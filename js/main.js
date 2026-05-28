@@ -559,6 +559,10 @@ export function animate() {
                     } else {
                         processTargetHit(j, 1);
                     }
+                } else {
+                    processTargetHit(j, 1);
+                }
+                
                 projectileHit = true;
                 // dynamic sparks hit sparks
                 spawnParticles(proj.position, 0xffaa00, 8, 12, 0.15, 20.0);
