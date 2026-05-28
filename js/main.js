@@ -209,6 +209,13 @@ export function init() {
         if (panelPause) panelPause.style.display = 'none';
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'block';
+
+        // Safari Keyboard Focus Fix: Force active focus on the body and canvas
+        document.body.focus();
+        if (state.renderer && state.renderer.domElement) {
+            state.renderer.domElement.tabIndex = 1; // Ensure canvas is explicitly focusable
+            state.renderer.domElement.focus();
+        }
     });
 
     state.controls.addEventListener('unlock', () => {
@@ -359,8 +366,8 @@ export function init() {
         }
     };
 
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('keyup', onKeyUp);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 
     window.addEventListener('mousedown', (e) => {
         if (e.button === 0) { // Left click
