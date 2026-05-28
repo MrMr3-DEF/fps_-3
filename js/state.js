@@ -73,5 +73,7 @@ export const state = {
     playerMesh: null,
     isThirdPerson: false,
     isScoped: false,
+    rightClickActive: false,
+    keyCActive: false,
 };
 

@@ -504,14 +504,8 @@ export function updateWeapons(delta) {
             if (state.rightGunContainer) state.rightGunContainer.rotation.set(0, 0, 0);
         }
     }
-
-    // Override gun models visibility when scoped in (first person only)
-    if (state.rightGunContainer && state.leftGun) {
-        const gunsVisible = state.isThirdPerson || !state.isScoped;
-        state.rightGunContainer.visible = gunsVisible;
-        state.leftGun.visible = gunsVisible;
-    }
 }
+
 
 
 export function createPlayerMesh() {

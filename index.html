@@ -243,7 +243,7 @@
             to { opacity: 1; transform: translateY(0); }
         }
 
-        #sniper-scope {
+        #goggles-scope {
             position: absolute;
             top: 0;
             left: 0;
@@ -252,52 +252,28 @@
             display: none;
             pointer-events: none;
             z-index: 6;
-            background: radial-gradient(circle, transparent 32%, rgba(0, 0, 0, 0.94) 52%, rgba(0, 0, 0, 0.99) 100%);
+            background: radial-gradient(circle, rgba(0, 210, 255, 0.04) 30%, rgba(0, 80, 110, 0.18) 70%, rgba(0, 10, 20, 0.90) 100%);
+            box-shadow: inset 0 0 100px rgba(0, 210, 255, 0.25);
         }
 
-        #sniper-scope::before {
-            content: '';
+        .goggles-scanlines {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 65vh;
-            height: 65vh;
-            border: 3px solid rgba(0, 210, 255, 0.55);
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            box-shadow: 0 0 35px rgba(0, 210, 255, 0.3), inset 0 0 35px rgba(0, 210, 255, 0.3);
-            pointer-events: none;
-        }
-
-        #sniper-scope-reticle {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 65vh;
-            height: 65vh;
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-        }
-
-        .reticle-line-h {
-            position: absolute;
-            top: 50%;
+            top: 0;
             left: 0;
             width: 100%;
-            height: 2px;
-            background: linear-gradient(90deg, rgba(0, 210, 255, 0.9) 0%, transparent 35%, transparent 65%, rgba(0, 210, 255, 0.9) 100%);
-        }
-
-        .reticle-line-v {
-            position: absolute;
-            left: 50%;
-            top: 0;
-            width: 2px;
             height: 100%;
-            background: linear-gradient(180deg, rgba(0, 210, 255, 0.9) 0%, transparent 35%, transparent 65%, rgba(0, 210, 255, 0.9) 100%);
+            pointer-events: none;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 210, 255, 0.07) 0px,
+                rgba(0, 210, 255, 0.07) 1px,
+                transparent 2px,
+                transparent 4px
+            );
+            opacity: 0.55;
         }
 
-        .reticle-dot {
+        .goggles-dot {
             position: absolute;
             top: 50%;
             left: 50%;
@@ -306,22 +282,24 @@
             background: #00d2ff;
             border-radius: 50%;
             transform: translate(-50%, -50%);
-            box-shadow: 0 0 12px #00d2ff;
+            box-shadow: 0 0 10px #00d2ff, 0 0 20px rgba(0, 210, 255, 0.6);
         }
 
-        .reticle-bracket {
+        .goggles-corner {
             position: absolute;
-            width: 25px;
-            height: 25px;
+            width: 40px;
+            height: 40px;
             border-color: rgba(0, 210, 255, 0.7);
             border-style: solid;
             pointer-events: none;
+            box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
         }
 
-        .reticle-tl { top: 20%; left: 20%; border-width: 2px 0 0 2px; }
-        .reticle-tr { top: 20%; right: 20%; border-width: 2px 2px 0 0; }
-        .reticle-bl { bottom: 20%; left: 20%; border-width: 0 0 2px 2px; }
-        .reticle-br { bottom: 20%; right: 20%; border-width: 0 2px 2px 0; }
+        .goggles-tl { top: 30px; left: 30px; border-width: 3px 0 0 3px; }
+        .goggles-tr { top: 30px; right: 30px; border-width: 3px 3px 0 0; }
+        .goggles-bl { bottom: 30px; left: 30px; border-width: 0 0 3px 3px; }
+        .goggles-br { bottom: 30px; right: 30px; border-width: 0 3px 3px 0; }
+
     </style>
 
 </head>
@@ -340,7 +318,7 @@
                     WASD zum Bewegen | Shift zum Sprinten | Leertaste zum Springen<br/>
                     R zum Grappling Hook | Linksklick zum Schießen<br/>
                     E / 1, 2, 3, 4 zum Waffen wechseln | P für Third Person<br/>
-                    Rechtsklick / C zum Zielen (Scope)
+                    Rechtsklick / C gedrückt halten zum Zielen (Goggles)
                 </span>
 
             </div>
@@ -435,17 +413,15 @@
 
     <div id="speedlines"></div>
     <div id="crosshair"></div>
-    <div id="sniper-scope">
-        <div id="sniper-scope-reticle">
-            <div class="reticle-line-h"></div>
-            <div class="reticle-line-v"></div>
-            <div class="reticle-dot"></div>
-            <div class="reticle-bracket reticle-tl"></div>
-            <div class="reticle-bracket reticle-tr"></div>
-            <div class="reticle-bracket reticle-bl"></div>
-            <div class="reticle-bracket reticle-br"></div>
-        </div>
+    <div id="goggles-scope">
+        <div class="goggles-scanlines"></div>
+        <div class="goggles-dot"></div>
+        <div class="goggles-corner goggles-tl"></div>
+        <div class="goggles-corner goggles-tr"></div>
+        <div class="goggles-corner goggles-bl"></div>
+        <div class="goggles-corner goggles-br"></div>
     </div>
+
 
     <div id="ui" style="display: flex; flex-direction: column; gap: 4px;">
         <div>Ziele eliminiert: <span id="score">0</span></div>

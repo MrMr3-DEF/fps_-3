@@ -267,6 +267,8 @@ export function init() {
         state.isSprinting = false;
         state.isMouseDown = false;
         state.isScoped = false;
+        state.rightClickActive = false;
+        state.keyCActive = false;
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'none';
 
@@ -475,7 +477,8 @@ export function init() {
                 break;
             case 'KeyC':
                 if (state.controls.isLocked) {
-                    state.isScoped = !state.isScoped;
+                    state.keyCActive = true;
+                    state.isScoped = state.rightClickActive || state.keyCActive;
                 }
                 break;
             case 'KeyP':
@@ -493,8 +496,13 @@ export function init() {
             case 'KeyA': state.moveLeft = false; break;
             case 'KeyS': state.moveBackward = false; break;
             case 'KeyD': state.moveRight = false; break;
+            case 'KeyC':
+                state.keyCActive = false;
+                state.isScoped = state.rightClickActive || state.keyCActive;
+                break;
         }
     };
+
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -508,7 +516,8 @@ export function init() {
             }
         } else if (e.button === 2) { // Right click
             if (state.controls.isLocked) {
-                state.isScoped = !state.isScoped;
+                state.rightClickActive = true;
+                state.isScoped = state.rightClickActive || state.keyCActive;
             }
         }
     });
@@ -516,8 +525,12 @@ export function init() {
     window.addEventListener('mouseup', (e) => {
         if (e.button === 0) {
             state.isMouseDown = false;
+        } else if (e.button === 2) { // Right click release
+            state.rightClickActive = false;
+            state.isScoped = state.rightClickActive || state.keyCActive;
         }
     });
+
 
     window.addEventListener('contextmenu', (e) => {
         if (state.controls.isLocked) {
@@ -668,18 +681,19 @@ export function animate() {
             state.camera.updateProjectionMatrix();
         }
 
-        // Toggle sniper and normal crosshair HUD overlays
-        const sniperScopeEl = document.getElementById('sniper-scope');
+        // Toggle goggles and normal crosshair HUD overlays
+        const gogglesScopeEl = document.getElementById('goggles-scope');
         const crosshairEl = document.getElementById('crosshair');
-        if (sniperScopeEl && crosshairEl) {
+        if (gogglesScopeEl && crosshairEl) {
             if (state.isScoped) {
-                sniperScopeEl.style.display = 'block';
+                gogglesScopeEl.style.display = 'block';
                 crosshairEl.style.display = 'none';
             } else {
-                sniperScopeEl.style.display = 'none';
+                gogglesScopeEl.style.display = 'none';
                 crosshairEl.style.display = 'block';
             }
         }
+
     }
 
     if (state.renderer && state.scene && state.camera) {
