@@ -126,6 +126,7 @@ export async function joinGame(username, roomCode) {
 export function disconnectMultiplayer() {
     state.isMultiplayer = false;
     state.isHost = false;
+    state.isPlaying = false;
     state.roomCode = null;
 
     if (state.connections.length > 0) {
@@ -168,6 +169,7 @@ function setupConnection(conn) {
         } else {
             // Client: transition to play state!
             console.log('Client successfully connected to room, locking pointer controls!');
+            state.isPlaying = true;
             const blocker = document.getElementById('blocker');
             if (blocker) blocker.style.display = 'none';
             state.controls.lock();
