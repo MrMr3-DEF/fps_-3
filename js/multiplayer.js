@@ -128,6 +128,11 @@ export function disconnectMultiplayer() {
     state.isHost = false;
     state.isPlaying = false;
     state.roomCode = null;
+    state.kills = 0;
+    state.deaths = 0;
+
+    const pvpStats = document.getElementById('pvp-stats');
+    if (pvpStats) pvpStats.style.display = 'none';
 
     if (state.connections.length > 0) {
         state.connections.forEach(conn => conn.close());
@@ -211,17 +216,33 @@ function setupConnection(conn) {
     });
 }
 
-function handlePeerMessage(peerId, msg) {
+function handlePeerMessage(fromPeerId, msg) {
     if (!state.isMultiplayer) return;
+
+    // Star-Topology Relay: Host broadcasts client messages to all other clients
+    if (state.isHost) {
+        if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died') {
+            state.connections.forEach((conn) => {
+                if (conn.peer !== fromPeerId && conn.open) {
+                    conn.send({
+                        ...msg,
+                        senderPeerId: fromPeerId
+                    });
+                }
+            });
+        }
+    }
+
+    const senderId = msg.senderPeerId || fromPeerId;
 
     if (msg.type === 'update') {
         // Retrieve or instantiate remote peer
-        let peerData = state.peers[peerId];
+        let peerData = state.peers[senderId];
         if (!peerData) {
             const username = msg.username || 'Gast';
             console.log(`Spawning remote peer bean model for: ${username}`);
             peerData = createPeerBean(username);
-            state.peers[peerId] = peerData;
+            state.peers[senderId] = peerData;
         }
 
         // Apply position updates
@@ -340,6 +361,36 @@ function handlePeerMessage(peerId, msg) {
             import('./main.js').then((main) => {
                 main.processTargetHit(msg.targetIndex, msg.damage);
             });
+        }
+    } else if (msg.type === 'player_hit') {
+        if (msg.targetPeerId === state.peer.id) {
+            import('./main.js').then((main) => {
+                main.takePlayerDamage(msg.damage, msg.attackerName);
+            });
+        }
+    } else if (msg.type === 'player_died') {
+        // Spawn remote player death particle effect (bean color purple 0x8c7ae6)
+        const victimPeer = state.peers[msg.victimPeerId || senderId];
+        if (victimPeer && victimPeer.mesh) {
+            spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
+        }
+
+        const myName = document.getElementById('input-username').value.trim() || 'Gast';
+        if (msg.killerName === myName) {
+            state.kills++;
+            const killsEl = document.getElementById('kills');
+            if (killsEl) killsEl.innerText = state.kills;
+            
+            // Spawn visual hit indicator green flash on crosshair
+            const crosshair = document.getElementById('crosshair');
+            if (crosshair) {
+                crosshair.style.borderColor = '#00ff88';
+                crosshair.style.transform = 'translate(-50%, -50%) scale(1.5)';
+                setTimeout(() => {
+                    crosshair.style.borderColor = '#ff0055';
+                    crosshair.style.transform = 'translate(-50%, -50%) scale(1.0)';
+                }, 180);
+            }
         }
     }
 }

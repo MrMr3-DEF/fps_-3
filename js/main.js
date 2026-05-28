@@ -248,6 +248,12 @@ export function init() {
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'block';
 
+        // Show PvP stats overlay if in multiplayer
+        const pvpStats = document.getElementById('pvp-stats');
+        if (pvpStats) {
+            pvpStats.style.display = state.isMultiplayer ? 'block' : 'none';
+        }
+
         // Safari Keyboard Focus Fix: Force active focus on the body and canvas
         document.body.focus();
         if (state.renderer && state.renderer.domElement) {
@@ -553,14 +559,42 @@ export function animate() {
                     } else {
                         processTargetHit(j, 1);
                     }
-                } else {
-                    processTargetHit(j, 1);
-                }
-                
                 projectileHit = true;
                 // dynamic sparks hit sparks
                 spawnParticles(proj.position, 0xffaa00, 8, 12, 0.15, 20.0);
                 break;
+            }
+        }
+
+        // B) Check hits on Remote Players (PVP) in Multiplayer
+        if (!projectileHit && state.isMultiplayer) {
+            const peerIds = Object.keys(state.peers);
+            for (let j = 0; j < peerIds.length; j++) {
+                const peerId = peerIds[j];
+                const peerData = state.peers[peerId];
+                if (peerData && peerData.mesh) {
+                    const distance = proj.position.distanceTo(peerData.mesh.position);
+                    const hitRange = 0.8; // Player bean collision hit range
+                    
+                    if (distance < hitRange) {
+                        projectileHit = true;
+                        
+                        // Spawn dynamic purple particles (remote player bean hit sparks)
+                        spawnParticles(proj.position, 0x8c7ae6, 8, 12, 0.15, 20.0);
+                        
+                        // Send hit packet directly to the targeted peer connection
+                        const conn = state.connections.find(c => c.peer === peerId);
+                        if (conn && conn.open) {
+                            conn.send({
+                                type: 'player_hit',
+                                targetPeerId: peerId,
+                                damage: 1,
+                                attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                            });
+                        }
+                        break;
+                    }
+                }
             }
         }
 
@@ -611,6 +645,54 @@ export function animate() {
         if (state.isThirdPerson && logicalCameraPos) {
             state.camera.position.copy(logicalCameraPos);
         }
+    }
+}
+
+export function takePlayerDamage(damage, attackerName) {
+    if (!state.isPlaying || state.playerHp <= 0) return;
+
+    state.playerHp -= damage;
+    state.lastDamageTime = performance.now(); // Reset passive regen ticker delay
+
+    // Spawn dynamic red splat particles locally on damage
+    if (state.controls) {
+        const myPos = state.controls.getObject().position.clone();
+        myPos.y -= 0.5;
+        spawnParticles(myPos, 0xff3300, 10, 15, 0.2, 12.0);
+    }
+
+    const healthBar = document.getElementById('health-bar');
+    if (healthBar) {
+        const hpRatio = Math.max(0, state.playerHp / state.playerMaxHp) * 100;
+        healthBar.style.width = `${hpRatio}%`;
+        healthBar.style.backgroundColor = '#ff4757';
+        setTimeout(() => {
+            if (state.playerHp > 0) {
+                healthBar.style.backgroundColor = '#2ed573';
+            }
+        }, 100);
+    }
+
+    if (state.playerHp <= 0) {
+        triggerDeath();
+        
+        // Update local deaths score tally
+        state.deaths++;
+        const deathsEl = document.getElementById('deaths');
+        if (deathsEl) deathsEl.innerText = state.deaths;
+
+        // Broadcast death message to everyone in the lobby
+        const myName = document.getElementById('input-username').value.trim() || 'Gast';
+        state.connections.forEach((conn) => {
+            if (conn.open) {
+                conn.send({
+                    type: 'player_died',
+                    victimName: myName,
+                    killerName: attackerName,
+                    victimPeerId: state.peer.id
+                });
+            }
+        });
     }
 }
 

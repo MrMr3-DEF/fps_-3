@@ -20,6 +20,8 @@ export const state = {
     lastDamageTime: 0,
     isPlaying: false,
     regenTimer: 0,
+    kills: 0,
+    deaths: 0,
 
     // Multiplayer state fields
     isMultiplayer: false,
