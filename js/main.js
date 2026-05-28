@@ -108,6 +108,10 @@ export function init() {
     
     const pauseLobbyInfo = document.getElementById('pause-lobby-info');
     const pauseRoomCode = document.getElementById('pause-room-code');
+
+    const deathOverlay = document.getElementById('death-overlay');
+    const btnDeathRespawn = document.getElementById('btn-death-respawn');
+    const btnDeathLeave = document.getElementById('btn-death-leave');
     
     if (btnPlaySp) {
         btnPlaySp.addEventListener('click', (e) => {
@@ -232,10 +236,15 @@ export function init() {
         if (panelJoinRoom) panelJoinRoom.style.display = 'none';
 
         if (state.isPlaying) {
-            // Show pause panel and keep active connections
-            if (panelPause) panelPause.style.display = 'flex';
+            const isDead = (deathOverlay && deathOverlay.style.display === 'flex');
+            
+            // Show pause panel if playing and NOT dead
+            if (panelPause) {
+                panelPause.style.display = isDead ? 'none' : 'flex';
+            }
+            
             if (state.isMultiplayer) {
-                if (pauseLobbyInfo) pauseLobbyInfo.style.display = 'inline';
+                if (pauseLobbyInfo) pauseLobbyInfo.style.display = isDead ? 'none' : 'inline';
                 if (pauseRoomCode) pauseRoomCode.innerText = state.roomCode || '----';
                 if (btnPauseLeave) btnPauseLeave.innerText = 'Lobby verlassen';
             } else {
@@ -276,6 +285,74 @@ export function init() {
             if (panelPause) panelPause.style.display = 'none';
             if (panelMain) panelMain.style.display = 'flex';
             resetHook();
+        });
+    }
+
+    if (btnDeathRespawn) {
+        btnDeathRespawn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            
+            // Reset player stats
+            state.playerHp = state.playerMaxHp;
+            state.score = 0;
+            const scoreEl = document.getElementById('score');
+            if (scoreEl) scoreEl.innerText = '0';
+
+            const healthBar = document.getElementById('health-bar');
+            if (healthBar) {
+                healthBar.style.width = '100%';
+                healthBar.style.backgroundColor = '#2ed573';
+            }
+
+            if (state.controls) {
+                const playerObj = state.controls.getObject();
+                playerObj.position.set(0, 2, 0);
+            }
+            state.velocity.set(0, 0, 0);
+            resetHook();
+
+            // Hide death screen
+            if (deathOverlay) deathOverlay.style.display = 'none';
+
+            // Lock controls to resume playing
+            state.controls.lock();
+        });
+    }
+
+    if (btnDeathLeave) {
+        btnDeathLeave.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.isPlaying = false;
+            
+            // Reset stats
+            state.playerHp = state.playerMaxHp;
+            state.score = 0;
+            const scoreEl = document.getElementById('score');
+            if (scoreEl) scoreEl.innerText = '0';
+
+            const healthBar = document.getElementById('health-bar');
+            if (healthBar) {
+                healthBar.style.width = '100%';
+                healthBar.style.backgroundColor = '#2ed573';
+            }
+
+            if (state.controls) {
+                const playerObj = state.controls.getObject();
+                playerObj.position.set(0, 2, 0);
+            }
+            state.velocity.set(0, 0, 0);
+            resetHook();
+
+            if (state.isMultiplayer) {
+                import('./multiplayer.js').then((mp) => {
+                    mp.disconnectMultiplayer();
+                });
+            }
+
+            // Hide death screen and return to main panel
+            if (deathOverlay) deathOverlay.style.display = 'none';
+            if (panelPause) panelPause.style.display = 'none';
+            if (panelMain) panelMain.style.display = 'flex';
         });
     }
 
@@ -501,27 +578,17 @@ export function animate() {
 }
 
 export function triggerDeath() {
-    state.isPlaying = false; // Reset play status so unlock sends us to main menu instead of pause menu
+    // Show the red Death Screen overlay
+    const deathOverlay = document.getElementById('death-overlay');
+    if (deathOverlay) {
+        deathOverlay.style.display = 'flex';
+    }
+
     if (state.controls) {
         state.controls.unlock();
     }
 
-    state.playerHp = state.playerMaxHp;
-    state.score = 0;
-
-    const scoreEl = document.getElementById('score');
-    if (scoreEl) scoreEl.innerText = '0';
-
-    const healthBar = document.getElementById('health-bar');
-    if (healthBar) {
-        healthBar.style.width = '100%';
-        healthBar.style.backgroundColor = '#2ed573';
-    }
-
-    if (state.controls) {
-        const playerObj = state.controls.getObject();
-        playerObj.position.set(0, 2, 0);
-    }
+    // Immediately stop character physics movement and reset hook
     state.velocity.set(0, 0, 0);
     resetHook();
 }

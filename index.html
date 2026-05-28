@@ -323,6 +323,32 @@
         </div>
     </div>
 
+    <!-- Panel 6: Death Screen Overlay -->
+    <div id="death-overlay" style="
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(circle, rgba(255, 0, 0, 0.2) 20%, rgba(139, 0, 0, 0.75) 100%);
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 15; /* Sits on top of blocker (z-index 10) */
+        backdrop-filter: blur(3px);
+        color: #ffffff;
+        text-align: center;
+        animation: fadeIn 0.4s ease-in-out;
+    ">
+        <strong style="font-size: 48px; color: #ff3838; text-shadow: 0 0 20px rgba(255, 56, 56, 0.8), 0 0 40px rgba(255, 56, 56, 0.4); font-weight: 900; letter-spacing: 2px;">DU BIST GESTORBEN</strong>
+        <br/><br/>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+            <button class="menu-btn" id="btn-death-respawn" style="background: linear-gradient(135deg, #ff3838, #c0392b); box-shadow: 0 4px 15px rgba(255, 56, 56, 0.4); min-width: 200px;">Wiederbeleben</button>
+            <button class="menu-btn secondary" id="btn-death-leave" style="background: linear-gradient(135deg, #4b4b4b, #2f3542); color: #ccc; min-width: 200px;">Hauptmenü verlassen</button>
+        </div>
+    </div>
+
     <div id="speedlines"></div>
     <div id="crosshair"></div>
     <div id="ui">
