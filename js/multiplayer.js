@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { Peer } from 'peerjs';
 import { state } from './state.js';
 import { spawnParticles } from './particles.js';
 import { respawnTarget } from './world.js';
@@ -18,7 +17,7 @@ export function generateRoomCode() {
     return code;
 }
 
-export function hostGame(username, roomCode) {
+export async function hostGame(username, roomCode) {
     state.isMultiplayer = true;
     state.isHost = true;
     state.roomCode = roomCode.toUpperCase();
@@ -30,6 +29,7 @@ export function hostGame(username, roomCode) {
         peerInstance.destroy();
     }
 
+    const { Peer } = await import('peerjs');
     peerInstance = new Peer(hostPeerId);
     state.peer = peerInstance;
 
@@ -51,7 +51,7 @@ export function hostGame(username, roomCode) {
     });
 }
 
-export function joinGame(username, roomCode) {
+export async function joinGame(username, roomCode) {
     state.isMultiplayer = true;
     state.isHost = false;
     state.roomCode = roomCode.toUpperCase();
@@ -63,6 +63,7 @@ export function joinGame(username, roomCode) {
         peerInstance.destroy();
     }
 
+    const { Peer } = await import('peerjs');
     peerInstance = new Peer();
     state.peer = peerInstance;
 

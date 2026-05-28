@@ -29,32 +29,32 @@ export function createAkimboGuns() {
     const buildShotgun = () => {
         const shotgunGroup = new THREE.Group();
         const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const coreMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 }); 
-        
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+
         const bodyGeo = new THREE.BoxGeometry(0.08, 0.12, 0.45);
         const body = new THREE.Mesh(bodyGeo, bodyMat);
         body.castShadow = true;
         shotgunGroup.add(body);
-        
+
         const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.55, 8);
         barrelGeo.rotateX(Math.PI / 2);
-        
+
         const leftBarrel = new THREE.Mesh(barrelGeo, bodyMat);
         leftBarrel.position.set(-0.02, 0.02, -0.3);
         leftBarrel.castShadow = true;
         shotgunGroup.add(leftBarrel);
-        
+
         const rightBarrel = new THREE.Mesh(barrelGeo, bodyMat);
         rightBarrel.position.set(0.02, 0.02, -0.3);
         rightBarrel.castShadow = true;
         shotgunGroup.add(rightBarrel);
-        
+
         const gripGeo = new THREE.BoxGeometry(0.06, 0.12, 0.22);
         const grip = new THREE.Mesh(gripGeo, bodyMat);
         grip.position.set(0, -0.09, 0.15);
         grip.rotation.x = Math.PI / 6;
         shotgunGroup.add(grip);
-        
+
         const pumpGeo = new THREE.BoxGeometry(0.09, 0.08, 0.25);
         const pump = new THREE.Mesh(pumpGeo, bodyMat);
         pump.position.set(0, -0.04, -0.15);
@@ -64,33 +64,33 @@ export function createAkimboGuns() {
         const core = new THREE.Mesh(coreGeo, coreMat);
         core.position.set(0, 0.05, -0.05);
         shotgunGroup.add(core);
-        
+
         return shotgunGroup;
     };
 
     const buildAR = () => {
         const arGroup = new THREE.Group();
         const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff88 }); 
-        
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff88 });
+
         const bodyGeo = new THREE.BoxGeometry(0.08, 0.13, 0.52);
         const body = new THREE.Mesh(bodyGeo, bodyMat);
         body.castShadow = true;
         arGroup.add(body);
-        
+
         const barrelGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.65, 8);
         barrelGeo.rotateX(Math.PI / 2);
         const barrel = new THREE.Mesh(barrelGeo, bodyMat);
         barrel.position.set(0, 0.02, -0.4);
         barrel.castShadow = true;
         arGroup.add(barrel);
-        
+
         const gripGeo = new THREE.BoxGeometry(0.05, 0.15, 0.07);
         const grip = new THREE.Mesh(gripGeo, bodyMat);
         grip.position.set(0, -0.1, 0.12);
         grip.rotation.x = Math.PI / 6;
         arGroup.add(grip);
-        
+
         const magGeo = new THREE.BoxGeometry(0.04, 0.18, 0.08);
         magGeo.rotateX(-Math.PI / 12);
         const mag = new THREE.Mesh(magGeo, bodyMat);
@@ -101,7 +101,7 @@ export function createAkimboGuns() {
         const core = new THREE.Mesh(coreGeo, coreMat);
         core.position.set(0, 0.05, -0.06);
         arGroup.add(core);
-        
+
         return arGroup;
     };
 
@@ -141,7 +141,7 @@ export function fireProjectile() {
     const fireSinglePellet = (spreadAmt) => {
         let projectile;
         const bulletColor = state.activeWeaponName === 'PISTOL' ? 0xff0055 : (state.activeWeaponName === 'SHOTGUN' ? 0xffaa00 : 0x00ff88);
-        
+
         if (state.projectilePool.length > 0) {
             projectile = state.projectilePool.pop();
             projectile.visible = true;
@@ -223,7 +223,7 @@ export function updateWeapons(delta) {
     if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh) {
         state.switchTimer += delta;
         const t = Math.min(1.0, state.switchTimer / SWITCH_DURATION);
-        
+
         const getWeaponMesh = (name) => {
             if (name === 'PISTOL') return state.pistolMesh;
             if (name === 'SHOTGUN') return state.shotgunMesh;
@@ -241,29 +241,29 @@ export function updateWeapons(delta) {
         const currentMesh = getWeaponMesh(state.activeWeaponName);
         const nextMesh = getWeaponMesh(state.nextWeaponName);
         const d = getWeaponOffset(state.activeWeaponName);
-        
+
         if (state.switchState === 'WITHDRAWING') {
             const theta = t * (Math.PI / 1.7);
             currentMesh.rotation.x = theta;
             currentMesh.position.y = -d * Math.sin(Math.abs(theta));
             currentMesh.position.z = d * (Math.cos(theta) - 1);
-            
+
             if (t >= 1.0) {
                 currentMesh.visible = false;
-                currentMesh.rotation.set(0, 0, 0); 
-                currentMesh.position.set(0, 0, 0); 
-                
+                currentMesh.rotation.set(0, 0, 0);
+                currentMesh.position.set(0, 0, 0);
+
                 state.activeWeaponName = state.nextWeaponName;
                 state.rightGun = nextMesh;
-                
+
                 const nextD = getWeaponOffset(state.activeWeaponName);
                 const startTheta = -Math.PI / 1.7;
-                
+
                 nextMesh.visible = true;
-                nextMesh.rotation.x = startTheta; 
+                nextMesh.rotation.x = startTheta;
                 nextMesh.position.y = -nextD * Math.sin(Math.abs(startTheta));
                 nextMesh.position.z = nextD * (Math.cos(startTheta) - 1);
-                
+
                 state.switchState = 'BRINGING_IN';
                 state.switchTimer = 0;
             }
@@ -272,7 +272,7 @@ export function updateWeapons(delta) {
             nextMesh.rotation.x = theta;
             nextMesh.position.y = -d * Math.sin(Math.abs(theta));
             nextMesh.position.z = d * (Math.cos(theta) - 1);
-            
+
             if (t >= 1.0) {
                 nextMesh.rotation.set(0, 0, 0);
                 nextMesh.position.set(0, 0, 0);
@@ -285,7 +285,7 @@ export function updateWeapons(delta) {
     if (state.playerMesh && state.controls) {
         const playerObj = state.controls.getObject();
         state.playerMesh.position.copy(playerObj.position);
-        state.playerMesh.position.y -= 1.0; 
+        state.playerMesh.position.y -= 1.0;
 
         const camEuler = new THREE.Euler().setFromQuaternion(state.camera.quaternion, 'YXZ');
         state.playerMesh.rotation.y = camEuler.y;
@@ -306,8 +306,8 @@ export function createPlayerMesh() {
     const playerGroup = new THREE.Group();
 
     // Body: bean color (standard sci-fi blue 0x3b5998)
-    const bodyMat = new THREE.MeshStandardMaterial({ 
-        color: 0x3b5998, 
+    const bodyMat = new THREE.MeshStandardMaterial({
+        color: 0x3b5998,
         roughness: 0.3,
         metalness: 0.2
     });
@@ -318,15 +318,15 @@ export function createPlayerMesh() {
     cylinder.castShadow = true;
     cylinder.receiveShadow = true;
     playerGroup.add(cylinder);
-    
+
     const sphereGeo = new THREE.SphereGeometry(0.6, 16, 16);
-    
+
     const topSphere = new THREE.Mesh(sphereGeo, bodyMat);
     topSphere.position.y = 0.5;
     topSphere.castShadow = true;
     topSphere.receiveShadow = true;
     playerGroup.add(topSphere);
-    
+
     const bottomSphere = new THREE.Mesh(sphereGeo, bodyMat);
     bottomSphere.position.y = -0.5;
     bottomSphere.castShadow = true;
@@ -335,8 +335,8 @@ export function createPlayerMesh() {
 
     // Sleek dark shiny glass visor
     const visorGeo = new THREE.BoxGeometry(0.85, 0.25, 0.45);
-    const visorMat = new THREE.MeshStandardMaterial({ 
-        color: 0x1e272e, 
+    const visorMat = new THREE.MeshStandardMaterial({
+        color: 0x1e272e,
         roughness: 0.1,
         metalness: 0.9
     });
@@ -366,7 +366,7 @@ export function setThirdPerson(enabled) {
         if (state.playerMesh && state.leftGun && state.rightGunContainer) {
             state.playerMesh.add(state.leftGun);
             state.playerMesh.add(state.rightGunContainer);
-            
+
             // Adjust gun positions relative to the bean center
             state.leftGun.position.set(-0.7, 0.0, -0.5);
             state.rightGunContainer.position.set(0.7, 0.0, -0.5);
@@ -377,7 +377,7 @@ export function setThirdPerson(enabled) {
         if (state.camera && state.leftGun && state.rightGunContainer) {
             state.camera.add(state.leftGun);
             state.camera.add(state.rightGunContainer);
-            
+
             // Reset gun positions for first-person view
             state.leftGun.position.set(-0.32, -0.22, -0.5);
             state.rightGunContainer.position.set(0.32, -0.22, -0.5);
