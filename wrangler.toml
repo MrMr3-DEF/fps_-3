@@ -1,0 +1,7 @@
+name = "testfps"
+compatibility_date = "2026-05-28"
+
+[assets]
+directory = "./"
+# We exclude the .git directory and git files to avoid uploading internal git metadata to Cloudflare
+exclude = [".git/**", ".github/**"]
