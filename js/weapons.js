@@ -273,7 +273,7 @@ export function fireProjectile() {
         state.fireCooldown = 0.2;
         fireSinglePellet(0.02);
     } else if (state.activeWeaponName === 'SNIPER') {
-        state.fireCooldown = 1.2;
+        state.fireCooldown = 2.0;
 
         const barrelWorldPosition = new THREE.Vector3();
         state.rightGun.getWorldPosition(barrelWorldPosition);

@@ -247,6 +247,8 @@ export function init() {
         if (panelPause) panelPause.style.display = 'none';
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'block';
+        const reloadContainer = document.getElementById('reload-container');
+        if (reloadContainer) reloadContainer.style.display = 'block';
 
         // Show PvP stats overlay if in multiplayer
         const pvpStats = document.getElementById('pvp-stats');
@@ -271,6 +273,8 @@ export function init() {
         state.keyCActive = false;
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'none';
+        const reloadContainer = document.getElementById('reload-container');
+        if (reloadContainer) reloadContainer.style.display = 'none';
 
         
         // Hide all starting panels
@@ -551,6 +555,18 @@ export function animate() {
     // 1) Update weapons recoil and switched models
     updateWeapons(delta);
 
+    // Update reload bar UI (indicates cooldown recovery)
+    const reloadBar = document.getElementById('reload-bar');
+    if (reloadBar) {
+        let maxCooldown = 0.1;
+        if (state.activeWeaponName === 'SHOTGUN') maxCooldown = 0.6;
+        else if (state.activeWeaponName === 'AR') maxCooldown = 0.2;
+        else if (state.activeWeaponName === 'SNIPER') maxCooldown = 2.0;
+
+        const progress = Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown)));
+        reloadBar.style.width = `${progress * 100}%`;
+    }
+
     // 1.5) Automatic weapon firing
     if (state.controls.isLocked && state.isMouseDown && state.activeWeaponName === 'AR' && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
         fireProjectile();
@@ -687,6 +703,7 @@ export function animate() {
         const uiEl = document.getElementById('ui');
         const fpsEl = document.getElementById('fps-counter');
         const healthEl = document.getElementById('health-container');
+        const reloadEl = document.getElementById('reload-container');
 
         if (gogglesScopeEl && crosshairEl) {
             if (state.isScoped) {
@@ -695,6 +712,7 @@ export function animate() {
                 if (uiEl) uiEl.style.display = 'none';
                 if (fpsEl) fpsEl.style.display = 'none';
                 if (healthEl) healthEl.style.display = 'none';
+                if (reloadEl) reloadEl.style.display = 'none';
             } else {
                 gogglesScopeEl.style.display = 'none';
                 crosshairEl.style.display = 'block';
@@ -702,6 +720,9 @@ export function animate() {
                 if (fpsEl) fpsEl.style.display = 'block';
                 if (healthEl) {
                     healthEl.style.display = state.controls.isLocked ? 'block' : 'none';
+                }
+                if (reloadEl) {
+                    reloadEl.style.display = state.controls.isLocked ? 'block' : 'none';
                 }
             }
         }

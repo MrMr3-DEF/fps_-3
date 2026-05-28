@@ -186,6 +186,29 @@
             transition: width 0.1s ease-out, background-color 0.1s ease-out;
         }
 
+        #reload-container {
+            position: absolute;
+            bottom: 68px; /* positioned directly on top of health bar with a 10px gap */
+            left: 50%;
+            transform: translateX(-50%);
+            width: 480px;
+            height: 28px;
+            background: rgba(43, 43, 43, 0.95); /* dark grey background */
+            border: 2px solid rgba(255, 255, 255, 0.95);
+            border-radius: 4px;
+            overflow: hidden;
+            z-index: 5;
+            display: none; /* Show only when playing */
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+        }
+
+        #reload-bar {
+            width: 100%;
+            height: 100%;
+            background: #ffffff; /* white */
+            transition: width 0.05s linear;
+        }
+
         .menu-btn {
             background: linear-gradient(135deg, #00aaee, #0077cc);
             color: #ffffff;
@@ -434,6 +457,10 @@
         </div>
     </div>
     <div id="fps-counter">FPS: 0</div>
+
+    <div id="reload-container">
+        <div id="reload-bar"></div>
+    </div>
 
     <div id="health-container">
         <div id="health-bar"></div>
