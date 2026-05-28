@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sci-Fi Momentum Slingshot FPS</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            background-color: #d0dbf0;
+        }
+
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(239, 243, 248, 0.85);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #1a1c24;
+            font-size: 24px;
+            cursor: pointer;
+            text-align: center;
+            z-index: 10;
+        }
+
+        #instructions {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 30px 50px;
+            border-radius: 16px;
+            border: 2px solid #00aaee;
+            box-shadow: 0 10px 30px rgba(0, 170, 238, 0.15);
+            backdrop-filter: blur(4px);
+        }
+
+        .settings-container {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            text-align: left;
+            font-size: 16px;
+        }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+        }
+
+        .settings-container label {
+            color: #555;
+            font-weight: 500;
+        }
+
+        .settings-container input[type=range] {
+            -webkit-appearance: none;
+            width: 150px;
+            background: #ccd5e0;
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .settings-container input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00aaee;
+            cursor: pointer;
+            box-shadow: 0 0 6px rgba(0, 170, 238, 0.5);
+        }
+
+        #sens-value {
+            color: #00aaee;
+            min-width: 30px;
+            display: inline-block;
+            text-align: right;
+            font-weight: bold;
+        }
+
+        #speedlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 4;
+            opacity: 0;
+            transition: opacity 0.15s ease-in-out;
+            background: repeating-conic-gradient(from 0deg, transparent 0deg 3deg, rgba(0, 170, 238, 0.25) 4deg 5deg, transparent 6deg 12deg);
+            -webkit-mask-image: radial-gradient(circle, transparent 35%, black 75%);
+            mask-image: radial-gradient(circle, transparent 35%, black 75%);
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #ff0055;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #1a1c24;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px #ffffff;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #sprint-badge {
+            font-size: 14px;
+            color: #00aaee;
+            background: rgba(0, 170, 238, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            display: none;
+        }
+
+        #hook-badge {
+            font-size: 14px;
+            color: #00aaee;
+            background: rgba(0, 170, 238, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            display: none;
+            box-shadow: 0 0 8px rgba(0, 170, 238, 0.2);
+            border: 1px solid rgba(0, 170, 238, 0.3);
+        }
+
+        #fps-counter {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #1a1c24;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px #ffffff;
+            pointer-events: none;
+            z-index: 5;
+            font-family: monospace;
+        }
+
+        #health-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 22px;
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            border-radius: 11px;
+            overflow: hidden;
+            z-index: 5;
+            display: none; /* Show only when playing */
+            box-shadow: 0 0 15px rgba(46, 213, 115, 0.3);
+        }
+
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background: #2ed573;
+            transition: width 0.1s ease-out, background-color 0.1s ease-out;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="blocker">
+        <div id="instructions">
+            <strong style="color: #00aaee; font-size: 32px; letter-spacing: 1px;">FPS ARENA :3</strong><br/><br/>
+            Klicken zum Starten<br/><br/>
+            <span style="font-size: 15px; color: #555;">
+                WASD zum Bewegen<br/>
+                Shift zum Sprinten<br/>
+                Leertaste zum Springen<br/>
+                R zum Grappling Hook<br/>
+                Linksklick zum Schießen<br/>
+                E / 1, 2, 3 zum Waffen wechseln<br/>
+                P für Third Person Ansicht
+            </span>
+
+            <div class="settings-container">
+                <div class="settings-row">
+                    <label for="sensitivity">Aim Sensitivity:</label>
+                    <input type="range" id="sensitivity" min="0.1" max="3.0" step="0.1" value="1.0">
+                    <span id="sens-value">1.0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="speedlines"></div>
+    <div id="crosshair"></div>
+    <div id="ui">
+        Ziele eliminiert: <span id="score">0</span>
+        <span id="sprint-badge">SPRINT</span>
+        <span id="hook-badge">HOOK ACTIVE</span>
+    </div>
+    <div id="fps-counter">FPS: 0</div>
+
+    <div id="health-container">
+        <div id="health-bar"></div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
