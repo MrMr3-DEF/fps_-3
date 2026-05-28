@@ -18,6 +18,7 @@ export const state = {
     playerHp: 10,
     playerMaxHp: 10,
     lastDamageTime: 0,
+    isPlaying: false,
 
     // Multiplayer state fields
     isMultiplayer: false,

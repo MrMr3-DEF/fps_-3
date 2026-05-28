@@ -83,6 +83,7 @@ export function init() {
     const panelMp = document.getElementById('panel-mp');
     const panelHostWaiting = document.getElementById('panel-host-waiting');
     const panelJoinRoom = document.getElementById('panel-join-room');
+    const panelPause = document.getElementById('panel-pause');
 
     const btnPlaySp = document.getElementById('btn-play-sp');
     const btnMenuMp = document.getElementById('btn-menu-mp');
@@ -97,16 +98,23 @@ export function init() {
     const btnJoinConnect = document.getElementById('btn-join-connect');
     const btnJoinCancel = document.getElementById('btn-join-cancel');
 
+    const btnPauseResume = document.getElementById('btn-pause-resume');
+    const btnPauseLeave = document.getElementById('btn-pause-leave');
+
     const inputUsername = document.getElementById('input-username');
     const inputRoomCode = document.getElementById('input-room-code');
     const roomCodeDisplay = document.getElementById('room-code-display');
     const joinErrorLog = document.getElementById('join-error-log');
+    
+    const pauseLobbyInfo = document.getElementById('pause-lobby-info');
+    const pauseRoomCode = document.getElementById('pause-room-code');
     
     if (btnPlaySp) {
         btnPlaySp.addEventListener('click', (e) => {
             e.stopPropagation();
             state.isMultiplayer = false;
             state.isHost = false;
+            state.isPlaying = true;
             state.controls.lock();
         });
     }
@@ -156,6 +164,7 @@ export function init() {
     if (btnHostStart) {
         btnHostStart.addEventListener('click', (e) => {
             e.stopPropagation();
+            state.isPlaying = true;
             if (blocker) blocker.style.display = 'none';
             state.controls.lock();
         });
@@ -197,6 +206,7 @@ export function init() {
 
     state.controls.addEventListener('lock', () => {
         if (blocker) blocker.style.display = 'none';
+        if (panelPause) panelPause.style.display = 'none';
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'block';
     });
@@ -208,17 +218,59 @@ export function init() {
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'none';
         
-        if (state.isMultiplayer) {
-            disconnectMultiplayer();
-        }
-
-        if (panelMain) panelMain.style.display = 'flex';
+        // Hide all starting panels
+        if (panelMain) panelMain.style.display = 'none';
         if (panelMp) panelMp.style.display = 'none';
         if (panelHostWaiting) panelHostWaiting.style.display = 'none';
         if (panelJoinRoom) panelJoinRoom.style.display = 'none';
 
+        if (state.isPlaying) {
+            // Show pause panel and keep active connections
+            if (panelPause) panelPause.style.display = 'flex';
+            if (state.isMultiplayer) {
+                if (pauseLobbyInfo) pauseLobbyInfo.style.display = 'inline';
+                if (pauseRoomCode) pauseRoomCode.innerText = state.roomCode || '----';
+                if (btnPauseLeave) btnPauseLeave.innerText = 'Lobby verlassen';
+            } else {
+                if (pauseLobbyInfo) pauseLobbyInfo.style.display = 'none';
+                if (btnPauseLeave) btnPauseLeave.innerText = 'Spiel verlassen';
+            }
+        } else {
+            // Return to primary main selection screen
+            if (panelPause) panelPause.style.display = 'none';
+            if (panelMain) panelMain.style.display = 'flex';
+            
+            if (state.isMultiplayer) {
+                import('./multiplayer.js').then((mp) => {
+                    mp.disconnectMultiplayer();
+                });
+            }
+        }
+
         resetHook();
     });
+
+    if (btnPauseResume) {
+        btnPauseResume.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.controls.lock();
+        });
+    }
+
+    if (btnPauseLeave) {
+        btnPauseLeave.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.isPlaying = false;
+            if (state.isMultiplayer) {
+                import('./multiplayer.js').then((mp) => {
+                    mp.disconnectMultiplayer();
+                });
+            }
+            if (panelPause) panelPause.style.display = 'none';
+            if (panelMain) panelMain.style.display = 'flex';
+            resetHook();
+        });
+    }
 
     state.scene.add(state.controls.getObject());
 
@@ -442,6 +494,7 @@ export function animate() {
 }
 
 export function triggerDeath() {
+    state.isPlaying = false; // Reset play status so unlock sends us to main menu instead of pause menu
     if (state.controls) {
         state.controls.unlock();
     }
