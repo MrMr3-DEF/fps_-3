@@ -37,6 +37,35 @@ export function spawnParticles(position, color, count, speed, size, gravity) {
     }
 }
 
+export function createLaserBeam(startPos, endPos) {
+    const distance = startPos.distanceTo(endPos);
+    if (distance <= 0) return;
+
+    const cylGeo = new THREE.CylinderGeometry(0.025, 0.025, 1, 6);
+    cylGeo.rotateX(Math.PI / 2); // Rotate so height is along Z axis
+
+    const cylMat = new THREE.MeshBasicMaterial({
+        color: 0x00d2ff, // glowing neon blue
+        transparent: true,
+        opacity: 0.95
+    });
+
+    const mesh = new THREE.Mesh(cylGeo, cylMat);
+    const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
+    mesh.position.copy(midPoint);
+    mesh.scale.set(1, 1, distance);
+    mesh.lookAt(endPos);
+
+    state.scene.add(mesh);
+
+    state.activeParticles.push({
+        mesh: mesh,
+        isSniperTrail: true,
+        life: 0.25,
+        maxLife: 0.25
+    });
+}
+
 export function updateParticles(delta) {
     for (let i = state.activeParticles.length - 1; i >= 0; i--) {
         const p = state.activeParticles[i];
@@ -50,7 +79,11 @@ export function updateParticles(delta) {
         } else {
             const ratio = Math.max(0, p.life / p.maxLife);
             
-            if (p.isShockwave) {
+            if (p.isSniperTrail) {
+                p.mesh.material.opacity = ratio * 0.95;
+                p.mesh.scale.x = ratio;
+                p.mesh.scale.y = ratio;
+            } else if (p.isShockwave) {
                 // Expanding shockwave sphere
                 const currentScale = 1.0 + (p.targetScale - 1.0) * (1.0 - ratio);
                 p.mesh.scale.setScalar(currentScale);
@@ -65,3 +98,4 @@ export function updateParticles(delta) {
         }
     }
 }
+

@@ -242,7 +242,88 @@
             from { opacity: 0; transform: translateY(5px); }
             to { opacity: 1; transform: translateY(0); }
         }
+
+        #sniper-scope {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            pointer-events: none;
+            z-index: 6;
+            background: radial-gradient(circle, transparent 32%, rgba(0, 0, 0, 0.94) 52%, rgba(0, 0, 0, 0.99) 100%);
+        }
+
+        #sniper-scope::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 65vh;
+            height: 65vh;
+            border: 3px solid rgba(0, 210, 255, 0.55);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 35px rgba(0, 210, 255, 0.3), inset 0 0 35px rgba(0, 210, 255, 0.3);
+            pointer-events: none;
+        }
+
+        #sniper-scope-reticle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 65vh;
+            height: 65vh;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        .reticle-line-h {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, rgba(0, 210, 255, 0.9) 0%, transparent 35%, transparent 65%, rgba(0, 210, 255, 0.9) 100%);
+        }
+
+        .reticle-line-v {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: linear-gradient(180deg, rgba(0, 210, 255, 0.9) 0%, transparent 35%, transparent 65%, rgba(0, 210, 255, 0.9) 100%);
+        }
+
+        .reticle-dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background: #00d2ff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 12px #00d2ff;
+        }
+
+        .reticle-bracket {
+            position: absolute;
+            width: 25px;
+            height: 25px;
+            border-color: rgba(0, 210, 255, 0.7);
+            border-style: solid;
+            pointer-events: none;
+        }
+
+        .reticle-tl { top: 20%; left: 20%; border-width: 2px 0 0 2px; }
+        .reticle-tr { top: 20%; right: 20%; border-width: 2px 2px 0 0; }
+        .reticle-bl { bottom: 20%; left: 20%; border-width: 0 0 2px 2px; }
+        .reticle-br { bottom: 20%; right: 20%; border-width: 0 2px 2px 0; }
     </style>
+
 </head>
 <body>
 
@@ -258,8 +339,10 @@
                 <span style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
                     WASD zum Bewegen | Shift zum Sprinten | Leertaste zum Springen<br/>
                     R zum Grappling Hook | Linksklick zum Schießen<br/>
-                    E / 1, 2, 3 zum Waffen wechseln | P für Third Person
+                    E / 1, 2, 3, 4 zum Waffen wechseln | P für Third Person<br/>
+                    Rechtsklick / C zum Zielen (Scope)
                 </span>
+
             </div>
 
             <!-- Panel 2: Multiplayer Dashboard -->
@@ -352,6 +435,18 @@
 
     <div id="speedlines"></div>
     <div id="crosshair"></div>
+    <div id="sniper-scope">
+        <div id="sniper-scope-reticle">
+            <div class="reticle-line-h"></div>
+            <div class="reticle-line-v"></div>
+            <div class="reticle-dot"></div>
+            <div class="reticle-bracket reticle-tl"></div>
+            <div class="reticle-bracket reticle-tr"></div>
+            <div class="reticle-bracket reticle-bl"></div>
+            <div class="reticle-bracket reticle-br"></div>
+        </div>
+    </div>
+
     <div id="ui" style="display: flex; flex-direction: column; gap: 4px;">
         <div>Ziele eliminiert: <span id="score">0</span></div>
         <div id="pvp-stats" style="display: none; font-size: 18px; color: #ff3838; text-shadow: 1px 1px 2px #000; font-weight: bold; background: rgba(0,0,0,0.25); padding: 4px 10px; border-radius: 4px; width: fit-content; pointer-events: none;">

@@ -105,6 +105,72 @@ export function createAkimboGuns() {
         return arGroup;
     };
 
+    const buildSniper = () => {
+        const sniperGroup = new THREE.Group();
+        const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff }); // glowing bright blue
+        const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
+
+        // Main body: long and rectangular
+        const bodyGeo = new THREE.BoxGeometry(0.08, 0.14, 0.65);
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.castShadow = true;
+        sniperGroup.add(body);
+
+        // Very long thin barrel
+        const barrelGeo = new THREE.CylinderGeometry(0.015, 0.015, 1.0, 8);
+        barrelGeo.rotateX(Math.PI / 2);
+        const barrel = new THREE.Mesh(barrelGeo, bodyMat);
+        barrel.position.set(0, 0.03, -0.75);
+        barrel.castShadow = true;
+        sniperGroup.add(barrel);
+
+        // Large scope on top
+        const scopeTubeGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.32, 8);
+        scopeTubeGeo.rotateX(Math.PI / 2);
+        const scopeTube = new THREE.Mesh(scopeTubeGeo, scopeMat);
+        scopeTube.position.set(0, 0.11, -0.05);
+        scopeTube.castShadow = true;
+        sniperGroup.add(scopeTube);
+
+        // Scope mounts
+        const mountGeo = new THREE.BoxGeometry(0.02, 0.05, 0.04);
+        const mount1 = new THREE.Mesh(mountGeo, bodyMat);
+        mount1.position.set(0, 0.07, 0.05);
+        sniperGroup.add(mount1);
+        const mount2 = new THREE.Mesh(mountGeo, bodyMat);
+        mount2.position.set(0, 0.07, -0.15);
+        sniperGroup.add(mount2);
+
+        // Glowing scope lens
+        const lensGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.01, 8);
+        lensGeo.rotateX(Math.PI / 2);
+        const lens = new THREE.Mesh(lensGeo, coreMat);
+        lens.position.set(0, 0.11, -0.215);
+        sniperGroup.add(lens);
+
+        // Stock (butt of the gun)
+        const stockGeo = new THREE.BoxGeometry(0.06, 0.12, 0.3);
+        const stock = new THREE.Mesh(stockGeo, bodyMat);
+        stock.position.set(0, -0.04, 0.35);
+        sniperGroup.add(stock);
+
+        // Grip
+        const gripGeo = new THREE.BoxGeometry(0.05, 0.15, 0.06);
+        const grip = new THREE.Mesh(gripGeo, bodyMat);
+        grip.position.set(0, -0.11, 0.12);
+        grip.rotation.x = Math.PI / 6;
+        sniperGroup.add(grip);
+
+        // Glowing core line
+        const coreGeo = new THREE.BoxGeometry(0.04, 0.03, 0.6);
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        core.position.set(0, 0.05, -0.05);
+        sniperGroup.add(core);
+
+        return sniperGroup;
+    };
+
     state.leftGun = buildGun(0x00aaff);
     state.leftGun.position.set(-0.32, -0.22, -0.5);
     state.camera.add(state.leftGun);
@@ -124,10 +190,15 @@ export function createAkimboGuns() {
     state.arMesh.visible = false;
     state.rightGunContainer.add(state.arMesh);
 
+    state.sniperMesh = buildSniper();
+    state.sniperMesh.visible = false;
+    state.rightGunContainer.add(state.sniperMesh);
+
     state.rightGun = state.pistolMesh;
 
     state.scene.add(state.camera);
 }
+
 
 export function fireProjectile() {
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
@@ -136,6 +207,7 @@ export function fireProjectile() {
     let recoilDist = 0.08;
     if (state.activeWeaponName === 'SHOTGUN') recoilDist = 0.22;
     else if (state.activeWeaponName === 'AR') recoilDist = 0.12;
+    else if (state.activeWeaponName === 'SNIPER') recoilDist = 0.30;
     state.rightGunContainer.position.z += recoilDist;
 
     const fireSinglePellet = (spreadAmt) => {
@@ -187,6 +259,135 @@ export function fireProjectile() {
     } else if (state.activeWeaponName === 'AR') {
         state.fireCooldown = 0.2;
         fireSinglePellet(0.02);
+    } else if (state.activeWeaponName === 'SNIPER') {
+        state.fireCooldown = 1.2;
+
+        const barrelWorldPosition = new THREE.Vector3();
+        state.rightGun.getWorldPosition(barrelWorldPosition);
+
+        const camDirection = new THREE.Vector3();
+        state.camera.getWorldDirection(camDirection);
+
+        // Raycasting for hitscan sniper aiming
+        const raycaster = new THREE.Raycaster();
+        raycaster.set(state.camera.position, camDirection);
+
+        // Intersect obstacles (pillars)
+        const obstacleHits = raycaster.intersectObjects(state.obstacles);
+        let closestObstacleDist = Infinity;
+        if (obstacleHits.length > 0) {
+            closestObstacleDist = obstacleHits[0].distance;
+        }
+
+        // Intersect targets
+        let hitTargetIndex = -1;
+        let closestTargetDist = Infinity;
+        let hitTargetGroup = null;
+
+        for (let j = 0; j < state.targets.length; j++) {
+            const targetGroup = state.targets[j];
+            const bodyMesh = targetGroup.userData.bodyMesh;
+            if (bodyMesh) {
+                const targetHits = raycaster.intersectObject(bodyMesh);
+                if (targetHits.length > 0) {
+                    const dist = targetHits[0].distance;
+                    if (dist < closestTargetDist) {
+                        closestTargetDist = dist;
+                        hitTargetIndex = j;
+                        hitTargetGroup = targetGroup;
+                    }
+                }
+            }
+        }
+
+        // Intersect PvP remote players
+        let pvpPeerId = null;
+        let closestPeerDist = Infinity;
+        if (state.isMultiplayer) {
+            const peerIds = Object.keys(state.peers);
+            for (let j = 0; j < peerIds.length; j++) {
+                const peerId = peerIds[j];
+                const peerData = state.peers[peerId];
+                if (peerData && peerData.mesh) {
+                    const peerHits = raycaster.intersectObject(peerData.mesh, true);
+                    if (peerHits.length > 0) {
+                        const dist = peerHits[0].distance;
+                        if (dist < closestPeerDist) {
+                            closestPeerDist = dist;
+                            pvpPeerId = peerId;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Determine hit point and what was hit
+        let hitPoint = new THREE.Vector3().copy(state.camera.position).addScaledVector(camDirection, 300);
+
+        if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
+            // Hit pillar/wall
+            hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestObstacleDist);
+            import('./particles.js').then((parts) => {
+                parts.spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
+            });
+        } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist) {
+            // Hit enemy target authoritatively
+            hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestTargetDist);
+            
+            if (state.isMultiplayer) {
+                if (!state.isHost) {
+                    state.connections.forEach((conn) => {
+                        if (conn.open) {
+                            conn.send({
+                                type: 'hit_target',
+                                targetIndex: hitTargetIndex,
+                                damage: 10
+                            });
+                        }
+                    });
+                } else {
+                    import('./main.js').then((main) => {
+                        main.processTargetHit(hitTargetIndex, 10);
+                    });
+                }
+            } else {
+                import('./main.js').then((main) => {
+                    main.processTargetHit(hitTargetIndex, 10);
+                });
+            }
+
+            import('./particles.js').then((parts) => {
+                parts.spawnParticles(hitPoint, hitTargetGroup.userData.color || 0xffaa00, 15, 12, 0.15, 12.0);
+            });
+        } else if (pvpPeerId !== null) {
+            // Hit remote player in PvP
+            hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestPeerDist);
+
+            const conn = state.connections.find(c => c.peer === pvpPeerId);
+            if (conn && conn.open) {
+                conn.send({
+                    type: 'player_hit',
+                    targetPeerId: pvpPeerId,
+                    damage: 10,
+                    attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                });
+            }
+
+            import('./particles.js').then((parts) => {
+                parts.spawnParticles(hitPoint, 0x8c7ae6, 15, 12, 0.15, 12.0);
+            });
+        }
+
+        // Draw local sniper trace trail
+        import('./particles.js').then((parts) => {
+            parts.createLaserBeam(barrelWorldPosition, hitPoint);
+        });
+
+        // Broadcast sniper fire to P2P network
+        if (state.isMultiplayer) {
+            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
+        }
+        return;
     }
 
     // Broadcast fire event in multiplayer
@@ -198,6 +399,7 @@ export function fireProjectile() {
         broadcastLocalFire(barrelWorldPosition, camDirection);
     }
 }
+
 
 export function updateWeapons(delta) {
     if (state.fireCooldown > 0) {
@@ -211,7 +413,7 @@ export function updateWeapons(delta) {
 
     // Auto-trigger weapon switch cycle if desired weapon is not active
     if (state.switchState === 'IDLE' && state.activeWeaponName !== state.desiredWeaponName) {
-        const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR'];
+        const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER'];
         const currentIndex = weaponCycle.indexOf(state.activeWeaponName);
         const nextIndex = (currentIndex + 1) % weaponCycle.length;
         state.nextWeaponName = weaponCycle[nextIndex];
@@ -220,7 +422,7 @@ export function updateWeapons(delta) {
     }
 
     // Animate weapon switching
-    if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh) {
+    if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh && state.sniperMesh) {
         state.switchTimer += delta;
         const t = Math.min(1.0, state.switchTimer / SWITCH_DURATION);
 
@@ -228,6 +430,7 @@ export function updateWeapons(delta) {
             if (name === 'PISTOL') return state.pistolMesh;
             if (name === 'SHOTGUN') return state.shotgunMesh;
             if (name === 'AR') return state.arMesh;
+            if (name === 'SNIPER') return state.sniperMesh;
             return null;
         };
 
@@ -235,6 +438,7 @@ export function updateWeapons(delta) {
             if (name === 'PISTOL') return 0.19;
             if (name === 'SHOTGUN') return 0.22;
             if (name === 'AR') return 0.26;
+            if (name === 'SNIPER') return 0.32;
             return 0.22;
         };
 
@@ -300,7 +504,15 @@ export function updateWeapons(delta) {
             if (state.rightGunContainer) state.rightGunContainer.rotation.set(0, 0, 0);
         }
     }
+
+    // Override gun models visibility when scoped in (first person only)
+    if (state.rightGunContainer && state.leftGun) {
+        const gunsVisible = state.isThirdPerson || !state.isScoped;
+        state.rightGunContainer.visible = gunsVisible;
+        state.leftGun.visible = gunsVisible;
+    }
 }
+
 
 export function createPlayerMesh() {
     const playerGroup = new THREE.Group();

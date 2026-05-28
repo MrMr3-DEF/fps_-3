@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { spawnParticles } from './particles.js';
+import { spawnParticles, createLaserBeam } from './particles.js';
 import { respawnTarget } from './world.js';
 import { resetHook } from './grapple.js';
 import { PROJECTILE_LIFETIME } from './config.js';
@@ -257,6 +257,7 @@ function handlePeerMessage(fromPeerId, msg) {
         peerData.pistolMesh.visible = (msg.activeWeapon === 'PISTOL');
         peerData.shotgunMesh.visible = (msg.activeWeapon === 'SHOTGUN');
         peerData.arMesh.visible = (msg.activeWeapon === 'AR');
+        peerData.sniperMesh.visible = (msg.activeWeapon === 'SNIPER');
 
         // Draw remote grapple hook lines
         if (msg.hookState !== 'IDLE' && msg.hookPos) {
@@ -295,26 +296,37 @@ function handlePeerMessage(fromPeerId, msg) {
         const barrelPos = new THREE.Vector3(msg.barrelPos.x, msg.barrelPos.y, msg.barrelPos.z);
         const dir = new THREE.Vector3(msg.dir.x, msg.dir.y, msg.dir.z);
 
-        // Spawn a tracer bullet locally
-        let bullet;
-        const bulletColor = msg.weapon === 'PISTOL' ? 0xff0055 : (msg.weapon === 'SHOTGUN' ? 0xffaa00 : 0x00ff88);
-
-        if (state.projectilePool.length > 0) {
-            bullet = state.projectilePool.pop();
-            bullet.visible = true;
-            bullet.material.color.setHex(bulletColor);
+        if (msg.weapon === 'SNIPER') {
+            const targetPos = new THREE.Vector3();
+            if (msg.hitPoint) {
+                targetPos.copy(msg.hitPoint);
+            } else {
+                targetPos.copy(barrelPos).addScaledVector(dir, 500);
+            }
+            createLaserBeam(barrelPos, targetPos);
         } else {
-            bullet = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), new THREE.MeshBasicMaterial({ color: bulletColor }));
-            bullet.userData = {};
-        }
+            // Spawn a tracer bullet locally
+            let bullet;
+            const bulletColor = msg.weapon === 'PISTOL' ? 0xff0055 : (msg.weapon === 'SHOTGUN' ? 0xffaa00 : 0x00ff88);
 
-        bullet.position.copy(barrelPos).addScaledVector(dir, 0.1);
-        bullet.userData.direction = dir.clone();
-        bullet.userData.age = 0;
-        
-        state.scene.add(bullet);
-        state.projectiles.push(bullet);
-    } else if (msg.type === 'kill_target') {
+            if (state.projectilePool.length > 0) {
+                bullet = state.projectilePool.pop();
+                bullet.visible = true;
+                bullet.material.color.setHex(bulletColor);
+            } else {
+                bullet = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), new THREE.MeshBasicMaterial({ color: bulletColor }));
+                bullet.userData = {};
+            }
+
+            bullet.position.copy(barrelPos).addScaledVector(dir, 0.1);
+            bullet.userData.direction = dir.clone();
+            bullet.userData.age = 0;
+            
+            state.scene.add(bullet);
+            state.projectiles.push(bullet);
+        }
+    }
+ else if (msg.type === 'kill_target') {
         // Sync targets authoritatively as informed by the host
         const target = state.targets[msg.targetIndex];
         if (target) {
@@ -615,6 +627,49 @@ function createPeerBean(username) {
         return ar;
     };
 
+    const buildSniper = () => {
+        const sniper = new THREE.Group();
+        const bMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff }); // glowing bright blue
+        const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
+
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.65), bMat);
+        body.castShadow = true;
+        sniper.add(body);
+
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1.0, 8), bMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0, 0.03, -0.75);
+        barrel.castShadow = true;
+        sniper.add(barrel);
+
+        const scopeTube = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.32, 8), scopeMat);
+        scopeTube.rotation.x = Math.PI / 2;
+        scopeTube.position.set(0, 0.11, -0.05);
+        scopeTube.castShadow = true;
+        sniper.add(scopeTube);
+
+        const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.01, 8), coreMat);
+        lens.rotation.x = Math.PI / 2;
+        lens.position.set(0, 0.11, -0.215);
+        sniper.add(lens);
+
+        const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.3), bMat);
+        stock.position.set(0, -0.04, 0.35);
+        sniper.add(stock);
+
+        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.06), bMat);
+        grip.position.set(0, -0.11, 0.12);
+        grip.rotation.x = Math.PI / 6;
+        sniper.add(grip);
+
+        const core = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.6), coreMat);
+        core.position.set(0, 0.05, -0.05);
+        sniper.add(core);
+
+        return sniper;
+    };
+
     const leftGun = buildGun(0x00aaff);
     leftGun.position.set(-0.7, 0.0, -0.5);
     peerGroup.add(leftGun);
@@ -633,6 +688,10 @@ function createPeerBean(username) {
     const arMesh = buildAR();
     arMesh.visible = false;
     rightGunContainer.add(arMesh);
+
+    const sniperMesh = buildSniper();
+    sniperMesh.visible = false;
+    rightGunContainer.add(sniperMesh);
 
     // Sprite username text label
     const canvas = document.createElement('canvas');
@@ -664,6 +723,8 @@ function createPeerBean(username) {
         pistolMesh: pistolMesh,
         shotgunMesh: shotgunMesh,
         arMesh: arMesh,
+        sniperMesh: sniperMesh,
         hookLine: null
     };
 }
+

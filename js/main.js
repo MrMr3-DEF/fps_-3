@@ -266,8 +266,10 @@ export function init() {
         if (blocker) blocker.style.display = 'flex';
         state.isSprinting = false;
         state.isMouseDown = false;
+        state.isScoped = false;
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'none';
+
         
         // Hide all starting panels
         if (panelMain) panelMain.style.display = 'none';
@@ -445,7 +447,7 @@ export function init() {
                 break;
             case 'KeyE':
                 if (state.controls.isLocked) {
-                    const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR'];
+                    const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER'];
                     const currentIndex = weaponCycle.indexOf(state.desiredWeaponName);
                     const nextIndex = (currentIndex + 1) % weaponCycle.length;
                     state.desiredWeaponName = weaponCycle[nextIndex];
@@ -466,6 +468,16 @@ export function init() {
                     state.desiredWeaponName = 'SHOTGUN';
                 }
                 break;
+            case 'Digit4':
+                if (state.controls.isLocked) {
+                    state.desiredWeaponName = 'SNIPER';
+                }
+                break;
+            case 'KeyC':
+                if (state.controls.isLocked) {
+                    state.isScoped = !state.isScoped;
+                }
+                break;
             case 'KeyP':
                 if (state.controls.isLocked) {
                     setThirdPerson(!state.isThirdPerson);
@@ -473,6 +485,7 @@ export function init() {
                 break;
         }
     };
+
 
     const onKeyUp = (e) => {
         switch (e.code) {
@@ -493,6 +506,10 @@ export function init() {
             if (state.fireCooldown <= 0 && state.switchState === 'IDLE') {
                 fireProjectile();
             }
+        } else if (e.button === 2) { // Right click
+            if (state.controls.isLocked) {
+                state.isScoped = !state.isScoped;
+            }
         }
     });
 
@@ -502,8 +519,15 @@ export function init() {
         }
     });
 
+    window.addEventListener('contextmenu', (e) => {
+        if (state.controls.isLocked) {
+            e.preventDefault();
+        }
+    });
+
     window.addEventListener('resize', onWindowResize);
 }
+
 
 export function animate() {
     requestAnimationFrame(animate);
@@ -632,6 +656,32 @@ export function animate() {
     }
 
     state.prevTime = time;
+
+    // Lerp FOV for scoping
+    if (state.camera) {
+        const targetFov = state.isScoped ? 20 : 75;
+        if (Math.abs(state.camera.fov - targetFov) > 0.1) {
+            state.camera.fov += (targetFov - state.camera.fov) * 15 * delta;
+            state.camera.updateProjectionMatrix();
+        } else if (state.camera.fov !== targetFov) {
+            state.camera.fov = targetFov;
+            state.camera.updateProjectionMatrix();
+        }
+
+        // Toggle sniper and normal crosshair HUD overlays
+        const sniperScopeEl = document.getElementById('sniper-scope');
+        const crosshairEl = document.getElementById('crosshair');
+        if (sniperScopeEl && crosshairEl) {
+            if (state.isScoped) {
+                sniperScopeEl.style.display = 'block';
+                crosshairEl.style.display = 'none';
+            } else {
+                sniperScopeEl.style.display = 'none';
+                crosshairEl.style.display = 'block';
+            }
+        }
+    }
+
     if (state.renderer && state.scene && state.camera) {
         let logicalCameraPos = null;
         if (state.isThirdPerson) {
@@ -651,6 +701,7 @@ export function animate() {
         }
     }
 }
+
 
 export function takePlayerDamage(damage, attackerName) {
     if (!state.isPlaying || state.playerHp <= 0) return;

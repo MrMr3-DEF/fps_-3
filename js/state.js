@@ -69,6 +69,9 @@ export const state = {
     pistolMesh: null,
     shotgunMesh: null,
     arMesh: null,
+    sniperMesh: null,
     playerMesh: null,
     isThirdPerson: false,
+    isScoped: false,
 };
+
