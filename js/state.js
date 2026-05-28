@@ -19,6 +19,14 @@ export const state = {
     playerMaxHp: 10,
     lastDamageTime: 0,
 
+    // Multiplayer state fields
+    isMultiplayer: false,
+    isHost: false,
+    roomCode: null,
+    peer: null,
+    connections: [],
+    peers: {},
+
     // Active game object arrays
     targets: [],
     obstacles: [],

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { state } from './state.js';
 import { SWITCH_DURATION } from './config.js';
+import { broadcastLocalFire } from './multiplayer.js';
 
 export function createAkimboGuns() {
     const buildGun = (coreColor) => {
@@ -186,6 +187,15 @@ export function fireProjectile() {
     } else if (state.activeWeaponName === 'AR') {
         state.fireCooldown = 0.2;
         fireSinglePellet(0.02);
+    }
+
+    // Broadcast fire event in multiplayer
+    if (state.isMultiplayer) {
+        const barrelWorldPosition = new THREE.Vector3();
+        state.rightGun.getWorldPosition(barrelWorldPosition);
+        const camDirection = new THREE.Vector3();
+        state.camera.getWorldDirection(camDirection);
+        broadcastLocalFire(barrelWorldPosition, camDirection);
     }
 }
 

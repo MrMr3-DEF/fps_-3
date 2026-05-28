@@ -11,6 +11,7 @@ import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson } from './weapons.js';
 import { createEnvironment, respawnTarget, updateTargets } from './world.js';
+import { sendLocalState, disconnectMultiplayer } from './multiplayer.js';
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
@@ -77,8 +78,121 @@ export function init() {
         sensSlider.addEventListener('click', (e) => e.stopPropagation());
     }
 
-    if (blocker) {
-        blocker.addEventListener('click', () => state.controls.lock());
+    // Setup multiplayer/singleplayer menu controls
+    const panelMain = document.getElementById('panel-main');
+    const panelMp = document.getElementById('panel-mp');
+    const panelHostWaiting = document.getElementById('panel-host-waiting');
+    const panelJoinRoom = document.getElementById('panel-join-room');
+
+    const btnPlaySp = document.getElementById('btn-play-sp');
+    const btnMenuMp = document.getElementById('btn-menu-mp');
+    
+    const btnMpBack = document.getElementById('btn-mp-back');
+    const btnMpHostView = document.getElementById('btn-mp-host-view');
+    const btnMpJoinView = document.getElementById('btn-mp-join-view');
+
+    const btnHostCancel = document.getElementById('btn-host-cancel');
+    const btnHostStart = document.getElementById('btn-host-start');
+
+    const btnJoinConnect = document.getElementById('btn-join-connect');
+    const btnJoinCancel = document.getElementById('btn-join-cancel');
+
+    const inputUsername = document.getElementById('input-username');
+    const inputRoomCode = document.getElementById('input-room-code');
+    const roomCodeDisplay = document.getElementById('room-code-display');
+    const joinErrorLog = document.getElementById('join-error-log');
+    
+    if (btnPlaySp) {
+        btnPlaySp.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.isMultiplayer = false;
+            state.isHost = false;
+            state.controls.lock();
+        });
+    }
+
+    if (btnMenuMp) {
+        btnMenuMp.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panelMain.style.display = 'none';
+            panelMp.style.display = 'flex';
+        });
+    }
+
+    if (btnMpBack) {
+        btnMpBack.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panelMp.style.display = 'none';
+            panelMain.style.display = 'flex';
+        });
+    }
+
+    if (btnMpHostView) {
+        btnMpHostView.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const username = inputUsername.value.trim() || 'Gast';
+            panelMp.style.display = 'none';
+            panelHostWaiting.style.display = 'flex';
+
+            import('./multiplayer.js').then((mp) => {
+                const code = mp.generateRoomCode();
+                if (roomCodeDisplay) roomCodeDisplay.innerText = code;
+                mp.hostGame(username, code);
+            });
+        });
+    }
+
+    if (btnHostCancel) {
+        btnHostCancel.addEventListener('click', (e) => {
+            e.stopPropagation();
+            import('./multiplayer.js').then((mp) => {
+                mp.disconnectMultiplayer();
+            });
+            panelHostWaiting.style.display = 'none';
+            panelMp.style.display = 'flex';
+        });
+    }
+
+    if (btnHostStart) {
+        btnHostStart.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (blocker) blocker.style.display = 'none';
+            state.controls.lock();
+        });
+    }
+
+    if (btnMpJoinView) {
+        btnMpJoinView.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panelMp.style.display = 'none';
+            panelJoinRoom.style.display = 'flex';
+            if (joinErrorLog) joinErrorLog.innerText = '';
+        });
+    }
+
+    if (btnJoinCancel) {
+        btnJoinCancel.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panelJoinRoom.style.display = 'none';
+            panelMp.style.display = 'flex';
+        });
+    }
+
+    if (btnJoinConnect) {
+        btnJoinConnect.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const username = inputUsername.value.trim() || 'Gast';
+            const code = inputRoomCode.value.trim().toUpperCase();
+
+            if (code.length !== 4) {
+                if (joinErrorLog) joinErrorLog.innerText = 'Code muss 4 Zeichen lang sein!';
+                return;
+            }
+
+            import('./multiplayer.js').then((mp) => {
+                mp.joinGame(username, code);
+            });
+        });
     }
 
     state.controls.addEventListener('lock', () => {
@@ -93,6 +207,16 @@ export function init() {
         state.isMouseDown = false;
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'none';
+        
+        if (state.isMultiplayer) {
+            disconnectMultiplayer();
+        }
+
+        if (panelMain) panelMain.style.display = 'flex';
+        if (panelMp) panelMp.style.display = 'none';
+        if (panelHostWaiting) panelHostWaiting.style.display = 'none';
+        if (panelJoinRoom) panelJoinRoom.style.display = 'none';
+
         resetHook();
     });
 
@@ -242,47 +366,22 @@ export function animate() {
 
             const hitRange = 1.6 * (target.userData.scale || 1.0);
             if (distance < hitRange) {
-                target.userData.hp -= 1; 
-
-                const hpRatio = Math.max(0, target.userData.hp / target.userData.maxHp);
-                target.userData.healthBarFg.scale.x = hpRatio;
-
-                if (target.userData.hp <= 0) {
-                    // Outward burst of 35 particles matching enemy color
-                    const enemyColor = target.userData.color || 0xff4500;
-                    spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
-
-                    // Sphere mesh death shockwave
-                    const shockwaveGeom = new THREE.SphereGeometry(1, 16, 16);
-                    const shockwaveMat = new THREE.MeshBasicMaterial({
-                        color: 0xffaa00,
-                        wireframe: true,
-                        transparent: true,
-                        opacity: 0.8
-                    });
-                    const shockwave = new THREE.Mesh(shockwaveGeom, shockwaveMat);
-                    shockwave.position.copy(target.position);
-                    state.scene.add(shockwave);
-
-                    state.activeParticles.push({
-                        mesh: shockwave,
-                        velocity: new THREE.Vector3(0, 0, 0),
-                        gravity: 0,
-                        life: 0.35,
-                        maxLife: 0.35,
-                        isShockwave: true,
-                        targetScale: 8.0 * (target.userData.scale || 1.0)
-                    });
-
-                    // Dead target safety hook disengage
-                    if (state.hookState === 'PULLING' && state.hookIsEnemy && state.hookTargetEnemy === target) {
-                        resetHook();
+                if (state.isMultiplayer) {
+                    if (!state.isHost) {
+                        state.connections.forEach((conn) => {
+                            if (conn.open) {
+                                conn.send({
+                                    type: 'hit_target',
+                                    targetIndex: j,
+                                    damage: 1
+                                });
+                            }
+                        });
+                    } else {
+                        processTargetHit(j, 1);
                     }
-
-                    respawnTarget(target);
-                    state.score++;
-                    const scoreEl = document.getElementById('score');
-                    if (scoreEl) scoreEl.innerText = state.score;
+                } else {
+                    processTargetHit(j, 1);
                 }
                 
                 projectileHit = true;
@@ -305,6 +404,11 @@ export function animate() {
 
     // 6) Tick dynamic gravity particles
     updateParticles(delta);
+
+    // 6.5) Stream multiplayer client sync packets
+    if (state.isMultiplayer) {
+        sendLocalState();
+    }
 
     // 7) Frame pacing calculations
     fpsFrames++;
@@ -360,6 +464,57 @@ export function triggerDeath() {
     }
     state.velocity.set(0, 0, 0);
     resetHook();
+}
+
+export function processTargetHit(targetIndex, damage) {
+    const target = state.targets[targetIndex];
+    if (!target) return;
+    
+    target.userData.hp -= damage;
+    const hpRatio = Math.max(0, target.userData.hp / target.userData.maxHp);
+    target.userData.healthBarFg.scale.x = hpRatio;
+    
+    if (target.userData.hp <= 0) {
+        const enemyColor = target.userData.color || 0xff4500;
+        spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
+        
+        const shockwaveGeom = new THREE.SphereGeometry(1, 16, 16);
+        const shockwaveMat = new THREE.MeshBasicMaterial({
+            color: 0xffaa00,
+            wireframe: true,
+            transparent: true,
+            opacity: 0.8
+        });
+        const shockwave = new THREE.Mesh(shockwaveGeom, shockwaveMat);
+        shockwave.position.copy(target.position);
+        state.scene.add(shockwave);
+        
+        state.activeParticles.push({
+            mesh: shockwave,
+            velocity: new THREE.Vector3(0, 0, 0),
+            gravity: 0,
+            life: 0.35,
+            maxLife: 0.35,
+            isShockwave: true,
+            targetScale: 8.0 * (target.userData.scale || 1.0)
+        });
+        
+        if (state.hookState === 'PULLING' && state.hookIsEnemy && state.hookTargetEnemy === target) {
+            resetHook();
+        }
+        
+        respawnTarget(target);
+        state.score++;
+        
+        const scoreEl = document.getElementById('score');
+        if (scoreEl) scoreEl.innerText = state.score;
+        
+        if (state.isMultiplayer && state.isHost) {
+            import('./multiplayer.js').then((mp) => {
+                mp.broadcastTargetKill(targetIndex, state.score, target.position, target.userData);
+            });
+        }
+    }
 }
 
 export function checkLavaDamage(delta) {

@@ -185,6 +185,63 @@
             background: #2ed573;
             transition: width 0.1s ease-out, background-color 0.1s ease-out;
         }
+
+        .menu-btn {
+            background: linear-gradient(135deg, #00aaee, #0077cc);
+            color: #ffffff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 8px;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 4px 10px rgba(0, 170, 238, 0.3);
+        }
+        .menu-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 170, 238, 0.5);
+            background: linear-gradient(135deg, #00bfff, #0088dd);
+        }
+        .menu-btn:active {
+            transform: translateY(0);
+        }
+        .menu-btn.secondary {
+            background: linear-gradient(135deg, #747d8c, #2f3542);
+            box-shadow: 0 4px 10px rgba(47, 53, 66, 0.3);
+        }
+        .menu-btn.secondary:hover {
+            background: linear-gradient(135deg, #a4b0be, #57606f);
+            box-shadow: 0 6px 15px rgba(47, 53, 66, 0.5);
+        }
+        .menu-input {
+            background: rgba(255, 255, 255, 0.9);
+            border: 2px solid #ccd5e0;
+            padding: 10px 16px;
+            font-size: 16px;
+            border-radius: 8px;
+            outline: none;
+            width: 200px;
+            text-align: center;
+            transition: border-color 0.2s;
+            margin: 8px;
+            color: #1a1c24;
+            font-weight: bold;
+        }
+        .menu-input:focus {
+            border-color: #00aaee;
+        }
+        .menu-panel {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
     </style>
 </head>
 <body>
@@ -192,16 +249,56 @@
     <div id="blocker">
         <div id="instructions">
             <strong style="color: #00aaee; font-size: 32px; letter-spacing: 1px;">FPS ARENA :3</strong><br/><br/>
-            Klicken zum Starten<br/><br/>
-            <span style="font-size: 15px; color: #555;">
-                WASD zum Bewegen<br/>
-                Shift zum Sprinten<br/>
-                Leertaste zum Springen<br/>
-                R zum Grappling Hook<br/>
-                Linksklick zum Schießen<br/>
-                E / 1, 2, 3 zum Waffen wechseln<br/>
-                P für Third Person Ansicht
-            </span>
+            
+            <!-- Panel 1: Main Selection Menu -->
+            <div id="panel-main" style="display: flex; flex-direction: column; align-items: center;">
+                <button class="menu-btn" id="btn-play-sp">Offline Einzelspieler</button>
+                <button class="menu-btn secondary" id="btn-menu-mp">Online Mehrspieler</button>
+                
+                <span style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
+                    WASD zum Bewegen | Shift zum Sprinten | Leertaste zum Springen<br/>
+                    R zum Grappling Hook | Linksklick zum Schießen<br/>
+                    E / 1, 2, 3 zum Waffen wechseln | P für Third Person
+                </span>
+            </div>
+
+            <!-- Panel 2: Multiplayer Dashboard -->
+            <div id="panel-mp" class="menu-panel">
+                <strong style="color: #57606f; font-size: 20px;">Mehrspieler-Setup</strong><br/>
+                <input type="text" class="menu-input" id="input-username" placeholder="Dein Spielername" maxlength="12"><br/>
+                
+                <div style="display: flex; gap: 10px;">
+                    <button class="menu-btn" id="btn-mp-host-view">Spiel Hosten</button>
+                    <button class="menu-btn secondary" id="btn-mp-join-view">Spiel Beitreten</button>
+                </div>
+                <br/>
+                <button class="menu-btn secondary" id="btn-mp-back" style="padding: 6px 16px; font-size: 14px; margin-top: 5px;">Zurück zum Hauptmenü</button>
+            </div>
+
+            <!-- Panel 3: Host Waiting Lobby -->
+            <div id="panel-host-waiting" class="menu-panel">
+                <strong style="color: #57606f; font-size: 20px;">Spiel Hosten</strong><br/>
+                <span style="font-size: 15px; color: #555;">Dein Raum-Code lautet:</span>
+                <span id="room-code-display" style="font-size: 36px; font-weight: bold; color: #00aaee; letter-spacing: 2px; margin: 10px 0;">....</span>
+                <span style="font-size: 14px; color: #777;" id="host-lobby-status">Erstelle Raum...</span><br/>
+                
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="menu-btn" id="btn-host-start" style="display: none;">Spiel Starten</button>
+                    <button class="menu-btn secondary" id="btn-host-cancel">Abbrechen</button>
+                </div>
+            </div>
+
+            <!-- Panel 4: Join Room Menu -->
+            <div id="panel-join-room" class="menu-panel">
+                <strong style="color: #57606f; font-size: 20px;">Spiel Beitreten</strong><br/>
+                <input type="text" class="menu-input" id="input-room-code" placeholder="CODE" maxlength="4" style="text-transform: uppercase; font-size: 20px; width: 140px; letter-spacing: 2px;"><br/>
+                <span style="font-size: 14px; color: #ff4757; font-weight: bold;" id="join-error-log"></span><br/>
+                
+                <div style="display: flex; gap: 10px;">
+                    <button class="menu-btn" id="btn-join-connect">Verbinden</button>
+                    <button class="menu-btn secondary" id="btn-join-cancel">Zurück</button>
+                </div>
+            </div>
 
             <div class="settings-container">
                 <div class="settings-row">
@@ -230,7 +327,8 @@
       {
         "imports": {
           "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+          "peerjs": "https://unpkg.com/peerjs@1.5.2/dist/peerjs.esm.js"
         }
       }
     </script>
