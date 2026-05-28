@@ -30,7 +30,20 @@ export async function hostGame(username, roomCode) {
     }
 
     const { Peer } = await import('peerjs');
-    peerInstance = new Peer(hostPeerId);
+    
+    const peerConfig = {
+        debug: 2, // Prints warnings and errors in developer console
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun.cloudflare.com:3478' }
+            ]
+        }
+    };
+
+    peerInstance = new Peer(hostPeerId, peerConfig);
     state.peer = peerInstance;
 
     peerInstance.on('open', (id) => {
@@ -46,7 +59,13 @@ export async function hostGame(username, roomCode) {
 
     peerInstance.on('error', (err) => {
         console.error('Host peer error:', err);
-        if (hostStatus) hostStatus.innerText = `Fehler: ${err.type}`;
+        if (hostStatus) {
+            if (err.type === 'unavailable-id') {
+                hostStatus.innerText = 'Fehler: Code bereits belegt! Bitte versuche es in 5 Sekunden erneut.';
+            } else {
+                hostStatus.innerText = `Fehler: ${err.type}`;
+            }
+        }
         disconnectMultiplayer();
     });
 }
@@ -64,11 +83,25 @@ export async function joinGame(username, roomCode) {
     }
 
     const { Peer } = await import('peerjs');
-    peerInstance = new Peer();
+    
+    const peerConfig = {
+        debug: 2, // Prints warnings and errors in developer console
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun.cloudflare.com:3478' }
+            ]
+        }
+    };
+
+    peerInstance = new Peer(peerConfig);
     state.peer = peerInstance;
 
     peerInstance.on('open', (clientId) => {
         console.log('Client registered with ID:', clientId);
+        if (joinError) joinError.innerText = `Suche Raum ${state.roomCode}...`;
         const hostPeerId = `testfps-room-${state.roomCode}`;
         const conn = peerInstance.connect(hostPeerId, {
             reliable: false
@@ -79,7 +112,13 @@ export async function joinGame(username, roomCode) {
 
     peerInstance.on('error', (err) => {
         console.error('Client peer error:', err);
-        if (joinError) joinError.innerText = 'Fehler: Raum nicht gefunden!';
+        if (joinError) {
+            if (err.type === 'peer-unavailable') {
+                joinError.innerText = 'Fehler: Raum nicht gefunden! Überprüfe den Code.';
+            } else {
+                joinError.innerText = `Fehler: ${err.type}`;
+            }
+        }
         disconnectMultiplayer();
     });
 }
@@ -110,7 +149,8 @@ export function disconnectMultiplayer() {
 }
 
 function setupConnection(conn) {
-    conn.on('open', () => {
+    const handleOpen = () => {
+        if (state.connections.includes(conn)) return; // Prevent duplicate additions
         console.log('Direct WebRTC DataConnection open with peer:', conn.peer);
         state.connections.push(conn);
 
@@ -132,7 +172,13 @@ function setupConnection(conn) {
             if (blocker) blocker.style.display = 'none';
             state.controls.lock();
         }
-    });
+    };
+
+    if (conn.open) {
+        handleOpen();
+    } else {
+        conn.on('open', handleOpen);
+    }
 
     conn.on('data', (data) => {
         handlePeerMessage(conn.peer, data);
