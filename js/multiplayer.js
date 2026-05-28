@@ -303,7 +303,8 @@ function handlePeerMessage(fromPeerId, msg) {
             } else {
                 targetPos.copy(barrelPos).addScaledVector(dir, 500);
             }
-            createLaserBeam(barrelPos, targetPos);
+            createLaserBeam(barrelPos, targetPos, 0xffff00);
+
         } else {
             // Spawn a tracer bullet locally
             let bullet;
@@ -630,45 +631,81 @@ function createPeerBean(username) {
     const buildSniper = () => {
         const sniper = new THREE.Group();
         const bMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff }); // glowing bright blue
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0xffea00 }); // glowing bright yellow accents
         const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
 
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.65), bMat);
+        // 1. Pistol Base Structure
+        const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
+        const body = new THREE.Mesh(bodyGeo, bMat);
         body.castShadow = true;
         sniper.add(body);
 
-        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1.0, 8), bMat);
-        barrel.rotation.x = Math.PI / 2;
-        barrel.position.set(0, 0.03, -0.75);
-        barrel.castShadow = true;
-        sniper.add(barrel);
-
-        const scopeTube = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.32, 8), scopeMat);
-        scopeTube.rotation.x = Math.PI / 2;
-        scopeTube.position.set(0, 0.11, -0.05);
-        scopeTube.castShadow = true;
-        sniper.add(scopeTube);
-
-        const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.01, 8), coreMat);
-        lens.rotation.x = Math.PI / 2;
-        lens.position.set(0, 0.11, -0.215);
-        sniper.add(lens);
-
-        const stock = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.3), bMat);
-        stock.position.set(0, -0.04, 0.35);
-        sniper.add(stock);
-
-        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.06), bMat);
-        grip.position.set(0, -0.11, 0.12);
+        const gripGeo = new THREE.BoxGeometry(0.05, 0.16, 0.07);
+        const grip = new THREE.Mesh(gripGeo, bMat);
+        grip.position.set(0, -0.09, 0.09);
         grip.rotation.x = Math.PI / 6;
         sniper.add(grip);
 
-        const core = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.6), coreMat);
-        core.position.set(0, 0.05, -0.05);
+        const coreGeo = new THREE.BoxGeometry(0.03, 0.03, 0.36);
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        core.position.set(0, 0.04, -0.04);
         sniper.add(core);
+
+        // 2. Primary round barrel: 1.5x base length (0.38 * 1.5 = 0.57)
+        const primaryBarrelGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.57, 8);
+        primaryBarrelGeo.rotateX(Math.PI / 2);
+        const primaryBarrel = new THREE.Mesh(primaryBarrelGeo, bMat);
+        primaryBarrel.position.set(0, 0.02, -0.475);
+        primaryBarrel.castShadow = true;
+        sniper.add(primaryBarrel);
+
+        // 3. Smaller round barrel at the end: standard barrel length (0.38)
+        const secondaryBarrelGeo = new THREE.CylinderGeometry(0.011, 0.011, 0.38, 8);
+        secondaryBarrelGeo.rotateX(Math.PI / 2);
+        const secondaryBarrel = new THREE.Mesh(secondaryBarrelGeo, bMat);
+        secondaryBarrel.position.set(0, 0.02, -0.95);
+        secondaryBarrel.castShadow = true;
+        sniper.add(secondaryBarrel);
+
+        // 4. Stock (butt of the gun)
+        const stockGeo = new THREE.BoxGeometry(0.05, 0.11, 0.32);
+        const stock = new THREE.Mesh(stockGeo, bMat);
+        stock.position.set(0, -0.04, 0.35);
+        sniper.add(stock);
+
+        // Stock buttpad accent (yellow)
+        const padGeo = new THREE.BoxGeometry(0.052, 0.112, 0.02);
+        const pad = new THREE.Mesh(padGeo, coreMat);
+        pad.position.set(0, -0.04, 0.51);
+        sniper.add(pad);
+
+        // 5. Scope on top
+        const scopeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 8);
+        scopeGeo.rotateX(Math.PI / 2);
+        const scope = new THREE.Mesh(scopeGeo, scopeMat);
+        scope.position.set(0, 0.09, -0.05);
+        scope.castShadow = true;
+        sniper.add(scope);
+
+        // Scope mounts
+        const mountGeo = new THREE.BoxGeometry(0.015, 0.04, 0.03);
+        const mount1 = new THREE.Mesh(mountGeo, bMat);
+        mount1.position.set(0, 0.065, 0.03);
+        sniper.add(mount1);
+        const mount2 = new THREE.Mesh(mountGeo, bMat);
+        mount2.position.set(0, 0.065, -0.13);
+        sniper.add(mount2);
+
+        // Glowing scope lens (yellow)
+        const lensGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.01, 8);
+        lensGeo.rotateX(Math.PI / 2);
+        const lens = new THREE.Mesh(lensGeo, coreMat);
+        lens.position.set(0, 0.09, -0.176);
+        sniper.add(lens);
 
         return sniper;
     };
+
 
     const leftGun = buildGun(0x00aaff);
     leftGun.position.set(-0.7, 0.0, -0.5);

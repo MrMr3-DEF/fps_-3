@@ -108,68 +108,81 @@ export function createAkimboGuns() {
     const buildSniper = () => {
         const sniperGroup = new THREE.Group();
         const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff }); // glowing bright blue
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0xffea00 }); // glowing bright yellow accents
         const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
 
-        // Main body: long and rectangular
-        const bodyGeo = new THREE.BoxGeometry(0.08, 0.14, 0.65);
+        // 1. Pistol Base Structure
+        const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
         const body = new THREE.Mesh(bodyGeo, bodyMat);
         body.castShadow = true;
         sniperGroup.add(body);
 
-        // Very long thin barrel
-        const barrelGeo = new THREE.CylinderGeometry(0.015, 0.015, 1.0, 8);
-        barrelGeo.rotateX(Math.PI / 2);
-        const barrel = new THREE.Mesh(barrelGeo, bodyMat);
-        barrel.position.set(0, 0.03, -0.75);
-        barrel.castShadow = true;
-        sniperGroup.add(barrel);
+        const gripGeo = new THREE.BoxGeometry(0.05, 0.16, 0.07);
+        const grip = new THREE.Mesh(gripGeo, bodyMat);
+        grip.position.set(0, -0.09, 0.09);
+        grip.rotation.x = Math.PI / 6;
+        sniperGroup.add(grip);
 
-        // Large scope on top
-        const scopeTubeGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.32, 8);
-        scopeTubeGeo.rotateX(Math.PI / 2);
-        const scopeTube = new THREE.Mesh(scopeTubeGeo, scopeMat);
-        scopeTube.position.set(0, 0.11, -0.05);
-        scopeTube.castShadow = true;
-        sniperGroup.add(scopeTube);
+        const coreGeo = new THREE.BoxGeometry(0.03, 0.03, 0.36);
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        core.position.set(0, 0.04, -0.04);
+        sniperGroup.add(core);
 
-        // Scope mounts
-        const mountGeo = new THREE.BoxGeometry(0.02, 0.05, 0.04);
-        const mount1 = new THREE.Mesh(mountGeo, bodyMat);
-        mount1.position.set(0, 0.07, 0.05);
-        sniperGroup.add(mount1);
-        const mount2 = new THREE.Mesh(mountGeo, bodyMat);
-        mount2.position.set(0, 0.07, -0.15);
-        sniperGroup.add(mount2);
+        // 2. Primary round barrel: 1.5x base length (0.38 * 1.5 = 0.57)
+        const primaryBarrelGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.57, 8);
+        primaryBarrelGeo.rotateX(Math.PI / 2);
+        const primaryBarrel = new THREE.Mesh(primaryBarrelGeo, bodyMat);
+        primaryBarrel.position.set(0, 0.02, -0.475);
+        primaryBarrel.castShadow = true;
+        sniperGroup.add(primaryBarrel);
 
-        // Glowing scope lens
-        const lensGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.01, 8);
-        lensGeo.rotateX(Math.PI / 2);
-        const lens = new THREE.Mesh(lensGeo, coreMat);
-        lens.position.set(0, 0.11, -0.215);
-        sniperGroup.add(lens);
+        // 3. Smaller round barrel at the end: standard barrel length (0.38)
+        const secondaryBarrelGeo = new THREE.CylinderGeometry(0.011, 0.011, 0.38, 8);
+        secondaryBarrelGeo.rotateX(Math.PI / 2);
+        const secondaryBarrel = new THREE.Mesh(secondaryBarrelGeo, bodyMat);
+        secondaryBarrel.position.set(0, 0.02, -0.95);
+        secondaryBarrel.castShadow = true;
+        sniperGroup.add(secondaryBarrel);
 
-        // Stock (butt of the gun)
-        const stockGeo = new THREE.BoxGeometry(0.06, 0.12, 0.3);
+        // 4. Stock (butt of the gun)
+        const stockGeo = new THREE.BoxGeometry(0.05, 0.11, 0.32);
         const stock = new THREE.Mesh(stockGeo, bodyMat);
         stock.position.set(0, -0.04, 0.35);
         sniperGroup.add(stock);
 
-        // Grip
-        const gripGeo = new THREE.BoxGeometry(0.05, 0.15, 0.06);
-        const grip = new THREE.Mesh(gripGeo, bodyMat);
-        grip.position.set(0, -0.11, 0.12);
-        grip.rotation.x = Math.PI / 6;
-        sniperGroup.add(grip);
+        // Stock buttpad accent (yellow)
+        const padGeo = new THREE.BoxGeometry(0.052, 0.112, 0.02);
+        const pad = new THREE.Mesh(padGeo, coreMat);
+        pad.position.set(0, -0.04, 0.51);
+        sniperGroup.add(pad);
 
-        // Glowing core line
-        const coreGeo = new THREE.BoxGeometry(0.04, 0.03, 0.6);
-        const core = new THREE.Mesh(coreGeo, coreMat);
-        core.position.set(0, 0.05, -0.05);
-        sniperGroup.add(core);
+        // 5. Scope on top
+        const scopeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 8);
+        scopeGeo.rotateX(Math.PI / 2);
+        const scope = new THREE.Mesh(scopeGeo, scopeMat);
+        scope.position.set(0, 0.09, -0.05);
+        scope.castShadow = true;
+        sniperGroup.add(scope);
+
+        // Scope mounts
+        const mountGeo = new THREE.BoxGeometry(0.015, 0.04, 0.03);
+        const mount1 = new THREE.Mesh(mountGeo, bodyMat);
+        mount1.position.set(0, 0.065, 0.03);
+        sniperGroup.add(mount1);
+        const mount2 = new THREE.Mesh(mountGeo, bodyMat);
+        mount2.position.set(0, 0.065, -0.13);
+        sniperGroup.add(mount2);
+
+        // Glowing scope lens (yellow)
+        const lensGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.01, 8);
+        lensGeo.rotateX(Math.PI / 2);
+        const lens = new THREE.Mesh(lensGeo, coreMat);
+        lens.position.set(0, 0.09, -0.176);
+        sniperGroup.add(lens);
 
         return sniperGroup;
     };
+
 
     state.leftGun = buildGun(0x00aaff);
     state.leftGun.position.set(-0.32, -0.22, -0.5);
@@ -378,10 +391,11 @@ export function fireProjectile() {
             });
         }
 
-        // Draw local sniper trace trail
+        // Draw local sniper trace trail (yellow)
         import('./particles.js').then((parts) => {
-            parts.createLaserBeam(barrelWorldPosition, hitPoint);
+            parts.createLaserBeam(barrelWorldPosition, hitPoint, 0xffff00);
         });
+
 
         // Broadcast sniper fire to P2P network
         if (state.isMultiplayer) {

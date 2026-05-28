@@ -37,7 +37,7 @@ export function spawnParticles(position, color, count, speed, size, gravity) {
     }
 }
 
-export function createLaserBeam(startPos, endPos) {
+export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
     const distance = startPos.distanceTo(endPos);
     if (distance <= 0) return;
 
@@ -45,10 +45,11 @@ export function createLaserBeam(startPos, endPos) {
     cylGeo.rotateX(Math.PI / 2); // Rotate so height is along Z axis
 
     const cylMat = new THREE.MeshBasicMaterial({
-        color: 0x00d2ff, // glowing neon blue
+        color: color,
         transparent: true,
         opacity: 0.95
     });
+
 
     const mesh = new THREE.Mesh(cylGeo, cylMat);
     const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
