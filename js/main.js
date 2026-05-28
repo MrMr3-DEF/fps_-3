@@ -670,9 +670,9 @@ export function animate() {
 
     state.prevTime = time;
 
-    // Lerp FOV for scoping
+    // Lerp FOV for scoping (5x zoom = 15 deg FOV)
     if (state.camera) {
-        const targetFov = state.isScoped ? 20 : 75;
+        const targetFov = state.isScoped ? 15 : 75;
         if (Math.abs(state.camera.fov - targetFov) > 0.1) {
             state.camera.fov += (targetFov - state.camera.fov) * 15 * delta;
             state.camera.updateProjectionMatrix();
@@ -681,20 +681,32 @@ export function animate() {
             state.camera.updateProjectionMatrix();
         }
 
-        // Toggle goggles and normal crosshair HUD overlays
+        // Toggle goggles, normal crosshair, and standard gameplay HUD overlays
         const gogglesScopeEl = document.getElementById('goggles-scope');
         const crosshairEl = document.getElementById('crosshair');
+        const uiEl = document.getElementById('ui');
+        const fpsEl = document.getElementById('fps-counter');
+        const healthEl = document.getElementById('health-container');
+
         if (gogglesScopeEl && crosshairEl) {
             if (state.isScoped) {
                 gogglesScopeEl.style.display = 'block';
                 crosshairEl.style.display = 'none';
+                if (uiEl) uiEl.style.display = 'none';
+                if (fpsEl) fpsEl.style.display = 'none';
+                if (healthEl) healthEl.style.display = 'none';
             } else {
                 gogglesScopeEl.style.display = 'none';
                 crosshairEl.style.display = 'block';
+                if (uiEl) uiEl.style.display = 'flex';
+                if (fpsEl) fpsEl.style.display = 'block';
+                if (healthEl) {
+                    healthEl.style.display = state.controls.isLocked ? 'block' : 'none';
+                }
             }
         }
-
     }
+
 
     if (state.renderer && state.scene && state.camera) {
         let logicalCameraPos = null;
