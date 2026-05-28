@@ -17,6 +17,20 @@ let fpsFrames = 0;
 let fpsLastTime = performance.now();
 const fpsCounterEl = document.getElementById('fps-counter');
 
+function validateUsername(username) {
+    if (!username) {
+        return 'Spielername darf nicht leer sein!';
+    }
+    if (username.length > 10) {
+        return 'Spielername darf max. 10 Zeichen lang sein!';
+    }
+    const lettersOnly = /^[A-Za-zÄäÖöÜüß]+$/;
+    if (!lettersOnly.test(username)) {
+        return 'Spielername darf nur Buchstaben enthalten!';
+    }
+    return null;
+}
+
 function onWindowResize() {
     if (state.camera && state.renderer) {
         state.camera.aspect = window.innerWidth / window.innerHeight;
@@ -112,6 +126,8 @@ export function init() {
     const deathOverlay = document.getElementById('death-overlay');
     const btnDeathRespawn = document.getElementById('btn-death-respawn');
     const btnDeathLeave = document.getElementById('btn-death-leave');
+
+    const mpNameError = document.getElementById('mp-name-error');
     
     if (btnPlaySp) {
         btnPlaySp.addEventListener('click', (e) => {
@@ -134,6 +150,7 @@ export function init() {
     if (btnMpBack) {
         btnMpBack.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (mpNameError) mpNameError.innerText = '';
             panelMp.style.display = 'none';
             panelMain.style.display = 'flex';
         });
@@ -142,7 +159,15 @@ export function init() {
     if (btnMpHostView) {
         btnMpHostView.addEventListener('click', (e) => {
             e.stopPropagation();
-            const username = inputUsername.value.trim() || 'Gast';
+            const username = inputUsername.value.trim();
+            const nameError = validateUsername(username);
+
+            if (nameError) {
+                if (mpNameError) mpNameError.innerText = nameError;
+                return;
+            }
+
+            if (mpNameError) mpNameError.innerText = '';
             panelMp.style.display = 'none';
             panelHostWaiting.style.display = 'flex';
 
@@ -177,6 +202,15 @@ export function init() {
     if (btnMpJoinView) {
         btnMpJoinView.addEventListener('click', (e) => {
             e.stopPropagation();
+            const username = inputUsername.value.trim();
+            const nameError = validateUsername(username);
+
+            if (nameError) {
+                if (mpNameError) mpNameError.innerText = nameError;
+                return;
+            }
+
+            if (mpNameError) mpNameError.innerText = '';
             panelMp.style.display = 'none';
             panelJoinRoom.style.display = 'flex';
             if (joinErrorLog) joinErrorLog.innerText = '';
@@ -485,6 +519,9 @@ export function animate() {
     // 2.5) Check lava hazard damage ticks
     checkLavaDamage(delta);
 
+    // 2.6) Update passive health regeneration
+    updateHealthRegen(delta);
+
     // 3) Update hook trajectories
     updateHook(delta);
 
@@ -689,6 +726,32 @@ export function checkLavaDamage(delta) {
                 }
             }
         }
+    }
+}
+
+export function updateHealthRegen(delta) {
+    if (!state.isPlaying || state.playerHp <= 0 || state.playerHp >= state.playerMaxHp) {
+        state.regenTimer = 0;
+        return;
+    }
+
+    const now = performance.now();
+    if (now - state.lastDamageTime >= 4000) {
+        state.regenTimer += delta;
+        if (state.regenTimer >= 1.0) {
+            state.playerHp = Math.min(state.playerMaxHp, state.playerHp + 1);
+            state.regenTimer -= 1.0;
+
+            // Update the health bar UI
+            const healthBar = document.getElementById('health-bar');
+            if (healthBar) {
+                const hpRatio = (state.playerHp / state.playerMaxHp) * 100;
+                healthBar.style.width = `${hpRatio}%`;
+                healthBar.style.backgroundColor = '#2ed573';
+            }
+        }
+    } else {
+        state.regenTimer = 0;
     }
 }
 
