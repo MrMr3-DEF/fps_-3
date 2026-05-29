@@ -189,11 +189,12 @@ export const buildMinigun = () => {
     const handleMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.7 });
 
     const Y_OFFSET = -0.06; // Shift entire weapon lower
+    const Z_OFFSET = 0.08;  // Shift weapon closer to player
 
     // 1. Base is a cube
     const cubeGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
     const cube = new THREE.Mesh(cubeGeo, bodyMat);
-    cube.position.set(0, Y_OFFSET, 0);
+    cube.position.set(0, Y_OFFSET, Z_OFFSET);
     cube.castShadow = true;
     minigunGroup.add(cube);
 
@@ -203,7 +204,7 @@ export const buildMinigun = () => {
     // Vertical rear support
     const s1Geo = new THREE.BoxGeometry(0.04, 0.12, 0.04);
     const s1 = new THREE.Mesh(s1Geo, handleMat);
-    s1.position.set(0, Y_OFFSET + 0.09, 0.07);
+    s1.position.set(0, Y_OFFSET + 0.09, 0.07 + Z_OFFSET);
     s1.castShadow = true;
     handleGroup.add(s1);
 
@@ -211,7 +212,7 @@ export const buildMinigun = () => {
     const gripGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.15, 8);
     gripGeo.rotateX(Math.PI / 2);
     const grip = new THREE.Mesh(gripGeo, handleMat);
-    grip.position.set(0, Y_OFFSET + 0.15, -0.005);
+    grip.position.set(0, Y_OFFSET + 0.15, -0.005 + Z_OFFSET);
     grip.castShadow = true;
     handleGroup.add(grip);
 
@@ -219,11 +220,11 @@ export const buildMinigun = () => {
 
     // 3. Barrels Group (so we can rotate it!)
     const barrelsGroup = new THREE.Group();
-    barrelsGroup.position.set(0, Y_OFFSET, -0.09); // front face of the cube
+    barrelsGroup.position.set(0, Y_OFFSET, Z_OFFSET - 0.09); // front face of the cube
     
-    // Six barrels protruding arranged in a circle - much thicker and further outward
+    // Six barrels protruding arranged in a circle - 4x the length of the cube (0.18 * 4 = 0.72)
     const barrelRadius = 0.07; // circle radius (near outer edges of cube)
-    const barrelLength = 0.45;
+    const barrelLength = 0.72; // 4x cube length
     const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, barrelLength, 8); // thicker barrels
     barrelGeo.rotateX(Math.PI / 2);
 
@@ -239,7 +240,7 @@ export const buildMinigun = () => {
         barrelsGroup.add(b);
     }
 
-    // 4. Square shaped plane (bracket) at half length from barrels with height and width of the cube
+    // 4. Square shaped plane (bracket) at half length from barrels (centered in the new middle)
     const bracketGeo = new THREE.BoxGeometry(0.18, 0.18, 0.015);
     const bracket = new THREE.Mesh(bracketGeo, bodyMat);
     bracket.position.set(0, 0, -barrelLength / 2);
