@@ -13,7 +13,8 @@ import {
     DEFAULT_FOV,
     SCOPED_FOV,
     FOV_LERP_SPEED,
-    PLAYER_RADIUS
+    PLAYER_RADIUS,
+    WEAPON_STATS
 } from './config.js';
 import { spawnParticles, updateParticles } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
@@ -599,10 +600,8 @@ export function animate() {
     // Update reload bar UI (indicates cooldown recovery)
     const reloadBar = document.getElementById('reload-bar');
     if (reloadBar) {
-        let maxCooldown = 0.1;
-        if (state.activeWeaponName === 'SHOTGUN') maxCooldown = 0.6;
-        else if (state.activeWeaponName === 'AR') maxCooldown = 0.2;
-        else if (state.activeWeaponName === 'SNIPER') maxCooldown = 2.0;
+        const stats = WEAPON_STATS[state.activeWeaponName];
+        const maxCooldown = stats ? stats.fireRate : 0.1;
 
         const progress = Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown)));
         reloadBar.style.width = `${progress * 100}%`;

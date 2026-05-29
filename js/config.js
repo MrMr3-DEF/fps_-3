@@ -35,7 +35,7 @@ export const FOV_LERP_SPEED = 15;
 export const WEAPON_STATS = {
     PISTOL:  { fireRate: 0.1, damage: 1, recoil: 0.08, spread: 0.0,  bulletColor: 0xff0055 },
     SHOTGUN: { fireRate: 0.6, damage: 1, recoil: 0.22, spread: 0.08, bulletColor: 0xffaa00, pellets: 5 },
-    AR:      { fireRate: 0.2, damage: 1, recoil: 0.12, spread: 0.02, bulletColor: 0x00ff88 },
+    AR:      { fireRate: 0.15, damage: 1, recoil: 0.12, spread: 0.02, bulletColor: 0x00ff88 },
     SNIPER:  { fireRate: 2.0, damage: 10, recoil: 0.30, spread: 0.0, bulletColor: 0xffff00 },
 };
 
