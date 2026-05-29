@@ -152,6 +152,19 @@ export function disconnectMultiplayer() {
     state.peers = {};
 
     resetHook();
+
+    const btnJoinConnect = document.getElementById('btn-join-connect');
+    if (btnJoinConnect) {
+        btnJoinConnect.innerText = 'Verbinden';
+        btnJoinConnect.style.background = '';
+        btnJoinConnect.disabled = false;
+        btnJoinConnect.removeAttribute('data-connected');
+    }
+    const joinErrorLog = document.getElementById('join-error-log');
+    if (joinErrorLog) {
+        joinErrorLog.style.color = '';
+        joinErrorLog.innerText = '';
+    }
 }
 
 function setupConnection(conn) {
@@ -172,12 +185,20 @@ function setupConnection(conn) {
                 roomCode: state.roomCode
             });
         } else {
-            // Client: transition to play state!
-            console.log('Client successfully connected to room, locking pointer controls!');
-            state.isPlaying = true;
-            const blocker = document.getElementById('blocker');
-            if (blocker) blocker.style.display = 'none';
-            state.controls.lock();
+            // Client successfully connected!
+            console.log('Client successfully connected to room! Waiting for click activation.');
+            const joinErrorLog = document.getElementById('join-error-log');
+            if (joinErrorLog) {
+                joinErrorLog.style.color = '#00ff88';
+                joinErrorLog.innerText = 'Erfolgreich verbunden!';
+            }
+            const btnJoinConnect = document.getElementById('btn-join-connect');
+            if (btnJoinConnect) {
+                btnJoinConnect.innerText = 'Dem Spiel beitreten';
+                btnJoinConnect.style.background = 'linear-gradient(135deg, #2ed573, #26af5f)';
+                btnJoinConnect.disabled = false;
+                btnJoinConnect.dataset.connected = 'true';
+            }
         }
     };
 
@@ -461,7 +482,7 @@ export function sendLocalState() {
     });
 }
 
-export function broadcastLocalFire(barrelPos, dir) {
+export function broadcastLocalFire(barrelPos, dir, hitPoint = null) {
     if (!state.isMultiplayer || state.connections.length === 0) return;
 
     const packet = {
@@ -470,6 +491,10 @@ export function broadcastLocalFire(barrelPos, dir) {
         barrelPos: { x: barrelPos.x, y: barrelPos.y, z: barrelPos.z },
         dir: { x: dir.x, y: dir.y, z: dir.z }
     };
+
+    if (hitPoint) {
+        packet.hitPoint = { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z };
+    }
 
     state.connections.forEach((conn) => {
         if (conn.open) {

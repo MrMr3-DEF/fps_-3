@@ -228,6 +228,14 @@ export function init() {
     if (btnJoinConnect) {
         btnJoinConnect.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (btnJoinConnect.dataset.connected === 'true') {
+                // If successfully connected, transition client into the game under direct click activation
+                state.isPlaying = true;
+                if (blocker) blocker.style.display = 'none';
+                state.controls.lock();
+                return;
+            }
+
             const username = inputUsername.value.trim() || 'Gast';
             const code = inputRoomCode.value.trim().toUpperCase();
 
@@ -235,6 +243,9 @@ export function init() {
                 if (joinErrorLog) joinErrorLog.innerText = 'Code muss 4 Zeichen lang sein!';
                 return;
             }
+
+            btnJoinConnect.disabled = true;
+            btnJoinConnect.innerText = 'Verbinde...';
 
             import('./multiplayer.js').then((mp) => {
                 mp.joinGame(username, code);
