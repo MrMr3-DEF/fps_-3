@@ -3,8 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="A fast-paced 3D browser FPS with multiplayer support, grappling hooks, and multiple weapon classes.">
+    <meta name="theme-color" content="#0a0a12">
     <title>Sci-Fi Momentum Slingshot FPS</title>
     <style>
+        :root {
+            --accent-pink: #ff0055;
+            --accent-green: #2ed573;
+            --accent-blue: #00aaee;
+            --bg-dark: #0a0a12;
+            --text-primary: #e0e0e0;
+            --text-muted: #aaa;
+        }
+
         html, body {
             margin: 0;
             padding: 0;
@@ -33,11 +44,14 @@
 
         #instructions {
             background: rgba(255, 255, 255, 0.8);
-            padding: 30px 50px;
+            padding: 30px 40px;
             border-radius: 16px;
-            border: 2px solid #00aaee;
+            border: 2px solid var(--accent-blue);
             box-shadow: 0 10px 30px rgba(0, 170, 238, 0.15);
             backdrop-filter: blur(4px);
+            max-width: 480px;
+            width: 90%;
+            box-sizing: border-box;
         }
 
         .settings-container {
@@ -109,7 +123,7 @@
             left: 50%;
             width: 12px;
             height: 12px;
-            border: 2px solid #ff0055;
+            border: 2px solid var(--accent-pink);
             border-radius: 50%;
             transform: translate(-50%, -50%);
             pointer-events: none;
@@ -330,7 +344,7 @@
 
     <div id="blocker">
         <div id="instructions">
-            <strong style="color: #00aaee; font-size: 32px; letter-spacing: 1px;">FPS ARENA :3</strong><br/><br/>
+            <h1 id="title" style="color: var(--accent-blue); font-size: 32px; letter-spacing: 1px; margin-top: 0; margin-bottom: 20px; font-weight: bold; text-align: center;">FPS ARENA :3</h1>
             
             <!-- Panel 1: Main Selection Menu -->
             <div id="panel-main" style="display: flex; flex-direction: column; align-items: center;">
@@ -364,7 +378,18 @@
             <div id="panel-host-waiting" class="menu-panel">
                 <strong style="color: #57606f; font-size: 20px;">Spiel Hosten</strong><br/>
                 <span style="font-size: 15px; color: #555;">Dein Raum-Code lautet:</span>
-                <span id="room-code-display" style="font-size: 36px; font-weight: bold; color: #00aaee; letter-spacing: 2px; margin: 10px 0;">....</span>
+                <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin: 10px 0;">
+                    <span id="room-code-display" style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">....</span>
+                    <button id="btn-copy-code" style="
+                        background: none;
+                        border: none;
+                        font-size: 20px;
+                        cursor: pointer;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        transition: transform 0.1s;
+                    " title="Raum-Code kopieren">📋</button>
+                </div>
                 <span style="font-size: 14px; color: #777;" id="host-lobby-status">Erstelle Raum...</span><br/>
                 
                 <div style="display: flex; gap: 10px; margin-top: 15px;">

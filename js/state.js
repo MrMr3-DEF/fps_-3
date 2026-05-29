@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PLAYER_MAX_HP } from './config.js';
 
 export const state = {
     // Player controls input state
@@ -15,8 +16,8 @@ export const state = {
 
     // Game stats
     score: 0,
-    playerHp: 10,
-    playerMaxHp: 10,
+    playerHp: PLAYER_MAX_HP,
+    playerMaxHp: PLAYER_MAX_HP,
     lastDamageTime: 0,
     isPlaying: false,
     regenTimer: 0,
@@ -50,7 +51,7 @@ export const state = {
     hookMesh: null,
 
     // Weapon system state
-    activeWeaponName: 'PISTOL', // 'PISTOL' or 'SHOTGUN'
+    activeWeaponName: 'PISTOL', // 'PISTOL', 'SHOTGUN', 'AR', 'SNIPER'
     nextWeaponName: null,
     desiredWeaponName: 'PISTOL',
     switchState: 'IDLE', // 'IDLE', 'WITHDRAWING', 'BRINGING_IN'

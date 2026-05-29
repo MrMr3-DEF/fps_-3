@@ -4,7 +4,15 @@ import { state } from './state.js';
 import {
     JUMP_FORCE,
     PROJECTILE_SPEED,
-    PROJECTILE_LIFETIME
+    PROJECTILE_LIFETIME,
+    PLAYER_HEIGHT,
+    PLAYER_MAX_HP,
+    LAVA_DAMAGE_TICK_MS,
+    LAVA_DAMAGE_PER_TICK,
+    LAVA_POOL_HALF_SIZE,
+    DEFAULT_FOV,
+    SCOPED_FOV,
+    FOV_LERP_SPEED
 } from './config.js';
 import { spawnParticles, updateParticles } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
@@ -12,6 +20,22 @@ import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson } from './weapons.js';
 import { createEnvironment, respawnTarget, updateTargets } from './world.js';
 import { sendLocalState, disconnectMultiplayer } from './multiplayer.js';
+
+export function updateHealthBar(hpRatio, flashColor = null) {
+    const healthBar = document.getElementById('health-bar');
+    if (!healthBar) return;
+    healthBar.style.width = `${hpRatio}%`;
+    if (flashColor) {
+        healthBar.style.backgroundColor = flashColor;
+        setTimeout(() => {
+            if (state.playerHp > 0 && healthBar.style.backgroundColor === flashColor) {
+                healthBar.style.backgroundColor = '#2ed573';
+            }
+        }, 100);
+    } else {
+        healthBar.style.backgroundColor = '#2ed573';
+    }
+}
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
@@ -357,11 +381,7 @@ export function init() {
             const scoreEl = document.getElementById('score');
             if (scoreEl) scoreEl.innerText = '0';
 
-            const healthBar = document.getElementById('health-bar');
-            if (healthBar) {
-                healthBar.style.width = '100%';
-                healthBar.style.backgroundColor = '#2ed573';
-            }
+            updateHealthBar(100);
 
             if (state.controls) {
                 const playerObj = state.controls.getObject();
@@ -389,11 +409,7 @@ export function init() {
             const scoreEl = document.getElementById('score');
             if (scoreEl) scoreEl.innerText = '0';
 
-            const healthBar = document.getElementById('health-bar');
-            if (healthBar) {
-                healthBar.style.width = '100%';
-                healthBar.style.backgroundColor = '#2ed573';
-            }
+            updateHealthBar(100);
 
             if (state.controls) {
                 const playerObj = state.controls.getObject();
@@ -412,6 +428,19 @@ export function init() {
             if (deathOverlay) deathOverlay.style.display = 'none';
             if (panelPause) panelPause.style.display = 'none';
             if (panelMain) panelMain.style.display = 'flex';
+        });
+    }
+
+    const btnCopyCode = document.getElementById('btn-copy-code');
+    if (btnCopyCode) {
+        btnCopyCode.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const code = state.roomCode || (roomCodeDisplay ? roomCodeDisplay.innerText : '');
+            if (code && code !== '----') {
+                navigator.clipboard.writeText(code);
+                btnCopyCode.textContent = '✅';
+                setTimeout(() => btnCopyCode.textContent = '📋', 1500);
+            }
         });
     }
 
@@ -706,11 +735,11 @@ export function animate() {
 
     state.prevTime = time;
 
-    // Lerp FOV for scoping (5x zoom = 15 deg FOV)
+    // Lerp FOV for scoping
     if (state.camera) {
-        const targetFov = state.isScoped ? 15 : 75;
+        const targetFov = state.isScoped ? SCOPED_FOV : DEFAULT_FOV;
         if (Math.abs(state.camera.fov - targetFov) > 0.1) {
-            state.camera.fov += (targetFov - state.camera.fov) * 15 * delta;
+            state.camera.fov += (targetFov - state.camera.fov) * FOV_LERP_SPEED * delta;
             state.camera.updateProjectionMatrix();
         } else if (state.camera.fov !== targetFov) {
             state.camera.fov = targetFov;
@@ -783,17 +812,7 @@ export function takePlayerDamage(damage, attackerName) {
         spawnParticles(myPos, 0xff3300, 10, 15, 0.2, 12.0);
     }
 
-    const healthBar = document.getElementById('health-bar');
-    if (healthBar) {
-        const hpRatio = Math.max(0, state.playerHp / state.playerMaxHp) * 100;
-        healthBar.style.width = `${hpRatio}%`;
-        healthBar.style.backgroundColor = '#ff4757';
-        setTimeout(() => {
-            if (state.playerHp > 0) {
-                healthBar.style.backgroundColor = '#2ed573';
-            }
-        }, 100);
-    }
+    updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp) * 100, '#ff4757');
 
     if (state.playerHp <= 0) {
         triggerDeath();
@@ -893,7 +912,7 @@ export function checkLavaDamage(delta) {
     if (!state.controls || !state.controls.isLocked) return;
 
     const playerObj = state.controls.getObject();
-    const feetY = playerObj.position.y - 2.0;
+    const feetY = playerObj.position.y - PLAYER_HEIGHT;
 
     if (feetY <= 0.15) {
         let standingOnLava = false;
@@ -901,7 +920,7 @@ export function checkLavaDamage(delta) {
             const pool = state.lavaPools[i];
             const dx = Math.abs(playerObj.position.x - pool.position.x);
             const dz = Math.abs(playerObj.position.z - pool.position.z);
-            if (dx < 12.8 && dz < 12.8) {
+            if (dx < LAVA_POOL_HALF_SIZE && dz < LAVA_POOL_HALF_SIZE) {
                 standingOnLava = true;
                 break;
             }
@@ -909,25 +928,15 @@ export function checkLavaDamage(delta) {
 
         if (standingOnLava) {
             const now = performance.now();
-            if (now - state.lastDamageTime >= 500) {
-                state.playerHp -= 1;
+            if (now - state.lastDamageTime >= LAVA_DAMAGE_TICK_MS) {
+                state.playerHp -= LAVA_DAMAGE_PER_TICK;
                 state.lastDamageTime = now;
 
                 const feetPos = playerObj.position.clone();
                 feetPos.y -= 1.8;
                 spawnParticles(feetPos, 0xff3300, 6, 10, 0.15, 5.0);
 
-                const healthBar = document.getElementById('health-bar');
-                if (healthBar) {
-                    const hpRatio = Math.max(0, state.playerHp / state.playerMaxHp) * 100;
-                    healthBar.style.width = `${hpRatio}%`;
-                    healthBar.style.backgroundColor = '#ff4757';
-                    setTimeout(() => {
-                        if (state.playerHp > 0) {
-                            healthBar.style.backgroundColor = '#2ed573';
-                        }
-                    }, 100);
-                }
+                updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp) * 100, '#ff4757');
 
                 if (state.playerHp <= 0) {
                     triggerDeath();
@@ -951,12 +960,7 @@ export function updateHealthRegen(delta) {
             state.regenTimer -= 1.0;
 
             // Update the health bar UI
-            const healthBar = document.getElementById('health-bar');
-            if (healthBar) {
-                const hpRatio = (state.playerHp / state.playerMaxHp) * 100;
-                healthBar.style.width = `${hpRatio}%`;
-                healthBar.style.backgroundColor = '#2ed573';
-            }
+            updateHealthBar((state.playerHp / state.playerMaxHp) * 100);
         }
     } else {
         state.regenTimer = 0;

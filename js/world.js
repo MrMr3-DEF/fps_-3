@@ -6,7 +6,8 @@ import {
     PILLAR_WIDTH,
     MAX_PILLAR_HEIGHT,
     MAX_ENEMY_HEIGHT,
-    ENEMY_CLASSES
+    ENEMY_CLASSES,
+    LAVA_POOL_HALF_SIZE
 } from './config.js';
 
 export function respawnTarget(targetGroup) {
@@ -41,8 +42,8 @@ export function createEnvironment() {
     state.scene.add(floor);
     state.grappleSurfaces.push(floor);
 
-    // Spawn 6 glowing orange lava pools on the floor (24x24 planes slightly elevated to prevent z-fighting)
-    const lavaGeo = new THREE.PlaneGeometry(24, 24);
+    // Spawn 6 glowing orange lava pools on the floor slightly elevated to prevent z-fighting
+    const lavaGeo = new THREE.PlaneGeometry(LAVA_POOL_HALF_SIZE * 2, LAVA_POOL_HALF_SIZE * 2);
     const lavaMat = new THREE.MeshStandardMaterial({ 
         color: 0xff4500, 
         emissive: 0xff2200, 
@@ -120,6 +121,9 @@ export function createEnvironment() {
         const obstacle = new THREE.Mesh(new THREE.BoxGeometry(PILLAR_WIDTH, height, PILLAR_WIDTH), boxMat);
         obstacle.position.copy(dummy.position);
         obstacle.userData.height = height;
+        obstacle.userData.halfW = PILLAR_WIDTH / 2;
+        obstacle.userData.halfD = PILLAR_WIDTH / 2;
+        obstacle.userData.halfH = height / 2;
         obstacle.visible = false; 
         state.scene.add(obstacle);
         state.obstacles.push(obstacle);

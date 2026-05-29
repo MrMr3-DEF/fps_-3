@@ -7,19 +7,27 @@ import {
     BASE_GRAVITY,
     JUMP_FORCE,
     WALK_SPEED,
-    SPRINT_SPEED
+    SPRINT_SPEED,
+    PLAYER_HEIGHT
 } from './config.js';
 
+// Module-level cached vectors to prevent per-frame garbage collection
+const _camForward = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+const _moveDir = new THREE.Vector3();
+const _tempPos = new THREE.Vector3();
+
 export function checkCollision(position, feetY) {
-    const halfW = PILLAR_WIDTH / 2;
     for (let i = 0; i < state.obstacles.length; i++) {
         const box = state.obstacles[i];
         const pillarHeight = box.userData.height;
+        const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
+        const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
 
         const minX = box.position.x - halfW - PLAYER_RADIUS;
         const maxX = box.position.x + halfW + PLAYER_RADIUS;
-        const minZ = box.position.z - halfW - PLAYER_RADIUS;
-        const maxZ = box.position.z + halfW + PLAYER_RADIUS;
+        const minZ = box.position.z - halfD - PLAYER_RADIUS;
+        const maxZ = box.position.z + halfD + PLAYER_RADIUS;
 
         if (position.x > minX && position.x < maxX && position.z > minZ && position.z < maxZ) {
             if (feetY < pillarHeight - 0.3) {
@@ -34,16 +42,17 @@ export function checkCollision(position, feetY) {
 
 export function getGroundY(position) {
     let highestGround = 0;
-    const halfW = PILLAR_WIDTH / 2;
 
     for (let i = 0; i < state.obstacles.length; i++) {
         const box = state.obstacles[i];
         const pillarHeight = box.userData.height;
+        const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
+        const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
 
         const minX = box.position.x - halfW - PLAYER_RADIUS;
         const maxX = box.position.x + halfW + PLAYER_RADIUS;
-        const minZ = box.position.z - halfW - PLAYER_RADIUS;
-        const maxZ = box.position.z + halfW + PLAYER_RADIUS;
+        const minZ = box.position.z - halfD - PLAYER_RADIUS;
+        const maxZ = box.position.z + halfD + PLAYER_RADIUS;
 
         if (position.x > minX && position.x < maxX && position.z > minZ && position.z < maxZ) {
             if (pillarHeight > highestGround) {
@@ -102,28 +111,28 @@ export function updatePlayerPhysics(delta) {
             state.velocity.y -= dynamicGravity * delta;
 
             // --- WORLD SPACE DIRECTION INTEGRATION ---
-            const camForward = new THREE.Vector3(0, 0, -1).applyQuaternion(state.camera.quaternion);
-            camForward.y = 0;
-            camForward.normalize();
+            _camForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
+            _camForward.y = 0;
+            _camForward.normalize();
 
-            const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(state.camera.quaternion);
-            camRight.y = 0;
-            camRight.normalize();
+            _camRight.set(1, 0, 0).applyQuaternion(state.camera.quaternion);
+            _camRight.y = 0;
+            _camRight.normalize();
 
             // Keyboard movement vector
-            const moveDir = new THREE.Vector3();
-            if (moveForward) moveDir.add(camForward);
-            if (moveBackward) moveDir.sub(camForward);
-            if (moveRight) moveDir.add(camRight);
-            if (moveLeft) moveDir.sub(camRight);
-            if (moveDir.lengthSq() > 0) moveDir.normalize();
+            _moveDir.set(0, 0, 0);
+            if (moveForward) _moveDir.add(_camForward);
+            if (moveBackward) _moveDir.sub(_camForward);
+            if (moveRight) _moveDir.add(_camRight);
+            if (moveLeft) _moveDir.sub(_camRight);
+            if (_moveDir.lengthSq() > 0) _moveDir.normalize();
 
             const currentSpeed = isSprinting ? SPRINT_SPEED : WALK_SPEED;
 
             if (state.canJump) {
                 if (state.hookState !== 'PULLING' && isMoving) {
-                    const targetVelX = moveDir.x * currentSpeed;
-                    const targetVelZ = moveDir.z * currentSpeed;
+                    const targetVelX = _moveDir.x * currentSpeed;
+                    const targetVelZ = _moveDir.z * currentSpeed;
                     state.velocity.x += (targetVelX - state.velocity.x) * 10.0 * delta;
                     state.velocity.z += (targetVelZ - state.velocity.z) * 10.0 * delta;
                 }
@@ -135,8 +144,8 @@ export function updatePlayerPhysics(delta) {
                     state.velocity.z -= state.velocity.z * airDrag * delta;
 
                     if (moveForward || moveLeft || moveRight) {
-                        state.velocity.x += moveDir.x * 35.0 * delta;
-                        state.velocity.z += moveDir.z * 35.0 * delta;
+                        state.velocity.x += _moveDir.x * 35.0 * delta;
+                        state.velocity.z += _moveDir.z * 35.0 * delta;
                     }
                     if (moveBackward) {
                         state.velocity.x -= state.velocity.x * 1.5 * delta;
@@ -147,10 +156,10 @@ export function updatePlayerPhysics(delta) {
 
             const nextX = playerObj.position.x + state.velocity.x * delta;
             const nextZ = playerObj.position.z + state.velocity.z * delta;
-            const feetY = playerObj.position.y - 2.0;
+            const feetY = playerObj.position.y - PLAYER_HEIGHT;
 
-            const collisionX = checkCollision(new THREE.Vector3(nextX, playerObj.position.y, playerObj.position.z), feetY);
-            const collisionZ = checkCollision(new THREE.Vector3(playerObj.position.x, playerObj.position.y, nextZ), feetY);
+            const collisionX = checkCollision(_tempPos.set(nextX, playerObj.position.y, playerObj.position.z), feetY);
+            const collisionZ = checkCollision(_tempPos.set(playerObj.position.x, playerObj.position.y, nextZ), feetY);
 
             if (!collisionX) {
                 playerObj.position.x = nextX;
@@ -167,7 +176,7 @@ export function updatePlayerPhysics(delta) {
             playerObj.position.y += state.velocity.y * delta;
 
             const currentGroundY = getGroundY(playerObj.position);
-            const minCameraY = currentGroundY + 2.0; 
+            const minCameraY = currentGroundY + PLAYER_HEIGHT; 
 
             if (playerObj.position.y < minCameraY) {
                 state.velocity.y = 0;

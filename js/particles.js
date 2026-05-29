@@ -1,16 +1,22 @@
 import * as THREE from 'three';
 import { state } from './state.js';
+import { LASER_BEAM_FADE_TIME } from './config.js';
+
+// Module-level shared geometries to eliminate GC overhead
+const SHARED_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
+const SHARED_CYL_GEO = new THREE.CylinderGeometry(0.025, 0.025, 1, 6);
+SHARED_CYL_GEO.rotateX(Math.PI / 2); // Rotate Z axis forward
 
 export function spawnParticles(position, color, count, speed, size, gravity) {
-    const geom = new THREE.BoxGeometry(size, size, size);
     for (let i = 0; i < count; i++) {
         const mat = new THREE.MeshBasicMaterial({
             color: color,
             transparent: true,
             opacity: 1.0
         });
-        const mesh = new THREE.Mesh(geom, mat);
+        const mesh = new THREE.Mesh(SHARED_BOX_GEO, mat);
         mesh.position.copy(position);
+        mesh.scale.setScalar(size);
         
         // Add tiny random offset to position
         mesh.position.x += (Math.random() - 0.5) * 0.5;
@@ -32,7 +38,8 @@ export function spawnParticles(position, color, count, speed, size, gravity) {
             velocity: velocity,
             gravity: gravity,
             life: maxLife,
-            maxLife: maxLife
+            maxLife: maxLife,
+            isSharedGeo: true
         });
     }
 }
@@ -41,17 +48,13 @@ export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
     const distance = startPos.distanceTo(endPos);
     if (distance <= 0) return;
 
-    const cylGeo = new THREE.CylinderGeometry(0.025, 0.025, 1, 6);
-    cylGeo.rotateX(Math.PI / 2); // Rotate so height is along Z axis
-
     const cylMat = new THREE.MeshBasicMaterial({
         color: color,
         transparent: true,
         opacity: 0.95
     });
 
-
-    const mesh = new THREE.Mesh(cylGeo, cylMat);
+    const mesh = new THREE.Mesh(SHARED_CYL_GEO, cylMat);
     const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
     mesh.position.copy(midPoint);
     mesh.scale.set(1, 1, distance);
@@ -62,8 +65,9 @@ export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
     state.activeParticles.push({
         mesh: mesh,
         isSniperTrail: true,
-        life: 0.25,
-        maxLife: 0.25
+        isSharedGeo: true,
+        life: LASER_BEAM_FADE_TIME,
+        maxLife: LASER_BEAM_FADE_TIME
     });
 }
 
@@ -74,7 +78,10 @@ export function updateParticles(delta) {
 
         if (p.life <= 0) {
             state.scene.remove(p.mesh);
-            if (p.mesh.geometry) p.mesh.geometry.dispose();
+            // Dispose of material, but do NOT dispose shared geometry
+            if (p.mesh.geometry && !p.isSharedGeo) {
+                p.mesh.geometry.dispose();
+            }
             if (p.mesh.material) p.mesh.material.dispose();
             state.activeParticles.splice(i, 1);
         } else {
@@ -93,7 +100,7 @@ export function updateParticles(delta) {
                 // Flying spark particle under gravity
                 p.velocity.y -= p.gravity * delta;
                 p.mesh.position.addScaledVector(p.velocity, delta);
-                p.mesh.scale.setScalar(ratio);
+                p.mesh.scale.setScalar(ratio * p.maxLife); // Maintain original particle scale ratio
                 p.mesh.material.opacity = ratio;
             }
         }

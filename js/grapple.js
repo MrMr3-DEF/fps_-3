@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { HOOK_MAX_RANGE, PROJECTILE_SPEED } from './config.js';
+import { HOOK_MAX_RANGE, HOOK_SPEED } from './config.js';
 
-const HOOK_SPEED = PROJECTILE_SPEED;
 const HOOK_SLINGSHOT_ACCEL = 360.0;
 
 export function resetHook() {

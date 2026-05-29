@@ -3,7 +3,50 @@ import { state } from './state.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
 import { respawnTarget } from './world.js';
 import { resetHook } from './grapple.js';
-import { PROJECTILE_LIFETIME } from './config.js';
+import {
+    PROJECTILE_LIFETIME,
+    NETWORK_TICK_MS,
+    ROOM_CODE_LENGTH,
+    PEER_Y_OFFSET,
+    HIT_FLASH_DURATION_MS
+} from './config.js';
+import { buildGun, buildShotgun, buildAR, buildSniper } from './weapons.js';
+
+// Module-level cached objects to prevent per-tick allocations
+const _stateEuler = new THREE.Euler();
+
+export function broadcastToAll(packet, excludePeerId = null) {
+    if (!state.isMultiplayer || state.connections.length === 0) return;
+    state.connections.forEach((conn) => {
+        if (conn.open && conn.peer !== excludePeerId) {
+            try {
+                conn.send(packet);
+            } catch (err) {
+                console.error(`Error broadcasting packet of type ${packet.type} to peer ${conn.peer}:`, err);
+            }
+        }
+    });
+}
+
+export function flashPeerMesh(peerData, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS) {
+    if (!peerData || !peerData.mesh) return;
+    peerData.mesh.traverse((child) => {
+        if (child.isMesh && child.material && child.material.color) {
+            if (child.userData.originalColor === undefined) {
+                child.userData.originalColor = child.material.color.getHex();
+            }
+            child.material.color.setHex(color);
+        }
+    });
+    setTimeout(() => {
+        if (!peerData || !peerData.mesh) return;
+        peerData.mesh.traverse((child) => {
+            if (child.isMesh && child.material && child.material.color && child.userData.originalColor !== undefined) {
+                child.material.color.setHex(child.userData.originalColor);
+            }
+        });
+    }, durationMs);
+}
 
 let peerInstance = null;
 let lastSentTime = 0;
@@ -11,7 +54,7 @@ let lastSentTime = 0;
 export function generateRoomCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoid confusing characters
     let code = '';
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return code;
@@ -104,7 +147,7 @@ export async function joinGame(username, roomCode) {
         if (joinError) joinError.innerText = `Suche Raum ${state.roomCode}...`;
         const hostPeerId = `testfps-room-${state.roomCode}`;
         const conn = peerInstance.connect(hostPeerId, {
-            reliable: false
+            reliable: true
         });
 
         setupConnection(conn);
@@ -247,18 +290,10 @@ function handlePeerMessage(fromPeerId, msg) {
     // Star-Topology Relay: Host broadcasts client messages to all other clients
     if (state.isHost) {
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died') {
-            state.connections.forEach((conn) => {
-                if (conn.peer !== fromPeerId && conn.open) {
-                    try {
-                        conn.send({
-                            ...msg,
-                            senderPeerId: fromPeerId
-                        });
-                    } catch (err) {
-                        console.error('Error relaying packet:', err);
-                    }
-                }
-            });
+            broadcastToAll({
+                ...msg,
+                senderPeerId: fromPeerId
+            }, fromPeerId);
         }
     }
 
@@ -276,7 +311,7 @@ function handlePeerMessage(fromPeerId, msg) {
 
         // Apply position updates (with y-offset to align remote models with ground geometry)
         peerData.mesh.position.copy(msg.pos);
-        peerData.mesh.position.y -= 1.0;
+        peerData.mesh.position.y -= PEER_Y_OFFSET;
         peerData.mesh.rotation.y = msg.yaw;
 
         // Apply weapon rotations (aiming pitches)
@@ -355,9 +390,7 @@ function handlePeerMessage(fromPeerId, msg) {
             
             state.scene.add(bullet);
             state.projectiles.push(bullet);
-        }
-    }
- else if (msg.type === 'kill_target') {
+    } else if (msg.type === 'kill_target') {
         // Sync targets authoritatively as informed by the host
         const target = state.targets[msg.targetIndex];
         if (target) {
@@ -408,23 +441,7 @@ function handlePeerMessage(fromPeerId, msg) {
     } else if (msg.type === 'player_hit') {
         // Flash targeted remote player bean model bright neon-red to provide instant damage feedback
         const targetPeer = state.peers[msg.targetPeerId];
-        if (targetPeer && targetPeer.mesh) {
-            targetPeer.mesh.traverse((child) => {
-                if (child.isMesh && child.material && child.material.color) {
-                    if (child.userData.originalColor === undefined) {
-                        child.userData.originalColor = child.material.color.getHex();
-                    }
-                    child.material.color.setHex(0xff3333); // Bright neon-red
-                }
-            });
-            setTimeout(() => {
-                targetPeer.mesh.traverse((child) => {
-                    if (child.isMesh && child.material && child.material.color && child.userData.originalColor !== undefined) {
-                        child.material.color.setHex(child.userData.originalColor);
-                    }
-                });
-            }, 150);
-        }
+        flashPeerMesh(targetPeer, 0xff3333, 150);
 
         if (msg.targetPeerId === state.peer.id) {
             import('./main.js').then((main) => {
@@ -485,11 +502,11 @@ export function sendLocalState() {
     if (!state.isMultiplayer || state.connections.length === 0) return;
 
     const now = performance.now();
-    if (now - lastSentTime < 33) return; // Cap at ~30 packets per second to conserve bandwidth
+    if (now - lastSentTime < NETWORK_TICK_MS) return; // Cap at ~30 packets per second to conserve bandwidth
     lastSentTime = now;
 
     const playerObj = state.controls.getObject();
-    const camEuler = new THREE.Euler().setFromQuaternion(state.camera.quaternion, 'YXZ');
+    const camEuler = _stateEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
 
     const username = document.getElementById('input-username').value || 'Gast';
 
@@ -504,15 +521,7 @@ export function sendLocalState() {
         hookPos: state.hookState !== 'IDLE' ? { x: state.hookPosition.x, y: state.hookPosition.y, z: state.hookPosition.z } : null
     };
 
-    state.connections.forEach((conn) => {
-        if (conn.open) {
-            try {
-                conn.send(packet);
-            } catch (err) {
-                console.error('Error broadcasting state update:', err);
-            }
-        }
-    });
+    broadcastToAll(packet);
 }
 
 export function broadcastLocalFire(barrelPos, dir, hitPoint = null) {
@@ -529,15 +538,7 @@ export function broadcastLocalFire(barrelPos, dir, hitPoint = null) {
         packet.hitPoint = { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z };
     }
 
-    state.connections.forEach((conn) => {
-        if (conn.open) {
-            try {
-                conn.send(packet);
-            } catch (err) {
-                console.error('Error broadcasting fire event:', err);
-            }
-        }
-    });
+    broadcastToAll(packet);
 }
 
 export function broadcastTargetKill(targetIndex, score, newPos, targetData) {
@@ -553,15 +554,7 @@ export function broadcastTargetKill(targetIndex, score, newPos, targetData) {
         color: targetData.color
     };
 
-    state.connections.forEach((conn) => {
-        if (conn.open) {
-            try {
-                conn.send(packet);
-            } catch (err) {
-                console.error('Error broadcasting target kill:', err);
-            }
-        }
-    });
+    broadcastToAll(packet);
 }
 
 function createPeerBean(username) {
@@ -614,165 +607,7 @@ function createPeerBean(username) {
     visorStrip.position.set(0, 0.5, -0.36);
     peerGroup.add(visorStrip);
 
-    // Build remote peer weapons (Akimbo attachments)
-    const buildGun = (color) => {
-        const gun = new THREE.Group();
-        const bMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.11, 0.38), bMat);
-        body.castShadow = true;
-        gun.add(body);
-        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.07), bMat);
-        grip.position.set(0, -0.09, 0.09);
-        grip.rotation.x = Math.PI / 6;
-        gun.add(grip);
-        const core = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.36), new THREE.MeshBasicMaterial({ color: color }));
-        core.position.set(0, 0.04, -0.04);
-        gun.add(core);
-        return gun;
-    };
-    
-    const buildShotgun = () => {
-        const shotgun = new THREE.Group();
-        const bMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.45), bMat);
-        body.castShadow = true;
-        shotgun.add(body);
-        
-        const leftB = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.55, 8), bMat);
-        leftB.rotation.x = Math.PI / 2;
-        leftB.position.set(-0.02, 0.02, -0.3);
-        leftB.castShadow = true;
-        shotgun.add(leftB);
-        
-        const rightB = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.55, 8), bMat);
-        rightB.rotation.x = Math.PI / 2;
-        rightB.position.set(0.02, 0.02, -0.3);
-        rightB.castShadow = true;
-        shotgun.add(rightB);
-        
-        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 0.22), bMat);
-        grip.position.set(0, -0.09, 0.15);
-        grip.rotation.x = Math.PI / 6;
-        shotgun.add(grip);
-        
-        const pump = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.08, 0.25), bMat);
-        pump.position.set(0, -0.04, -0.15);
-        shotgun.add(pump);
-        
-        const core = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.42), new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
-        core.position.set(0, 0.05, -0.05);
-        shotgun.add(core);
-        return shotgun;
-    };
-    
-    const buildAR = () => {
-        const ar = new THREE.Group();
-        const bMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const body = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.13, 0.52), bMat);
-        body.castShadow = true;
-        ar.add(body);
-        
-        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.65, 8), bMat);
-        barrel.rotation.x = Math.PI / 2;
-        barrel.position.set(0, 0.02, -0.4);
-        barrel.castShadow = true;
-        ar.add(barrel);
-        
-        const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.15, 0.07), bMat);
-        grip.position.set(0, -0.1, 0.12);
-        grip.rotation.x = Math.PI / 6;
-        ar.add(grip);
-        
-        const mag = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.08), bMat);
-        mag.rotation.x = -Math.PI / 12;
-        mag.position.set(0, -0.16, -0.05);
-        ar.add(mag);
-        
-        const core = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.48), new THREE.MeshBasicMaterial({ color: 0x00ff88 }));
-        core.position.set(0, 0.05, -0.06);
-        ar.add(core);
-        return ar;
-    };
-
-    const buildSniper = () => {
-        const sniper = new THREE.Group();
-        const bMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-        const coreMat = new THREE.MeshBasicMaterial({ color: 0xffea00 }); // glowing bright yellow accents
-        const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
-
-        // 1. Pistol Base Structure
-        const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
-        const body = new THREE.Mesh(bodyGeo, bMat);
-        body.castShadow = true;
-        sniper.add(body);
-
-        const gripGeo = new THREE.BoxGeometry(0.05, 0.16, 0.07);
-        const grip = new THREE.Mesh(gripGeo, bMat);
-        grip.position.set(0, -0.09, 0.09);
-        grip.rotation.x = Math.PI / 6;
-        sniper.add(grip);
-
-        const coreGeo = new THREE.BoxGeometry(0.03, 0.03, 0.36);
-        const core = new THREE.Mesh(coreGeo, coreMat);
-        core.position.set(0, 0.04, -0.04);
-        sniper.add(core);
-
-        // 2. Primary round barrel: 1.5x base length (0.38 * 1.5 = 0.57)
-        const primaryBarrelGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.57, 8);
-        primaryBarrelGeo.rotateX(Math.PI / 2);
-        const primaryBarrel = new THREE.Mesh(primaryBarrelGeo, bMat);
-        primaryBarrel.position.set(0, 0.02, -0.475);
-        primaryBarrel.castShadow = true;
-        sniper.add(primaryBarrel);
-
-        // 3. Smaller round barrel at the end: standard barrel length (0.38)
-        const secondaryBarrelGeo = new THREE.CylinderGeometry(0.011, 0.011, 0.38, 8);
-        secondaryBarrelGeo.rotateX(Math.PI / 2);
-        const secondaryBarrel = new THREE.Mesh(secondaryBarrelGeo, bMat);
-        secondaryBarrel.position.set(0, 0.02, -0.95);
-        secondaryBarrel.castShadow = true;
-        sniper.add(secondaryBarrel);
-
-        // 4. Stock (butt of the gun)
-        const stockGeo = new THREE.BoxGeometry(0.05, 0.11, 0.32);
-        const stock = new THREE.Mesh(stockGeo, bMat);
-        stock.position.set(0, -0.04, 0.35);
-        sniper.add(stock);
-
-        // Stock buttpad accent (yellow)
-        const padGeo = new THREE.BoxGeometry(0.052, 0.112, 0.02);
-        const pad = new THREE.Mesh(padGeo, coreMat);
-        pad.position.set(0, -0.04, 0.51);
-        sniper.add(pad);
-
-        // 5. Scope on top
-        const scopeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 8);
-        scopeGeo.rotateX(Math.PI / 2);
-        const scope = new THREE.Mesh(scopeGeo, scopeMat);
-        scope.position.set(0, 0.09, -0.05);
-        scope.castShadow = true;
-        sniper.add(scope);
-
-        // Scope mounts
-        const mountGeo = new THREE.BoxGeometry(0.015, 0.04, 0.03);
-        const mount1 = new THREE.Mesh(mountGeo, bMat);
-        mount1.position.set(0, 0.065, 0.03);
-        sniper.add(mount1);
-        const mount2 = new THREE.Mesh(mountGeo, bMat);
-        mount2.position.set(0, 0.065, -0.13);
-        sniper.add(mount2);
-
-        // Glowing scope lens (yellow)
-        const lensGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.01, 8);
-        lensGeo.rotateX(Math.PI / 2);
-        const lens = new THREE.Mesh(lensGeo, coreMat);
-        lens.position.set(0, 0.09, -0.176);
-        sniper.add(lens);
-
-        return sniper;
-    };
-
-
+    // Build remote peer weapons (Akimbo attachments) using imported builders from weapons.js
     const leftGun = buildGun(0x00aaff);
     leftGun.position.set(-0.7, 0.0, -0.5);
     peerGroup.add(leftGun);
