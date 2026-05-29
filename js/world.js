@@ -10,6 +10,10 @@ import {
     LAVA_POOL_HALF_SIZE
 } from './config.js';
 
+// Shared unit geometries to minimize memory allocation and GC pressure
+const UNIT_PLANE_GEO = new THREE.PlaneGeometry(1, 1);
+const UNIT_CIRCLE_GEO = new THREE.CircleGeometry(1, 24);
+
 export function respawnTarget(targetGroup) {
     targetGroup.position.x = (Math.random() - 0.5) * (MAP_SIZE - 40);
     targetGroup.position.y = 3.0 + Math.random() * (MAX_ENEMY_HEIGHT - 5.0);
@@ -42,8 +46,7 @@ export function createEnvironment() {
     state.scene.add(floor);
     state.grappleSurfaces.push(floor);
 
-    // Spawn 6 glowing orange lava pools on the floor slightly elevated to prevent z-fighting
-    const lavaGeo = new THREE.PlaneGeometry(LAVA_POOL_HALF_SIZE * 2, LAVA_POOL_HALF_SIZE * 2);
+    // Spawn 30 glowing orange lava pools of varied shapes and sizes on the floor slightly elevated to prevent z-fighting
     const lavaMat = new THREE.MeshStandardMaterial({ 
         color: 0xff4500, 
         emissive: 0xff2200, 
@@ -51,8 +54,32 @@ export function createEnvironment() {
         roughness: 0.5
     });
 
-    for (let i = 0; i < 6; i++) {
-        const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
+    for (let i = 0; i < 30; i++) {
+        const isCircle = Math.random() < 0.5;
+        let lavaMesh;
+
+        if (isCircle) {
+            // Circle pool: radius between 6.0 and 20.0
+            const radius = 6.0 + Math.random() * 14.0;
+            lavaMesh = new THREE.Mesh(UNIT_CIRCLE_GEO, lavaMat);
+            lavaMesh.scale.set(radius, radius, 1.0);
+            lavaMesh.userData = {
+                isCircle: true,
+                radius: radius
+            };
+        } else {
+            // Rectangle pool: width and depth between 12.0 and 35.0
+            const width = 12.0 + Math.random() * 23.0;
+            const depth = 12.0 + Math.random() * 23.0;
+            lavaMesh = new THREE.Mesh(UNIT_PLANE_GEO, lavaMat);
+            lavaMesh.scale.set(width, depth, 1.0);
+            lavaMesh.userData = {
+                isCircle: false,
+                halfW: width / 2,
+                halfD: depth / 2
+            };
+        }
+
         lavaMesh.rotation.x = -Math.PI / 2;
         
         // Position randomly on the map (avoid spawning exactly at 0,0 where the player starts)
