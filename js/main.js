@@ -438,8 +438,8 @@ export function init() {
             const code = state.roomCode || (roomCodeDisplay ? roomCodeDisplay.innerText : '');
             if (code && code !== '----') {
                 navigator.clipboard.writeText(code);
-                btnCopyCode.textContent = '✅';
-                setTimeout(() => btnCopyCode.textContent = '📋', 1500);
+                btnCopyCode.textContent = '✅ Kopiert';
+                setTimeout(() => btnCopyCode.textContent = '📋 Kopieren', 1500);
             }
         });
     }
