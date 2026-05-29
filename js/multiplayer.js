@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { spawnParticles, createLaserBeam } from './particles.js';
+import { spawnParticles, createLaserBeam, spawnLightBeam } from './particles.js';
 import { respawnTarget } from './world.js';
 import { resetHook } from './grapple.js';
 import {
@@ -302,17 +302,28 @@ function handlePeerMessage(fromPeerId, msg) {
     if (msg.type === 'update') {
         // Retrieve or instantiate remote peer
         let peerData = state.peers[senderId];
+        let justJoined = false;
         if (!peerData) {
             const username = msg.username || 'Gast';
             console.log(`Spawning remote peer bean model for: ${username}`);
             peerData = createPeerBean(username);
             state.peers[senderId] = peerData;
+            justJoined = true;
         }
 
         // Apply position updates (with y-offset to align remote models with ground geometry)
         peerData.mesh.position.copy(msg.pos);
         peerData.mesh.position.y -= PEER_Y_OFFSET;
         peerData.mesh.rotation.y = msg.yaw;
+
+        // If they just joined, play the spawn animation
+        if (justJoined) {
+            spawnLightBeam(peerData.mesh.position);
+        } else if (peerData.mesh.visible === false) {
+            // If they were dead and are now alive (respawned!)
+            peerData.mesh.visible = true;
+            spawnLightBeam(peerData.mesh.position);
+        }
 
         // Apply weapon rotations (aiming pitches)
         peerData.leftGun.rotation.x = msg.pitch;
@@ -466,10 +477,11 @@ function handlePeerMessage(fromPeerId, msg) {
             });
         }
     } else if (msg.type === 'player_died') {
-        // Spawn remote player death particle effect (bean color purple 0x8c7ae6)
+        // Spawn remote player death particle effect (bean color purple 0x8c7ae6) and hide model
         const victimPeer = state.peers[msg.victimPeerId || senderId];
         if (victimPeer && victimPeer.mesh) {
             spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
+            victimPeer.mesh.visible = false;
         }
 
         const myName = document.getElementById('input-username').value.trim() || 'Gast';

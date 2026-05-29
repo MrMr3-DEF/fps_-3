@@ -71,6 +71,35 @@ export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
     });
 }
 
+export function spawnLightBeam(position) {
+    const beamHeight = 120; // higher than pillars (as high as max spawn height of enemies)
+    const beamGeo = new THREE.CylinderGeometry(2.5, 2.5, beamHeight, 16);
+    const beamMat = new THREE.MeshBasicMaterial({
+        color: 0x00aaff,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide
+    });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.set(position.x, beamHeight / 2, position.z); // go from ground (0) to 120
+    
+    state.scene.add(beam);
+    
+    const maxLife = 1.2; // 1.2s spawn animation
+    state.activeParticles.push({
+        mesh: beam,
+        isLightBeam: true,
+        life: maxLife,
+        maxLife: maxLife
+    });
+    
+    // Spawn secondary upward visual particles around the spawn footprint
+    const sparkPos = new THREE.Vector3(position.x, 0.5, position.z);
+    for (let i = 0; i < 20; i++) {
+        spawnParticles(sparkPos, 0x00aaff, 1, 14.0, 0.4, -6.0); // low upwards gravity drift
+    }
+}
+
 export function updateParticles(delta) {
     for (let i = state.activeParticles.length - 1; i >= 0; i--) {
         const p = state.activeParticles[i];
@@ -96,6 +125,11 @@ export function updateParticles(delta) {
                 const currentScale = 1.0 + (p.targetScale - 1.0) * (1.0 - ratio);
                 p.mesh.scale.setScalar(currentScale);
                 p.mesh.material.opacity = ratio * 0.7;
+            } else if (p.isLightBeam) {
+                // Fades out and shrinks
+                p.mesh.material.opacity = ratio * 0.8;
+                p.mesh.scale.x = ratio;
+                p.mesh.scale.z = ratio;
             } else {
                 // Flying spark particle under gravity
                 p.velocity.y -= p.gravity * delta;

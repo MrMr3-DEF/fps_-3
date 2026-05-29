@@ -16,7 +16,7 @@ import {
     PLAYER_RADIUS,
     WEAPON_STATS
 } from './config.js';
-import { spawnParticles, updateParticles } from './particles.js';
+import { spawnParticles, updateParticles, spawnLightBeam } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson } from './weapons.js';
@@ -162,6 +162,7 @@ export function init() {
             state.isHost = false;
             state.isPlaying = true;
             state.controls.lock();
+            spawnLightBeam(new THREE.Vector3(0, 2, 0));
         });
     }
 
@@ -222,6 +223,7 @@ export function init() {
             state.isPlaying = true;
             if (blocker) blocker.style.display = 'none';
             state.controls.lock();
+            spawnLightBeam(new THREE.Vector3(0, 2, 0));
         });
     }
 
@@ -259,6 +261,7 @@ export function init() {
                 state.isPlaying = true;
                 if (blocker) blocker.style.display = 'none';
                 state.controls.lock();
+                spawnLightBeam(new THREE.Vector3(0, 2, 0));
                 return;
             }
 
@@ -388,9 +391,14 @@ export function init() {
             if (state.controls) {
                 const playerObj = state.controls.getObject();
                 playerObj.position.set(0, 2, 0);
+                spawnLightBeam(new THREE.Vector3(0, 2, 0));
             }
             state.velocity.set(0, 0, 0);
             resetHook();
+
+            if (state.isThirdPerson && state.playerMesh) {
+                state.playerMesh.visible = true;
+            }
 
             // Hide death screen
             if (deathOverlay) deathOverlay.style.display = 'none';
@@ -855,6 +863,13 @@ export function triggerDeath() {
 
     if (state.controls) {
         state.controls.unlock();
+        const playerObj = state.controls.getObject();
+        // Explode player model (local bean color standard sci-fi blue 0x3b5998)
+        spawnParticles(playerObj.position, 0x3b5998, 40, 16.0, 0.45, 6.0);
+    }
+
+    if (state.playerMesh) {
+        state.playerMesh.visible = false;
     }
 
     // Immediately stop character physics movement and reset hook
