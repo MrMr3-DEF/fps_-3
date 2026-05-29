@@ -613,11 +613,15 @@ export function animate() {
                     if (!state.isHost) {
                         state.connections.forEach((conn) => {
                             if (conn.open) {
-                                conn.send({
-                                    type: 'hit_target',
-                                    targetIndex: j,
-                                    damage: 1
-                                });
+                                try {
+                                    conn.send({
+                                        type: 'hit_target',
+                                        targetIndex: j,
+                                        damage: 1
+                                    });
+                                } catch (err) {
+                                    console.error('Error broadcasting hit_target:', err);
+                                }
                             }
                         });
                     } else {
@@ -653,12 +657,16 @@ export function animate() {
                         // Send hit packet to all connections to relay in Star Topology
                         state.connections.forEach((conn) => {
                             if (conn.open) {
-                                conn.send({
-                                    type: 'player_hit',
-                                    targetPeerId: peerId,
-                                    damage: 1,
-                                    attackerName: document.getElementById('input-username').value.trim() || 'Gast'
-                                });
+                                try {
+                                    conn.send({
+                                        type: 'player_hit',
+                                        targetPeerId: peerId,
+                                        damage: 1,
+                                        attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                                    });
+                                } catch (err) {
+                                    console.error('Error broadcasting player_hit:', err);
+                                }
                             }
                         });
                         break;
@@ -799,12 +807,16 @@ export function takePlayerDamage(damage, attackerName) {
         const myName = document.getElementById('input-username').value.trim() || 'Gast';
         state.connections.forEach((conn) => {
             if (conn.open) {
-                conn.send({
-                    type: 'player_died',
-                    victimName: myName,
-                    killerName: attackerName,
-                    victimPeerId: state.peer.id
-                });
+                try {
+                    conn.send({
+                        type: 'player_died',
+                        victimName: myName,
+                        killerName: attackerName,
+                        victimPeerId: state.peer.id
+                    });
+                } catch (err) {
+                    console.error('Error broadcasting player_died:', err);
+                }
             }
         });
     }

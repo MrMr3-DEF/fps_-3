@@ -351,11 +351,15 @@ export function fireProjectile() {
                 if (!state.isHost) {
                     state.connections.forEach((conn) => {
                         if (conn.open) {
-                            conn.send({
-                                type: 'hit_target',
-                                targetIndex: hitTargetIndex,
-                                damage: 10
-                            });
+                            try {
+                                conn.send({
+                                    type: 'hit_target',
+                                    targetIndex: hitTargetIndex,
+                                    damage: 10
+                                });
+                            } catch (err) {
+                                console.error('Error broadcasting hit_target:', err);
+                            }
                         }
                     });
                 } else {
@@ -376,14 +380,38 @@ export function fireProjectile() {
             // Hit remote player in PvP
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestPeerDist);
 
+            // Flash the hit remote player mesh locally on shooter's screen for instant hit confirmation
+            const peerData = state.peers[pvpPeerId];
+            if (peerData && peerData.mesh) {
+                peerData.mesh.traverse((child) => {
+                    if (child.isMesh && child.material && child.material.color) {
+                        if (child.userData.originalColor === undefined) {
+                            child.userData.originalColor = child.material.color.getHex();
+                        }
+                        child.material.color.setHex(0xff3333); // Bright neon-red
+                    }
+                });
+                setTimeout(() => {
+                    peerData.mesh.traverse((child) => {
+                        if (child.isMesh && child.material && child.material.color && child.userData.originalColor !== undefined) {
+                            child.material.color.setHex(child.userData.originalColor);
+                        }
+                    });
+                }, 150);
+            }
+
             state.connections.forEach((conn) => {
                 if (conn.open) {
-                    conn.send({
-                        type: 'player_hit',
-                        targetPeerId: pvpPeerId,
-                        damage: 10,
-                        attackerName: document.getElementById('input-username').value.trim() || 'Gast'
-                    });
+                    try {
+                        conn.send({
+                            type: 'player_hit',
+                            targetPeerId: pvpPeerId,
+                            damage: 10,
+                            attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                        });
+                    } catch (err) {
+                        console.error('Error broadcasting player_hit:', err);
+                    }
                 }
             });
 

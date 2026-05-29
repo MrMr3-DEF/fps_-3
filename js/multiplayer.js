@@ -180,10 +180,14 @@ function setupConnection(conn) {
             if (hostStatus) hostStatus.innerText = `Warte auf Mitspieler (${currentPlayers}/5)...`;
             
             // Send initial lobby info
-            conn.send({
-                type: 'lobby_welcome',
-                roomCode: state.roomCode
-            });
+            try {
+                conn.send({
+                    type: 'lobby_welcome',
+                    roomCode: state.roomCode
+                });
+            } catch (err) {
+                console.error('Error sending lobby_welcome:', err);
+            }
         } else {
             // Client successfully connected!
             console.log('Client successfully connected to room! Waiting for click activation.');
@@ -245,10 +249,14 @@ function handlePeerMessage(fromPeerId, msg) {
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died') {
             state.connections.forEach((conn) => {
                 if (conn.peer !== fromPeerId && conn.open) {
-                    conn.send({
-                        ...msg,
-                        senderPeerId: fromPeerId
-                    });
+                    try {
+                        conn.send({
+                            ...msg,
+                            senderPeerId: fromPeerId
+                        });
+                    } catch (err) {
+                        console.error('Error relaying packet:', err);
+                    }
                 }
             });
         }
@@ -266,8 +274,9 @@ function handlePeerMessage(fromPeerId, msg) {
             state.peers[senderId] = peerData;
         }
 
-        // Apply position updates
+        // Apply position updates (with y-offset to align remote models with ground geometry)
         peerData.mesh.position.copy(msg.pos);
+        peerData.mesh.position.y -= 1.0;
         peerData.mesh.rotation.y = msg.yaw;
 
         // Apply weapon rotations (aiming pitches)
@@ -320,7 +329,7 @@ function handlePeerMessage(fromPeerId, msg) {
         if (msg.weapon === 'SNIPER') {
             const targetPos = new THREE.Vector3();
             if (msg.hitPoint) {
-                targetPos.copy(msg.hitPoint);
+                targetPos.set(msg.hitPoint.x, msg.hitPoint.y, msg.hitPoint.z);
             } else {
                 targetPos.copy(barrelPos).addScaledVector(dir, 500);
             }
@@ -397,6 +406,26 @@ function handlePeerMessage(fromPeerId, msg) {
             });
         }
     } else if (msg.type === 'player_hit') {
+        // Flash targeted remote player bean model bright neon-red to provide instant damage feedback
+        const targetPeer = state.peers[msg.targetPeerId];
+        if (targetPeer && targetPeer.mesh) {
+            targetPeer.mesh.traverse((child) => {
+                if (child.isMesh && child.material && child.material.color) {
+                    if (child.userData.originalColor === undefined) {
+                        child.userData.originalColor = child.material.color.getHex();
+                    }
+                    child.material.color.setHex(0xff3333); // Bright neon-red
+                }
+            });
+            setTimeout(() => {
+                targetPeer.mesh.traverse((child) => {
+                    if (child.isMesh && child.material && child.material.color && child.userData.originalColor !== undefined) {
+                        child.material.color.setHex(child.userData.originalColor);
+                    }
+                });
+            }, 150);
+        }
+
         if (msg.targetPeerId === state.peer.id) {
             import('./main.js').then((main) => {
                 main.takePlayerDamage(msg.damage, msg.attackerName);
@@ -477,7 +506,11 @@ export function sendLocalState() {
 
     state.connections.forEach((conn) => {
         if (conn.open) {
-            conn.send(packet);
+            try {
+                conn.send(packet);
+            } catch (err) {
+                console.error('Error broadcasting state update:', err);
+            }
         }
     });
 }
@@ -498,7 +531,11 @@ export function broadcastLocalFire(barrelPos, dir, hitPoint = null) {
 
     state.connections.forEach((conn) => {
         if (conn.open) {
-            conn.send(packet);
+            try {
+                conn.send(packet);
+            } catch (err) {
+                console.error('Error broadcasting fire event:', err);
+            }
         }
     });
 }
@@ -518,7 +555,11 @@ export function broadcastTargetKill(targetIndex, score, newPos, targetData) {
 
     state.connections.forEach((conn) => {
         if (conn.open) {
-            conn.send(packet);
+            try {
+                conn.send(packet);
+            } catch (err) {
+                console.error('Error broadcasting target kill:', err);
+            }
         }
     });
 }
