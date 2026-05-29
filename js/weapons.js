@@ -599,7 +599,7 @@ export function updateWeapons(delta) {
     if (state.playerMesh && state.controls) {
         const playerObj = state.controls.getObject();
         state.playerMesh.position.copy(playerObj.position);
-        state.playerMesh.position.y -= 1.0;
+        state.playerMesh.position.y -= 0.35;
 
         const camEuler = new THREE.Euler().setFromQuaternion(state.camera.quaternion, 'YXZ');
         state.playerMesh.rotation.y = camEuler.y;
@@ -670,6 +670,7 @@ export function createPlayerMesh() {
     playerGroup.add(visorStrip);
 
     state.playerMesh = playerGroup;
+    state.playerMesh.scale.set(1.5, 1.5, 1.5);
     state.playerMesh.visible = false;
     state.scene.add(state.playerMesh);
 }

@@ -675,6 +675,7 @@ function createPeerBean(username) {
     peerGroup.add(nameSprite);
 
     state.scene.add(peerGroup);
+    peerGroup.scale.set(1.5, 1.5, 1.5);
 
     return {
         mesh: peerGroup,

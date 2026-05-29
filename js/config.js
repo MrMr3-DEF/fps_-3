@@ -47,7 +47,7 @@ export const LAVA_POOL_HALF_SIZE = 12.8;
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
 export const ROOM_CODE_LENGTH = 4;
-export const PEER_Y_OFFSET = 1.0;
+export const PEER_Y_OFFSET = 0.35;
 export const HIT_FLASH_DURATION_MS = 150;
 
 export const HOOK_SPEED = 200;
