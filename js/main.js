@@ -919,27 +919,11 @@ export function checkLavaDamage(delta) {
         let standingOnLava = false;
         for (let i = 0; i < state.lavaPools.length; i++) {
             const pool = state.lavaPools[i];
-            
-            if (pool.userData.isCircle) {
-                // Circle pool dynamic collision (with player radius buffer)
-                const dx = playerObj.position.x - pool.position.x;
-                const dz = playerObj.position.z - pool.position.z;
-                const distSq = dx * dx + dz * dz;
-                const radiusWithBuffer = pool.userData.radius + PLAYER_RADIUS;
-                if (distSq < radiusWithBuffer * radiusWithBuffer) {
-                    standingOnLava = true;
-                    break;
-                }
-            } else {
-                // Rectangle pool dynamic AABB collision (with player radius buffer)
-                const dx = Math.abs(playerObj.position.x - pool.position.x);
-                const dz = Math.abs(playerObj.position.z - pool.position.z);
-                const halfW = pool.userData.halfW !== undefined ? pool.userData.halfW : LAVA_POOL_HALF_SIZE;
-                const halfD = pool.userData.halfD !== undefined ? pool.userData.halfD : LAVA_POOL_HALF_SIZE;
-                if (dx < halfW + PLAYER_RADIUS && dz < halfD + PLAYER_RADIUS) {
-                    standingOnLava = true;
-                    break;
-                }
+            const dx = Math.abs(playerObj.position.x - pool.position.x);
+            const dz = Math.abs(playerObj.position.z - pool.position.z);
+            if (dx < LAVA_POOL_HALF_SIZE + PLAYER_RADIUS && dz < LAVA_POOL_HALF_SIZE + PLAYER_RADIUS) {
+                standingOnLava = true;
+                break;
             }
         }
 

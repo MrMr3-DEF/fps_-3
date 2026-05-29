@@ -10,10 +10,6 @@ import {
     LAVA_POOL_HALF_SIZE
 } from './config.js';
 
-// Shared unit geometries to minimize memory allocation and GC pressure
-const UNIT_PLANE_GEO = new THREE.PlaneGeometry(1, 1);
-const UNIT_CIRCLE_GEO = new THREE.CircleGeometry(1, 24);
-
 export function respawnTarget(targetGroup) {
     targetGroup.position.x = (Math.random() - 0.5) * (MAP_SIZE - 40);
     targetGroup.position.y = 3.0 + Math.random() * (MAX_ENEMY_HEIGHT - 5.0);
@@ -34,6 +30,21 @@ export function respawnTarget(targetGroup) {
     targetGroup.userData.healthBarFg.scale.x = 1;
 }
 
+// Helper to check if a square center (sqX, sqZ) overlaps with any spawned pillar
+function overlapsWithPillars(sqX, sqZ) {
+    const halfPillar = PILLAR_WIDTH / 2; // 3.0
+    const checkDist = LAVA_POOL_HALF_SIZE + halfPillar; // 12.8 + 3.0 = 15.8
+    for (let i = 0; i < state.obstacles.length; i++) {
+        const obs = state.obstacles[i];
+        const dx = Math.abs(sqX - obs.position.x);
+        const dz = Math.abs(sqZ - obs.position.z);
+        if (dx < checkDist && dz < checkDist) {
+            return true;
+        }
+    }
+    return false;
+}
+
 export function createEnvironment() {
     if (!state.scene) return;
 
@@ -45,57 +56,6 @@ export function createEnvironment() {
     floor.receiveShadow = true; 
     state.scene.add(floor);
     state.grappleSurfaces.push(floor);
-
-    // Spawn 30 glowing orange lava pools of varied shapes and sizes on the floor slightly elevated to prevent z-fighting
-    const lavaMat = new THREE.MeshStandardMaterial({ 
-        color: 0xff4500, 
-        emissive: 0xff2200, 
-        emissiveIntensity: 1.5,
-        roughness: 0.5
-    });
-
-    for (let i = 0; i < 30; i++) {
-        const isCircle = Math.random() < 0.5;
-        let lavaMesh;
-
-        if (isCircle) {
-            // Circle pool: radius between 6.0 and 20.0
-            const radius = 6.0 + Math.random() * 14.0;
-            lavaMesh = new THREE.Mesh(UNIT_CIRCLE_GEO, lavaMat);
-            lavaMesh.scale.set(radius, radius, 1.0);
-            lavaMesh.userData = {
-                isCircle: true,
-                radius: radius
-            };
-        } else {
-            // Rectangle pool: width and depth between 12.0 and 35.0
-            const width = 12.0 + Math.random() * 23.0;
-            const depth = 12.0 + Math.random() * 23.0;
-            lavaMesh = new THREE.Mesh(UNIT_PLANE_GEO, lavaMat);
-            lavaMesh.scale.set(width, depth, 1.0);
-            lavaMesh.userData = {
-                isCircle: false,
-                halfW: width / 2,
-                halfD: depth / 2
-            };
-        }
-
-        lavaMesh.rotation.x = -Math.PI / 2;
-        
-        // Position randomly on the map (avoid spawning exactly at 0,0 where the player starts)
-        let posX, posZ;
-        do {
-            posX = (Math.random() - 0.5) * (MAP_SIZE - 80);
-            posZ = (Math.random() - 0.5) * (MAP_SIZE - 80);
-        } while (Math.sqrt(posX * posX + posZ * posZ) < 30); // Keep at least 30 units away from center spawn
-
-        lavaMesh.position.set(posX, 0.02, posZ);
-        state.scene.add(lavaMesh);
-        state.lavaPools.push(lavaMesh);
-        
-        // Lava pools are also grappleable surfaces! (Which makes it even cooler and is a great momentum mechanic!)
-        state.grappleSurfaces.push(lavaMesh);
-    }
 
     // Border Walls
     const wallMat = new THREE.MeshBasicMaterial({ color: 0xe0e6ed, side: THREE.DoubleSide });
@@ -124,7 +84,7 @@ export function createEnvironment() {
     wallW.rotation.y = Math.PI / 2;
     state.scene.add(wallW);
 
-    // Instanced pillars for excellent draw-call performance
+    // 1) Instanced pillars for excellent draw-call performance - SPAWNED FIRST to allow lava overlap checks
     const dummy = new THREE.Object3D();
     const boxGeo = new THREE.BoxGeometry(PILLAR_WIDTH, 1, PILLAR_WIDTH);
     const boxMat = new THREE.MeshStandardMaterial({ roughness: 0.3 });
@@ -157,6 +117,115 @@ export function createEnvironment() {
         state.grappleSurfaces.push(obstacle);
     }
     state.scene.add(pillarInstanced);
+
+    // 2) Spawn 30 glowing orange lava pool chains of 1 to 5 connected squares (completely avoiding pillars)
+    const lavaGeo = new THREE.PlaneGeometry(LAVA_POOL_HALF_SIZE * 2, LAVA_POOL_HALF_SIZE * 2);
+    const lavaMat = new THREE.MeshStandardMaterial({ 
+        color: 0xff4500, 
+        emissive: 0xff2200, 
+        emissiveIntensity: 1.5,
+        roughness: 0.5
+    });
+
+    for (let i = 0; i < 30; i++) {
+        let chainValid = false;
+        let squares = [];
+        let attempts = 0;
+
+        while (!chainValid && attempts < 100) {
+            attempts++;
+            squares = [];
+            
+            // Choose start position for the chain
+            let startX, startZ;
+            let posAttempts = 0;
+            do {
+                startX = (Math.random() - 0.5) * (MAP_SIZE - 80);
+                startZ = (Math.random() - 0.5) * (MAP_SIZE - 80);
+                posAttempts++;
+            } while (
+                (Math.sqrt(startX * startX + startZ * startZ) < 30 || overlapsWithPillars(startX, startZ)) && 
+                posAttempts < 50
+            );
+            
+            if (posAttempts >= 50) continue;
+            
+            squares.push({ x: startX, z: startZ });
+            
+            // Random amount of squares between 1 and 5
+            const squareCount = 1 + Math.floor(Math.random() * 5); // 1 to 5
+            
+            let growthSuccess = true;
+            for (let j = 1; j < squareCount; j++) {
+                let spotFound = false;
+                let spotAttempts = 0;
+                
+                while (!spotFound && spotAttempts < 30) {
+                    spotAttempts++;
+                    // Pick a random existing square in the chain
+                    const parent = squares[Math.floor(Math.random() * squares.length)];
+                    
+                    // Pick random cardinal direction
+                    const dir = Math.floor(Math.random() * 4);
+                    let nextX = parent.x;
+                    let nextZ = parent.z;
+                    const step = LAVA_POOL_HALF_SIZE * 2; // adjacent placement
+                    
+                    if (dir === 0) nextX += step; // East
+                    else if (dir === 1) nextX -= step; // West
+                    else if (dir === 2) nextZ += step; // North
+                    else nextZ -= step; // South
+                    
+                    // Check if already in the chain
+                    const duplicate = squares.some(sq => Math.abs(sq.x - nextX) < 1.0 && Math.abs(sq.z - nextZ) < 1.0);
+                    if (duplicate) continue;
+                    
+                    // Check map bounds
+                    if (Math.abs(nextX) > (MAP_SIZE / 2 - LAVA_POOL_HALF_SIZE - 10) || 
+                        Math.abs(nextZ) > (MAP_SIZE / 2 - LAVA_POOL_HALF_SIZE - 10)) {
+                        continue;
+                    }
+                    
+                    // Check player spawn safety
+                    if (Math.sqrt(nextX * nextX + nextZ * nextZ) < 30) {
+                        continue;
+                    }
+                    
+                    // Check pillar overlap
+                    if (overlapsWithPillars(nextX, nextZ)) {
+                        continue;
+                    }
+                    
+                    // Valid spot found!
+                    squares.push({ x: nextX, z: nextZ });
+                    spotFound = true;
+                }
+                
+                if (!spotFound) {
+                    growthSuccess = false;
+                    break;
+                }
+            }
+            
+            if (growthSuccess) {
+                chainValid = true;
+            }
+        }
+
+        // If we successfully generated a valid chain configuration, instantiate all its squares
+        if (chainValid) {
+            for (const sq of squares) {
+                const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
+                lavaMesh.rotation.x = -Math.PI / 2;
+                lavaMesh.position.set(sq.x, 0.02, sq.z);
+                state.scene.add(lavaMesh);
+                state.lavaPools.push(lavaMesh);
+                
+                // Lava pools are also grappleable surfaces!
+                state.grappleSurfaces.push(lavaMesh);
+            }
+        }
+    }
 
     // Spawn 16 enemies
     for (let i = 0; i < 16; i++) {
