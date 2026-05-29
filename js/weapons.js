@@ -376,15 +376,16 @@ export function fireProjectile() {
             // Hit remote player in PvP
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestPeerDist);
 
-            const conn = state.connections.find(c => c.peer === pvpPeerId);
-            if (conn && conn.open) {
-                conn.send({
-                    type: 'player_hit',
-                    targetPeerId: pvpPeerId,
-                    damage: 10,
-                    attackerName: document.getElementById('input-username').value.trim() || 'Gast'
-                });
-            }
+            state.connections.forEach((conn) => {
+                if (conn.open) {
+                    conn.send({
+                        type: 'player_hit',
+                        targetPeerId: pvpPeerId,
+                        damage: 10,
+                        attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                    });
+                }
+            });
 
             import('./particles.js').then((parts) => {
                 parts.spawnParticles(hitPoint, 0x8c7ae6, 15, 12, 0.15, 12.0);

@@ -639,16 +639,17 @@ export function animate() {
                         // Spawn dynamic purple particles (remote player bean hit sparks)
                         spawnParticles(proj.position, 0x8c7ae6, 8, 12, 0.15, 20.0);
                         
-                        // Send hit packet directly to the targeted peer connection
-                        const conn = state.connections.find(c => c.peer === peerId);
-                        if (conn && conn.open) {
-                            conn.send({
-                                type: 'player_hit',
-                                targetPeerId: peerId,
-                                damage: 1,
-                                attackerName: document.getElementById('input-username').value.trim() || 'Gast'
-                            });
-                        }
+                        // Send hit packet to all connections to relay in Star Topology
+                        state.connections.forEach((conn) => {
+                            if (conn.open) {
+                                conn.send({
+                                    type: 'player_hit',
+                                    targetPeerId: peerId,
+                                    damage: 1,
+                                    attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                                });
+                            }
+                        });
                         break;
                     }
                 }
