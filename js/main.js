@@ -296,6 +296,14 @@ export function init() {
             pvpStats.style.display = state.isMultiplayer ? 'block' : 'none';
         }
 
+        // Restore other gameplay HUD elements that might have been hidden on death
+        const crosshair = document.getElementById('crosshair');
+        if (crosshair) crosshair.style.display = 'block';
+        const ui = document.getElementById('ui');
+        if (ui) ui.style.display = 'flex';
+        const fpsCounter = document.getElementById('fps-counter');
+        if (fpsCounter) fpsCounter.style.display = 'block';
+
         // Safari Keyboard Focus Fix: Force active focus on the body and canvas
         document.body.focus();
         if (state.renderer && state.renderer.domElement) {
@@ -861,6 +869,18 @@ export function triggerDeath() {
         panelPause.style.display = 'none';
     }
 
+    // Hide all gameplay HUD UI elements behind the death screen
+    const crosshair = document.getElementById('crosshair');
+    if (crosshair) crosshair.style.display = 'none';
+    const ui = document.getElementById('ui');
+    if (ui) ui.style.display = 'none';
+    const fpsCounter = document.getElementById('fps-counter');
+    if (fpsCounter) fpsCounter.style.display = 'none';
+    const healthContainer = document.getElementById('health-container');
+    if (healthContainer) healthContainer.style.display = 'none';
+    const reloadContainer = document.getElementById('reload-container');
+    if (reloadContainer) reloadContainer.style.display = 'none';
+
     // Show the red Death Screen overlay
     const deathOverlay = document.getElementById('death-overlay');
     if (deathOverlay) {
@@ -935,7 +955,7 @@ export function processTargetHit(targetIndex, damage) {
 }
 
 export function checkLavaDamage(delta) {
-    if (!state.controls || !state.controls.isLocked) return;
+    if (!state.controls || (!state.controls.isLocked && !state.isMultiplayer)) return;
 
     const playerObj = state.controls.getObject();
     const feetY = playerObj.position.y - PLAYER_HEIGHT;
