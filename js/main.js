@@ -855,6 +855,12 @@ export function takePlayerDamage(damage, attackerName) {
 }
 
 export function triggerDeath() {
+    // Hide the pause menu if open
+    const panelPause = document.getElementById('panel-pause');
+    if (panelPause) {
+        panelPause.style.display = 'none';
+    }
+
     // Show the red Death Screen overlay
     const deathOverlay = document.getElementById('death-overlay');
     if (deathOverlay) {
