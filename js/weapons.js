@@ -284,6 +284,7 @@ export function fireProjectile() {
         // Raycasting for hitscan sniper aiming
         const raycaster = new THREE.Raycaster();
         raycaster.set(state.camera.position, camDirection);
+        raycaster.camera = state.camera; // Required for raycasting against Sprites (peer name labels)
 
         // Intersect obstacles (pillars)
         const obstacleHits = raycaster.intersectObjects(state.obstacles);
