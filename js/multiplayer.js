@@ -299,6 +299,9 @@ function handlePeerMessage(fromPeerId, msg) {
 
     const senderId = msg.senderPeerId || fromPeerId;
 
+    // Ignore game actions/updates if the local client is not yet active in the game world
+    if (!state.isPlaying) return;
+
     if (msg.type === 'update') {
         // Retrieve or instantiate remote peer
         let peerData = state.peers[senderId];
@@ -533,7 +536,7 @@ function removePeer(peerId) {
 }
 
 export function sendLocalState() {
-    if (!state.isMultiplayer || state.connections.length === 0) return;
+    if (!state.isMultiplayer || !state.isPlaying || state.connections.length === 0) return;
 
     const now = performance.now();
     if (now - lastSentTime < NETWORK_TICK_MS) return; // Cap at ~30 packets per second to conserve bandwidth
