@@ -316,13 +316,18 @@ function handlePeerMessage(fromPeerId, msg) {
         peerData.mesh.position.y -= PEER_Y_OFFSET;
         peerData.mesh.rotation.y = msg.yaw;
 
-        // If they just joined, play the spawn animation
-        if (justJoined) {
-            spawnLightBeam(peerData.mesh.position);
-        } else if (peerData.mesh.visible === false) {
-            // If they were dead and are now alive (respawned!)
-            peerData.mesh.visible = true;
-            spawnLightBeam(peerData.mesh.position);
+        if (msg.isDead) {
+            peerData.mesh.visible = false;
+        } else {
+            // If they just joined, play the spawn animation
+            if (justJoined) {
+                peerData.mesh.visible = true;
+                spawnLightBeam(peerData.mesh.position);
+            } else if (peerData.mesh.visible === false) {
+                // If they were dead and are now alive (respawned!)
+                peerData.mesh.visible = true;
+                spawnLightBeam(peerData.mesh.position);
+            }
         }
 
         // Apply weapon rotations (aiming pitches)
@@ -547,6 +552,7 @@ export function sendLocalState() {
         pitch: camEuler.x,
         activeWeapon: state.activeWeaponName,
         isMouseDown: state.isMouseDown,
+        isDead: state.playerHp <= 0,
         hookState: state.hookState,
         hookPos: state.hookState !== 'IDLE' ? { x: state.hookPosition.x, y: state.hookPosition.y, z: state.hookPosition.z } : null
     };
