@@ -192,19 +192,19 @@ export function createAkimboGuns() {
     state.camera.add(state.rightGunContainer);
 
     state.pistolMesh = buildGun(0xff0055);
-    rightGunContainer.add(state.pistolMesh);
+    state.rightGunContainer.add(state.pistolMesh);
 
     state.shotgunMesh = buildShotgun();
     state.shotgunMesh.visible = false;
-    rightGunContainer.add(state.shotgunMesh);
+    state.rightGunContainer.add(state.shotgunMesh);
 
     state.arMesh = buildAR();
     state.arMesh.visible = false;
-    rightGunContainer.add(state.arMesh);
+    state.rightGunContainer.add(state.arMesh);
 
     state.sniperMesh = buildSniper();
     state.sniperMesh.visible = false;
-    rightGunContainer.add(state.sniperMesh);
+    state.rightGunContainer.add(state.sniperMesh);
 
     state.rightGun = state.pistolMesh;
 
