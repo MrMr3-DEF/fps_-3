@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="de">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="A fast-paced 3D browser FPS with multiplayer support, grappling hooks, and multiple weapon classes.">
+    <meta name="description"
+        content="A fast-paced 3D browser FPS with multiplayer support, grappling hooks, and multiple weapon classes.">
     <meta name="theme-color" content="#0a0a12">
     <title>Sci-Fi Momentum Slingshot FPS</title>
     <style>
@@ -16,7 +18,8 @@
             --text-muted: #aaa;
         }
 
-        html, body {
+        html,
+        body {
             margin: 0;
             padding: 0;
             overflow: hidden;
@@ -189,7 +192,8 @@
             border-radius: 4px;
             overflow: hidden;
             z-index: 5;
-            display: none; /* Show only when playing */
+            display: none;
+            /* Show only when playing */
             box-shadow: 0 0 20px rgba(46, 213, 115, 0.35);
         }
 
@@ -202,24 +206,28 @@
 
         #reload-container {
             position: absolute;
-            bottom: 68px; /* positioned directly on top of health bar with a 10px gap */
+            bottom: 68px;
+            /* positioned directly on top of health bar with a 10px gap */
             left: 50%;
             transform: translateX(-50%);
             width: 480px;
             height: 28px;
-            background: rgba(43, 43, 43, 0.95); /* dark grey background */
+            background: rgba(43, 43, 43, 0.95);
+            /* dark grey background */
             border: 2px solid rgba(255, 255, 255, 0.95);
             border-radius: 4px;
             overflow: hidden;
             z-index: 5;
-            display: none; /* Show only when playing */
+            display: none;
+            /* Show only when playing */
             box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
         }
 
         #reload-bar {
             width: 100%;
             height: 100%;
-            background: #ffffff; /* white */
+            background: #ffffff;
+            /* white */
             transition: width 0.05s linear;
         }
 
@@ -236,22 +244,27 @@
             transition: all 0.2s ease-in-out;
             box-shadow: 0 4px 10px rgba(0, 170, 238, 0.3);
         }
+
         .menu-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 15px rgba(0, 170, 238, 0.5);
             background: linear-gradient(135deg, #00bfff, #0088dd);
         }
+
         .menu-btn:active {
             transform: translateY(0);
         }
+
         .menu-btn.secondary {
             background: linear-gradient(135deg, #747d8c, #2f3542);
             box-shadow: 0 4px 10px rgba(47, 53, 66, 0.3);
         }
+
         .menu-btn.secondary:hover {
             background: linear-gradient(135deg, #a4b0be, #57606f);
             box-shadow: 0 6px 15px rgba(47, 53, 66, 0.5);
         }
+
         .menu-input {
             background: rgba(255, 255, 255, 0.9);
             border: 2px solid #ccd5e0;
@@ -266,18 +279,28 @@
             color: #1a1c24;
             font-weight: bold;
         }
+
         .menu-input:focus {
             border-color: #00aaee;
         }
+
         .menu-panel {
             display: none;
             flex-direction: column;
             align-items: center;
             animation: fadeIn 0.3s ease-in-out;
         }
+
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(5px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         #goggles-scope {
@@ -300,13 +323,11 @@
             width: 100%;
             height: 100%;
             pointer-events: none;
-            background: repeating-linear-gradient(
-                0deg,
-                rgba(0, 210, 255, 0.07) 0px,
-                rgba(0, 210, 255, 0.07) 1px,
-                transparent 2px,
-                transparent 4px
-            );
+            background: repeating-linear-gradient(0deg,
+                    rgba(0, 210, 255, 0.07) 0px,
+                    rgba(0, 210, 255, 0.07) 1px,
+                    transparent 2px,
+                    transparent 4px);
             opacity: 0.55;
         }
 
@@ -332,29 +353,54 @@
             box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
         }
 
-        .goggles-tl { top: 30px; left: 30px; border-width: 3px 0 0 3px; }
-        .goggles-tr { top: 30px; right: 30px; border-width: 3px 3px 0 0; }
-        .goggles-bl { bottom: 30px; left: 30px; border-width: 0 0 3px 3px; }
-        .goggles-br { bottom: 30px; right: 30px; border-width: 0 3px 3px 0; }
+        .goggles-tl {
+            top: 30px;
+            left: 30px;
+            border-width: 3px 0 0 3px;
+        }
 
+        .goggles-tr {
+            top: 30px;
+            right: 30px;
+            border-width: 3px 3px 0 0;
+        }
+
+        .goggles-bl {
+            bottom: 30px;
+            left: 30px;
+            border-width: 0 0 3px 3px;
+        }
+
+        .goggles-br {
+            bottom: 30px;
+            right: 30px;
+            border-width: 0 3px 3px 0;
+        }
     </style>
 
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2941554287312347"
+        crossorigin="anonymous">
+        </script>
+
 </head>
+
 <body>
 
     <div id="blocker">
         <div id="instructions">
-            <h1 id="title" style="color: var(--accent-blue); font-size: 32px; letter-spacing: 1px; margin-top: 0; margin-bottom: 20px; font-weight: bold; text-align: center;">FPS ARENA :3</h1>
-            
+            <h1 id="title"
+                style="color: var(--accent-blue); font-size: 32px; letter-spacing: 1px; margin-top: 0; margin-bottom: 20px; font-weight: bold; text-align: center;">
+                FPS ARENA :3</h1>
+
             <!-- Panel 1: Main Selection Menu -->
             <div id="panel-main" style="display: flex; flex-direction: column; align-items: center;">
                 <button class="menu-btn" id="btn-play-sp">Offline Einzelspieler</button>
                 <button class="menu-btn secondary" id="btn-menu-mp">Online Mehrspieler</button>
-                
+
                 <span style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
-                    WASD zum Bewegen | Shift zum Sprinten | Leertaste zum Springen<br/>
-                    R zum Grappling Hook | Linksklick zum Schießen<br/>
-                    E / 1, 2, 3, 4 zum Waffen wechseln | P für Third Person<br/>
+                    WASD zum Bewegen | Shift zum Sprinten | Leertaste zum Springen<br />
+                    R zum Grappling Hook | Linksklick zum Schießen<br />
+                    E / 1, 2, 3, 4 zum Waffen wechseln | P für Third Person<br />
                     Rechtsklick / C gedrückt halten zum Zielen (Goggles)
                 </span>
 
@@ -362,24 +408,28 @@
 
             <!-- Panel 2: Multiplayer Dashboard -->
             <div id="panel-mp" class="menu-panel">
-                <strong style="color: #57606f; font-size: 20px;">Mehrspieler-Setup</strong><br/>
-                <input type="text" class="menu-input" id="input-username" placeholder="Dein Spielername" maxlength="10"><br/>
-                <span id="mp-name-error" style="font-size: 14px; color: #ff4757; font-weight: bold; margin-bottom: 8px; height: 18px; display: block;"></span>
-                
+                <strong style="color: #57606f; font-size: 20px;">Mehrspieler-Setup</strong><br />
+                <input type="text" class="menu-input" id="input-username" placeholder="Dein Spielername"
+                    maxlength="10"><br />
+                <span id="mp-name-error"
+                    style="font-size: 14px; color: #ff4757; font-weight: bold; margin-bottom: 8px; height: 18px; display: block;"></span>
+
                 <div style="display: flex; gap: 10px;">
                     <button class="menu-btn" id="btn-mp-host-view">Spiel Hosten</button>
                     <button class="menu-btn secondary" id="btn-mp-join-view">Spiel Beitreten</button>
                 </div>
-                <br/>
-                <button class="menu-btn secondary" id="btn-mp-back" style="padding: 6px 16px; font-size: 14px; margin-top: 5px;">Zurück zum Hauptmenü</button>
+                <br />
+                <button class="menu-btn secondary" id="btn-mp-back"
+                    style="padding: 6px 16px; font-size: 14px; margin-top: 5px;">Zurück zum Hauptmenü</button>
             </div>
 
             <!-- Panel 3: Host Waiting Lobby -->
             <div id="panel-host-waiting" class="menu-panel">
-                <strong style="color: #57606f; font-size: 20px;">Spiel Hosten</strong><br/>
+                <strong style="color: #57606f; font-size: 20px;">Spiel Hosten</strong><br />
                 <span style="font-size: 15px; color: #555;">Dein Raum-Code lautet:</span>
                 <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0;">
-                    <span id="room-code-display" style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">....</span>
+                    <span id="room-code-display"
+                        style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">....</span>
                     <button id="btn-copy-code" class="menu-btn" style="
                         padding: 6px 14px;
                         font-size: 14px;
@@ -389,8 +439,8 @@
                         gap: 6px;
                     " title="Raum-Code kopieren">📋 Kopieren</button>
                 </div>
-                <span style="font-size: 14px; color: #777;" id="host-lobby-status">Erstelle Raum...</span><br/>
-                
+                <span style="font-size: 14px; color: #777;" id="host-lobby-status">Erstelle Raum...</span><br />
+
                 <div style="display: flex; gap: 10px; margin-top: 15px;">
                     <button class="menu-btn" id="btn-host-start" style="display: none;">Spiel Starten</button>
                     <button class="menu-btn secondary" id="btn-host-cancel">Abbrechen</button>
@@ -399,10 +449,11 @@
 
             <!-- Panel 4: Join Room Menu -->
             <div id="panel-join-room" class="menu-panel">
-                <strong style="color: #57606f; font-size: 20px;">Spiel Beitreten</strong><br/>
-                <input type="text" class="menu-input" id="input-room-code" placeholder="CODE" maxlength="4" style="text-transform: uppercase; font-size: 20px; width: 140px; letter-spacing: 2px;"><br/>
-                <span style="font-size: 14px; color: #ff4757; font-weight: bold;" id="join-error-log"></span><br/>
-                
+                <strong style="color: #57606f; font-size: 20px;">Spiel Beitreten</strong><br />
+                <input type="text" class="menu-input" id="input-room-code" placeholder="CODE" maxlength="4"
+                    style="text-transform: uppercase; font-size: 20px; width: 140px; letter-spacing: 2px;"><br />
+                <span style="font-size: 14px; color: #ff4757; font-weight: bold;" id="join-error-log"></span><br />
+
                 <div style="display: flex; gap: 10px;">
                     <button class="menu-btn" id="btn-join-connect">Verbinden</button>
                     <button class="menu-btn secondary" id="btn-join-cancel">Zurück</button>
@@ -411,11 +462,12 @@
 
             <!-- Panel 5: Pause Menu -->
             <div id="panel-pause" class="menu-panel">
-                <strong style="color: #00aaee; font-size: 28px; letter-spacing: 1px;">PAUSE</strong><br/>
+                <strong style="color: #00aaee; font-size: 28px; letter-spacing: 1px;">PAUSE</strong><br />
                 <span id="pause-lobby-info" style="font-size: 15px; color: #555; margin-bottom: 15px; display: none;">
-                    Lobby-Code: <strong id="pause-room-code" style="color: #00aaee; font-size: 20px; letter-spacing: 1px;">----</strong>
+                    Lobby-Code: <strong id="pause-room-code"
+                        style="color: #00aaee; font-size: 20px; letter-spacing: 1px;">----</strong>
                 </span>
-                
+
                 <div style="display: flex; flex-direction: column; align-items: center; width: 100%;">
                     <button class="menu-btn" id="btn-pause-resume">Weiterspielen</button>
                     <button class="menu-btn secondary" id="btn-pause-leave">Lobby verlassen</button>
@@ -450,11 +502,16 @@
         text-align: center;
         animation: fadeIn 0.4s ease-in-out;
     ">
-        <strong style="font-size: 48px; color: #ff3838; text-shadow: 0 0 20px rgba(255, 56, 56, 0.8), 0 0 40px rgba(255, 56, 56, 0.4); font-weight: 900; letter-spacing: 2px;">DU BIST GESTORBEN</strong>
-        <br/><br/>
+        <strong
+            style="font-size: 48px; color: #ff3838; text-shadow: 0 0 20px rgba(255, 56, 56, 0.8), 0 0 40px rgba(255, 56, 56, 0.4); font-weight: 900; letter-spacing: 2px;">DU
+            BIST GESTORBEN</strong>
+        <br /><br />
         <div style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
-            <button class="menu-btn" id="btn-death-respawn" style="background: linear-gradient(135deg, #ff3838, #c0392b); box-shadow: 0 4px 15px rgba(255, 56, 56, 0.4); min-width: 200px;">Wiederbeleben</button>
-            <button class="menu-btn secondary" id="btn-death-leave" style="background: linear-gradient(135deg, #4b4b4b, #2f3542); color: #ccc; min-width: 200px;">Hauptmenü verlassen</button>
+            <button class="menu-btn" id="btn-death-respawn"
+                style="background: linear-gradient(135deg, #ff3838, #c0392b); box-shadow: 0 4px 15px rgba(255, 56, 56, 0.4); min-width: 200px;">Wiederbeleben</button>
+            <button class="menu-btn secondary" id="btn-death-leave"
+                style="background: linear-gradient(135deg, #4b4b4b, #2f3542); color: #ccc; min-width: 200px;">Hauptmenü
+                verlassen</button>
         </div>
     </div>
 
@@ -472,8 +529,10 @@
 
     <div id="ui" style="display: flex; flex-direction: column; gap: 4px;">
         <div>Ziele eliminiert: <span id="score">0</span></div>
-        <div id="pvp-stats" style="display: none; font-size: 18px; color: #ff3838; text-shadow: 1px 1px 2px #000; font-weight: bold; background: rgba(0,0,0,0.25); padding: 4px 10px; border-radius: 4px; width: fit-content; pointer-events: none;">
-            Eliminierungen: <span id="kills" style="color: #00ff88;">0</span> &nbsp;|&nbsp; Tode: <span id="deaths" style="color: #ff3838;">0</span>
+        <div id="pvp-stats"
+            style="display: none; font-size: 18px; color: #ff3838; text-shadow: 1px 1px 2px #000; font-weight: bold; background: rgba(0,0,0,0.25); padding: 4px 10px; border-radius: 4px; width: fit-content; pointer-events: none;">
+            Eliminierungen: <span id="kills" style="color: #00ff88;">0</span> &nbsp;|&nbsp; Tode: <span id="deaths"
+                style="color: #ff3838;">0</span>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 4px;">
             <span id="sprint-badge">SPRINT</span>
@@ -502,4 +561,5 @@
 
     <script type="module" src="js/main.js"></script>
 </body>
+
 </html>
