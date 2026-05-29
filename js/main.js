@@ -495,7 +495,7 @@ export function init() {
                 break;
             case 'KeyE':
                 if (state.controls.isLocked) {
-                    const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER'];
+                    const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
                     const currentIndex = weaponCycle.indexOf(state.desiredWeaponName);
                     const nextIndex = (currentIndex + 1) % weaponCycle.length;
                     state.desiredWeaponName = weaponCycle[nextIndex];
@@ -519,6 +519,11 @@ export function init() {
             case 'Digit4':
                 if (state.controls.isLocked) {
                     state.desiredWeaponName = 'SNIPER';
+                }
+                break;
+            case 'Digit5':
+                if (state.controls.isLocked) {
+                    state.desiredWeaponName = 'MINIGUN';
                 }
                 break;
             case 'KeyC':
@@ -608,7 +613,7 @@ export function animate() {
     }
 
     // 1.5) Automatic weapon firing
-    if (state.controls.isLocked && state.isMouseDown && state.activeWeaponName === 'AR' && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
+    if (state.controls.isLocked && state.isMouseDown && (state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
         fireProjectile();
     }
 

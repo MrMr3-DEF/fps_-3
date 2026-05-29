@@ -51,13 +51,14 @@ export const state = {
     hookMesh: null,
 
     // Weapon system state
-    activeWeaponName: 'PISTOL', // 'PISTOL', 'SHOTGUN', 'AR', 'SNIPER'
+    activeWeaponName: 'PISTOL', // 'PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'
     nextWeaponName: null,
     desiredWeaponName: 'PISTOL',
     switchState: 'IDLE', // 'IDLE', 'WITHDRAWING', 'BRINGING_IN'
     switchTimer: 0,
     fireCooldown: 0,
     isMouseDown: false,
+    minigunRamp: 0.0,
 
     // Three.js instances
     camera: null,
@@ -71,6 +72,7 @@ export const state = {
     shotgunMesh: null,
     arMesh: null,
     sniperMesh: null,
+    minigunMesh: null,
     playerMesh: null,
     isThirdPerson: false,
     isScoped: false,

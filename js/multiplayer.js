@@ -10,7 +10,7 @@ import {
     PEER_Y_OFFSET,
     HIT_FLASH_DURATION_MS
 } from './config.js';
-import { buildGun, buildShotgun, buildAR, buildSniper } from './weapons.js';
+import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun } from './weapons.js';
 
 // Module-level cached objects to prevent per-tick allocations
 const _stateEuler = new THREE.Euler();
@@ -323,6 +323,22 @@ function handlePeerMessage(fromPeerId, msg) {
         peerData.shotgunMesh.visible = (msg.activeWeapon === 'SHOTGUN');
         peerData.arMesh.visible = (msg.activeWeapon === 'AR');
         peerData.sniperMesh.visible = (msg.activeWeapon === 'SNIPER');
+        peerData.minigunMesh.visible = (msg.activeWeapon === 'MINIGUN');
+
+        // Rotate remote peer minigun barrels if active and firing
+        if (msg.activeWeapon === 'MINIGUN' && peerData.minigunMesh && peerData.minigunMesh.userData.barrels) {
+            if (peerData.minigunRamp === undefined) peerData.minigunRamp = 0.0;
+            
+            const dt = 0.033; // Approx delta based on network interval
+            if (msg.isMouseDown) {
+                peerData.minigunRamp = Math.min(3.0, peerData.minigunRamp + dt);
+            } else {
+                peerData.minigunRamp = Math.max(0.0, peerData.minigunRamp - dt * 2.0);
+            }
+            
+            const spinSpeed = (peerData.minigunRamp / 3.0) * 40.0 + (msg.isMouseDown ? 5.0 : 0.0);
+            peerData.minigunMesh.userData.barrels.rotation.z += spinSpeed * dt;
+        }
 
         // Draw remote grapple hook lines
         if (msg.hookState !== 'IDLE' && msg.hookPos) {
@@ -518,6 +534,7 @@ export function sendLocalState() {
         yaw: camEuler.y,
         pitch: camEuler.x,
         activeWeapon: state.activeWeaponName,
+        isMouseDown: state.isMouseDown,
         hookState: state.hookState,
         hookPos: state.hookState !== 'IDLE' ? { x: state.hookPosition.x, y: state.hookPosition.y, z: state.hookPosition.z } : null
     };
@@ -632,6 +649,10 @@ function createPeerBean(username) {
     sniperMesh.visible = false;
     rightGunContainer.add(sniperMesh);
 
+    const minigunMesh = buildMinigun();
+    minigunMesh.visible = false;
+    rightGunContainer.add(minigunMesh);
+
     // Sprite username text label
     const canvas = document.createElement('canvas');
     canvas.width = 256;
@@ -663,6 +684,7 @@ function createPeerBean(username) {
         shotgunMesh: shotgunMesh,
         arMesh: arMesh,
         sniperMesh: sniperMesh,
+        minigunMesh: minigunMesh,
         hookLine: null
     };
 }

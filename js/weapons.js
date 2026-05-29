@@ -182,6 +182,77 @@ export const buildSniper = () => {
     return sniperGroup;
 };
 
+export const buildMinigun = () => {
+    const minigunGroup = new THREE.Group();
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5 });
+    const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.3, metalness: 0.8 });
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.7 });
+
+    // 1. Base is a cube
+    const cubeGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+    const cube = new THREE.Mesh(cubeGeo, bodyMat);
+    cube.castShadow = true;
+    minigunGroup.add(cube);
+
+    // 2. Handle on top
+    const handleGroup = new THREE.Group();
+    // vertical support 1
+    const s1Geo = new THREE.BoxGeometry(0.02, 0.08, 0.02);
+    const s1 = new THREE.Mesh(s1Geo, handleMat);
+    s1.position.set(0, 0.11, 0.05);
+    handleGroup.add(s1);
+
+    // vertical support 2
+    const s2 = s1.clone();
+    s2.position.set(0, 0.11, -0.05);
+    handleGroup.add(s2);
+
+    // horizontal grip bar
+    const gripGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.14, 8);
+    gripGeo.rotateX(Math.PI / 2);
+    const grip = new THREE.Mesh(gripGeo, handleMat);
+    grip.position.set(0, 0.15, 0.0);
+    handleGroup.add(grip);
+
+    minigunGroup.add(handleGroup);
+
+    // 3. Barrels Group (so we can rotate it!)
+    const barrelsGroup = new THREE.Group();
+    barrelsGroup.position.set(0, 0, -0.09); // front face of the cube
+    
+    // Six barrels protruding arranged in a circle
+    const barrelRadius = 0.045; // circle radius
+    const barrelLength = 0.45;
+    const barrelGeo = new THREE.CylinderGeometry(0.01, 0.01, barrelLength, 8);
+    barrelGeo.rotateX(Math.PI / 2);
+
+    for (let i = 0; i < 6; i++) {
+        const angle = (i * Math.PI) / 3;
+        const b = new THREE.Mesh(barrelGeo, barrelMat);
+        b.position.set(
+            Math.cos(angle) * barrelRadius,
+            Math.sin(angle) * barrelRadius,
+            -barrelLength / 2 // offset forward
+        );
+        b.castShadow = true;
+        barrelsGroup.add(b);
+    }
+
+    // 4. Square shaped plane (thickness 0.015) at half length from barrels with height and width of the cube
+    const bracketGeo = new THREE.BoxGeometry(0.18, 0.18, 0.015);
+    const bracket = new THREE.Mesh(bracketGeo, bodyMat);
+    bracket.position.set(0, 0, -barrelLength / 2);
+    barrelsGroup.add(bracket);
+
+    minigunGroup.add(barrelsGroup);
+
+    // Save barrelsGroup reference in userData so we can spin it easily during updates
+    minigunGroup.userData.barrels = barrelsGroup;
+
+    return minigunGroup;
+};
+
+
 export function createAkimboGuns() {
     state.leftGun = buildGun(0x00aaff);
     state.leftGun.position.set(-0.32, -0.22, -0.5);
@@ -205,6 +276,10 @@ export function createAkimboGuns() {
     state.sniperMesh = buildSniper();
     state.sniperMesh.visible = false;
     state.rightGunContainer.add(state.sniperMesh);
+
+    state.minigunMesh = buildMinigun();
+    state.minigunMesh.visible = false;
+    state.rightGunContainer.add(state.minigunMesh);
 
     state.rightGun = state.pistolMesh;
 
@@ -259,7 +334,13 @@ export function fireProjectile() {
         state.projectiles.push(projectile);
     };
 
-    state.fireCooldown = stats.fireRate;
+    let currentFireRate = stats.fireRate;
+    if (state.activeWeaponName === 'MINIGUN') {
+        const t = state.minigunRamp / 3.0; // 0 to 1
+        const currentRpm = 50.0 + (1000.0 - 50.0) * t;
+        currentFireRate = 60.0 / currentRpm; // 1.2s to 0.06s
+    }
+    state.fireCooldown = currentFireRate;
 
     if (state.activeWeaponName === 'SNIPER') {
         const barrelWorldPosition = new THREE.Vector3();
@@ -420,9 +501,25 @@ export function updateWeapons(delta) {
         state.rightGunContainer.position.z += (-0.5 - state.rightGunContainer.position.z) * 15 * delta;
     }
 
+    // Minigun ramp up and barrel spin animation
+    if (state.activeWeaponName === 'MINIGUN') {
+        if (state.controls && state.controls.isLocked && state.isMouseDown && state.switchState === 'IDLE') {
+            state.minigunRamp = Math.min(3.0, state.minigunRamp + delta);
+        } else {
+            state.minigunRamp = Math.max(0.0, state.minigunRamp - delta * 2.0);
+        }
+        
+        if (state.minigunMesh && state.minigunMesh.userData.barrels) {
+            const spinSpeed = (state.minigunRamp / 3.0) * 40.0 + (state.isMouseDown && state.controls.isLocked && state.switchState === 'IDLE' ? 5.0 : 0.0);
+            state.minigunMesh.userData.barrels.rotation.z += spinSpeed * delta;
+        }
+    } else {
+        state.minigunRamp = Math.max(0.0, state.minigunRamp - delta * 2.0);
+    }
+
     // Auto-trigger weapon switch cycle if desired weapon is not active
     if (state.switchState === 'IDLE' && state.activeWeaponName !== state.desiredWeaponName) {
-        const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER'];
+        const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
         const currentIndex = weaponCycle.indexOf(state.activeWeaponName);
         const nextIndex = (currentIndex + 1) % weaponCycle.length;
         state.nextWeaponName = weaponCycle[nextIndex];
@@ -431,7 +528,7 @@ export function updateWeapons(delta) {
     }
 
     // Animate weapon switching
-    if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh && state.sniperMesh) {
+    if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh && state.sniperMesh && state.minigunMesh) {
         state.switchTimer += delta;
         const t = Math.min(1.0, state.switchTimer / SWITCH_DURATION);
 
@@ -440,6 +537,7 @@ export function updateWeapons(delta) {
             if (name === 'SHOTGUN') return state.shotgunMesh;
             if (name === 'AR') return state.arMesh;
             if (name === 'SNIPER') return state.sniperMesh;
+            if (name === 'MINIGUN') return state.minigunMesh;
             return null;
         };
 
@@ -448,6 +546,7 @@ export function updateWeapons(delta) {
             if (name === 'SHOTGUN') return 0.22;
             if (name === 'AR') return 0.26;
             if (name === 'SNIPER') return 0.32;
+            if (name === 'MINIGUN') return 0.36;
             return 0.22;
         };
 
