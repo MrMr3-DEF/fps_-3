@@ -390,6 +390,7 @@ function handlePeerMessage(fromPeerId, msg) {
             
             state.scene.add(bullet);
             state.projectiles.push(bullet);
+        }
     } else if (msg.type === 'kill_target') {
         // Sync targets authoritatively as informed by the host
         const target = state.targets[msg.targetIndex];
