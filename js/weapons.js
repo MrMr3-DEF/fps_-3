@@ -521,10 +521,7 @@ export function updateWeapons(delta) {
 
     // Auto-trigger weapon switch cycle if desired weapon is not active
     if (state.switchState === 'IDLE' && state.activeWeaponName !== state.desiredWeaponName) {
-        const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
-        const currentIndex = weaponCycle.indexOf(state.activeWeaponName);
-        const nextIndex = (currentIndex + 1) % weaponCycle.length;
-        state.nextWeaponName = weaponCycle[nextIndex];
+        state.nextWeaponName = state.desiredWeaponName;
         state.switchState = 'WITHDRAWING';
         state.switchTimer = 0;
     }
