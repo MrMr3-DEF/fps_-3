@@ -376,6 +376,11 @@
             right: 30px;
             border-width: 0 3px 3px 0;
         }
+
+        #legal-link:hover {
+            color: var(--accent-blue) !important;
+            text-decoration: underline;
+        }
     </style>
 
     <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2941554287312347"
@@ -482,6 +487,18 @@
                 </div>
             </div>
         </div>
+        <a href="https://luigismansion.de" target="_blank" id="legal-link" onclick="event.stopPropagation();" style="
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 14px;
+            color: var(--text-muted, #aaa);
+            text-decoration: none;
+            font-family: inherit;
+            font-weight: 500;
+            transition: color 0.2s ease-in-out;
+            z-index: 11;
+        ">For legal information</a>
     </div>
 
     <!-- Panel 6: Death Screen Overlay -->
