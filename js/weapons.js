@@ -127,21 +127,13 @@ export const buildSniper = () => {
     core.position.set(0, 0.04, -0.04);
     sniperGroup.add(core);
 
-    // 2. Primary round barrel: 1.5x base length (0.38 * 1.5 = 0.57)
-    const primaryBarrelGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.57, 8);
-    primaryBarrelGeo.rotateX(Math.PI / 2);
-    const primaryBarrel = new THREE.Mesh(primaryBarrelGeo, bodyMat);
-    primaryBarrel.position.set(0, 0.02, -0.475);
-    primaryBarrel.castShadow = true;
-    sniperGroup.add(primaryBarrel);
-
-    // 3. Smaller round barrel at the end: standard barrel length (0.38)
-    const secondaryBarrelGeo = new THREE.CylinderGeometry(0.011, 0.011, 0.38, 8);
-    secondaryBarrelGeo.rotateX(Math.PI / 2);
-    const secondaryBarrel = new THREE.Mesh(secondaryBarrelGeo, bodyMat);
-    secondaryBarrel.position.set(0, 0.02, -0.95);
-    secondaryBarrel.castShadow = true;
-    sniperGroup.add(secondaryBarrel);
+    // 2. Continuous round barrel (combined length of 0.57 + 0.38 = 0.95, radius is 50% bigger than 0.018: 0.027)
+    const barrelGeo = new THREE.CylinderGeometry(0.027, 0.027, 0.95, 8);
+    barrelGeo.rotateX(Math.PI / 2);
+    const barrel = new THREE.Mesh(barrelGeo, bodyMat);
+    barrel.position.set(0, 0.02, -0.665);
+    barrel.castShadow = true;
+    sniperGroup.add(barrel);
 
     // 4. Stock (butt of the gun)
     const stockGeo = new THREE.BoxGeometry(0.05, 0.11, 0.32);
