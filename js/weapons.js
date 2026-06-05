@@ -636,52 +636,120 @@ export function updateWeapons(delta) {
     // Increment inspect timer and apply animation if inspecting
     if (state.inspectState === 'INSPECTING') {
         state.inspectTimer += delta;
-        if (state.inspectTimer >= 2.5) {
+        const totalDuration = 3.8;
+        if (state.inspectTimer >= totalDuration) {
             state.inspectState = 'IDLE';
             state.inspectTimer = 0.0;
             if (state.rightGunContainer && !state.isThirdPerson) {
                 state.rightGunContainer.position.set(0.32, -0.22, -0.5);
                 state.rightGunContainer.rotation.set(0, 0, 0);
             }
-        } else if (state.rightGunContainer && !state.isThirdPerson) {
+            if (state.leftGun && !state.isThirdPerson) {
+                state.leftGun.position.set(-0.32, -0.22, -0.5);
+                state.leftGun.rotation.set(0, 0, 0);
+            }
+        } else if (!state.isThirdPerson) {
             const t = state.inspectTimer;
             const basePos = new THREE.Vector3(0.32, -0.22, -0.5);
             // Move weapon closer, slightly centered, lifted up
-            const inspectPos = new THREE.Vector3(0.1, -0.08, -0.32);
+            const inspectPos = new THREE.Vector3(0.12, -0.15, -0.42);
             
-            const targetRotX = -Math.PI / 4; // Tilt up/backwards
-            const targetRotY = -Math.PI / 6; // Angled to center
-            const targetRotZ = Math.PI / 12; // Slight roll
+            const targetRotX = 0; // Parallel to horizon
+            const targetRotY = 83 * Math.PI / 180; // Point left (~83 degrees for natural perspective)
+            const targetRotZ = 0;
 
-            if (t < 0.5) {
+            const baseLeftPos = new THREE.Vector3(-0.32, -0.22, -0.5);
+            const holsterLeftPos = new THREE.Vector3(-0.32, -0.65, -0.45);
+            const targetLeftRotX = Math.PI / 2; // Point straight down (holstered)
+
+            if (t < 0.6) {
                 // Phase 1: Transition in
-                const r = t / 0.5;
-                state.rightGunContainer.position.lerpVectors(basePos, inspectPos, r);
-                state.rightGunContainer.rotation.set(
-                    targetRotX * r,
-                    targetRotY * r,
-                    targetRotZ * r
-                );
-            } else if (t < 2.0) {
-                // Phase 2: Spin inspect
-                const r = (t - 0.5) / 1.5;
-                const spinZ = Math.sin(r * Math.PI) * (Math.PI / 3);
-                const spinY = Math.sin(r * Math.PI) * (Math.PI / 12);
-                state.rightGunContainer.position.copy(inspectPos);
-                state.rightGunContainer.rotation.set(
-                    targetRotX,
-                    targetRotY + spinY,
-                    targetRotZ + spinZ
-                );
+                const r = t / 0.6;
+                const ease = 0.5 - 0.5 * Math.cos(r * Math.PI); // Cosine ease
+                
+                // Animate right gun container
+                if (state.rightGunContainer) {
+                    state.rightGunContainer.position.lerpVectors(basePos, inspectPos, ease);
+                    state.rightGunContainer.rotation.set(
+                        targetRotX * ease,
+                        targetRotY * ease,
+                        targetRotZ * ease
+                    );
+                }
+
+                // Animate left gun (holstering downwards out of screen)
+                if (state.leftGun) {
+                    state.leftGun.position.lerpVectors(baseLeftPos, holsterLeftPos, ease);
+                    state.leftGun.rotation.set(targetLeftRotX * ease, 0, 0);
+                }
+            } else if (t < 1.0) {
+                // Phase 1 Pause (short pause before roll starts)
+                if (state.rightGunContainer) {
+                    state.rightGunContainer.position.copy(inspectPos);
+                    state.rightGunContainer.rotation.set(targetRotX, targetRotY, targetRotZ);
+                }
+                if (state.leftGun) {
+                    state.leftGun.position.copy(holsterLeftPos);
+                    state.leftGun.rotation.set(targetLeftRotX, 0, 0);
+                }
+            } else if (t < 3.2) {
+                // Phase 2: Spin inspect around Z axis with pauses
+                if (state.rightGunContainer) {
+                    state.rightGunContainer.position.copy(inspectPos);
+                }
+                if (state.leftGun) {
+                    state.leftGun.position.copy(holsterLeftPos);
+                    state.leftGun.rotation.set(targetLeftRotX, 0, 0);
+                }
+                
+                const time = t - 1.0; 
+                const maxRoll = Math.PI / 2.2; // ~81 degrees roll
+                let rollZ = 0;
+
+                if (time < 0.4) {
+                    // Roll from 0 to maxRoll
+                    const r = time / 0.4;
+                    const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
+                    rollZ = ease * maxRoll;
+                } else if (time < 0.8) {
+                    // Pause 1 (underside)
+                    rollZ = maxRoll;
+                } else if (time < 1.4) {
+                    // Roll from maxRoll to -maxRoll
+                    const r = (time - 0.8) / 0.6;
+                    const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
+                    rollZ = maxRoll - ease * (2 * maxRoll);
+                } else if (time < 1.8) {
+                    // Pause 2 (topside)
+                    rollZ = -maxRoll;
+                } else {
+                    // Roll from -maxRoll to 0
+                    const r = (time - 1.8) / 0.4;
+                    const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
+                    rollZ = -maxRoll + ease * maxRoll;
+                }
+
+                if (state.rightGunContainer) {
+                    state.rightGunContainer.rotation.set(targetRotX, targetRotY, rollZ);
+                }
             } else {
-                // Phase 3: Transition out
-                const r = (t - 2.0) / 0.5;
-                state.rightGunContainer.position.lerpVectors(inspectPos, basePos, r);
-                state.rightGunContainer.rotation.set(
-                    targetRotX * (1.0 - r),
-                    targetRotY * (1.0 - r),
-                    targetRotZ * (1.0 - r)
-                );
+                // Phase 3: Transition out (return both guns to hand positions)
+                const r = (t - 3.2) / 0.6;
+                const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
+
+                if (state.rightGunContainer) {
+                    state.rightGunContainer.position.lerpVectors(inspectPos, basePos, ease);
+                    state.rightGunContainer.rotation.set(
+                        targetRotX * (1.0 - ease),
+                        targetRotY * (1.0 - ease),
+                        targetRotZ * (1.0 - ease)
+                    );
+                }
+
+                if (state.leftGun) {
+                    state.leftGun.position.lerpVectors(holsterLeftPos, baseLeftPos, ease);
+                    state.leftGun.rotation.set(targetLeftRotX * (1.0 - ease), 0, 0);
+                }
             }
         }
     }
@@ -694,6 +762,10 @@ export function cancelInspect() {
         if (state.rightGunContainer && !state.isThirdPerson) {
             state.rightGunContainer.position.set(0.32, -0.22, -0.5);
             state.rightGunContainer.rotation.set(0, 0, 0);
+        }
+        if (state.leftGun && !state.isThirdPerson) {
+            state.leftGun.position.set(-0.32, -0.22, -0.5);
+            state.leftGun.rotation.set(0, 0, 0);
         }
     }
 }
