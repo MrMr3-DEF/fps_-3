@@ -19,7 +19,7 @@ import {
 import { spawnParticles, updateParticles, spawnLightBeam } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
-import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson } from './weapons.js';
+import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect } from './weapons.js';
 import { createEnvironment, respawnTarget, updateTargets } from './world.js';
 import { sendLocalState, disconnectMultiplayer } from './multiplayer.js';
 
@@ -319,6 +319,7 @@ export function init() {
         state.isScoped = false;
         state.rightClickActive = false;
         state.keyCActive = false;
+        cancelInspect();
         const healthContainer = document.getElementById('health-container');
         if (healthContainer) healthContainer.style.display = 'none';
         const reloadContainer = document.getElementById('reload-container');
@@ -503,10 +504,12 @@ export function init() {
                     state.velocity.y += JUMP_FORCE;
                     state.canJump = false;
                 }
+                cancelInspect();
                 break;
             case 'KeyR':
                 if (state.controls.isLocked) {
                     toggleGrapplingHook();
+                    cancelInspect();
                 }
                 break;
             case 'KeyE':
@@ -515,37 +518,50 @@ export function init() {
                     const currentIndex = weaponCycle.indexOf(state.desiredWeaponName);
                     const nextIndex = (currentIndex + 1) % weaponCycle.length;
                     state.desiredWeaponName = weaponCycle[nextIndex];
+                    cancelInspect();
                 }
                 break;
             case 'Digit1':
                 if (state.controls.isLocked) {
                     state.desiredWeaponName = 'PISTOL';
+                    cancelInspect();
                 }
                 break;
             case 'Digit2':
                 if (state.controls.isLocked) {
                     state.desiredWeaponName = 'AR';
+                    cancelInspect();
                 }
                 break;
             case 'Digit3':
                 if (state.controls.isLocked) {
                     state.desiredWeaponName = 'SHOTGUN';
+                    cancelInspect();
                 }
                 break;
             case 'Digit4':
                 if (state.controls.isLocked) {
                     state.desiredWeaponName = 'SNIPER';
+                    cancelInspect();
                 }
                 break;
             case 'Digit5':
                 if (state.controls.isLocked) {
                     state.desiredWeaponName = 'MINIGUN';
+                    cancelInspect();
+                }
+                break;
+            case 'KeyX':
+                if (state.controls.isLocked && state.switchState === 'IDLE') {
+                    state.inspectState = 'INSPECTING';
+                    state.inspectTimer = 0.0;
                 }
                 break;
             case 'KeyC':
                 if (state.controls.isLocked) {
                     state.keyCActive = true;
                     state.isScoped = state.rightClickActive || state.keyCActive;
+                    cancelInspect();
                 }
                 break;
             case 'KeyP':
@@ -578,6 +594,9 @@ export function init() {
         if (e.button === 0) { // Left click
             state.isMouseDown = true;
             if (!state.controls.isLocked) return;
+            if (state.inspectState === 'INSPECTING') {
+                cancelInspect();
+            }
             if (state.fireCooldown <= 0 && state.switchState === 'IDLE') {
                 fireProjectile();
             }
@@ -585,6 +604,7 @@ export function init() {
             if (state.controls.isLocked) {
                 state.rightClickActive = true;
                 state.isScoped = state.rightClickActive || state.keyCActive;
+                cancelInspect();
             }
         }
     });
@@ -630,6 +650,9 @@ export function animate() {
 
     // 1.5) Automatic weapon firing
     if (state.controls.isLocked && state.isMouseDown && (state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
+        if (state.inspectState === 'INSPECTING') {
+            cancelInspect();
+        }
         fireProjectile();
     }
 

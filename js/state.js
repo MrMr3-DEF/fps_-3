@@ -59,6 +59,8 @@ export const state = {
     fireCooldown: 0,
     isMouseDown: false,
     minigunRamp: 0.0,
+    inspectState: 'IDLE', // 'IDLE', 'INSPECTING'
+    inspectTimer: 0.0,
 
     // Three.js instances
     camera: null,

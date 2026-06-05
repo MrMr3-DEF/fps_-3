@@ -632,6 +632,70 @@ export function updateWeapons(delta) {
             if (state.rightGunContainer) state.rightGunContainer.rotation.set(0, 0, 0);
         }
     }
+
+    // Increment inspect timer and apply animation if inspecting
+    if (state.inspectState === 'INSPECTING') {
+        state.inspectTimer += delta;
+        if (state.inspectTimer >= 2.5) {
+            state.inspectState = 'IDLE';
+            state.inspectTimer = 0.0;
+            if (state.rightGunContainer && !state.isThirdPerson) {
+                state.rightGunContainer.position.set(0.32, -0.22, -0.5);
+                state.rightGunContainer.rotation.set(0, 0, 0);
+            }
+        } else if (state.rightGunContainer && !state.isThirdPerson) {
+            const t = state.inspectTimer;
+            const basePos = new THREE.Vector3(0.32, -0.22, -0.5);
+            // Move weapon closer, slightly centered, lifted up
+            const inspectPos = new THREE.Vector3(0.1, -0.08, -0.32);
+            
+            const targetRotX = -Math.PI / 4; // Tilt up/backwards
+            const targetRotY = -Math.PI / 6; // Angled to center
+            const targetRotZ = Math.PI / 12; // Slight roll
+
+            if (t < 0.5) {
+                // Phase 1: Transition in
+                const r = t / 0.5;
+                state.rightGunContainer.position.lerpVectors(basePos, inspectPos, r);
+                state.rightGunContainer.rotation.set(
+                    targetRotX * r,
+                    targetRotY * r,
+                    targetRotZ * r
+                );
+            } else if (t < 2.0) {
+                // Phase 2: Spin inspect
+                const r = (t - 0.5) / 1.5;
+                const spinZ = Math.sin(r * Math.PI) * (Math.PI / 3);
+                const spinY = Math.sin(r * Math.PI) * (Math.PI / 12);
+                state.rightGunContainer.position.copy(inspectPos);
+                state.rightGunContainer.rotation.set(
+                    targetRotX,
+                    targetRotY + spinY,
+                    targetRotZ + spinZ
+                );
+            } else {
+                // Phase 3: Transition out
+                const r = (t - 2.0) / 0.5;
+                state.rightGunContainer.position.lerpVectors(inspectPos, basePos, r);
+                state.rightGunContainer.rotation.set(
+                    targetRotX * (1.0 - r),
+                    targetRotY * (1.0 - r),
+                    targetRotZ * (1.0 - r)
+                );
+            }
+        }
+    }
+}
+
+export function cancelInspect() {
+    if (state.inspectState === 'INSPECTING') {
+        state.inspectState = 'IDLE';
+        state.inspectTimer = 0.0;
+        if (state.rightGunContainer && !state.isThirdPerson) {
+            state.rightGunContainer.position.set(0.32, -0.22, -0.5);
+            state.rightGunContainer.rotation.set(0, 0, 0);
+        }
+    }
 }
 
 
