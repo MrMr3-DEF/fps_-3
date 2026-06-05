@@ -127,13 +127,42 @@ export const buildSniper = () => {
     core.position.set(0, 0.04, -0.04);
     sniperGroup.add(core);
 
-    // 2. Continuous round barrel (combined length of 0.57 + 0.38 = 0.95, radius is 50% bigger than 0.018: 0.027)
-    const barrelGeo = new THREE.CylinderGeometry(0.027, 0.027, 0.95, 8);
+    // 2. Continuous round barrel (centered on the end of the body, Y = 0, length increased by 20% to 1.14)
+    const barrelGeo = new THREE.CylinderGeometry(0.027, 0.027, 1.14, 8);
     barrelGeo.rotateX(Math.PI / 2);
     const barrel = new THREE.Mesh(barrelGeo, bodyMat);
-    barrel.position.set(0, 0.02, -0.665);
+    barrel.position.set(0, 0, -0.76);
     barrel.castShadow = true;
     sniperGroup.add(barrel);
+
+    // 3. Muzzle brake at the end of the barrel
+    const brakeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.5, metalness: 0.8 });
+    const ventMat = new THREE.MeshBasicMaterial({ color: 0x0a0a12 }); // dark slots for ports
+
+    const brakeBodyGeo = new THREE.CylinderGeometry(0.038, 0.038, 0.14, 8);
+    brakeBodyGeo.rotateX(Math.PI / 2);
+    const brakeBody = new THREE.Mesh(brakeBodyGeo, brakeMat);
+    brakeBody.position.set(0, 0, -1.40);
+    brakeBody.castShadow = true;
+    sniperGroup.add(brakeBody);
+
+    // Side vent ports (2 on left, 2 on right)
+    const ventGeo = new THREE.BoxGeometry(0.01, 0.05, 0.025);
+    const ventL1 = new THREE.Mesh(ventGeo, ventMat);
+    ventL1.position.set(-0.036, 0, -1.365);
+    sniperGroup.add(ventL1);
+
+    const ventL2 = new THREE.Mesh(ventGeo, ventMat);
+    ventL2.position.set(-0.036, 0, -1.435);
+    sniperGroup.add(ventL2);
+
+    const ventR1 = new THREE.Mesh(ventGeo, ventMat);
+    ventR1.position.set(0.036, 0, -1.365);
+    sniperGroup.add(ventR1);
+
+    const ventR2 = new THREE.Mesh(ventGeo, ventMat);
+    ventR2.position.set(0.036, 0, -1.435);
+    sniperGroup.add(ventR2);
 
     // 4. Stock (butt of the gun)
     const stockGeo = new THREE.BoxGeometry(0.05, 0.11, 0.32);
