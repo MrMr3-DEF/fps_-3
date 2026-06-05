@@ -362,7 +362,7 @@ function handlePeerMessage(fromPeerId, msg) {
         // Draw remote grapple hook lines
         if (msg.hookState !== 'IDLE' && msg.hookPos) {
             if (!peerData.hookLine) {
-                const hookGeo = new THREE.CylinderGeometry(0.08, 0.08, 1, 8);
+                const hookGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
                 hookGeo.rotateX(Math.PI / 2);
                 const hookMat = new THREE.MeshStandardMaterial({ 
                     color: 0x00aaff, 
@@ -374,8 +374,8 @@ function handlePeerMessage(fromPeerId, msg) {
                 state.scene.add(peerData.hookLine);
             }
 
-            const gunTip = new THREE.Vector3();
-            peerData.leftGun.getWorldPosition(gunTip);
+            const gunTip = new THREE.Vector3(0, 0, -0.19);
+            peerData.leftGun.localToWorld(gunTip);
             const targetPos = new THREE.Vector3(msg.hookPos.x, msg.hookPos.y, msg.hookPos.z);
             const distance = gunTip.distanceTo(targetPos);
 

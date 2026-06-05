@@ -23,8 +23,12 @@ export function toggleGrapplingHook() {
         state.hookIsEnemy = false;
         state.hookTargetEnemy = null;
 
-        const barrelWorldPosition = new THREE.Vector3();
-        state.leftGun.getWorldPosition(barrelWorldPosition);
+        if (state.leftGun && !state.isThirdPerson) {
+            state.leftGun.position.z += 0.15;
+        }
+
+        const barrelWorldPosition = new THREE.Vector3(0, 0, -0.19);
+        state.leftGun.localToWorld(barrelWorldPosition);
         state.hookPosition.copy(barrelWorldPosition);
 
         const raycaster = new THREE.Raycaster();
@@ -156,8 +160,8 @@ export function updateHook(delta) {
         }
 
         if (state.leftGun && state.hookMesh) {
-            const gunTip = new THREE.Vector3();
-            state.leftGun.getWorldPosition(gunTip);
+            const gunTip = new THREE.Vector3(0, 0, -0.19);
+            state.leftGun.localToWorld(gunTip);
             const distance = gunTip.distanceTo(state.hookPosition);
 
             if (distance > 0.05) {

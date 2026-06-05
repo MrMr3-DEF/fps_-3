@@ -524,6 +524,11 @@ export function updateWeapons(delta) {
         state.rightGunContainer.position.z += (-0.5 - state.rightGunContainer.position.z) * 15 * delta;
     }
 
+    if (state.leftGun && state.inspectState === 'IDLE' && !state.isThirdPerson) {
+        // Recoil recovery for left gun (grappling gun)
+        state.leftGun.position.z += (-0.5 - state.leftGun.position.z) * 15 * delta;
+    }
+
     // Minigun ramp up and barrel spin animation
     if (state.activeWeaponName === 'MINIGUN') {
         if (state.controls && state.controls.isLocked && state.isMouseDown && state.switchState === 'IDLE') {

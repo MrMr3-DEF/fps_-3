@@ -471,7 +471,7 @@ export function init() {
     createEnvironment();
 
     // Hook Mesh Cable
-    const hookGeo = new THREE.CylinderGeometry(0.08, 0.08, 1, 8);
+    const hookGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
     hookGeo.rotateX(Math.PI / 2);
     const hookMat = new THREE.MeshStandardMaterial({ 
         color: 0x00aaff,
