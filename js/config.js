@@ -9,8 +9,8 @@ export const PLAYER_RADIUS = 0.8;
 export const JUMP_FORCE = 164.0;
 export const BASE_GRAVITY = 420.0;
 
-export const MAX_PILLAR_HEIGHT = 120.0;
-export const MAX_ENEMY_HEIGHT = 120.0;
+export const MAX_PILLAR_HEIGHT = 225.0;
+export const MAX_ENEMY_HEIGHT = 275.0;
 export const HOOK_MAX_RANGE = 300.0;
 
 export const SWITCH_DURATION = 0.15;
