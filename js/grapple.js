@@ -47,21 +47,21 @@ export function toggleGrapplingHook() {
         for (let j = 0; j < state.targets.length; j++) {
             const target = state.targets[j];
             const enemyPos = target.position;
-            
+
             // Shortest distance from camera looking ray to enemy center
             const distToRay = ray.distanceToPoint(enemyPos);
             const enemyScale = target.userData.scale || 1.0;
-            
+
             // Generous magnetic hitbox: 3.5 * enemyScale
             const magneticRadius = 3.5 * enemyScale;
-            
+
             if (distToRay <= magneticRadius) {
                 const distToPlayer = playerObj.position.distanceTo(enemyPos);
-                
+
                 // Ensure enemy is in front of the player (dot product > 0)
                 const toEnemy = new THREE.Vector3().subVectors(enemyPos, playerObj.position);
                 const dot = toEnemy.dot(ray.direction);
-                
+
                 // Allow a small buffer beyond HOOK_MAX_RANGE (plus enemyScale) to account for large enemy size
                 if (dot > 0 && distToPlayer <= (HOOK_MAX_RANGE + enemyScale) && distToPlayer < closestEnemyDist) {
                     closestEnemyDist = distToPlayer;
@@ -107,19 +107,19 @@ export function toggleGrapplingHook() {
 export function updateHook(delta) {
     if (state.hookState !== 'IDLE') {
         const playerObj = state.controls.getObject();
-        
+
         if (state.hookState === 'FIRING') {
             const dirToTarget = new THREE.Vector3().subVectors(state.hookTarget, state.hookPosition).normalize();
             state.hookPosition.addScaledVector(dirToTarget, HOOK_SPEED * delta);
 
             if (state.hookPosition.distanceTo(state.hookTarget) < 1.5) {
                 if (state.hookWillHit) {
-                    state.hookState = 'PULLING'; 
+                    state.hookState = 'PULLING';
                     state.isSprinting = false;
                     const badge = document.getElementById('hook-badge');
                     if (badge) badge.style.display = 'inline-block';
                 } else {
-                    resetHook(); 
+                    resetHook();
                 }
             }
         } else if (state.hookState === 'PULLING') {
@@ -132,7 +132,7 @@ export function updateHook(delta) {
 
                 if (dist > 3.0) {
                     const pullDir = toEnemy.clone().normalize();
-                    const pullSpeed = HOOK_SPEED * 0.75; 
+                    const pullSpeed = HOOK_SPEED * 0.5;
                     state.velocity.copy(pullDir).multiplyScalar(pullSpeed);
                 } else {
                     resetHook();
