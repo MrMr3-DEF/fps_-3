@@ -3,6 +3,41 @@ import { state } from './state.js';
 import { SWITCH_DURATION, WEAPON_STATS } from './config.js';
 import { broadcastLocalFire } from './multiplayer.js';
 
+// ---------------------------------------------------------------------------
+// Inspect animation — cached vectors (avoids per-frame Vector3 allocations)
+// ---------------------------------------------------------------------------
+const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
+const _INSPECT_WEAPON_POS  = new THREE.Vector3(0.12, -0.15, -0.42);
+const _INSPECT_LEFT_BASE   = new THREE.Vector3(-0.32, -0.22, -0.5);
+const _INSPECT_HOLSTER_POS = new THREE.Vector3(-0.32, -0.65, -0.45);
+
+// Inspect phase boundary timestamps (seconds)
+const INSPECT_PHASE1_END   = 0.6;  // Gun lifts into view
+const INSPECT_PAUSE1_END   = 1.0;  // Short pause before spin
+const INSPECT_PHASE2_END   = 3.2;  // Spin animation complete
+const INSPECT_TOTAL        = 3.8;  // Entire animation length
+
+// ---------------------------------------------------------------------------
+// Weapon helpers — at module scope to avoid per-frame re-creation
+// ---------------------------------------------------------------------------
+function getWeaponMesh(name) {
+    if (name === 'PISTOL')  return state.pistolMesh;
+    if (name === 'SHOTGUN') return state.shotgunMesh;
+    if (name === 'AR')      return state.arMesh;
+    if (name === 'SNIPER')  return state.sniperMesh;
+    if (name === 'MINIGUN') return state.minigunMesh;
+    return null;
+}
+
+function getWeaponOffset(name) {
+    if (name === 'PISTOL')  return 0.19;
+    if (name === 'SHOTGUN') return 0.22;
+    if (name === 'AR')      return 0.26;
+    if (name === 'SNIPER')  return 0.32;
+    if (name === 'MINIGUN') return 0.36;
+    return 0.22;
+}
+
 export const buildGun = (coreColor) => {
     const gunGroup = new THREE.Group();
     const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
@@ -525,8 +560,10 @@ export function updateWeapons(delta) {
     }
 
     if (state.leftGun && state.inspectState === 'IDLE' && !state.isThirdPerson) {
-        // Recoil recovery for left gun (grappling gun)
-        state.leftGun.position.z += (-0.5 - state.leftGun.position.z) * 15 * delta;
+        // Recoil recovery for left gun (grappling gun) — skip when already at rest
+        if (Math.abs(state.leftGun.position.z - (-0.5)) > 0.001) {
+            state.leftGun.position.z += (-0.5 - state.leftGun.position.z) * 15 * delta;
+        }
     }
 
     // Minigun ramp up and barrel spin animation
@@ -557,27 +594,9 @@ export function updateWeapons(delta) {
         state.switchTimer += delta;
         const t = Math.min(1.0, state.switchTimer / SWITCH_DURATION);
 
-        const getWeaponMesh = (name) => {
-            if (name === 'PISTOL') return state.pistolMesh;
-            if (name === 'SHOTGUN') return state.shotgunMesh;
-            if (name === 'AR') return state.arMesh;
-            if (name === 'SNIPER') return state.sniperMesh;
-            if (name === 'MINIGUN') return state.minigunMesh;
-            return null;
-        };
-
-        const getWeaponOffset = (name) => {
-            if (name === 'PISTOL') return 0.19;
-            if (name === 'SHOTGUN') return 0.22;
-            if (name === 'AR') return 0.26;
-            if (name === 'SNIPER') return 0.32;
-            if (name === 'MINIGUN') return 0.36;
-            return 0.22;
-        };
-
         const currentMesh = getWeaponMesh(state.activeWeaponName);
-        const nextMesh = getWeaponMesh(state.nextWeaponName);
-        const d = getWeaponOffset(state.activeWeaponName);
+        const nextMesh    = getWeaponMesh(state.nextWeaponName);
+        const d           = getWeaponOffset(state.activeWeaponName);
 
         if (state.switchState === 'WITHDRAWING') {
             const theta = t * (Math.PI / 1.7);
@@ -641,8 +660,7 @@ export function updateWeapons(delta) {
     // Increment inspect timer and apply animation if inspecting
     if (state.inspectState === 'INSPECTING') {
         state.inspectTimer += delta;
-        const totalDuration = 3.8;
-        if (state.inspectTimer >= totalDuration) {
+        if (state.inspectTimer >= INSPECT_TOTAL) {
             state.inspectState = 'IDLE';
             state.inspectTimer = 0.0;
             if (state.rightGunContainer && !state.isThirdPerson) {
@@ -655,21 +673,20 @@ export function updateWeapons(delta) {
             }
         } else if (!state.isThirdPerson) {
             const t = state.inspectTimer;
-            const basePos = new THREE.Vector3(0.32, -0.22, -0.5);
-            // Move weapon closer, slightly centered, lifted up
-            const inspectPos = new THREE.Vector3(0.12, -0.15, -0.42);
+            // Use module-level cached vectors instead of allocating new ones every frame
+            const basePos       = _INSPECT_BASE_POS;
+            const inspectPos    = _INSPECT_WEAPON_POS;
+            const baseLeftPos   = _INSPECT_LEFT_BASE;
+            const holsterLeftPos = _INSPECT_HOLSTER_POS;
             
             const targetRotX = 0; // Parallel to horizon
             const targetRotY = 83 * Math.PI / 180; // Point left (~83 degrees for natural perspective)
             const targetRotZ = 0;
-
-            const baseLeftPos = new THREE.Vector3(-0.32, -0.22, -0.5);
-            const holsterLeftPos = new THREE.Vector3(-0.32, -0.65, -0.45);
             const targetLeftRotX = Math.PI / 2; // Point straight down (holstered)
 
-            if (t < 0.6) {
+            if (t < INSPECT_PHASE1_END) {
                 // Phase 1: Transition in
-                const r = t / 0.6;
+                const r = t / INSPECT_PHASE1_END;
                 const ease = 0.5 - 0.5 * Math.cos(r * Math.PI); // Cosine ease
                 
                 // Animate right gun container
@@ -687,7 +704,7 @@ export function updateWeapons(delta) {
                     state.leftGun.position.lerpVectors(baseLeftPos, holsterLeftPos, ease);
                     state.leftGun.rotation.set(targetLeftRotX * ease, 0, 0);
                 }
-            } else if (t < 1.0) {
+            } else if (t < INSPECT_PAUSE1_END) {
                 // Phase 1 Pause (short pause before roll starts)
                 if (state.rightGunContainer) {
                     state.rightGunContainer.position.copy(inspectPos);
@@ -697,7 +714,7 @@ export function updateWeapons(delta) {
                     state.leftGun.position.copy(holsterLeftPos);
                     state.leftGun.rotation.set(targetLeftRotX, 0, 0);
                 }
-            } else if (t < 3.2) {
+            } else if (t < INSPECT_PHASE2_END) {
                 // Phase 2: Spin inspect around Z axis with pauses
                 if (state.rightGunContainer) {
                     state.rightGunContainer.position.copy(inspectPos);
@@ -739,7 +756,7 @@ export function updateWeapons(delta) {
                 }
             } else {
                 // Phase 3: Transition out (return both guns to hand positions)
-                const r = (t - 3.2) / 0.6;
+                const r = (t - INSPECT_PHASE2_END) / (INSPECT_TOTAL - INSPECT_PHASE2_END);
                 const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
 
                 if (state.rightGunContainer) {

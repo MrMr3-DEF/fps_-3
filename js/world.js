@@ -73,10 +73,10 @@ export function createEnvironment() {
     state.scene.add(wallS);
 
     // East
-    const wallO = new THREE.Mesh(wallGeo, wallMat);
-    wallO.position.set(MAP_SIZE / 2, 150, 0);
-    wallO.rotation.y = -Math.PI / 2;
-    state.scene.add(wallO);
+    const wallE = new THREE.Mesh(wallGeo, wallMat);
+    wallE.position.set(MAP_SIZE / 2, 150, 0);
+    wallE.rotation.y = -Math.PI / 2;
+    state.scene.add(wallE);
 
     // West
     const wallW = new THREE.Mesh(wallGeo, wallMat);
@@ -93,6 +93,10 @@ export function createEnvironment() {
     pillarInstanced.castShadow = true;
     pillarInstanced.receiveShadow = true;
 
+    // Invisible collision boxes use a lightweight separate material so that
+    // future changes to pillar visuals don't accidentally affect colliders.
+    const colliderMat = new THREE.MeshBasicMaterial();
+
     for (let i = 0; i < PILLAR_COUNT; i++) {
         const height = 20.0 + Math.random() * (MAX_PILLAR_HEIGHT - 20.0);
         dummy.scale.set(1, height, 1);
@@ -105,7 +109,7 @@ export function createEnvironment() {
         pillarInstanced.setMatrixAt(i, dummy.matrix);
 
         // Keep invisible collision box
-        const obstacle = new THREE.Mesh(new THREE.BoxGeometry(PILLAR_WIDTH, height, PILLAR_WIDTH), boxMat);
+        const obstacle = new THREE.Mesh(new THREE.BoxGeometry(PILLAR_WIDTH, height, PILLAR_WIDTH), colliderMat);
         obstacle.position.copy(dummy.position);
         obstacle.userData.height = height;
         obstacle.userData.halfW = PILLAR_WIDTH / 2;

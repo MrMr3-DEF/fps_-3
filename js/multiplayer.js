@@ -15,6 +15,19 @@ import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun } from './we
 // Module-level cached objects to prevent per-tick allocations
 const _stateEuler = new THREE.Euler();
 
+// Shared PeerJS ICE / debug config (avoids duplication between hostGame and joinGame)
+const PEER_CONFIG = {
+    debug: 2, // Prints warnings and errors in developer console
+    config: {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' }
+        ]
+    }
+};
+
 export function broadcastToAll(packet, excludePeerId = null) {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     state.connections.forEach((conn) => {
@@ -74,19 +87,7 @@ export async function hostGame(username, roomCode) {
 
     const { Peer } = await import('peerjs');
     
-    const peerConfig = {
-        debug: 2, // Prints warnings and errors in developer console
-        config: {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun.cloudflare.com:3478' }
-            ]
-        }
-    };
-
-    peerInstance = new Peer(hostPeerId, peerConfig);
+    peerInstance = new Peer(hostPeerId, PEER_CONFIG);
     state.peer = peerInstance;
 
     peerInstance.on('open', (id) => {
@@ -127,19 +128,7 @@ export async function joinGame(username, roomCode) {
 
     const { Peer } = await import('peerjs');
     
-    const peerConfig = {
-        debug: 2, // Prints warnings and errors in developer console
-        config: {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun.cloudflare.com:3478' }
-            ]
-        }
-    };
-
-    peerInstance = new Peer(peerConfig);
+    peerInstance = new Peer(PEER_CONFIG);
     state.peer = peerInstance;
 
     peerInstance.on('open', (clientId) => {
@@ -346,9 +335,14 @@ function handlePeerMessage(fromPeerId, msg) {
 
         // Rotate remote peer minigun barrels if active and firing
         if (msg.activeWeapon === 'MINIGUN' && peerData.minigunMesh && peerData.minigunMesh.userData.barrels) {
-            if (peerData.minigunRamp === undefined) peerData.minigunRamp = 0.0;
-            
-            const dt = 0.033; // Approx delta based on network interval
+            if (peerData.minigunRamp === undefined)      peerData.minigunRamp = 0.0;
+            if (peerData.lastUpdateTime === undefined)   peerData.lastUpdateTime = performance.now();
+
+            const now = performance.now();
+            // Use the real inter-packet elapsed time instead of a hard-coded 33ms
+            const dt = Math.min((now - peerData.lastUpdateTime) / 1000, 0.1);
+            peerData.lastUpdateTime = now;
+
             if (msg.isMouseDown) {
                 peerData.minigunRamp = Math.min(3.0, peerData.minigunRamp + dt);
             } else {

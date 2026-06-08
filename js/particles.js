@@ -95,9 +95,7 @@ export function spawnLightBeam(position) {
     
     // Spawn secondary upward visual particles around the spawn footprint
     const sparkPos = new THREE.Vector3(position.x, 0.5, position.z);
-    for (let i = 0; i < 20; i++) {
-        spawnParticles(sparkPos, 0x00aaff, 1, 14.0, 0.4, -6.0); // low upwards gravity drift
-    }
+    spawnParticles(sparkPos, 0x00aaff, 20, 14.0, 0.4, -6.0); // low upwards gravity drift
 }
 
 export function updateParticles(delta) {

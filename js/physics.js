@@ -16,52 +16,93 @@ const _camForward = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
 const _moveDir = new THREE.Vector3();
 const _tempPos = new THREE.Vector3();
+const _tempZ   = new THREE.Vector3();
 
-export function checkCollision(position, feetY) {
+// ---------------------------------------------------------------------------
+// scanObstacles — single-pass collision + ground query (replaces the two
+// separate loops that checkCollision and getGroundY used to run).
+// Returns { colX, colZ, groundY } in one obstacle-list iteration.
+// ---------------------------------------------------------------------------
+function scanObstacles(actualPos, testPosX, testPosZ, feetY) {
+    let groundY = 0;
+    let colX = false;
+    let colZ = false;
+
+    const limit = (MAP_SIZE / 2) - 1;
+    if (Math.abs(testPosX.x) > limit || Math.abs(testPosX.z) > limit) colX = true;
+    if (Math.abs(testPosZ.x) > limit || Math.abs(testPosZ.z) > limit) colZ = true;
+    // Also guard the actual position for ground-boundary (player is already there, so
+    // if we're past the limit physics already stopped us — no separate check needed).
+
     for (let i = 0; i < state.obstacles.length; i++) {
         const box = state.obstacles[i];
-        const pillarHeight = box.userData.height;
+        const ph  = box.userData.height;
         const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
         const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
+        const ex = halfW + PLAYER_RADIUS;
+        const ez = halfD + PLAYER_RADIUS;
+        const bx = box.position.x;
+        const bz = box.position.z;
 
-        const minX = box.position.x - halfW - PLAYER_RADIUS;
-        const maxX = box.position.x + halfW + PLAYER_RADIUS;
-        const minZ = box.position.z - halfD - PLAYER_RADIUS;
-        const maxZ = box.position.z + halfD + PLAYER_RADIUS;
+        // X-axis collision test
+        if (!colX &&
+            testPosX.x > bx - ex && testPosX.x < bx + ex &&
+            testPosX.z > bz - ez && testPosX.z < bz + ez) {
+            if (feetY < ph - 0.3) colX = true;
+        }
 
-        if (position.x > minX && position.x < maxX && position.z > minZ && position.z < maxZ) {
-            if (feetY < pillarHeight - 0.3) {
-                return true;
-            }
+        // Z-axis collision test
+        if (!colZ &&
+            testPosZ.x > bx - ex && testPosZ.x < bx + ex &&
+            testPosZ.z > bz - ez && testPosZ.z < bz + ez) {
+            if (feetY < ph - 0.3) colZ = true;
+        }
+
+        // Ground height from actual (current) position
+        if (actualPos.x > bx - ex && actualPos.x < bx + ex &&
+            actualPos.z > bz - ez && actualPos.z < bz + ez) {
+            if (ph > groundY) groundY = ph;
         }
     }
+
+    return { colX, colZ, groundY };
+}
+
+// Thin public wrappers kept for any potential external usage.
+export function checkCollision(position, feetY) {
     const limit = (MAP_SIZE / 2) - 1;
     if (Math.abs(position.x) > limit || Math.abs(position.z) > limit) return true;
+    for (let i = 0; i < state.obstacles.length; i++) {
+        const box = state.obstacles[i];
+        const ph  = box.userData.height;
+        const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
+        const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
+        const ex = halfW + PLAYER_RADIUS, ez = halfD + PLAYER_RADIUS;
+        if (position.x > box.position.x - ex && position.x < box.position.x + ex &&
+            position.z > box.position.z - ez && position.z < box.position.z + ez) {
+            if (feetY < ph - 0.3) return true;
+        }
+    }
     return false;
 }
 
 export function getGroundY(position) {
-    let highestGround = 0;
-
+    let highest = 0;
     for (let i = 0; i < state.obstacles.length; i++) {
         const box = state.obstacles[i];
-        const pillarHeight = box.userData.height;
+        const ph  = box.userData.height;
         const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
         const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
-
-        const minX = box.position.x - halfW - PLAYER_RADIUS;
-        const maxX = box.position.x + halfW + PLAYER_RADIUS;
-        const minZ = box.position.z - halfD - PLAYER_RADIUS;
-        const maxZ = box.position.z + halfD + PLAYER_RADIUS;
-
-        if (position.x > minX && position.x < maxX && position.z > minZ && position.z < maxZ) {
-            if (pillarHeight > highestGround) {
-                highestGround = pillarHeight;
-            }
+        const ex = halfW + PLAYER_RADIUS, ez = halfD + PLAYER_RADIUS;
+        if (position.x > box.position.x - ex && position.x < box.position.x + ex &&
+            position.z > box.position.z - ez && position.z < box.position.z + ez) {
+            if (ph > highest) highest = ph;
         }
     }
-    return highestGround;
+    return highest;
 }
+
+
 
 export function updatePlayerPhysics(delta) {
     if (state.controls) {
@@ -158,8 +199,11 @@ export function updatePlayerPhysics(delta) {
             const nextZ = playerObj.position.z + state.velocity.z * delta;
             const feetY = playerObj.position.y - PLAYER_HEIGHT;
 
-            const collisionX = checkCollision(_tempPos.set(nextX, playerObj.position.y, playerObj.position.z), feetY);
-            const collisionZ = checkCollision(_tempPos.set(playerObj.position.x, playerObj.position.y, nextZ), feetY);
+            // Single-pass scan: compute X collision, Z collision, and ground height together
+            const testPosX = _tempPos.set(nextX, playerObj.position.y, playerObj.position.z);
+            const testPosZ = _tempZ.set(playerObj.position.x, playerObj.position.y, nextZ);
+            const { colX: collisionX, colZ: collisionZ, groundY: currentGroundY } =
+                scanObstacles(playerObj.position, testPosX, testPosZ, feetY);
 
             if (!collisionX) {
                 playerObj.position.x = nextX;
@@ -175,7 +219,6 @@ export function updatePlayerPhysics(delta) {
 
             playerObj.position.y += state.velocity.y * delta;
 
-            const currentGroundY = getGroundY(playerObj.position);
             const minCameraY = currentGroundY + PLAYER_HEIGHT; 
 
             if (playerObj.position.y < minCameraY) {

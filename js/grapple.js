@@ -27,6 +27,8 @@ export function toggleGrapplingHook() {
             state.leftGun.position.z += 0.15;
         }
 
+        // Flush world matrix so localToWorld uses this frame's transform, not last frame's
+        state.leftGun.updateWorldMatrix(true, false);
         const barrelWorldPosition = new THREE.Vector3(0, 0, -0.19);
         state.leftGun.localToWorld(barrelWorldPosition);
         state.hookPosition.copy(barrelWorldPosition);
@@ -34,6 +36,9 @@ export function toggleGrapplingHook() {
         const raycaster = new THREE.Raycaster();
         raycaster.setFromCamera(new THREE.Vector2(0, 0), state.camera);
         const ray = raycaster.ray;
+
+        // Cache player object once — used repeatedly in the target loop below
+        const playerObj = state.controls.getObject();
 
         // 1) Check enemies first with a premium magnetic aim assist
         let bestEnemyHit = null;
@@ -51,10 +56,10 @@ export function toggleGrapplingHook() {
             const magneticRadius = 3.5 * enemyScale;
             
             if (distToRay <= magneticRadius) {
-                const distToPlayer = state.controls.getObject().position.distanceTo(enemyPos);
+                const distToPlayer = playerObj.position.distanceTo(enemyPos);
                 
                 // Ensure enemy is in front of the player (dot product > 0)
-                const toEnemy = new THREE.Vector3().subVectors(enemyPos, state.controls.getObject().position);
+                const toEnemy = new THREE.Vector3().subVectors(enemyPos, playerObj.position);
                 const dot = toEnemy.dot(ray.direction);
                 
                 // Allow a small buffer beyond HOOK_MAX_RANGE (plus enemyScale) to account for large enemy size
@@ -88,7 +93,7 @@ export function toggleGrapplingHook() {
         } else {
             const camDir = new THREE.Vector3();
             state.camera.getWorldDirection(camDir);
-            state.hookTarget.copy(state.controls.getObject().position).addScaledVector(camDir, HOOK_MAX_RANGE);
+            state.hookTarget.copy(playerObj.position).addScaledVector(camDir, HOOK_MAX_RANGE);
             state.hookWillHit = false;
             state.hookIsEnemy = false;
         }
@@ -160,6 +165,8 @@ export function updateHook(delta) {
         }
 
         if (state.leftGun && state.hookMesh) {
+            // Ensure gun world matrix is current before computing the rope origin
+            state.leftGun.updateWorldMatrix(true, false);
             const gunTip = new THREE.Vector3(0, 0, -0.19);
             state.leftGun.localToWorld(gunTip);
             const distance = gunTip.distanceTo(state.hookPosition);

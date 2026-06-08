@@ -51,7 +51,6 @@ export const PEER_Y_OFFSET = 0.35;
 export const HIT_FLASH_DURATION_MS = 150;
 
 export const HOOK_SPEED = 200;
-export const HOOK_PULL_SPEED = 45;
 export const LASER_BEAM_FADE_TIME = 0.3;
 export const TARGET_HIT_RANGE_MULTIPLIER = 1.6;
 

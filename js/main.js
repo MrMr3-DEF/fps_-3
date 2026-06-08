@@ -14,7 +14,8 @@ import {
     SCOPED_FOV,
     FOV_LERP_SPEED,
     PLAYER_RADIUS,
-    WEAPON_STATS
+    WEAPON_STATS,
+    TARGET_HIT_RANGE_MULTIPLIER
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
@@ -41,7 +42,14 @@ export function updateHealthBar(hpRatio, flashColor = null) {
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
-const fpsCounterEl = document.getElementById('fps-counter');
+// Cached DOM element references — queried once at startup instead of every frame
+const fpsCounterEl      = document.getElementById('fps-counter');
+const reloadBarEl       = document.getElementById('reload-bar');
+const gogglesScopeEl    = document.getElementById('goggles-scope');
+const crosshairEl       = document.getElementById('crosshair');
+const uiEl              = document.getElementById('ui');
+const healthContainerEl = document.getElementById('health-container');
+const reloadContainerEl = document.getElementById('reload-container');
 
 function validateUsername(username) {
     if (!username) {
@@ -209,9 +217,7 @@ export function init() {
     if (btnHostCancel) {
         btnHostCancel.addEventListener('click', (e) => {
             e.stopPropagation();
-            import('./multiplayer.js').then((mp) => {
-                mp.disconnectMultiplayer();
-            });
+            disconnectMultiplayer();
             panelHostWaiting.style.display = 'none';
             panelMp.style.display = 'flex';
         });
@@ -297,12 +303,9 @@ export function init() {
         }
 
         // Restore other gameplay HUD elements that might have been hidden on death
-        const crosshair = document.getElementById('crosshair');
-        if (crosshair) crosshair.style.display = 'block';
-        const ui = document.getElementById('ui');
-        if (ui) ui.style.display = 'flex';
-        const fpsCounter = document.getElementById('fps-counter');
-        if (fpsCounter) fpsCounter.style.display = 'block';
+        if (crosshairEl) crosshairEl.style.display = 'block';
+        if (uiEl) uiEl.style.display = 'flex';
+        if (fpsCounterEl) fpsCounterEl.style.display = 'block';
 
         // Safari Keyboard Focus Fix: Force active focus on the body and canvas
         document.body.focus();
@@ -320,10 +323,8 @@ export function init() {
         state.rightClickActive = false;
         state.keyCActive = false;
         cancelInspect();
-        const healthContainer = document.getElementById('health-container');
-        if (healthContainer) healthContainer.style.display = 'none';
-        const reloadContainer = document.getElementById('reload-container');
-        if (reloadContainer) reloadContainer.style.display = 'none';
+        if (healthContainerEl) healthContainerEl.style.display = 'none';
+        if (reloadContainerEl) reloadContainerEl.style.display = 'none';
 
         
         // Hide all starting panels
@@ -354,9 +355,7 @@ export function init() {
             if (panelMain) panelMain.style.display = 'flex';
             
             if (state.isMultiplayer) {
-                import('./multiplayer.js').then((mp) => {
-                    mp.disconnectMultiplayer();
-                });
+                disconnectMultiplayer();
             }
         }
 
@@ -375,9 +374,7 @@ export function init() {
             e.stopPropagation();
             state.isPlaying = false;
             if (state.isMultiplayer) {
-                import('./multiplayer.js').then((mp) => {
-                    mp.disconnectMultiplayer();
-                });
+                disconnectMultiplayer();
             }
             if (panelPause) panelPause.style.display = 'none';
             if (panelMain) panelMain.style.display = 'flex';
@@ -438,9 +435,7 @@ export function init() {
             resetHook();
 
             if (state.isMultiplayer) {
-                import('./multiplayer.js').then((mp) => {
-                    mp.disconnectMultiplayer();
-                });
+                disconnectMultiplayer();
             }
 
             // Hide death screen and return to main panel
@@ -500,7 +495,7 @@ export function init() {
                     resetHook();
                     state.velocity.y = JUMP_FORCE * 0.8; 
                     state.canJump = false;
-                } else if (state.canJump === true && state.hookState !== 'PULLING') {
+                } else if (state.canJump && state.hookState !== 'PULLING') {
                     state.velocity.y += JUMP_FORCE;
                     state.canJump = false;
                 }
@@ -508,8 +503,8 @@ export function init() {
                 break;
             case 'KeyR':
                 if (state.controls.isLocked) {
-                    toggleGrapplingHook();
-                    cancelInspect();
+                    cancelInspect();          // Cancel inspect first so the gun is in its normal pose
+                    toggleGrapplingHook();    // Then fire from the correct barrel position
                 }
                 break;
             case 'KeyE':
@@ -626,7 +621,11 @@ export function init() {
     });
 
     window.addEventListener('resize', onWindowResize);
+
+    // Start the render loop only after all systems are initialised
+    animate();
 }
+
 
 
 export function animate() {
@@ -639,13 +638,12 @@ export function animate() {
     updateWeapons(delta);
 
     // Update reload bar UI (indicates cooldown recovery)
-    const reloadBar = document.getElementById('reload-bar');
-    if (reloadBar) {
+    if (reloadBarEl) {
         const stats = WEAPON_STATS[state.activeWeaponName];
         const maxCooldown = stats ? stats.fireRate : 0.1;
 
         const progress = Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown)));
-        reloadBar.style.width = `${progress * 100}%`;
+        reloadBarEl.style.width = `${progress * 100}%`;
     }
 
     // 1.5) Automatic weapon firing
@@ -680,7 +678,7 @@ export function animate() {
             const target = state.targets[j];
             const distance = proj.position.distanceTo(target.position);
 
-            const hitRange = 1.6 * (target.userData.scale || 1.0);
+            const hitRange = TARGET_HIT_RANGE_MULTIPLIER * (target.userData.scale || 1.0);
             if (distance < hitRange) {
                 if (state.isMultiplayer) {
                     if (!state.isHost) {
@@ -690,7 +688,9 @@ export function animate() {
                                     conn.send({
                                         type: 'hit_target',
                                         targetIndex: j,
-                                        damage: 1
+                                        // All non-sniper weapons have damage:1 in WEAPON_STATS;
+                                        // read from config so future changes propagate automatically.
+                                        damage: WEAPON_STATS[state.activeWeaponName]?.damage ?? 1
                                     });
                                 } catch (err) {
                                     console.error('Error broadcasting hit_target:', err);
@@ -698,10 +698,10 @@ export function animate() {
                             }
                         });
                     } else {
-                        processTargetHit(j, 1);
+                        processTargetHit(j, WEAPON_STATS[state.activeWeaponName]?.damage ?? 1);
                     }
                 } else {
-                    processTargetHit(j, 1);
+                    processTargetHit(j, WEAPON_STATS[state.activeWeaponName]?.damage ?? 1);
                 }
                 
                 projectileHit = true;
@@ -719,7 +719,7 @@ export function animate() {
                 const peerData = state.peers[peerId];
                 if (peerData && peerData.mesh) {
                     const distance = proj.position.distanceTo(peerData.mesh.position);
-                    const hitRange = 0.8; // Player bean collision hit range
+                    const hitRange = PLAYER_RADIUS; // Player bean collision hit range
                     
                     if (distance < hitRange) {
                         projectileHit = true;
@@ -791,34 +791,29 @@ export function animate() {
         }
 
         // Toggle goggles, normal crosshair, and standard gameplay HUD overlays
-        const gogglesScopeEl = document.getElementById('goggles-scope');
-        const crosshairEl = document.getElementById('crosshair');
-        const uiEl = document.getElementById('ui');
-        const fpsEl = document.getElementById('fps-counter');
-        const healthEl = document.getElementById('health-container');
-        const reloadEl = document.getElementById('reload-container');
-
+        // (uses module-level cached refs: gogglesScopeEl, crosshairEl, uiEl, etc.)
         if (gogglesScopeEl && crosshairEl) {
             if (state.isScoped) {
                 gogglesScopeEl.style.display = 'block';
                 crosshairEl.style.display = 'none';
                 if (uiEl) uiEl.style.display = 'none';
-                if (fpsEl) fpsEl.style.display = 'none';
-                if (healthEl) healthEl.style.display = 'none';
-                if (reloadEl) reloadEl.style.display = 'none';
+                if (fpsCounterEl) fpsCounterEl.style.display = 'none';
+                if (healthContainerEl) healthContainerEl.style.display = 'none';
+                if (reloadContainerEl) reloadContainerEl.style.display = 'none';
             } else {
                 gogglesScopeEl.style.display = 'none';
                 crosshairEl.style.display = 'block';
                 if (uiEl) uiEl.style.display = 'flex';
-                if (fpsEl) fpsEl.style.display = 'block';
-                if (healthEl) {
-                    healthEl.style.display = state.controls.isLocked ? 'block' : 'none';
+                if (fpsCounterEl) fpsCounterEl.style.display = 'block';
+                if (healthContainerEl) {
+                    healthContainerEl.style.display = state.controls.isLocked ? 'block' : 'none';
                 }
-                if (reloadEl) {
-                    reloadEl.style.display = state.controls.isLocked ? 'block' : 'none';
+                if (reloadContainerEl) {
+                    reloadContainerEl.style.display = state.controls.isLocked ? 'block' : 'none';
                 }
             }
         }
+
     }
 
 
@@ -893,16 +888,11 @@ export function triggerDeath() {
     }
 
     // Hide all gameplay HUD UI elements behind the death screen
-    const crosshair = document.getElementById('crosshair');
-    if (crosshair) crosshair.style.display = 'none';
-    const ui = document.getElementById('ui');
-    if (ui) ui.style.display = 'none';
-    const fpsCounter = document.getElementById('fps-counter');
-    if (fpsCounter) fpsCounter.style.display = 'none';
-    const healthContainer = document.getElementById('health-container');
-    if (healthContainer) healthContainer.style.display = 'none';
-    const reloadContainer = document.getElementById('reload-container');
-    if (reloadContainer) reloadContainer.style.display = 'none';
+    if (crosshairEl) crosshairEl.style.display = 'none';
+    if (uiEl) uiEl.style.display = 'none';
+    if (fpsCounterEl) fpsCounterEl.style.display = 'none';
+    if (healthContainerEl) healthContainerEl.style.display = 'none';
+    if (reloadContainerEl) reloadContainerEl.style.display = 'none';
 
     // Show the red Death Screen overlay
     const deathOverlay = document.getElementById('death-overlay');
@@ -1000,6 +990,7 @@ export function checkLavaDamage(delta) {
             if (now - state.lastDamageTime >= LAVA_DAMAGE_TICK_MS) {
                 state.playerHp -= LAVA_DAMAGE_PER_TICK;
                 state.lastDamageTime = now;
+                state.regenTimer = 0; // Prevent regen racing with lava damage
 
                 const feetPos = playerObj.position.clone();
                 feetPos.y -= 1.8;
@@ -1009,6 +1000,30 @@ export function checkLavaDamage(delta) {
 
                 if (state.playerHp <= 0) {
                     triggerDeath();
+
+                    // Broadcast lava death in multiplayer (mirrors the bullet-death broadcast
+                    // in takePlayerDamage so the kill feed and death counter stay correct)
+                    if (state.isMultiplayer && state.peer) {
+                        state.deaths++;
+                        const deathsEl = document.getElementById('deaths');
+                        if (deathsEl) deathsEl.innerText = state.deaths;
+
+                        const myName = document.getElementById('input-username').value.trim() || 'Gast';
+                        state.connections.forEach((conn) => {
+                            if (conn.open) {
+                                try {
+                                    conn.send({
+                                        type: 'player_died',
+                                        victimName: myName,
+                                        killerName: 'Lava',
+                                        victimPeerId: state.peer.id
+                                    });
+                                } catch (err) {
+                                    console.error('Error broadcasting lava death:', err);
+                                }
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -1038,4 +1053,3 @@ export function updateHealthRegen(delta) {
 
 // Automatically bootstrap the game
 init();
-animate();
