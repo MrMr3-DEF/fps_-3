@@ -14,13 +14,13 @@ export const MAX_ENEMY_HEIGHT = 120.0;
 export const HOOK_MAX_RANGE = 300.0;
 
 export const SWITCH_DURATION = 0.15;
-export const PROJECTILE_SPEED = 200;
+export const PROJECTILE_SPEED = 350;
 export const PROJECTILE_LIFETIME = 2.0;
 
 export const ENEMY_CLASSES = [
-    { hp: 1,  color: 0x00bfff, scale: 1.5 },
-    { hp: 3,  color: 0x2ed573, scale: 3 },
-    { hp: 5,  color: 0xffa500, scale: 4.5 },
+    { hp: 1, color: 0x00bfff, scale: 1.5 },
+    { hp: 3, color: 0x2ed573, scale: 3 },
+    { hp: 5, color: 0xffa500, scale: 4.5 },
     { hp: 10, color: 0xff4757, scale: 6 }
 ];
 
@@ -33,10 +33,10 @@ export const SCOPED_FOV = 15;
 export const FOV_LERP_SPEED = 15;
 
 export const WEAPON_STATS = {
-    PISTOL:  { fireRate: 0.1, damage: 1, recoil: 0.08, spread: 0.002, bulletColor: 0xff0055 },
-    SHOTGUN: { fireRate: 0.6, damage: 1, recoil: 0.22, spread: 0.08,  bulletColor: 0xffaa00, pellets: 5 },
-    AR:      { fireRate: 0.15, damage: 1, recoil: 0.12, spread: 0.002, bulletColor: 0x00ff88 },
-    SNIPER:  { fireRate: 2.0, damage: 10, recoil: 0.30, spread: 0.0,   bulletColor: 0xffff00 },
+    PISTOL: { fireRate: 0.1, damage: 1, recoil: 0.08, spread: 0.002, bulletColor: 0xff0055 },
+    SHOTGUN: { fireRate: 0.6, damage: 1, recoil: 0.22, spread: 0.08, bulletColor: 0xffaa00, pellets: 5 },
+    AR: { fireRate: 0.15, damage: 1, recoil: 0.12, spread: 0.002, bulletColor: 0x00ff88 },
+    SNIPER: { fireRate: 2.0, damage: 10, recoil: 0.30, spread: 0.0, bulletColor: 0xffff00 },
     MINIGUN: { fireRate: 0.06, damage: 1, recoil: 0.02, spread: 0.002, bulletColor: 0xff6600 },
 };
 
@@ -50,7 +50,7 @@ export const ROOM_CODE_LENGTH = 4;
 export const PEER_Y_OFFSET = 0.35;
 export const HIT_FLASH_DURATION_MS = 150;
 
-export const HOOK_SPEED = 200;
+export const HOOK_SPEED = 300;
 export const LASER_BEAM_FADE_TIME = 0.3;
 export const TARGET_HIT_RANGE_MULTIPLIER = 1.6;
 
