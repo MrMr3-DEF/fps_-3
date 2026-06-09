@@ -55,7 +55,7 @@ export const buildGun = (coreColor) => {
     const coreGeo = new THREE.BoxGeometry(0.03, 0.03, 0.36);
     const coreMat = new THREE.MeshBasicMaterial({ color: coreColor });
     const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(0, 0.04, -0.04);
+    core.position.set(0, 0.042, -0.04); // Raised slightly to prevent z-fighting with the top face of the gun body
     gunGroup.add(core);
     return gunGroup;
 };
@@ -133,7 +133,7 @@ export const buildAR = () => {
 
     const coreGeo = new THREE.BoxGeometry(0.04, 0.03, 0.48);
     const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(0, 0.05, -0.06);
+    core.position.set(0, 0.052, -0.06); // Raised slightly to prevent z-fighting with the top face of the gun body
     arGroup.add(core);
 
     return arGroup;
@@ -159,7 +159,7 @@ export const buildSniper = () => {
 
     const coreGeo = new THREE.BoxGeometry(0.03, 0.03, 0.36);
     const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(0, 0.04, -0.04);
+    core.position.set(0, 0.042, -0.04); // Raised slightly to prevent z-fighting with the top face of the gun body
     sniperGroup.add(core);
 
     // 2. Continuous round barrel (centered on the end of the body, Y = 0, length increased by 20% to 1.14)

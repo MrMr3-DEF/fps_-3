@@ -78,9 +78,9 @@ export function createEnvironment() {
         state.fakePillars.push(mesh);
     }
 
-    // Generate 80 distant, widely spread 2D lava pools
-    const fakeLavaGeo = new THREE.PlaneGeometry(LAVA_POOL_HALF_SIZE * 2, LAVA_POOL_HALF_SIZE * 2);
-    const fakeLavaMat = new THREE.MeshBasicMaterial({ color: 0xff3b00, side: THREE.DoubleSide }); // Bright, unlit lava color
+    // Generate 80 distant, widely spread 3D thin lava pools (using BoxGeometry to prevent Z-fighting)
+    const fakeLavaGeo = new THREE.BoxGeometry(LAVA_POOL_HALF_SIZE * 2, 0.15, LAVA_POOL_HALF_SIZE * 2);
+    const fakeLavaMat = new THREE.MeshBasicMaterial({ color: 0xff3b00 }); // Bright, unlit lava color
 
     for (let i = 0; i < 80; i++) {
         const angle = Math.random() * Math.PI * 2;
@@ -89,8 +89,7 @@ export function createEnvironment() {
         const z = Math.sin(angle) * radius;
 
         const mesh = new THREE.Mesh(fakeLavaGeo, fakeLavaMat);
-        mesh.rotation.x = -Math.PI / 2;
-        mesh.position.set(x, 0.01, z); // slight offset to prevent z-fighting with the floor
+        mesh.position.set(x, 0.075, z); // Center positioned at y = 0.075 so top is at y = 0.15 (above floor)
         
         state.scene.add(mesh);
     }
@@ -133,8 +132,8 @@ export function createEnvironment() {
     }
     state.scene.add(pillarInstanced);
 
-    // 2) Spawn 30 glowing orange lava pool chains of 1 to 5 connected squares (completely avoiding pillars)
-    const lavaGeo = new THREE.PlaneGeometry(LAVA_POOL_HALF_SIZE * 2, LAVA_POOL_HALF_SIZE * 2);
+    // 2) Spawn 30 glowing orange lava pool chains of 1 to 5 connected squares (completely avoiding pillars, using BoxGeometry to prevent Z-fighting)
+    const lavaGeo = new THREE.BoxGeometry(LAVA_POOL_HALF_SIZE * 2, 0.15, LAVA_POOL_HALF_SIZE * 2);
     const lavaMat = new THREE.MeshStandardMaterial({ 
         color: 0xff4500, 
         emissive: 0xff2200, 
@@ -231,8 +230,7 @@ export function createEnvironment() {
         if (chainValid) {
             for (const sq of squares) {
                 const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
-                lavaMesh.rotation.x = -Math.PI / 2;
-                lavaMesh.position.set(sq.x, 0.02, sq.z);
+                lavaMesh.position.set(sq.x, 0.075, sq.z); // Center at y = 0.075 so top is at y = 0.15 (above floor)
                 state.scene.add(lavaMesh);
                 state.lavaPools.push(lavaMesh);
                 
