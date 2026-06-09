@@ -33,7 +33,7 @@ async function getPeerConfig() {
     };
 
     try {
-        const response = await fetch('/api/turn');
+        const response = await fetch(`/api/turn?room=${state.roomCode || ''}`);
         if (response.ok) {
             const data = await response.json();
             if (data && data.iceServers) {
