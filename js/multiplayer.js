@@ -16,17 +16,56 @@ import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun } from './we
 const _stateEuler = new THREE.Euler();
 
 
-const PEER_CONFIG = {
-    debug: 2, // Prints warnings and errors in developer console
-    config: {
-        iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun.cloudflare.com:3478' }
-        ]
+async function getPeerConfig() {
+    const config = {
+        debug: 2,
+        host: '0.peerjs.com',
+        port: 443,
+        path: '/',
+        secure: true,
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun.cloudflare.com:3478' }
+            ]
+        }
+    };
+
+    try {
+        const response = await fetch('/api/turn');
+        if (response.ok) {
+            const data = await response.json();
+            if (data && data.iceServers) {
+                config.config.iceServers = data.iceServers;
+                console.log('Successfully loaded Cloudflare TURN servers.');
+                return config;
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to fetch Cloudflare TURN servers, using fallback ICE servers:', e);
     }
-};
+
+    // Fallback ICE/TURN servers if Cloudflare config is not set up or fails
+    config.config.iceServers.push(
+        {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        }
+    );
+    return config;
+}
 
 export function broadcastToAll(packet, excludePeerId = null) {
     if (!state.isMultiplayer || state.connections.length === 0) return;
@@ -86,8 +125,8 @@ export async function hostGame(username, roomCode) {
     }
 
     const { Peer } = await import('peerjs');
-    
-    peerInstance = new Peer(hostPeerId, PEER_CONFIG);
+    const activeConfig = await getPeerConfig();
+    peerInstance = new Peer(hostPeerId, activeConfig);
     state.peer = peerInstance;
 
     peerInstance.on('open', (id) => {
@@ -127,8 +166,8 @@ export async function joinGame(username, roomCode) {
     }
 
     const { Peer } = await import('peerjs');
-    
-    peerInstance = new Peer(PEER_CONFIG);
+    const activeConfig = await getPeerConfig();
+    peerInstance = new Peer(activeConfig);
     state.peer = peerInstance;
 
     peerInstance.on('open', (clientId) => {

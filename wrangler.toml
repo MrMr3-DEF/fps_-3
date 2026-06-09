@@ -1,7 +1,8 @@
 name = "fps3"
 compatibility_date = "2026-05-28"
+main = "worker.js"
 
 [assets]
 directory = "./"
-# We exclude the .git directory and git files to avoid uploading internal git metadata to Cloudflare
-exclude = [".git/**", ".github/**"]
+# We exclude internal configuration and source-control directories from assets
+exclude = [".git/**", ".github/**", "worker.js", "wrangler.toml", "functions/**"]
