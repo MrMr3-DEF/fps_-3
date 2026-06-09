@@ -12,10 +12,10 @@ import {
 } from './config.js';
 import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun } from './weapons.js';
 
-// Module-level cached objects to prevent per-tick allocations
+
 const _stateEuler = new THREE.Euler();
 
-// Shared PeerJS ICE / debug config (avoids duplication between hostGame and joinGame)
+
 const PEER_CONFIG = {
     debug: 2, // Prints warnings and errors in developer console
     config: {
@@ -210,16 +210,6 @@ function setupConnection(conn) {
             const hostStatus = document.getElementById('host-lobby-status');
             const currentPlayers = state.connections.length + 1;
             if (hostStatus) hostStatus.innerText = `Warte auf Mitspieler (${currentPlayers}/5)...`;
-            
-            // Send initial lobby info
-            try {
-                conn.send({
-                    type: 'lobby_welcome',
-                    roomCode: state.roomCode
-                });
-            } catch (err) {
-                console.error('Error sending lobby_welcome:', err);
-            }
         } else {
             // Client successfully connected!
             console.log('Client successfully connected to room! Waiting for click activation.');
@@ -262,9 +252,14 @@ function setupConnection(conn) {
             const currentPlayers = state.connections.length + 1;
             if (hostStatus) hostStatus.innerText = `Warte auf Mitspieler (${currentPlayers}/5)...`;
         } else {
-            // If the host disconnected, drop client back to menu
             disconnectMultiplayer();
             state.controls.unlock();
+            const blocker = document.getElementById('blocker');
+            if (blocker) blocker.style.display = 'flex';
+            const panels = ['panel-mp', 'panel-host-waiting', 'panel-join-room', 'panel-pause'];
+            panels.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+            const panelMain = document.getElementById('panel-main');
+            if (panelMain) panelMain.style.display = 'flex';
         }
     });
 
@@ -339,7 +334,7 @@ function handlePeerMessage(fromPeerId, msg) {
             if (peerData.lastUpdateTime === undefined)   peerData.lastUpdateTime = performance.now();
 
             const now = performance.now();
-            // Use the real inter-packet elapsed time instead of a hard-coded 33ms
+
             const dt = Math.min((now - peerData.lastUpdateTime) / 1000, 0.1);
             peerData.lastUpdateTime = now;
 
@@ -368,6 +363,7 @@ function handlePeerMessage(fromPeerId, msg) {
                 state.scene.add(peerData.hookLine);
             }
 
+            peerData.leftGun.updateWorldMatrix(true, false);
             const gunTip = new THREE.Vector3(0, 0, -0.19);
             peerData.leftGun.localToWorld(gunTip);
             const targetPos = new THREE.Vector3(msg.hookPos.x, msg.hookPos.y, msg.hookPos.z);
@@ -400,9 +396,9 @@ function handlePeerMessage(fromPeerId, msg) {
             createLaserBeam(barrelPos, targetPos, 0xffff00);
 
         } else {
-            // Spawn a tracer bullet locally
             let bullet;
-            const bulletColor = msg.weapon === 'PISTOL' ? 0xff0055 : (msg.weapon === 'SHOTGUN' ? 0xffaa00 : 0x00ff88);
+            const bulletColors = { PISTOL: 0xff0055, SHOTGUN: 0xffaa00, AR: 0x00ff88, MINIGUN: 0xff6600 };
+            const bulletColor = bulletColors[msg.weapon] ?? 0xffffff;
 
             if (state.projectilePool.length > 0) {
                 bullet = state.projectilePool.pop();

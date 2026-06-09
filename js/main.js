@@ -688,8 +688,6 @@ export function animate() {
                                     conn.send({
                                         type: 'hit_target',
                                         targetIndex: j,
-                                        // All non-sniper weapons have damage:1 in WEAPON_STATS;
-                                        // read from config so future changes propagate automatically.
                                         damage: WEAPON_STATS[state.activeWeaponName]?.damage ?? 1
                                     });
                                 } catch (err) {
@@ -734,7 +732,7 @@ export function animate() {
                                     conn.send({
                                         type: 'player_hit',
                                         targetPeerId: peerId,
-                                        damage: 1,
+                                        damage: WEAPON_STATS[state.activeWeaponName]?.damage ?? 1,
                                         attackerName: document.getElementById('input-username').value.trim() || 'Gast'
                                     });
                                 } catch (err) {
