@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { state } from './state.js';
 import { HOOK_MAX_RANGE, HOOK_SPEED } from './config.js';
 
-const HOOK_SLINGSHOT_ACCEL = 425.0;
+const HOOK_SLINGSHOT_ACCEL = 400.0;
 
 export function resetHook() {
     state.hookState = 'IDLE';
@@ -154,7 +154,7 @@ export function updateHook(delta) {
                         state.velocity.addScaledVector(pullDir, minPullSpeed - dot);
                     }
 
-                    const maxSpeed = 150.0;
+                    const maxSpeed = 120.0;
                     if (state.velocity.length() > maxSpeed) {
                         state.velocity.setLength(maxSpeed);
                     }
