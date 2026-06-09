@@ -20,6 +20,7 @@ export const state = {
     playerMaxHp: PLAYER_MAX_HP,
     lastDamageTime: 0,
     isPlaying: false,
+    pendingPlay: false,
     regenTimer: 0,
     kills: 0,
     deaths: 0,

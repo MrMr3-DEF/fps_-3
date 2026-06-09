@@ -168,9 +168,8 @@ export function init() {
             e.stopPropagation();
             state.isMultiplayer = false;
             state.isHost = false;
-            state.isPlaying = true;
+            state.pendingPlay = true;
             state.controls.lock();
-            spawnLightBeam(new THREE.Vector3(0, 2, 0));
         });
     }
 
@@ -226,10 +225,9 @@ export function init() {
     if (btnHostStart) {
         btnHostStart.addEventListener('click', (e) => {
             e.stopPropagation();
-            state.isPlaying = true;
+            state.pendingPlay = true;
             if (blocker) blocker.style.display = 'none';
             state.controls.lock();
-            spawnLightBeam(new THREE.Vector3(0, 2, 0));
         });
     }
 
@@ -263,11 +261,9 @@ export function init() {
         btnJoinConnect.addEventListener('click', (e) => {
             e.stopPropagation();
             if (btnJoinConnect.dataset.connected === 'true') {
-                // If successfully connected, transition client into the game under direct click activation
-                state.isPlaying = true;
+                state.pendingPlay = true;
                 if (blocker) blocker.style.display = 'none';
                 state.controls.lock();
-                spawnLightBeam(new THREE.Vector3(0, 2, 0));
                 return;
             }
 
@@ -289,6 +285,11 @@ export function init() {
     }
 
     state.controls.addEventListener('lock', () => {
+        if (state.pendingPlay) {
+            state.isPlaying = true;
+            state.pendingPlay = false;
+            spawnLightBeam(new THREE.Vector3(0, 2, 0));
+        }
         if (blocker) blocker.style.display = 'none';
         if (panelPause) panelPause.style.display = 'none';
         const healthContainer = document.getElementById('health-container');
@@ -296,21 +297,18 @@ export function init() {
         const reloadContainer = document.getElementById('reload-container');
         if (reloadContainer) reloadContainer.style.display = 'block';
 
-        // Show PvP stats overlay if in multiplayer
         const pvpStats = document.getElementById('pvp-stats');
         if (pvpStats) {
             pvpStats.style.display = state.isMultiplayer ? 'block' : 'none';
         }
 
-        // Restore other gameplay HUD elements that might have been hidden on death
         if (crosshairEl) crosshairEl.style.display = 'block';
         if (uiEl) uiEl.style.display = 'flex';
         if (fpsCounterEl) fpsCounterEl.style.display = 'block';
 
-        // Safari Keyboard Focus Fix: Force active focus on the body and canvas
         document.body.focus();
         if (state.renderer && state.renderer.domElement) {
-            state.renderer.domElement.tabIndex = 1; // Ensure canvas is explicitly focusable
+            state.renderer.domElement.tabIndex = 1;
             state.renderer.domElement.focus();
         }
     });
