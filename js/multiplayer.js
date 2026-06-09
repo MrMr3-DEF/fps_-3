@@ -199,20 +199,45 @@ export function disconnectMultiplayer() {
     }
 }
 
+function showJoinError(msg) {
+    const joinErrorLog = document.getElementById('join-error-log');
+    if (joinErrorLog) {
+        joinErrorLog.style.color = '#ff4757';
+        joinErrorLog.innerText = msg;
+    }
+    const btnJoinConnect = document.getElementById('btn-join-connect');
+    if (btnJoinConnect) {
+        btnJoinConnect.innerText = 'Verbinden';
+        btnJoinConnect.style.background = '';
+        btnJoinConnect.disabled = false;
+        btnJoinConnect.removeAttribute('data-connected');
+    }
+}
+
 function setupConnection(conn) {
+    let opened = false;
+
+    // Timeout: if the DataChannel doesn't open within 10 seconds, surface an error
+    const timeoutId = !state.isHost ? setTimeout(() => {
+        if (!opened) {
+            console.warn('Connection timed out — WebRTC DataChannel never opened.');
+            showJoinError('Verbindung fehlgeschlagen. Prüfe den Code und versuche es erneut.');
+            disconnectMultiplayer();
+        }
+    }, 10000) : null;
+
     const handleOpen = () => {
-        if (state.connections.includes(conn)) return; // Prevent duplicate additions
+        if (state.connections.includes(conn)) return;
+        opened = true;
+        if (timeoutId) clearTimeout(timeoutId);
         console.log('Direct WebRTC DataConnection open with peer:', conn.peer);
         state.connections.push(conn);
 
-        // If host, announce username and add connections
         if (state.isHost) {
             const hostStatus = document.getElementById('host-lobby-status');
             const currentPlayers = state.connections.length + 1;
             if (hostStatus) hostStatus.innerText = `Warte auf Mitspieler (${currentPlayers}/5)...`;
         } else {
-            // Client successfully connected!
-            console.log('Client successfully connected to room! Waiting for click activation.');
             const joinErrorLog = document.getElementById('join-error-log');
             if (joinErrorLog) {
                 joinErrorLog.style.color = '#00ff88';
@@ -265,6 +290,10 @@ function setupConnection(conn) {
 
     conn.on('error', (err) => {
         console.error('DataConnection error:', err);
+        if (!state.isHost) {
+            showJoinError(`Verbindungsfehler: ${err.type || err.message || 'unbekannt'}`);
+            disconnectMultiplayer();
+        }
     });
 }
 
