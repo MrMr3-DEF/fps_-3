@@ -48,8 +48,8 @@ function overlapsWithPillars(sqX, sqZ) {
 export function createEnvironment() {
     if (!state.scene) return;
 
-    // Floor Mesh Setup
-    const floorGeo = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE);
+    // Floor Mesh Setup (Extended significantly to look like an unlimited world fading into the fog)
+    const floorGeo = new THREE.PlaneGeometry(3500, 3500);
     const floorMat = new THREE.MeshLambertMaterial({ color: 0xeff3f8 });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -57,32 +57,43 @@ export function createEnvironment() {
     state.scene.add(floor);
     state.grappleSurfaces.push(floor);
 
-    // Border Walls
-    const wallMat = new THREE.MeshBasicMaterial({ color: 0xe0e6ed, side: THREE.DoubleSide });
-    const wallGeo = new THREE.PlaneGeometry(MAP_SIZE, 300);
+    // Dynamic 2D distant world generation (Pillars and Lava Pools outside the playable area)
+    state.fakePillars = [];
+    const fakePillarGeo = new THREE.PlaneGeometry(PILLAR_WIDTH * 1.5, 1); // Plane width scaled, height scaled dynamically
+    const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x909aab, side: THREE.DoubleSide }); // Reacts to lighting and fog
 
-    // North
-    const wallN = new THREE.Mesh(wallGeo, wallMat);
-    wallN.position.set(0, 150, -MAP_SIZE / 2);
-    state.scene.add(wallN);
+    // Generate 120 distant, widely spread 2D billboard pillars
+    for (let i = 0; i < 120; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 1100; // From border edge to 1500 units out
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const height = 20 + Math.random() * (MAX_PILLAR_HEIGHT - 20);
 
-    // South
-    const wallS = new THREE.Mesh(wallGeo, wallMat);
-    wallS.position.set(0, 150, MAP_SIZE / 2);
-    wallS.rotation.y = Math.PI;
-    state.scene.add(wallS);
+        const mesh = new THREE.Mesh(fakePillarGeo, fakePillarMat);
+        mesh.scale.set(1, height, 1);
+        mesh.position.set(x, height / 2, z); // pivot is center, offset vertically by half height
+        
+        state.scene.add(mesh);
+        state.fakePillars.push(mesh);
+    }
 
-    // East
-    const wallE = new THREE.Mesh(wallGeo, wallMat);
-    wallE.position.set(MAP_SIZE / 2, 150, 0);
-    wallE.rotation.y = -Math.PI / 2;
-    state.scene.add(wallE);
+    // Generate 80 distant, widely spread 2D lava pools
+    const fakeLavaGeo = new THREE.PlaneGeometry(LAVA_POOL_HALF_SIZE * 2, LAVA_POOL_HALF_SIZE * 2);
+    const fakeLavaMat = new THREE.MeshBasicMaterial({ color: 0xff3b00, side: THREE.DoubleSide }); // Bright, unlit lava color
 
-    // West
-    const wallW = new THREE.Mesh(wallGeo, wallMat);
-    wallW.position.set(-MAP_SIZE / 2, 150, 0);
-    wallW.rotation.y = Math.PI / 2;
-    state.scene.add(wallW);
+    for (let i = 0; i < 80; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 1100;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+
+        const mesh = new THREE.Mesh(fakeLavaGeo, fakeLavaMat);
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(x, 0.01, z); // slight offset to prevent z-fighting with the floor
+        
+        state.scene.add(mesh);
+    }
 
     // 1) Instanced pillars for excellent draw-call performance - SPAWNED FIRST to allow lava overlap checks
     const dummy = new THREE.Object3D();
@@ -277,4 +288,12 @@ export function updateTargets(delta) {
             target.userData.healthBarGroup.quaternion.copy(state.camera.quaternion);
         }
     });
+
+    // Update 2D fake billboard pillars to face the player's horizontal position
+    if (state.fakePillars && state.controls) {
+        const playerObj = state.controls.getObject();
+        state.fakePillars.forEach((pillar) => {
+            pillar.lookAt(playerObj.position.x, pillar.position.y, playerObj.position.z);
+        });
+    }
 }

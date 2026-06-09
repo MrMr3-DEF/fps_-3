@@ -227,8 +227,37 @@
             width: 100%;
             height: 100%;
             background: #ffffff;
-            /* white */
-            transition: width 0.05s linear;
+        }
+        #world-border-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            display: none;
+            box-sizing: border-box;
+            border: 24px solid transparent;
+            border-image: repeating-linear-gradient(45deg, #ff3333, #ff3333 15px, transparent 15px, transparent 30px) 24;
+            background: radial-gradient(circle, rgba(255, 0, 0, 0) 50%, rgba(255, 0, 0, 0.15) 80%, rgba(255, 0, 0, 0.35) 100%);
+            z-index: 8;
+            opacity: 0;
+            transition: opacity 0.15s ease-out;
+        }
+
+        #world-border-text {
+            position: absolute;
+            top: 15%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff3333;
+            font-family: 'Outfit', 'Inter', sans-serif;
+            font-size: 42px;
+            font-weight: 900;
+            letter-spacing: 6px;
+            text-shadow: 0 0 10px rgba(255, 0, 0, 0.8), 0 0 20px rgba(255, 0, 0, 0.4);
+            text-align: center;
+            pointer-events: none;
         }
 
         .menu-btn {
@@ -560,6 +589,11 @@
 
     <div id="health-container">
         <div id="health-bar"></div>
+    </div>
+
+    <!-- World Border Overlay -->
+    <div id="world-border-overlay">
+        <div id="world-border-text">WORLD BORDER</div>
     </div>
 
     <script type="importmap">

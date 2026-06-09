@@ -763,6 +763,9 @@ export function animate() {
         sendLocalState();
     }
 
+    // 6.6) Update world border overlay warning opacity
+    updateWorldBorderOverlay(delta);
+
     // 7) Frame pacing calculations
     fpsFrames++;
     if (time >= fpsLastTime + 1000) {
@@ -1044,6 +1047,40 @@ export function updateHealthRegen(delta) {
         }
     } else {
         state.regenTimer = 0;
+    }
+}
+
+export function updateWorldBorderOverlay(delta) {
+    if (!state.isPlaying || !state.controls) return;
+    const playerObj = state.controls.getObject();
+    const pos = playerObj.position;
+    
+    const limit = 340; // MAP_SIZE / 2
+    const distX = limit - Math.abs(pos.x);
+    const distZ = limit - Math.abs(pos.z);
+    const minDist = Math.min(distX, distZ);
+    
+    const overlay = document.getElementById("world-border-overlay");
+    if (!overlay) return;
+    
+    const warnThreshold = 50;
+    if (minDist < warnThreshold) {
+        overlay.style.display = "block";
+        
+        // Base opacity from distance: goes from 0 at minDist=warnThreshold to 0.45 at minDist=0
+        const distanceFactor = Math.max(0, Math.min(1.0, (warnThreshold - minDist) / warnThreshold));
+        
+        // If touching or extremely close, trigger pulsating warning effect
+        if (minDist <= 1.5) {
+            const time = performance.now() / 1000;
+            const pulse = 0.6 + 0.25 * Math.sin(time * 6); // Pulsates between 0.35 and 0.85
+            overlay.style.opacity = pulse;
+        } else {
+            overlay.style.opacity = distanceFactor * 0.45;
+        }
+    } else {
+        overlay.style.opacity = 0;
+        overlay.style.display = "none";
     }
 }
 

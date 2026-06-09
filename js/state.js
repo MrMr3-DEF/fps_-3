@@ -41,6 +41,7 @@ export const state = {
     projectilePool: [],
     activeParticles: [],
     lavaPools: [],
+    fakePillars: [],
 
     // Grappling hook details
     hookState: 'IDLE', // 'IDLE', 'FIRING', 'PULLING'
