@@ -174,9 +174,7 @@ export async function joinGame(username, roomCode) {
         console.log('Client registered with ID:', clientId);
         if (joinError) joinError.innerText = `Suche Raum ${state.roomCode}...`;
         const hostPeerId = `testfps-room-${state.roomCode}`;
-        const conn = peerInstance.connect(hostPeerId, {
-            reliable: true
-        });
+        const conn = peerInstance.connect(hostPeerId);
 
         setupConnection(conn);
     });
