@@ -31,6 +31,39 @@ async function isRateLimited(request) {
     return false;
 }
 
+function makeFallbackResponse(warningMessage) {
+    const fallbackData = {
+        warning: warningMessage,
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            {
+                urls: 'turn:openrelay.metered.ca:80',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            },
+            {
+                urls: 'turn:openrelay.metered.ca:443',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            },
+            {
+                urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                username: 'openrelayproject',
+                credential: 'openrelayproject'
+            }
+        ]
+    };
+    return new Response(JSON.stringify(fallbackData), {
+        status: 200,
+        headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=60"
+        }
+    });
+}
+
 export default {
     async fetch(request, env) {
         const url = new URL(request.url);
@@ -59,32 +92,14 @@ export default {
             const TURN_KEY_ID = env.TURN_KEY_ID;
             const TURN_KEY_API_TOKEN = env.TURN_KEY_API_TOKEN;
 
-            // Kill switch to prevent overcharging
+            // Kill switch to prevent overcharging - return fallback servers with a warning (no 503 console error)
             if (env.DISABLE_TURN === "true") {
-                return new Response(
-                    JSON.stringify({ error: "Cloudflare TURN service disabled via kill switch." }),
-                    {
-                        status: 503,
-                        headers: {
-                            "Content-Type": "application/json"
-                        }
-                    }
-                );
+                return makeFallbackResponse("Cloudflare TURN service disabled via kill switch. Using fallback servers.");
             }
 
-            // If variables aren't set, return an error so the frontend fallback can take over
+            // If variables aren't set, return fallback servers with a warning (no 500 console error)
             if (!TURN_KEY_ID || !TURN_KEY_API_TOKEN) {
-                return new Response(
-                    JSON.stringify({
-                        error: "Cloudflare TURN configuration missing. Please set TURN_KEY_ID and TURN_KEY_API_TOKEN in your environment variables."
-                    }),
-                    {
-                        status: 500,
-                        headers: {
-                            "Content-Type": "application/json"
-                        }
-                    }
-                );
+                return makeFallbackResponse("Cloudflare TURN configuration missing. Using fallback servers.");
             }
 
             try {
@@ -102,15 +117,7 @@ export default {
 
                 if (!cfResponse.ok) {
                     const errorText = await cfResponse.text();
-                    return new Response(
-                        JSON.stringify({ error: `Cloudflare Calls API error: ${errorText}` }),
-                        {
-                            status: cfResponse.status,
-                            headers: {
-                                "Content-Type": "application/json"
-                            }
-                        }
-                    );
+                    return makeFallbackResponse(`Cloudflare Calls API error: ${errorText}. Using fallback servers.`);
                 }
 
                 const data = await cfResponse.json();
@@ -121,15 +128,7 @@ export default {
                     }
                 });
             } catch (error) {
-                return new Response(
-                    JSON.stringify({ error: `Failed to generate ICE servers: ${error.message}` }),
-                    {
-                        status: 500,
-                        headers: {
-                            "Content-Type": "application/json"
-                        }
-                    }
-                );
+                return makeFallbackResponse(`Failed to generate ICE servers: ${error.message}. Using fallback servers.`);
             }
         }
 
