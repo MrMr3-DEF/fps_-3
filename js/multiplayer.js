@@ -131,7 +131,7 @@ export async function hostGame(username, roomCode) {
 
     peerInstance.on('open', (id) => {
         console.log('Host registered successfully on PeerJS with ID:', id);
-        if (hostStatus) hostStatus.innerText = 'Warte auf Mitspieler (1/5)...';
+        if (hostStatus) hostStatus.innerText = 'Waiting for players (1/5)...';
         const startBtn = document.getElementById('btn-host-start');
         if (startBtn) startBtn.style.display = 'inline-block';
     });
@@ -144,9 +144,9 @@ export async function hostGame(username, roomCode) {
         console.error('Host peer error:', err);
         if (hostStatus) {
             if (err.type === 'unavailable-id') {
-                hostStatus.innerText = 'Fehler: Code bereits belegt! Bitte versuche es in 5 Sekunden erneut.';
+                hostStatus.innerText = 'Error: Code already in use! Please try again in 5 seconds.';
             } else {
-                hostStatus.innerText = `Fehler: ${err.type}`;
+                hostStatus.innerText = `Error: ${err.type}`;
             }
         }
         disconnectMultiplayer();
@@ -159,7 +159,7 @@ export async function joinGame(username, roomCode) {
     state.roomCode = roomCode.toUpperCase();
 
     const joinError = document.getElementById('join-error-log');
-    if (joinError) joinError.innerText = 'Verbinde mit Server...';
+    if (joinError) joinError.innerText = 'Connecting to server...';
 
     if (peerInstance) {
         peerInstance.destroy();
@@ -172,7 +172,7 @@ export async function joinGame(username, roomCode) {
 
     peerInstance.on('open', (clientId) => {
         console.log('Client registered with ID:', clientId);
-        if (joinError) joinError.innerText = `Suche Raum ${state.roomCode}...`;
+        if (joinError) joinError.innerText = `Searching room ${state.roomCode}...`;
         const hostPeerId = `testfps-room-${state.roomCode}`;
         const conn = peerInstance.connect(hostPeerId);
 
@@ -183,9 +183,9 @@ export async function joinGame(username, roomCode) {
         console.error('Client peer error:', err);
         if (joinError) {
             if (err.type === 'peer-unavailable') {
-                joinError.innerText = 'Fehler: Raum nicht gefunden! Überprüfe den Code.';
+                joinError.innerText = 'Error: Room not found! Please check the code.';
             } else {
-                joinError.innerText = `Fehler: ${err.type}`;
+                joinError.innerText = `Error: ${err.type}`;
             }
         }
         disconnectMultiplayer();
@@ -224,7 +224,7 @@ export function disconnectMultiplayer() {
 
     const btnJoinConnect = document.getElementById('btn-join-connect');
     if (btnJoinConnect) {
-        btnJoinConnect.innerText = 'Verbinden';
+        btnJoinConnect.innerText = 'Connect';
         btnJoinConnect.style.background = '';
         btnJoinConnect.disabled = false;
         btnJoinConnect.removeAttribute('data-connected');
@@ -244,7 +244,7 @@ function showJoinError(msg) {
     }
     const btnJoinConnect = document.getElementById('btn-join-connect');
     if (btnJoinConnect) {
-        btnJoinConnect.innerText = 'Verbinden';
+        btnJoinConnect.innerText = 'Connect';
         btnJoinConnect.style.background = '';
         btnJoinConnect.disabled = false;
         btnJoinConnect.removeAttribute('data-connected');
@@ -258,7 +258,7 @@ function setupConnection(conn) {
     const timeoutId = !state.isHost ? setTimeout(() => {
         if (!opened) {
             console.warn('Connection timed out — WebRTC DataChannel never opened.');
-            showJoinError('Verbindung fehlgeschlagen. Prüfe den Code und versuche es erneut.');
+            showJoinError('Connection failed. Please check the code and try again.');
             disconnectMultiplayer();
         }
     }, 10000) : null;
@@ -273,16 +273,16 @@ function setupConnection(conn) {
         if (state.isHost) {
             const hostStatus = document.getElementById('host-lobby-status');
             const currentPlayers = state.connections.length + 1;
-            if (hostStatus) hostStatus.innerText = `Warte auf Mitspieler (${currentPlayers}/5)...`;
+            if (hostStatus) hostStatus.innerText = `Waiting for players (${currentPlayers}/5)...`;
         } else {
             const joinErrorLog = document.getElementById('join-error-log');
             if (joinErrorLog) {
                 joinErrorLog.style.color = '#00ff88';
-                joinErrorLog.innerText = 'Erfolgreich verbunden!';
+                joinErrorLog.innerText = 'Successfully connected!';
             }
             const btnJoinConnect = document.getElementById('btn-join-connect');
             if (btnJoinConnect) {
-                btnJoinConnect.innerText = 'Dem Spiel beitreten';
+                btnJoinConnect.innerText = 'Join Game';
                 btnJoinConnect.style.background = 'linear-gradient(135deg, #2ed573, #26af5f)';
                 btnJoinConnect.disabled = false;
                 btnJoinConnect.dataset.connected = 'true';
@@ -312,7 +312,7 @@ function setupConnection(conn) {
         if (state.isHost) {
             const hostStatus = document.getElementById('host-lobby-status');
             const currentPlayers = state.connections.length + 1;
-            if (hostStatus) hostStatus.innerText = `Warte auf Mitspieler (${currentPlayers}/5)...`;
+            if (hostStatus) hostStatus.innerText = `Waiting for players (${currentPlayers}/5)...`;
         } else {
             disconnectMultiplayer();
             state.controls.unlock();
@@ -328,7 +328,7 @@ function setupConnection(conn) {
     conn.on('error', (err) => {
         console.error('DataConnection error:', err);
         if (!state.isHost) {
-            showJoinError(`Verbindungsfehler: ${err.type || err.message || 'unbekannt'}`);
+            showJoinError(`Connection error: ${err.type || err.message || 'unknown'}`);
             disconnectMultiplayer();
         }
     });
@@ -357,7 +357,7 @@ function handlePeerMessage(fromPeerId, msg) {
         let peerData = state.peers[senderId];
         let justJoined = false;
         if (!peerData) {
-            const username = msg.username || 'Gast';
+            const username = msg.username || 'Guest';
             console.log(`Spawning remote peer bean model for: ${username}`);
             peerData = createPeerBean(username);
             state.peers[senderId] = peerData;
@@ -548,7 +548,7 @@ function handlePeerMessage(fromPeerId, msg) {
             victimPeer.mesh.visible = false;
         }
 
-        const myName = document.getElementById('input-username').value.trim() || 'Gast';
+        const myName = document.getElementById('input-username').value.trim() || 'Guest';
         if (msg.killerName === myName) {
             state.kills++;
             const killsEl = document.getElementById('kills');
@@ -601,7 +601,7 @@ export function sendLocalState() {
     const playerObj = state.controls.getObject();
     const camEuler = _stateEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
 
-    const username = document.getElementById('input-username').value || 'Gast';
+    const username = document.getElementById('input-username').value || 'Guest';
 
     const packet = {
         type: 'update',

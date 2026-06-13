@@ -510,7 +510,7 @@ export function fireProjectile() {
                     type: 'player_hit',
                     targetPeerId: pvpPeerId,
                     damage: stats.damage,
-                    attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                    attackerName: document.getElementById('input-username').value.trim() || 'Guest'
                 });
             });
 

@@ -53,14 +53,14 @@ const reloadContainerEl = document.getElementById('reload-container');
 
 function validateUsername(username) {
     if (!username) {
-        return 'Spielername darf nicht leer sein!';
+        return 'Username cannot be empty!';
     }
     if (username.length > 10) {
-        return 'Spielername darf max. 10 Zeichen lang sein!';
+        return 'Username must be 10 characters or less!';
     }
-    const lettersOnly = /^[A-Za-zÄäÖöÜüß]+$/;
+    const lettersOnly = /^[A-Za-z]+$/;
     if (!lettersOnly.test(username)) {
-        return 'Spielername darf nur Buchstaben enthalten!';
+        return 'Username must contain letters only!';
     }
     return null;
 }
@@ -267,16 +267,16 @@ export function init() {
                 return;
             }
 
-            const username = inputUsername.value.trim() || 'Gast';
+            const username = inputUsername.value.trim() || 'Guest';
             const code = inputRoomCode.value.trim().toUpperCase();
 
             if (code.length !== 4) {
-                if (joinErrorLog) joinErrorLog.innerText = 'Code muss 4 Zeichen lang sein!';
+                if (joinErrorLog) joinErrorLog.innerText = 'Code must be 4 characters long!';
                 return;
             }
 
             btnJoinConnect.disabled = true;
-            btnJoinConnect.innerText = 'Verbinde...';
+            btnJoinConnect.innerText = 'Connecting...';
 
             import('./multiplayer.js').then((mp) => {
                 mp.joinGame(username, code);
@@ -342,10 +342,10 @@ export function init() {
             if (state.isMultiplayer) {
                 if (pauseLobbyInfo) pauseLobbyInfo.style.display = isDead ? 'none' : 'inline';
                 if (pauseRoomCode) pauseRoomCode.innerText = state.roomCode || '----';
-                if (btnPauseLeave) btnPauseLeave.innerText = 'Lobby verlassen';
+                if (btnPauseLeave) btnPauseLeave.innerText = 'Leave Lobby';
             } else {
                 if (pauseLobbyInfo) pauseLobbyInfo.style.display = 'none';
-                if (btnPauseLeave) btnPauseLeave.innerText = 'Spiel verlassen';
+                if (btnPauseLeave) btnPauseLeave.innerText = 'Leave Game';
             }
         } else {
             // Return to primary main selection screen
@@ -731,7 +731,7 @@ export function animate() {
                                         type: 'player_hit',
                                         targetPeerId: peerId,
                                         damage: WEAPON_STATS[state.activeWeaponName]?.damage ?? 1,
-                                        attackerName: document.getElementById('input-username').value.trim() || 'Gast'
+                                        attackerName: document.getElementById('input-username').value.trim() || 'Guest'
                                     });
                                 } catch (err) {
                                     console.error('Error broadcasting player_hit:', err);
@@ -861,7 +861,7 @@ export function takePlayerDamage(damage, attackerName) {
         if (deathsEl) deathsEl.innerText = state.deaths;
 
         // Broadcast death message to everyone in the lobby
-        const myName = document.getElementById('input-username').value.trim() || 'Gast';
+        const myName = document.getElementById('input-username').value.trim() || 'Guest';
         state.connections.forEach((conn) => {
             if (conn.open) {
                 try {
@@ -1007,7 +1007,7 @@ export function checkLavaDamage(delta) {
                         const deathsEl = document.getElementById('deaths');
                         if (deathsEl) deathsEl.innerText = state.deaths;
 
-                        const myName = document.getElementById('input-username').value.trim() || 'Gast';
+                        const myName = document.getElementById('input-username').value.trim() || 'Guest';
                         state.connections.forEach((conn) => {
                             if (conn.open) {
                                 try {

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
@@ -428,39 +428,39 @@
 
             <!-- Panel 1: Main Selection Menu -->
             <div id="panel-main" style="display: flex; flex-direction: column; align-items: center;">
-                <button class="menu-btn" id="btn-play-sp">Offline Einzelspieler</button>
-                <button class="menu-btn secondary" id="btn-menu-mp">Online Mehrspieler</button>
+                <button class="menu-btn" id="btn-play-sp">Offline Singleplayer</button>
+                <button class="menu-btn secondary" id="btn-menu-mp">Online Multiplayer</button>
 
                 <span style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
-                    WASD zum Bewegen | Shift zum Sprinten | Leertaste zum Springen<br />
-                    R zum Grappling Hook | Linksklick zum Schießen<br />
-                    E / 1, 2, 3, 4 zum Waffen wechseln | P für Third Person<br />
-                    Rechtsklick / C gedrückt halten zum Zielen (Goggles)
+                    WASD to Move | Shift to Sprint | Space to Jump<br />
+                    R for Grappling Hook | Left-Click to Shoot<br />
+                    E / 1, 2, 3, 4 to Switch Weapons | P for Third Person<br />
+                    Right-Click / Hold C to Aim (goggles)
                 </span>
 
             </div>
 
             <!-- Panel 2: Multiplayer Dashboard -->
             <div id="panel-mp" class="menu-panel">
-                <strong style="color: #57606f; font-size: 20px;">Mehrspieler-Setup</strong><br />
-                <input type="text" class="menu-input" id="input-username" placeholder="Dein Spielername"
+                <strong style="color: #57606f; font-size: 20px;">Multiplayer Setup</strong><br />
+                <input type="text" class="menu-input" id="input-username" placeholder="Your Username"
                     maxlength="10"><br />
                 <span id="mp-name-error"
                     style="font-size: 14px; color: #ff4757; font-weight: bold; margin-bottom: 8px; height: 18px; display: block;"></span>
 
                 <div style="display: flex; gap: 10px;">
-                    <button class="menu-btn" id="btn-mp-host-view">Spiel Hosten</button>
-                    <button class="menu-btn secondary" id="btn-mp-join-view">Spiel Beitreten</button>
+                    <button class="menu-btn" id="btn-mp-host-view">Host Game</button>
+                    <button class="menu-btn secondary" id="btn-mp-join-view">Join Game</button>
                 </div>
                 <br />
                 <button class="menu-btn secondary" id="btn-mp-back"
-                    style="padding: 6px 16px; font-size: 14px; margin-top: 5px;">Zurück zum Hauptmenü</button>
+                    style="padding: 6px 16px; font-size: 14px; margin-top: 5px;">Back to Main Menu</button>
             </div>
 
             <!-- Panel 3: Host Waiting Lobby -->
             <div id="panel-host-waiting" class="menu-panel">
-                <strong style="color: #57606f; font-size: 20px;">Spiel Hosten</strong><br />
-                <span style="font-size: 15px; color: #555;">Dein Raum-Code lautet:</span>
+                <strong style="color: #57606f; font-size: 20px;">Host Game</strong><br />
+                <span style="font-size: 15px; color: #555;">Your room code is:</span>
                 <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0;">
                     <span id="room-code-display"
                         style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">....</span>
@@ -471,26 +471,26 @@
                         display: inline-flex;
                         align-items: center;
                         gap: 6px;
-                    " title="Raum-Code kopieren">📋 Kopieren</button>
+                    " title="Copy room code">📋 Copy</button>
                 </div>
-                <span style="font-size: 14px; color: #777;" id="host-lobby-status">Erstelle Raum...</span><br />
+                <span style="font-size: 14px; color: #777;" id="host-lobby-status">Creating room...</span><br />
 
                 <div style="display: flex; gap: 10px; margin-top: 15px;">
-                    <button class="menu-btn" id="btn-host-start" style="display: none;">Spiel Starten</button>
-                    <button class="menu-btn secondary" id="btn-host-cancel">Abbrechen</button>
+                    <button class="menu-btn" id="btn-host-start" style="display: none;">Start Game</button>
+                    <button class="menu-btn secondary" id="btn-host-cancel">Cancel</button>
                 </div>
             </div>
 
             <!-- Panel 4: Join Room Menu -->
             <div id="panel-join-room" class="menu-panel">
-                <strong style="color: #57606f; font-size: 20px;">Spiel Beitreten</strong><br />
+                <strong style="color: #57606f; font-size: 20px;">Join Game</strong><br />
                 <input type="text" class="menu-input" id="input-room-code" placeholder="CODE" maxlength="4"
                     style="text-transform: uppercase; font-size: 20px; width: 140px; letter-spacing: 2px;"><br />
                 <span style="font-size: 14px; color: #ff4757; font-weight: bold;" id="join-error-log"></span><br />
 
                 <div style="display: flex; gap: 10px;">
-                    <button class="menu-btn" id="btn-join-connect">Verbinden</button>
-                    <button class="menu-btn secondary" id="btn-join-cancel">Zurück</button>
+                    <button class="menu-btn" id="btn-join-connect">Connect</button>
+                    <button class="menu-btn secondary" id="btn-join-cancel">Back</button>
                 </div>
             </div>
 
@@ -498,13 +498,13 @@
             <div id="panel-pause" class="menu-panel">
                 <strong style="color: #00aaee; font-size: 28px; letter-spacing: 1px;">PAUSE</strong><br />
                 <span id="pause-lobby-info" style="font-size: 15px; color: #555; margin-bottom: 15px; display: none;">
-                    Lobby-Code: <strong id="pause-room-code"
+                    Lobby Code: <strong id="pause-room-code"
                         style="color: #00aaee; font-size: 20px; letter-spacing: 1px;">----</strong>
                 </span>
 
                 <div style="display: flex; flex-direction: column; align-items: center; width: 100%;">
-                    <button class="menu-btn" id="btn-pause-resume">Weiterspielen</button>
-                    <button class="menu-btn secondary" id="btn-pause-leave">Lobby verlassen</button>
+                    <button class="menu-btn" id="btn-pause-resume">Resume</button>
+                    <button class="menu-btn secondary" id="btn-pause-leave">Leave Lobby</button>
                 </div>
             </div>
 
@@ -549,15 +549,13 @@
         animation: fadeIn 0.4s ease-in-out;
     ">
         <strong
-            style="font-size: 48px; color: #ff3838; text-shadow: 0 0 20px rgba(255, 56, 56, 0.8), 0 0 40px rgba(255, 56, 56, 0.4); font-weight: 900; letter-spacing: 2px;">DU
-            BIST GESTORBEN</strong>
+            style="font-size: 48px; color: #ff3838; text-shadow: 0 0 20px rgba(255, 56, 56, 0.8), 0 0 40px rgba(255, 56, 56, 0.4); font-weight: 900; letter-spacing: 2px;">YOU DIED</strong>
         <br /><br />
         <div style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
             <button class="menu-btn" id="btn-death-respawn"
-                style="background: linear-gradient(135deg, #ff3838, #c0392b); box-shadow: 0 4px 15px rgba(255, 56, 56, 0.4); min-width: 200px;">Wiederbeleben</button>
+                style="background: linear-gradient(135deg, #ff3838, #c0392b); box-shadow: 0 4px 15px rgba(255, 56, 56, 0.4); min-width: 200px;">Respawn</button>
             <button class="menu-btn secondary" id="btn-death-leave"
-                style="background: linear-gradient(135deg, #4b4b4b, #2f3542); color: #ccc; min-width: 200px;">Hauptmenü
-                verlassen</button>
+                style="background: linear-gradient(135deg, #4b4b4b, #2f3542); color: #ccc; min-width: 200px;">Exit to Main Menu</button>
         </div>
     </div>
 
@@ -574,11 +572,9 @@
 
 
     <div id="ui" style="display: flex; flex-direction: column; gap: 4px;">
-        <div>Ziele eliminiert: <span id="score">0</span></div>
-        <div id="pvp-stats"
-            style="display: none; font-size: 18px; color: #ff3838; text-shadow: 1px 1px 2px #000; font-weight: bold; background: rgba(0,0,0,0.25); padding: 4px 10px; border-radius: 4px; width: fit-content; pointer-events: none;">
-            Eliminierungen: <span id="kills" style="color: #00ff88;">0</span> &nbsp;|&nbsp; Tode: <span id="deaths"
-                style="color: #ff3838;">0</span>
+        <div>Targets Eliminated: <span id="score">0</span></div>
+        <div id="pvp-stats" style="display: none;">
+            Kills: <span id="kills">0</span> &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 4px;">
             <span id="sprint-badge">SPRINT</span>
