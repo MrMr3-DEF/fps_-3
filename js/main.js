@@ -117,11 +117,32 @@ export function init() {
     const sensSlider = document.getElementById('sensitivity');
     const sensValue = document.getElementById('sens-value');
 
+    // Initialize baseSensitivity and active pointerSpeed
+    let initialSens = 1.0;
+    if (sensSlider) {
+        let val = parseFloat(sensSlider.value);
+        if (!isNaN(val)) {
+            initialSens = val;
+        }
+    }
+    state.baseSensitivity = initialSens;
+    if (state.controls) {
+        state.controls.pointerSpeed = state.baseSensitivity;
+    }
+    if (sensValue) {
+        sensValue.innerText = state.baseSensitivity.toFixed(1);
+    }
+
     if (sensSlider && sensValue) {
         sensSlider.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
+            let val = parseFloat(e.target.value);
+            if (isNaN(val)) val = 1.0;
+            val = Math.max(0.1, Math.min(3.0, val));
+            state.baseSensitivity = val;
             sensValue.innerText = val.toFixed(1);
-            state.controls.pointerSpeed = val;
+            if (state.controls) {
+                state.controls.pointerSpeed = val * (state.camera ? (state.camera.fov / DEFAULT_FOV) : 1.0);
+            }
         });
         sensSlider.addEventListener('click', (e) => e.stopPropagation());
     }
@@ -484,8 +505,13 @@ export function init() {
             case 'KeyD': state.moveRight = true; break;
             case 'ShiftLeft':
             case 'ShiftRight':
-                if (state.controls.isLocked && state.hookState !== 'PULLING' && (state.moveForward || state.moveBackward || state.moveLeft || state.moveRight)) {
+                if (state.controls && state.controls.isLocked && state.hookState !== 'PULLING' && (state.moveForward || state.moveBackward || state.moveLeft || state.moveRight)) {
                     state.isSprinting = !state.isSprinting;
+                    if (state.isSprinting) {
+                        state.rightClickActive = false;
+                        state.keyCActive = false;
+                        state.isScoped = false;
+                    }
                 }
                 break;
             case 'Space':
@@ -500,13 +526,13 @@ export function init() {
                 cancelInspect();
                 break;
             case 'KeyR':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     cancelInspect();          // Cancel inspect first so the gun is in its normal pose
                     toggleGrapplingHook();    // Then fire from the correct barrel position
                 }
                 break;
             case 'KeyE':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
                     const currentIndex = weaponCycle.indexOf(state.desiredWeaponName);
                     const nextIndex = (currentIndex + 1) % weaponCycle.length;
@@ -515,50 +541,51 @@ export function init() {
                 }
                 break;
             case 'Digit1':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     state.desiredWeaponName = 'PISTOL';
                     cancelInspect();
                 }
                 break;
             case 'Digit2':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     state.desiredWeaponName = 'AR';
                     cancelInspect();
                 }
                 break;
             case 'Digit3':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     state.desiredWeaponName = 'SHOTGUN';
                     cancelInspect();
                 }
                 break;
             case 'Digit4':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     state.desiredWeaponName = 'SNIPER';
                     cancelInspect();
                 }
                 break;
             case 'Digit5':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     state.desiredWeaponName = 'MINIGUN';
                     cancelInspect();
                 }
                 break;
             case 'KeyX':
-                if (state.controls.isLocked && state.switchState === 'IDLE') {
+                if (state.controls && state.controls.isLocked && state.switchState === 'IDLE') {
                     state.inspectState = 'INSPECTING';
                     state.inspectTimer = 0.0;
                 }
                 break;
             case 'KeyC':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     state.keyCActive = true;
                     state.isScoped = state.rightClickActive || state.keyCActive;
                     cancelInspect();
+                    state.isSprinting = false; // Aiming cancels sprint
                 }
                 break;
             case 'KeyP':
-                if (state.controls.isLocked) {
+                if (state.controls && state.controls.isLocked) {
                     setThirdPerson(!state.isThirdPerson);
                 }
                 break;
@@ -584,9 +611,12 @@ export function init() {
     window.addEventListener('keyup', onKeyUp);
 
     window.addEventListener('mousedown', (e) => {
+        if (state.controls && state.controls.isLocked) {
+            e.preventDefault();
+        }
         if (e.button === 0) { // Left click
             state.isMouseDown = true;
-            if (!state.controls.isLocked) return;
+            if (!state.controls || !state.controls.isLocked) return;
             if (state.inspectState === 'INSPECTING') {
                 cancelInspect();
             }
@@ -594,15 +624,19 @@ export function init() {
                 fireProjectile();
             }
         } else if (e.button === 2) { // Right click
-            if (state.controls.isLocked) {
+            if (state.controls && state.controls.isLocked) {
                 state.rightClickActive = true;
                 state.isScoped = state.rightClickActive || state.keyCActive;
                 cancelInspect();
+                state.isSprinting = false; // Aiming cancels sprint
             }
         }
     });
 
     window.addEventListener('mouseup', (e) => {
+        if (state.controls && state.controls.isLocked) {
+            e.preventDefault();
+        }
         if (e.button === 0) {
             state.isMouseDown = false;
         } else if (e.button === 2) { // Right click release
@@ -613,7 +647,7 @@ export function init() {
 
 
     window.addEventListener('contextmenu', (e) => {
-        if (state.controls.isLocked) {
+        if (state.controls && state.controls.isLocked) {
             e.preventDefault();
         }
     });
@@ -645,7 +679,7 @@ export function animate() {
     }
 
     // 1.5) Automatic weapon firing
-    if (state.controls.isLocked && state.isMouseDown && (state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
+    if (state.controls && state.controls.isLocked && state.isMouseDown && (state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
         if (state.inspectState === 'INSPECTING') {
             cancelInspect();
         }
@@ -789,6 +823,11 @@ export function animate() {
             state.camera.updateProjectionMatrix();
         }
 
+        // Dynamic pointer speed scaling based on zoom level
+        if (state.controls) {
+            state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / DEFAULT_FOV);
+        }
+
         // Toggle goggles, normal crosshair, and standard gameplay HUD overlays
         // (uses module-level cached refs: gogglesScopeEl, crosshairEl, uiEl, etc.)
         if (gogglesScopeEl && crosshairEl) {
@@ -805,10 +844,10 @@ export function animate() {
                 if (uiEl) uiEl.style.display = 'flex';
                 if (fpsCounterEl) fpsCounterEl.style.display = 'block';
                 if (healthContainerEl) {
-                    healthContainerEl.style.display = state.controls.isLocked ? 'block' : 'none';
+                    healthContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
                 }
                 if (reloadContainerEl) {
-                    reloadContainerEl.style.display = state.controls.isLocked ? 'block' : 'none';
+                    reloadContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
                 }
             }
         }

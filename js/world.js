@@ -45,12 +45,208 @@ function overlapsWithPillars(sqX, sqZ) {
     return false;
 }
 
+function createGrassTexture() {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // Base green: rich, vibrant dark grass green
+    ctx.fillStyle = '#1e4620';
+    ctx.fillRect(0, 0, size, size);
+
+    // Populate with 20000 grass blades / flecks of varying shades
+    for (let i = 0; i < 20000; i++) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const length = 2 + Math.random() * 5;
+        const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.5; // Upward leaning
+
+        // Palette of grass colors
+        const hue = 90 + Math.random() * 25; // 90 to 115
+        const sat = 45 + Math.random() * 15; // 45% to 60%
+        const light = 22 + Math.random() * 18; // 22% to 40%
+
+        ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
+        ctx.lineWidth = 1 + Math.random() * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(250, 250);
+    return texture;
+}
+
+function createLowPolyBush() {
+    const bushGroup = new THREE.Group();
+    
+    // Choose a green base shade for the leaves
+    const greenShades = [0x2f6633, 0x3d7a42, 0x4b8e51, 0x224c25, 0x3c7841];
+    const leafColor = greenShades[Math.floor(Math.random() * greenShades.length)];
+    const leafMat = new THREE.MeshLambertMaterial({ 
+        color: leafColor, 
+        flatShading: true 
+    });
+
+    // Trunk: small cylinder
+    const trunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 1.0, 5);
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a3d28, flatShading: true });
+    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+    trunk.position.y = 0.5;
+    trunk.castShadow = true;
+    trunk.receiveShadow = true;
+    bushGroup.add(trunk);
+
+    // Leaves clusters: overlapping dodecahedrons
+    const numClusters = 3 + Math.floor(Math.random() * 3); // 3 to 5 clusters
+    for (let i = 0; i < numClusters; i++) {
+        const radius = 0.7 + Math.random() * 0.7; // size of cluster
+        const leafGeo = new THREE.DodecahedronGeometry(radius, 0);
+        const leafMesh = new THREE.Mesh(leafGeo, leafMat);
+        
+        // Offset leaf mesh relative to trunk
+        const ox = (Math.random() - 0.5) * 1.0;
+        const oy = 0.7 + Math.random() * 0.9;
+        const oz = (Math.random() - 0.5) * 1.0;
+        leafMesh.position.set(ox, oy, oz);
+        
+        // Random rotation for low-poly look variation
+        leafMesh.rotation.set(
+            Math.random() * Math.PI,
+            Math.random() * Math.PI,
+            Math.random() * Math.PI
+        );
+        
+        leafMesh.castShadow = true;
+        leafMesh.receiveShadow = true;
+        bushGroup.add(leafMesh);
+    }
+    
+    return bushGroup;
+}
+
+function create2DBushTexture() {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    ctx.clearRect(0, 0, size, size);
+
+    const centerX = size / 2;
+    const centerY = size * 0.8; // Base of the leaves
+
+    // Draw trunk down to the bottom
+    ctx.fillStyle = '#5a3d28';
+    ctx.beginPath();
+    ctx.moveTo(centerX - 10, centerY);
+    ctx.lineTo(centerX + 10, centerY);
+    ctx.lineTo(centerX + 6, size);
+    ctx.lineTo(centerX - 6, size);
+    ctx.closePath();
+    ctx.fill();
+
+    // Helper to draw low-poly leafy blobs
+    function drawPolygonBlob(cx, cy, radius, color) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        const sides = 5 + Math.floor(Math.random() * 4); // 5 to 8 sides
+        for (let i = 0; i < sides; i++) {
+            const angle = (i / sides) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
+            const r = radius * (0.85 + Math.random() * 0.3);
+            const px = cx + Math.cos(angle) * r;
+            const py = cy + Math.sin(angle) * r;
+            if (i === 0) {
+                ctx.moveTo(px, py);
+            } else {
+                ctx.lineTo(px, py);
+            }
+        }
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    const greenShades = ['#224c25', '#2f6633', '#3d7a42', '#4b8e51', '#62ad69'];
+    
+    // Back clusters
+    drawPolygonBlob(centerX - 35, centerY - 45, 40, greenShades[0]);
+    drawPolygonBlob(centerX + 35, centerY - 45, 40, greenShades[0]);
+    
+    // Middle clusters
+    drawPolygonBlob(centerX - 25, centerY - 70, 45, greenShades[1]);
+    drawPolygonBlob(centerX + 25, centerY - 70, 45, greenShades[1]);
+    drawPolygonBlob(centerX, centerY - 40, 50, greenShades[2]);
+    
+    // Front/top clusters
+    drawPolygonBlob(centerX - 12, centerY - 95, 35, greenShades[3]);
+    drawPolygonBlob(centerX + 12, centerY - 95, 35, greenShades[3]);
+    drawPolygonBlob(centerX, centerY - 110, 30, greenShades[4]);
+    drawPolygonBlob(centerX, centerY - 80, 40, greenShades[4]);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
+function overlapsWithPillarsOrLava(x, z, checkRadius) {
+    // 1. Check pillars
+    const halfPillar = PILLAR_WIDTH / 2; // 3.0
+    for (let i = 0; i < state.obstacles.length; i++) {
+        const obs = state.obstacles[i];
+        const dx = Math.abs(x - obs.position.x);
+        const dz = Math.abs(z - obs.position.z);
+        if (dx < halfPillar + checkRadius && dz < halfPillar + checkRadius) {
+            return true;
+        }
+    }
+
+    // 2. Check lava pools
+    const halfLava = LAVA_POOL_HALF_SIZE; // 12.8
+    for (let i = 0; i < state.lavaPools.length; i++) {
+        const pool = state.lavaPools[i];
+        const dx = Math.abs(x - pool.position.x);
+        const dz = Math.abs(z - pool.position.z);
+        if (dx < halfLava + checkRadius && dz < halfLava + checkRadius) {
+            return true;
+        }
+    }
+
+    // 3. Check player spawn area
+    const distFromCenter = Math.sqrt(x * x + z * z);
+    if (distFromCenter < 25) {
+        return true;
+    }
+
+    return false;
+}
+
+function overlapsWithFakePillars(x, z, checkRadius) {
+    if (!state.fakePillars) return false;
+    const halfFakePillar = (PILLAR_WIDTH * 1.5) / 2; // 4.5
+    for (let i = 0; i < state.fakePillars.length; i++) {
+        const pillar = state.fakePillars[i];
+        const dx = Math.abs(x - pillar.position.x);
+        const dz = Math.abs(z - pillar.position.z);
+        if (dx < halfFakePillar + checkRadius && dz < halfFakePillar + checkRadius) {
+            return true;
+        }
+    }
+    return false;
+}
+
 export function createEnvironment() {
     if (!state.scene) return;
 
     // Floor Mesh Setup (Extended significantly to look like an unlimited world fading into the fog)
     const floorGeo = new THREE.PlaneGeometry(3500, 3500);
-    const floorMat = new THREE.MeshLambertMaterial({ color: 0xeff3f8 });
+    const grassTex = createGrassTexture();
+    const floorMat = new THREE.MeshLambertMaterial({ map: grassTex, color: 0xffffff });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true; 
@@ -237,6 +433,78 @@ export function createEnvironment() {
                 // Lava pools are also grappleable surfaces!
                 state.grappleSurfaces.push(lavaMesh);
             }
+        }
+    }
+
+    // Spawn 3D low poly bushes inside the world border (radius < 330)
+    let spawned3DBushes = 0;
+    const target3DBushes = 180;
+    let attempts3D = 0;
+    while (spawned3DBushes < target3DBushes && attempts3D < 1000) {
+        attempts3D++;
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 330;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+
+        if (!overlapsWithPillarsOrLava(x, z, 3.5)) {
+            const bush = createLowPolyBush();
+            const s = 0.75 + Math.random() * 0.5;
+            bush.scale.set(s, s, s);
+            bush.position.set(x, 0, z);
+            state.scene.add(bush);
+            spawned3DBushes++;
+        }
+    }
+
+    // Spawn 2D billboard bushes inside the world border (radius < 330, smaller amount)
+    const bush2DTexture = create2DBushTexture();
+    const spriteMat = new THREE.SpriteMaterial({ 
+        map: bush2DTexture, 
+        transparent: true,
+        color: 0xffffff 
+    });
+
+    let spawned2DInside = 0;
+    const target2DInside = 40;
+    let attempts2DInside = 0;
+    while (spawned2DInside < target2DInside && attempts2DInside < 500) {
+        attempts2DInside++;
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * 330;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+
+        if (!overlapsWithPillarsOrLava(x, z, 2.5)) {
+            const sprite = new THREE.Sprite(spriteMat);
+            const height = 3.5 + Math.random() * 1.5;
+            const width = height * (0.8 + Math.random() * 0.3);
+            sprite.scale.set(width, height, 1.0);
+            sprite.position.set(x, height / 2, z);
+            state.scene.add(sprite);
+            spawned2DInside++;
+        }
+    }
+
+    // Spawn 2D billboard bushes outside the world border (radius between 345 and 1200)
+    let spawned2DOutside = 0;
+    const target2DOutside = 60;
+    let attempts2DOutside = 0;
+    while (spawned2DOutside < target2DOutside && attempts2DOutside < 500) {
+        attempts2DOutside++;
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 345 + Math.random() * 855; // 345 to 1200
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+
+        if (!overlapsWithFakePillars(x, z, 3.5)) {
+            const sprite = new THREE.Sprite(spriteMat);
+            const height = 4.0 + Math.random() * 2.0;
+            const width = height * (0.8 + Math.random() * 0.3);
+            sprite.scale.set(width, height, 1.0);
+            sprite.position.set(x, height / 2, z);
+            state.scene.add(sprite);
+            spawned2DOutside++;
         }
     }
 

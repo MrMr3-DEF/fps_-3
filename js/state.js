@@ -82,5 +82,6 @@ export const state = {
     isScoped: false,
     rightClickActive: false,
     keyCActive: false,
+    baseSensitivity: 1.0,
 };
 

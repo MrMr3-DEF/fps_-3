@@ -592,7 +592,7 @@ function removePeer(peerId) {
 }
 
 export function sendLocalState() {
-    if (!state.isMultiplayer || !state.isPlaying || state.connections.length === 0) return;
+    if (!state.isMultiplayer || !state.isPlaying || state.connections.length === 0 || !state.controls) return;
 
     const now = performance.now();
     if (now - lastSentTime < NETWORK_TICK_MS) return; // Cap at ~30 packets per second to conserve bandwidth
