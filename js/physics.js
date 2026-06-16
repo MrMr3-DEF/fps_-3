@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
+import { spawnRocketFlame } from './particles.js';
 import {
     PILLAR_WIDTH,
     PLAYER_RADIUS,
@@ -116,18 +117,42 @@ export function updatePlayerPhysics(delta) {
             const moveBackward = isPaused ? false : state.moveBackward;
             const moveLeft = isPaused ? false : state.moveLeft;
             const moveRight = isPaused ? false : state.moveRight;
-            const isSprinting = isPaused ? false : state.isSprinting;
             const isMoving = moveForward || moveBackward || moveLeft || moveRight;
 
-            // Speedlines & sprint UI updates
+            // Hide sprint UI permanently since sprint is replaced by hover
             const speedlines = document.getElementById('speedlines');
             const badge = document.getElementById('sprint-badge');
-            if (isSprinting && isMoving && state.hookState !== 'PULLING') {
-                if (speedlines) speedlines.style.opacity = '1';
-                if (badge) badge.style.display = 'inline-block';
+            if (speedlines) speedlines.style.opacity = '0';
+            if (badge) badge.style.display = 'none';
+
+            // --- HOVER SYSTEM ---
+            // Activate hover only mid-air when Shift is held, we have fuel, and the grappling hook is inactive
+            if (!state.canJump && state.isShiftDown && state.hoverFuel > 0.0 && state.hookState === 'IDLE') {
+                state.isHovering = true;
             } else {
-                if (speedlines) speedlines.style.opacity = '0';
-                if (badge) badge.style.display = 'none';
+                state.isHovering = false;
+            }
+
+            // Consume or recharge fuel
+            if (state.isHovering) {
+                state.hoverFuel -= delta / 5.0; // drains in 5 seconds
+                if (state.hoverFuel < 0) {
+                    state.hoverFuel = 0;
+                    state.isHovering = false;
+                }
+
+                // Spawn blue thruster flames downwards from the rocket booster
+                const boosterPos = playerObj.position.clone();
+                boosterPos.y -= 1.8;
+                spawnRocketFlame(boosterPos, 2, false);
+            } else {
+                // Recharge fuel when standing on solid ground or when grappling hook is engaged
+                if (state.canJump || state.hookState === 'PULLING') {
+                    state.hoverFuel += delta / 3.0; // recharges in 3 seconds
+                    if (state.hoverFuel > 1.0) {
+                        state.hoverFuel = 1.0;
+                    }
+                }
             }
 
             // --- ACCELERATION & FRICTION PIPELINE ---
@@ -141,15 +166,36 @@ export function updatePlayerPhysics(delta) {
                 dynamicGravity = 0; // Constant speed pull handles vertical velocity directly
             } else if (state.hookState === 'PULLING') {
                 dynamicGravity = BASE_GRAVITY * 0.3; // Low gravity for smooth slingshots
+            } else if (state.isHovering && state.velocity.y <= 0) {
+                dynamicGravity = BASE_GRAVITY * 0.1; // Minimal gravity while hovering downward
             } else if (state.velocity.y > 0) {
-                const ascentProgress = Math.min(1.0, state.velocity.y / JUMP_FORCE);
-                dynamicGravity = BASE_GRAVITY * (0.3 + ascentProgress * 0.5);
-            } else if (state.velocity.y <= 0 && state.velocity.y > -70) {
-                dynamicGravity = BASE_GRAVITY * 0.15; 
+                if (state.velocity.y > 20) {
+                    dynamicGravity = BASE_GRAVITY * 1.0;
+                } else {
+                    // Smooth deceleration before reaching max height (apex)
+                    const ratio = state.velocity.y / 20;
+                    const ease = ratio * ratio; // quadratic ease
+                    dynamicGravity = BASE_GRAVITY * (0.2 + 0.8 * ease);
+                }
             } else {
-                dynamicGravity = BASE_GRAVITY * 1.1;
+                // Descent phase: quick but smooth reacceleration after changing direction
+                const fallSpeed = Math.abs(state.velocity.y);
+                const fallRatio = Math.min(1.0, fallSpeed / 45);
+                dynamicGravity = BASE_GRAVITY * (0.2 + 1.1 * fallRatio);
             }
             state.velocity.y -= dynamicGravity * delta;
+
+            // Clamp downward velocity when hovering or falling normally
+            if (state.isHovering) {
+                if (state.velocity.y < -4.5) {
+                    state.velocity.y = -4.5; // cap downward speed to a slightly faster drift
+                }
+            } else if (state.hookState !== 'PULLING') {
+                const maxDownwardSpeed = JUMP_FORCE * 0.88;
+                if (state.velocity.y < -maxDownwardSpeed) {
+                    state.velocity.y = -maxDownwardSpeed;
+                }
+            }
 
             // --- WORLD SPACE DIRECTION INTEGRATION ---
             _camForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
@@ -168,7 +214,7 @@ export function updatePlayerPhysics(delta) {
             if (moveLeft) _moveDir.sub(_camRight);
             if (_moveDir.lengthSq() > 0) _moveDir.normalize();
 
-            const currentSpeed = isSprinting ? SPRINT_SPEED : WALK_SPEED;
+            const currentSpeed = WALK_SPEED;
 
             if (state.canJump) {
                 if (state.hookState !== 'PULLING' && isMoving) {

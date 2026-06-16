@@ -232,6 +232,32 @@
             background: #ffffff;
         }
 
+        #hover-container {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 28px;
+            height: 480px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 2px solid rgba(255, 255, 255, 0.95);
+            border-radius: 4px;
+            overflow: hidden;
+            z-index: 5;
+            display: none; /* Show only when playing */
+            box-shadow: 0 0 20px rgba(0, 170, 255, 0.35); /* blue glow */
+        }
+
+        #hover-bar {
+            width: 100%;
+            height: 100%;
+            background: #00aaff;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            transition: height 0.05s linear;
+        }
+
         #world-border-overlay {
             position: fixed;
             top: 0;
@@ -589,6 +615,11 @@
 
     <div id="health-container">
         <div id="health-bar"></div>
+    </div>
+
+    <!-- Hover Fuel Container -->
+    <div id="hover-container">
+        <div id="hover-bar"></div>
     </div>
 
     <!-- World Border Overlay -->

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { spawnParticles, createLaserBeam, spawnLightBeam } from './particles.js';
+import { spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, createShockwave } from './particles.js';
 import { respawnTarget } from './world.js';
 import { resetHook } from './grapple.js';
 import {
@@ -339,7 +339,7 @@ function handlePeerMessage(fromPeerId, msg) {
 
     // Star-Topology Relay: Host broadcasts client messages to all other clients
     if (state.isHost) {
-        if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died') {
+        if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
             broadcastToAll({
                 ...msg,
                 senderPeerId: fromPeerId
@@ -380,6 +380,13 @@ function handlePeerMessage(fromPeerId, msg) {
                 // If they were dead and are now alive (respawned!)
                 peerData.mesh.visible = true;
                 spawnLightBeam(peerData.mesh.position);
+            }
+
+            // Spawn hover thruster flame particles if active
+            if (msg.isHovering) {
+                const boosterPos = peerData.mesh.position.clone();
+                boosterPos.y -= 1.45;
+                spawnRocketFlame(boosterPos, 4, false);
             }
         }
 
@@ -565,6 +572,14 @@ function handlePeerMessage(fromPeerId, msg) {
                 }, 180);
             }
         }
+    } else if (msg.type === 'jump') {
+        const peerData = state.peers[senderId];
+        if (peerData && peerData.mesh && peerData.mesh.visible) {
+            const boosterPos = peerData.mesh.position.clone();
+            boosterPos.y -= 1.45;
+            spawnRocketFlame(boosterPos, 50, true);
+            createShockwave(boosterPos, 15.0);
+        }
     }
 }
 
@@ -613,7 +628,8 @@ export function sendLocalState() {
         isMouseDown: state.isMouseDown,
         isDead: state.playerHp <= 0,
         hookState: state.hookState,
-        hookPos: state.hookState !== 'IDLE' ? { x: state.hookPosition.x, y: state.hookPosition.y, z: state.hookPosition.z } : null
+        hookPos: state.hookState !== 'IDLE' ? { x: state.hookPosition.x, y: state.hookPosition.y, z: state.hookPosition.z } : null,
+        isHovering: state.isHovering
     };
 
     broadcastToAll(packet);
@@ -652,6 +668,14 @@ export function broadcastTargetKill(targetIndex, score, newPos, targetData) {
     broadcastToAll(packet);
 }
 
+export function broadcastLocalJump() {
+    if (!state.isMultiplayer || state.connections.length === 0) return;
+    const packet = {
+        type: 'jump'
+    };
+    broadcastToAll(packet);
+}
+
 function createPeerBean(username) {
     const peerGroup = new THREE.Group();
 
@@ -676,11 +700,28 @@ function createPeerBean(username) {
     topSphere.receiveShadow = true;
     peerGroup.add(topSphere);
     
-    const bottomSphere = new THREE.Mesh(sphereGeo, bodyMat);
-    bottomSphere.position.y = -0.5;
-    bottomSphere.castShadow = true;
-    bottomSphere.receiveShadow = true;
-    peerGroup.add(bottomSphere);
+    // Booster body material: silver metal
+    const boosterMat = new THREE.MeshStandardMaterial({
+        color: 0xc0c0c0, // Silver
+        roughness: 0.15,
+        metalness: 0.85
+    });
+
+    // Booster Cylinder attached to the bottom of the bean (runs from y = -0.5 to y = -0.9)
+    const boosterCylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
+    const boosterCylinder = new THREE.Mesh(boosterCylinderGeo, boosterMat);
+    boosterCylinder.position.y = -0.7;
+    boosterCylinder.castShadow = true;
+    boosterCylinder.receiveShadow = true;
+    peerGroup.add(boosterCylinder);
+
+    // Booster Nozzle at the very bottom (runs from y = -0.9 to y = -1.1)
+    const nozzleGeo = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
+    const nozzle = new THREE.Mesh(nozzleGeo, boosterMat);
+    nozzle.position.y = -1.0;
+    nozzle.castShadow = true;
+    nozzle.receiveShadow = true;
+    peerGroup.add(nozzle);
 
     // Sleek dark shiny glass visor
     const visorGeo = new THREE.BoxGeometry(0.85, 0.25, 0.45);

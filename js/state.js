@@ -83,5 +83,8 @@ export const state = {
     rightClickActive: false,
     keyCActive: false,
     baseSensitivity: 1.0,
+    hoverFuel: 1.0,
+    isShiftDown: false,
+    isHovering: false,
 };
 

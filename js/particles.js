@@ -6,6 +6,8 @@ import { LASER_BEAM_FADE_TIME } from './config.js';
 const SHARED_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
 const SHARED_CYL_GEO = new THREE.CylinderGeometry(0.025, 0.025, 1, 6);
 SHARED_CYL_GEO.rotateX(Math.PI / 2); // Rotate Z axis forward
+const SHARED_RING_GEO = new THREE.RingGeometry(0.9, 1.0, 32);
+SHARED_RING_GEO.rotateX(-Math.PI / 2); // Rotate to lie flat horizontally in X-Z plane
 
 export function spawnParticles(position, color, count, speed, size, gravity) {
     for (let i = 0; i < count; i++) {
@@ -137,5 +139,68 @@ export function updateParticles(delta) {
             }
         }
     }
+}
+
+export function spawnRocketFlame(position, count, isBurst) {
+    for (let i = 0; i < count; i++) {
+        const mat = new THREE.MeshBasicMaterial({
+            color: isBurst ? 0x00ffff : (Math.random() > 0.4 ? 0x00aaff : 0x0055ff),
+            transparent: true,
+            opacity: 0.95
+        });
+        const mesh = new THREE.Mesh(SHARED_BOX_GEO, mat);
+        mesh.position.copy(position);
+        
+        // Add tiny offset around booster nozzle
+        mesh.position.x += (Math.random() - 0.5) * 0.3;
+        mesh.position.y += (Math.random() - 0.5) * 0.1;
+        mesh.position.z += (Math.random() - 0.5) * 0.3;
+        
+        const size = isBurst ? (0.25 + Math.random() * 0.25) : (0.15 + Math.random() * 0.15);
+        mesh.scale.setScalar(size);
+        
+        state.scene.add(mesh);
+        
+        // Velocity vectors pointing down and outwards at a very wide angle
+        const velocity = new THREE.Vector3(
+            (Math.random() - 0.5) * (isBurst ? 22.0 : 4.0),
+            isBurst ? (-8.0 - Math.random() * 20.0) : (-18.0 - Math.random() * 12.0),
+            (Math.random() - 0.5) * (isBurst ? 22.0 : 4.0)
+        );
+        
+        const maxLife = isBurst ? (0.3 + Math.random() * 0.3) : (0.25 + Math.random() * 0.25);
+        state.activeParticles.push({
+            mesh: mesh,
+            velocity: velocity,
+            gravity: 0.0, // Let them just shoot down under their own velocity
+            life: maxLife,
+            maxLife: maxLife,
+            isSharedGeo: true
+        });
+    }
+}
+
+export function createShockwave(position, targetRadius, color = 0x00ffff) {
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+    const mesh = new THREE.Mesh(SHARED_RING_GEO, ringMat);
+    mesh.position.copy(position);
+    mesh.position.y += 0.05; // slightly elevate to prevent clipping
+    
+    state.scene.add(mesh);
+    
+    state.activeParticles.push({
+        mesh: mesh,
+        isShockwave: true,
+        isSharedGeo: true,
+        targetScale: targetRadius,
+        life: 0.4,
+        maxLife: 0.4
+    });
 }
 

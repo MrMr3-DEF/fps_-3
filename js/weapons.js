@@ -819,11 +819,28 @@ export function createPlayerMesh() {
     topSphere.receiveShadow = true;
     playerGroup.add(topSphere);
 
-    const bottomSphere = new THREE.Mesh(sphereGeo, bodyMat);
-    bottomSphere.position.y = -0.5;
-    bottomSphere.castShadow = true;
-    bottomSphere.receiveShadow = true;
-    playerGroup.add(bottomSphere);
+    // Booster body material: silver metal
+    const boosterMat = new THREE.MeshStandardMaterial({
+        color: 0xc0c0c0, // Silver
+        roughness: 0.15,
+        metalness: 0.85
+    });
+
+    // Booster Cylinder attached to the bottom of the bean (runs from y = -0.5 to y = -0.9)
+    const boosterCylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
+    const boosterCylinder = new THREE.Mesh(boosterCylinderGeo, boosterMat);
+    boosterCylinder.position.y = -0.7;
+    boosterCylinder.castShadow = true;
+    boosterCylinder.receiveShadow = true;
+    playerGroup.add(boosterCylinder);
+
+    // Booster Nozzle at the very bottom (runs from y = -0.9 to y = -1.1)
+    const nozzleGeo = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
+    const nozzle = new THREE.Mesh(nozzleGeo, boosterMat);
+    nozzle.position.y = -1.0;
+    nozzle.castShadow = true;
+    nozzle.receiveShadow = true;
+    playerGroup.add(nozzle);
 
     // Sleek dark shiny glass visor
     const visorGeo = new THREE.BoxGeometry(0.85, 0.25, 0.45);

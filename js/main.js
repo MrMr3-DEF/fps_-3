@@ -17,12 +17,12 @@ import {
     WEAPON_STATS,
     TARGET_HIT_RANGE_MULTIPLIER
 } from './config.js';
-import { spawnParticles, updateParticles, spawnLightBeam } from './particles.js';
+import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect } from './weapons.js';
 import { createEnvironment, respawnTarget, updateTargets } from './world.js';
-import { sendLocalState, disconnectMultiplayer } from './multiplayer.js';
+import { sendLocalState, disconnectMultiplayer, broadcastLocalJump } from './multiplayer.js';
 
 export function updateHealthBar(hpRatio, flashColor = null) {
     const healthBar = document.getElementById('health-bar');
@@ -38,6 +38,12 @@ export function updateHealthBar(hpRatio, flashColor = null) {
     } else {
         healthBar.style.backgroundColor = '#2ed573';
     }
+}
+
+export function updateHoverBar(fuelRatio) {
+    const hoverBar = document.getElementById('hover-bar');
+    if (!hoverBar) return;
+    hoverBar.style.height = `${fuelRatio * 100}%`;
 }
 
 let fpsFrames = 0;
@@ -317,6 +323,8 @@ export function init() {
         if (healthContainer) healthContainer.style.display = 'block';
         const reloadContainer = document.getElementById('reload-container');
         if (reloadContainer) reloadContainer.style.display = 'block';
+        const hoverContainer = document.getElementById('hover-container');
+        if (hoverContainer) hoverContainer.style.display = 'block';
 
         const pvpStats = document.getElementById('pvp-stats');
         if (pvpStats) {
@@ -336,7 +344,8 @@ export function init() {
 
     state.controls.addEventListener('unlock', () => {
         if (blocker) blocker.style.display = 'flex';
-        state.isSprinting = false;
+        state.isShiftDown = false;
+        state.isHovering = false;
         state.isMouseDown = false;
         state.isScoped = false;
         state.rightClickActive = false;
@@ -344,6 +353,8 @@ export function init() {
         cancelInspect();
         if (healthContainerEl) healthContainerEl.style.display = 'none';
         if (reloadContainerEl) reloadContainerEl.style.display = 'none';
+        const hoverContainer = document.getElementById('hover-container');
+        if (hoverContainer) hoverContainer.style.display = 'none';
 
         
         // Hide all starting panels
@@ -505,13 +516,8 @@ export function init() {
             case 'KeyD': state.moveRight = true; break;
             case 'ShiftLeft':
             case 'ShiftRight':
-                if (state.controls && state.controls.isLocked && state.hookState !== 'PULLING' && (state.moveForward || state.moveBackward || state.moveLeft || state.moveRight)) {
-                    state.isSprinting = !state.isSprinting;
-                    if (state.isSprinting) {
-                        state.rightClickActive = false;
-                        state.keyCActive = false;
-                        state.isScoped = false;
-                    }
+                if (state.controls && state.controls.isLocked) {
+                    state.isShiftDown = true;
                 }
                 break;
             case 'Space':
@@ -519,9 +525,19 @@ export function init() {
                     resetHook();
                     state.velocity.y = JUMP_FORCE * 0.8; 
                     state.canJump = false;
+                    const boosterPos = state.controls.getObject().position.clone();
+                    boosterPos.y -= 1.8;
+                    spawnRocketFlame(boosterPos, 50, true);
+                    createShockwave(boosterPos, 15.0);
+                    broadcastLocalJump();
                 } else if (state.canJump && state.hookState !== 'PULLING') {
                     state.velocity.y += JUMP_FORCE;
                     state.canJump = false;
+                    const boosterPos = state.controls.getObject().position.clone();
+                    boosterPos.y -= 1.8;
+                    spawnRocketFlame(boosterPos, 50, true);
+                    createShockwave(boosterPos, 15.0);
+                    broadcastLocalJump();
                 }
                 cancelInspect();
                 break;
@@ -581,7 +597,6 @@ export function init() {
                     state.keyCActive = true;
                     state.isScoped = state.rightClickActive || state.keyCActive;
                     cancelInspect();
-                    state.isSprinting = false; // Aiming cancels sprint
                 }
                 break;
             case 'KeyP':
@@ -602,6 +617,10 @@ export function init() {
             case 'KeyC':
                 state.keyCActive = false;
                 state.isScoped = state.rightClickActive || state.keyCActive;
+                break;
+            case 'ShiftLeft':
+            case 'ShiftRight':
+                state.isShiftDown = false;
                 break;
         }
     };
@@ -628,7 +647,6 @@ export function init() {
                 state.rightClickActive = true;
                 state.isScoped = state.rightClickActive || state.keyCActive;
                 cancelInspect();
-                state.isSprinting = false; // Aiming cancels sprint
             }
         }
     });
@@ -688,6 +706,7 @@ export function animate() {
 
     // 2) Update player physics movements
     updatePlayerPhysics(delta);
+    updateHoverBar(state.hoverFuel);
 
     // 2.5) Check lava hazard damage ticks
     checkLavaDamage(delta);
@@ -831,6 +850,7 @@ export function animate() {
         // Toggle goggles, normal crosshair, and standard gameplay HUD overlays
         // (uses module-level cached refs: gogglesScopeEl, crosshairEl, uiEl, etc.)
         if (gogglesScopeEl && crosshairEl) {
+            const hoverContainer = document.getElementById('hover-container');
             if (state.isScoped) {
                 gogglesScopeEl.style.display = 'block';
                 crosshairEl.style.display = 'none';
@@ -838,6 +858,7 @@ export function animate() {
                 if (fpsCounterEl) fpsCounterEl.style.display = 'none';
                 if (healthContainerEl) healthContainerEl.style.display = 'none';
                 if (reloadContainerEl) reloadContainerEl.style.display = 'none';
+                if (hoverContainer) hoverContainer.style.display = 'none';
             } else {
                 gogglesScopeEl.style.display = 'none';
                 crosshairEl.style.display = 'block';
@@ -848,6 +869,9 @@ export function animate() {
                 }
                 if (reloadContainerEl) {
                     reloadContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
+                }
+                if (hoverContainer) {
+                    hoverContainer.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
                 }
             }
         }
