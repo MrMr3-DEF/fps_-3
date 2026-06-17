@@ -180,6 +180,45 @@ export function spawnRocketFlame(position, count, isBurst) {
     }
 }
 
+export function spawnManeuveringBeam(position, count, dir) {
+    if (!dir || dir.lengthSq() === 0) return;
+    for (let i = 0; i < count; i++) {
+        const mat = new THREE.MeshBasicMaterial({
+            color: Math.random() > 0.5 ? 0xffea00 : 0xffcc00, // shades of yellow
+            transparent: true,
+            opacity: 0.95
+        });
+        const mesh = new THREE.Mesh(SHARED_BOX_GEO, mat);
+        mesh.position.copy(position);
+        
+        // Offset slightly in the direction of the nozzle
+        mesh.position.x += dir.x * 0.3 + (Math.random() - 0.5) * 0.1;
+        mesh.position.y += (Math.random() - 0.5) * 0.1;
+        mesh.position.z += dir.z * 0.3 + (Math.random() - 0.5) * 0.1;
+        
+        const size = 0.06 + Math.random() * 0.06;
+        mesh.scale.setScalar(size);
+        
+        state.scene.add(mesh);
+        
+        // Velocity: pointing in the 'dir' direction with some dispersion
+        const velocity = dir.clone().multiplyScalar(12.0 + Math.random() * 6.0);
+        velocity.y = -3.0 - Math.random() * 4.0; // shoot slightly downwards as well as sideways
+        velocity.x += (Math.random() - 0.5) * 1.5;
+        velocity.z += (Math.random() - 0.5) * 1.5;
+        
+        const maxLife = 0.12 + Math.random() * 0.12;
+        state.activeParticles.push({
+            mesh: mesh,
+            velocity: velocity,
+            gravity: 0.0,
+            life: maxLife,
+            maxLife: maxLife,
+            isSharedGeo: true
+        });
+    }
+}
+
 export function createShockwave(position, targetRadius, color = 0xffcc00) {
     const ringMat = new THREE.MeshBasicMaterial({
         color: color,

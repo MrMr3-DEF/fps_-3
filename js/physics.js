@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { spawnRocketFlame } from './particles.js';
+import { spawnRocketFlame, spawnManeuveringBeam } from './particles.js';
 import {
     PILLAR_WIDTH,
     PLAYER_RADIUS,
@@ -119,6 +119,15 @@ export function updatePlayerPhysics(delta) {
             const moveRight = isPaused ? false : state.moveRight;
             const isMoving = moveForward || moveBackward || moveLeft || moveRight;
 
+            // --- WORLD SPACE DIRECTION INTEGRATION ---
+            _camForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
+            _camForward.y = 0;
+            _camForward.normalize();
+
+            _camRight.set(1, 0, 0).applyQuaternion(state.camera.quaternion);
+            _camRight.y = 0;
+            _camRight.normalize();
+
             // Hide sprint UI permanently since sprint is replaced by hover
             const speedlines = document.getElementById('speedlines');
             const badge = document.getElementById('sprint-badge');
@@ -146,6 +155,12 @@ export function updatePlayerPhysics(delta) {
                 const boosterPos = playerObj.position.clone();
                 boosterPos.y -= 1.8;
                 spawnRocketFlame(boosterPos, 2, false);
+
+                // Spawn absolute maneuvering thruster plumes when using WASD while hovering
+                if (moveForward)  spawnManeuveringBeam(boosterPos, 1, _camForward.clone().negate()); // W: shoot backwards
+                if (moveBackward) spawnManeuveringBeam(boosterPos, 1, _camForward);                  // S: shoot forwards
+                if (moveLeft)     spawnManeuveringBeam(boosterPos, 1, _camRight);                    // A: shoot rightwards
+                if (moveRight)    spawnManeuveringBeam(boosterPos, 1, _camRight.clone().negate());   // D: shoot leftwards
             } else {
                 // Recharge fuel when standing on solid ground or when grappling hook is engaged
                 if (state.canJump || state.hookState === 'PULLING') {
@@ -205,15 +220,6 @@ export function updatePlayerPhysics(delta) {
                 }
             }
 
-            // --- WORLD SPACE DIRECTION INTEGRATION ---
-            _camForward.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
-            _camForward.y = 0;
-            _camForward.normalize();
-
-            _camRight.set(1, 0, 0).applyQuaternion(state.camera.quaternion);
-            _camRight.y = 0;
-            _camRight.normalize();
-
             // Keyboard movement vector
             _moveDir.set(0, 0, 0);
             if (moveForward) _moveDir.add(_camForward);
@@ -238,13 +244,20 @@ export function updatePlayerPhysics(delta) {
                     state.velocity.x -= state.velocity.x * airDrag * delta;
                     state.velocity.z -= state.velocity.z * airDrag * delta;
 
-                    if (moveForward || moveLeft || moveRight) {
-                        state.velocity.x += _moveDir.x * 35.0 * delta;
-                        state.velocity.z += _moveDir.z * 35.0 * delta;
-                    }
-                    if (moveBackward) {
-                        state.velocity.x -= state.velocity.x * 1.5 * delta;
-                        state.velocity.z -= state.velocity.z * 1.5 * delta;
+                    if (state.isHovering) {
+                        if (moveForward || moveLeft || moveRight || moveBackward) {
+                            state.velocity.x += _moveDir.x * 35.0 * delta;
+                            state.velocity.z += _moveDir.z * 35.0 * delta;
+                        }
+                    } else {
+                        if (moveForward || moveLeft || moveRight) {
+                            state.velocity.x += _moveDir.x * 35.0 * delta;
+                            state.velocity.z += _moveDir.z * 35.0 * delta;
+                        }
+                        if (moveBackward) {
+                            state.velocity.x -= state.velocity.x * 1.5 * delta;
+                            state.velocity.z -= state.velocity.z * 1.5 * delta;
+                        }
                     }
                 }
             }

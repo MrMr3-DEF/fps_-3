@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, createShockwave } from './particles.js';
+import { spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
 import { respawnTarget } from './world.js';
 import { resetHook } from './grapple.js';
 import {
@@ -387,6 +387,17 @@ function handlePeerMessage(fromPeerId, msg) {
                 const boosterPos = peerData.mesh.position.clone();
                 boosterPos.y -= 1.45;
                 spawnRocketFlame(boosterPos, 4, false);
+
+                // Spawn maneuvering side thruster plumes if active keys are sent
+                if (msg.hoverKeys) {
+                    const peerForward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, msg.yaw, 0));
+                    const peerRight = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, msg.yaw, 0));
+
+                    if (msg.hoverKeys.w) spawnManeuveringBeam(boosterPos, 2, peerForward.clone().negate());
+                    if (msg.hoverKeys.s) spawnManeuveringBeam(boosterPos, 2, peerForward);
+                    if (msg.hoverKeys.a) spawnManeuveringBeam(boosterPos, 2, peerRight);
+                    if (msg.hoverKeys.d) spawnManeuveringBeam(boosterPos, 2, peerRight.clone().negate());
+                }
             }
         }
 
@@ -629,7 +640,13 @@ export function sendLocalState() {
         isDead: state.playerHp <= 0,
         hookState: state.hookState,
         hookPos: state.hookState !== 'IDLE' ? { x: state.hookPosition.x, y: state.hookPosition.y, z: state.hookPosition.z } : null,
-        isHovering: state.isHovering
+        isHovering: state.isHovering,
+        hoverKeys: state.isHovering ? {
+            w: state.moveForward,
+            s: state.moveBackward,
+            a: state.moveLeft,
+            d: state.moveRight
+        } : null
     };
 
     broadcastToAll(packet);
