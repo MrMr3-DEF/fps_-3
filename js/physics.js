@@ -134,13 +134,6 @@ export function updatePlayerPhysics(delta) {
                 state.isHovering = false;
             }
 
-            if (state.isHovering !== wasHovering) {
-                const hoverBadge = document.getElementById('hover-badge');
-                if (hoverBadge) {
-                    hoverBadge.style.display = state.isHovering ? 'inline-block' : 'none';
-                }
-            }
-
             // Consume or recharge fuel
             if (state.isHovering) {
                 state.hoverFuel -= delta / 5.0; // drains in 5 seconds
@@ -160,6 +153,13 @@ export function updatePlayerPhysics(delta) {
                     if (state.hoverFuel > 1.0) {
                         state.hoverFuel = 1.0;
                     }
+                }
+            }
+
+            if (state.isHovering !== wasHovering) {
+                const hoverBadge = document.getElementById('hover-badge');
+                if (hoverBadge) {
+                    hoverBadge.style.display = state.isHovering ? 'inline-block' : 'none';
                 }
             }
 
