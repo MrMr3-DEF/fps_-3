@@ -131,7 +131,7 @@ function createLowPolyBush() {
     return bushGroup;
 }
 
-function create2DBushTexture() {
+function create2DLowPolyBushTexture(baseColorHex) {
     const size = 256;
     const canvas = document.createElement('canvas');
     canvas.width = size;
@@ -141,54 +141,79 @@ function create2DBushTexture() {
     ctx.clearRect(0, 0, size, size);
 
     const centerX = size / 2;
-    const centerY = size * 0.8; // Base of the leaves
+    const centerY = size * 0.9; // Shift leaves down since there is no trunk/stem
 
-    // Draw trunk down to the bottom
-    ctx.fillStyle = '#5a3d28';
-    ctx.beginPath();
-    ctx.moveTo(centerX - 10, centerY);
-    ctx.lineTo(centerX + 10, centerY);
-    ctx.lineTo(centerX + 6, size);
-    ctx.lineTo(centerX - 6, size);
-    ctx.closePath();
-    ctx.fill();
-
-    // Helper to draw low-poly leafy blobs
-    function drawPolygonBlob(cx, cy, radius, color) {
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        const sides = 5 + Math.floor(Math.random() * 4); // 5 to 8 sides
-        for (let i = 0; i < sides; i++) {
-            const angle = (i / sides) * Math.PI * 2 + (Math.random() - 0.5) * 0.15;
-            const r = radius * (0.85 + Math.random() * 0.3);
-            const px = cx + Math.cos(angle) * r;
-            const py = cy + Math.sin(angle) * r;
-            if (i === 0) {
-                ctx.moveTo(px, py);
-            } else {
-                ctx.lineTo(px, py);
-            }
+    // Helper to draw a faceted low-poly leaf cluster using a base color
+    function drawFacetedCluster(cx, cy, radius, colorHex) {
+        // Parse hex color string (e.g. '#2f6633') or hex number (e.g. 0x2f6633)
+        let hex = colorHex;
+        if (typeof hex === 'number') {
+            hex = '#' + hex.toString(16).padStart(6, '0');
         }
-        ctx.closePath();
-        ctx.fill();
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+
+        const numVertices = 6 + Math.floor(Math.random() * 3); // 6 to 8 vertices
+        const vertices = [];
+        for (let i = 0; i < numVertices; i++) {
+            const angle = (i / numVertices) * Math.PI * 2 + (Math.random() - 0.5) * 0.1;
+            const dist = radius * (0.85 + Math.random() * 0.3);
+            vertices.push({
+                x: cx + Math.cos(angle) * dist,
+                y: cy + Math.sin(angle) * dist
+            });
+        }
+
+        // Center vertex, slightly offset up-left to simulate light from top-right
+        const centerOffsetX = (Math.random() - 0.3) * (radius * 0.25);
+        const centerOffsetY = -radius * 0.15 + (Math.random() - 0.5) * (radius * 0.15);
+        const center = { x: cx + centerOffsetX, y: cy + centerOffsetY };
+
+        // Draw triangular faces
+        for (let i = 0; i < numVertices; i++) {
+            const v1 = vertices[i];
+            const v2 = vertices[(i + 1) % numVertices];
+
+            // Calculate angle of the face midpoint relative to the cluster center
+            const midX = (v1.x + v2.x) / 2;
+            const midY = (v1.y + v2.y) / 2;
+            const faceAngle = Math.atan2(midY - cy, midX - cx);
+
+            // Light comes from top-right (-Math.PI/4)
+            const dot = Math.cos(faceAngle - (-Math.PI / 4));
+            // Map dot [-1, 1] to light factor [0.75, 1.25]
+            const lightFactor = 0.95 + dot * 0.25;
+
+            // Apply light factor to color channels
+            const newR = Math.min(255, Math.max(0, Math.round(r * lightFactor)));
+            const newG = Math.min(255, Math.max(0, Math.round(g * lightFactor)));
+            const newB = Math.min(255, Math.max(0, Math.round(b * lightFactor)));
+            const colorStr = `rgb(${newR}, ${newG}, ${newB})`;
+
+            ctx.fillStyle = colorStr;
+            ctx.strokeStyle = colorStr; // prevent seams between triangles
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(center.x, center.y);
+            ctx.lineTo(v1.x, v1.y);
+            ctx.lineTo(v2.x, v2.y);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
     }
 
-    const greenShades = ['#224c25', '#2f6633', '#3d7a42', '#4b8e51', '#62ad69'];
-    
-    // Back clusters
-    drawPolygonBlob(centerX - 35, centerY - 45, 40, greenShades[0]);
-    drawPolygonBlob(centerX + 35, centerY - 45, 40, greenShades[0]);
-    
-    // Middle clusters
-    drawPolygonBlob(centerX - 25, centerY - 70, 45, greenShades[1]);
-    drawPolygonBlob(centerX + 25, centerY - 70, 45, greenShades[1]);
-    drawPolygonBlob(centerX, centerY - 40, 50, greenShades[2]);
-    
-    // Front/top clusters
-    drawPolygonBlob(centerX - 12, centerY - 95, 35, greenShades[3]);
-    drawPolygonBlob(centerX + 12, centerY - 95, 35, greenShades[3]);
-    drawPolygonBlob(centerX, centerY - 110, 30, greenShades[4]);
-    drawPolygonBlob(centerX, centerY - 80, 40, greenShades[4]);
+    // Draw overlapping leaf clusters to simulate the 3D dodecahedrons
+    // Left cluster
+    drawFacetedCluster(centerX - 30, centerY - 35, 45, baseColorHex);
+    // Right cluster
+    drawFacetedCluster(centerX + 30, centerY - 35, 45, baseColorHex);
+    // Top-middle cluster
+    drawFacetedCluster(centerX, centerY - 80, 50, baseColorHex);
+    // Top-most clusters
+    drawFacetedCluster(centerX - 10, centerY - 110, 38, baseColorHex);
+    drawFacetedCluster(centerX + 15, centerY - 105, 35, baseColorHex);
 
     const texture = new THREE.CanvasTexture(canvas);
     return texture;
@@ -457,48 +482,29 @@ export function createEnvironment() {
         }
     }
 
-    // Spawn 2D billboard bushes inside the world border (radius < 330, smaller amount)
-    const bush2DTexture = create2DBushTexture();
-    const spriteMat = new THREE.SpriteMaterial({ 
-        map: bush2DTexture, 
+    // Pre-generate 2D low-poly bush textures (one for each of the 5 extra dark green shades)
+    const bushGreenShades = [0x153018, 0x1a331c, 0x162c18, 0x0f2010, 0x132815];
+    const bush2DTextures = bushGreenShades.map(color => create2DLowPolyBushTexture(color));
+    const spriteMaterials = bush2DTextures.map(tex => new THREE.SpriteMaterial({
+        map: tex,
         transparent: true,
-        color: 0xffffff 
-    });
+        color: 0xffffff
+    }));
 
-    let spawned2DInside = 0;
-    const target2DInside = 40;
-    let attempts2DInside = 0;
-    while (spawned2DInside < target2DInside && attempts2DInside < 500) {
-        attempts2DInside++;
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * 330;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-
-        if (!overlapsWithPillarsOrLava(x, z, 2.5)) {
-            const sprite = new THREE.Sprite(spriteMat);
-            const height = 3.5 + Math.random() * 1.5;
-            const width = height * (0.8 + Math.random() * 0.3);
-            sprite.scale.set(width, height, 1.0);
-            sprite.position.set(x, height / 2, z);
-            state.scene.add(sprite);
-            spawned2DInside++;
-        }
-    }
-
-    // Spawn 2D billboard bushes outside the world border (radius between 345 and 1200)
+    // Spawn 2D billboard bushes outside the world border (radius between 345 and 1500)
     let spawned2DOutside = 0;
-    const target2DOutside = 60;
+    const target2DOutside = 250;
     let attempts2DOutside = 0;
-    while (spawned2DOutside < target2DOutside && attempts2DOutside < 500) {
+    while (spawned2DOutside < target2DOutside && attempts2DOutside < 1500) {
         attempts2DOutside++;
         const angle = Math.random() * Math.PI * 2;
-        const radius = 345 + Math.random() * 855; // 345 to 1200
+        const radius = 345 + Math.random() * 1155; // 345 to 1500
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
         if (!overlapsWithFakePillars(x, z, 3.5)) {
-            const sprite = new THREE.Sprite(spriteMat);
+            const mat = spriteMaterials[Math.floor(Math.random() * spriteMaterials.length)];
+            const sprite = new THREE.Sprite(mat);
             const height = 4.0 + Math.random() * 2.0;
             const width = height * (0.8 + Math.random() * 0.3);
             sprite.scale.set(width, height, 1.0);
