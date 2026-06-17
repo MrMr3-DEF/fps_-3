@@ -144,7 +144,7 @@ export function updateParticles(delta) {
 export function spawnRocketFlame(position, count, isBurst) {
     for (let i = 0; i < count; i++) {
         const mat = new THREE.MeshBasicMaterial({
-            color: isBurst ? 0x00ffff : (Math.random() > 0.4 ? 0x00aaff : 0x0055ff),
+            color: isBurst ? (Math.random() > 0.5 ? 0xffea00 : 0xffcc00) : (Math.random() > 0.4 ? 0xffd700 : 0xffaa00),
             transparent: true,
             opacity: 0.95
         });
@@ -180,7 +180,7 @@ export function spawnRocketFlame(position, count, isBurst) {
     }
 }
 
-export function createShockwave(position, targetRadius, color = 0x00ffff) {
+export function createShockwave(position, targetRadius, color = 0xffcc00) {
     const ringMat = new THREE.MeshBasicMaterial({
         color: color,
         transparent: true,

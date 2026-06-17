@@ -355,6 +355,8 @@ export function init() {
         if (reloadContainerEl) reloadContainerEl.style.display = 'none';
         const hoverContainer = document.getElementById('hover-container');
         if (hoverContainer) hoverContainer.style.display = 'none';
+        const hoverBadge = document.getElementById('hover-badge');
+        if (hoverBadge) hoverBadge.style.display = 'none';
 
         
         // Hide all starting panels
@@ -976,6 +978,9 @@ export function triggerDeath() {
     // Immediately stop character physics movement and reset hook
     state.velocity.set(0, 0, 0);
     resetHook();
+    state.isHovering = false;
+    const hoverBadge = document.getElementById('hover-badge');
+    if (hoverBadge) hoverBadge.style.display = 'none';
 }
 
 export function processTargetHit(targetIndex, damage) {

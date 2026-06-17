@@ -7,7 +7,6 @@ export const state = {
     moveBackward: false,
     moveLeft: false,
     moveRight: false,
-    isSprinting: false,
     canJump: false,
 
     // Timing and physics

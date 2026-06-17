@@ -170,6 +170,18 @@
             border: 1px solid rgba(0, 170, 238, 0.3);
         }
 
+        #hover-badge {
+            font-size: 14px;
+            color: #ffcc00;
+            background: rgba(255, 204, 0, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            display: none;
+            box-shadow: 0 0 8px rgba(255, 204, 0, 0.2);
+            border: 1px solid rgba(255, 204, 0, 0.3);
+        }
+
         #fps-counter {
             position: absolute;
             top: 20px;
@@ -605,6 +617,7 @@
         <div style="display: flex; gap: 8px; margin-top: 4px;">
             <span id="sprint-badge">SPRINT</span>
             <span id="hook-badge">HOOK ACTIVE</span>
+            <span id="hover-badge">HOVER ACTIVE</span>
         </div>
     </div>
     <div id="fps-counter">FPS: 0</div>

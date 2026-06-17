@@ -115,7 +115,6 @@ export function updateHook(delta) {
             if (state.hookPosition.distanceTo(state.hookTarget) < 1.5) {
                 if (state.hookWillHit) {
                     state.hookState = 'PULLING';
-                    state.isSprinting = false;
                     const badge = document.getElementById('hook-badge');
                     if (badge) badge.style.display = 'inline-block';
                 } else {
@@ -123,7 +122,6 @@ export function updateHook(delta) {
                 }
             }
         } else if (state.hookState === 'PULLING') {
-            state.isSprinting = false;
 
             if (state.hookIsEnemy && state.hookTargetEnemy) {
                 state.hookTarget.copy(state.hookTargetEnemy.position);

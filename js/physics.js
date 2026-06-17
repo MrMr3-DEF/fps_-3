@@ -126,11 +126,19 @@ export function updatePlayerPhysics(delta) {
             if (badge) badge.style.display = 'none';
 
             // --- HOVER SYSTEM ---
-            // Activate hover only mid-air when Shift is held, we have fuel, and the grappling hook is inactive
-            if (!state.canJump && state.isShiftDown && state.hoverFuel > 0.0 && state.hookState === 'IDLE') {
+            // Activate hover only mid-air when Shift is held, we have fuel, and the grappling hook is not actively pulling
+            const wasHovering = state.isHovering;
+            if (!state.canJump && state.isShiftDown && state.hoverFuel > 0.0 && state.hookState !== 'PULLING') {
                 state.isHovering = true;
             } else {
                 state.isHovering = false;
+            }
+
+            if (state.isHovering !== wasHovering) {
+                const hoverBadge = document.getElementById('hover-badge');
+                if (hoverBadge) {
+                    hoverBadge.style.display = state.isHovering ? 'inline-block' : 'none';
+                }
             }
 
             // Consume or recharge fuel
