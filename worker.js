@@ -1,3 +1,4 @@
+// Tracks and evaluates IP-based rate limits for TURN credentials requests using the Cloudflare cache.
 async function isRateLimited(request) {
     const ip = request.headers.get("CF-Connecting-IP") || "local";
     const cacheKey = new Request(`https://rate-limit.local/ip/${ip}`);
@@ -31,6 +32,7 @@ async function isRateLimited(request) {
     return false;
 }
 
+// Generates fallback ICE and TURN server configurations when Cloudflare API calls fail or are disabled.
 function makeFallbackResponse(warningMessage) {
     const fallbackData = {
         warning: warningMessage,

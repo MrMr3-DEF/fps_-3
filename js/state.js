@@ -87,6 +87,7 @@ export const state = {
     isHovering: false,
 };
 
+// Resets player health, score, velocity, grapple hook state variables, and hover fuel back to default initial values.
 export function resetPlayerState() {
     state.playerHp = state.playerMaxHp;
     state.score = 0;

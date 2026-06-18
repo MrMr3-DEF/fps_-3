@@ -63,6 +63,7 @@ let lastHoverFuel = -1;
 let lastFov = -1;
 let lastScopedState = null;
 
+// Updates the player's health bar width in the UI HUD overlay and plays a damage screen/bar color flash.
 export function updateHealthBar(hpRatio, flashColor = null) {
     if (!healthBarEl) return;
     healthBarEl.style.width = `${hpRatio}%`;
@@ -78,6 +79,7 @@ export function updateHealthBar(hpRatio, flashColor = null) {
     }
 }
 
+// Updates the hover fuel progress bar height in the UI HUD overlay to match current hover energy.
 export function updateHoverBar(fuelRatio) {
     if (!hoverBarEl) return;
     if (fuelRatio !== lastHoverFuel) {
@@ -92,6 +94,7 @@ let lastFrameTime = performance.now();
 const targetFps = 120;
 const frameMinTime = 1000 / targetFps; // 8.333 ms
 
+// Caches DOM queries for all UI elements, overlays, menus, and game action buttons at initial startup.
 function initDOMCache() {
     healthBarEl = document.getElementById('health-bar');
     hoverBarEl = document.getElementById('hover-bar');
@@ -141,6 +144,7 @@ function initDOMCache() {
     btnCopyCodeEl = document.getElementById('btn-copy-code');
 }
 
+// Validates player username: must contain only letters, cannot be empty, and has a maximum length of 10 characters.
 function validateUsername(username) {
     if (!username) {
         return 'Username cannot be empty!';
@@ -155,6 +159,7 @@ function validateUsername(username) {
     return null;
 }
 
+// Resets camera aspect ratios and updates renderer size on window resize events to keep visuals aligned.
 function onWindowResize() {
     if (state.camera && state.renderer) {
         state.camera.aspect = window.innerWidth / window.innerHeight;
@@ -163,7 +168,7 @@ function onWindowResize() {
     }
 }
 
-// Sub-components of the init process
+// Creates Three.js camera, scene fog, ambient & directional lighting, configures shadow maps, and instantiates PointerLock controls.
 function setupRenderer() {
     state.camera = new THREE.PerspectiveCamera(DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.1, 1500);
 
@@ -204,6 +209,7 @@ function setupRenderer() {
     state.controls = new PointerLockControls(state.camera, document.body);
 }
 
+// Binds all HTML button event listeners (singleplayer, hosting, joining lobby, pausing, respawns, and code copying).
 function setupMenuListeners() {
     // Singleplayer Play
     if (btnPlaySpEl) {
@@ -393,6 +399,7 @@ function setupMenuListeners() {
     }
 }
 
+// Sets up all mouse click, hover, window resize, and keyboard inputs (WASD, Space, Shift, C, X, E, 1-5).
 function setupInputListeners() {
     // Keyboard inputs
     const onKeyDown = (e) => {
@@ -557,6 +564,7 @@ function setupInputListeners() {
     window.addEventListener('resize', onWindowResize);
 }
 
+// Initialises core runtime components: player mesh, weapons, procedural world border, and grappling hook cable.
 function setupGameSystems() {
     state.scene.add(state.controls.getObject());
 
@@ -577,7 +585,7 @@ function setupGameSystems() {
     state.hookMesh.receiveShadow = true;
 }
 
-// Consolidated player state reset helper (replaces btnDeathRespawn & btnDeathLeave duplicates)
+// Resets player state vectors, wipes HUD scores, restores health/fuel indicators, and respawns character.
 function performPlayerReset() {
     resetPlayerState();
     if (scoreEl) scoreEl.innerText = '0';
@@ -1060,6 +1068,7 @@ export function processTargetHit(targetIndex, damage) {
     }
 }
 
+// Detects if the player is standing inside a lava hazard pool and applies tick-based damage.
 export function checkLavaDamage(delta) {
     if (!state.controls || (!state.controls.isLocked && !state.isMultiplayer)) return;
 
@@ -1109,6 +1118,7 @@ export function checkLavaDamage(delta) {
     }
 }
 
+// Evaluates and updates passive health regeneration if the player has not taken damage recently.
 export function updateHealthRegen(delta) {
     if (!state.isPlaying || state.playerHp <= 0 || state.playerHp >= state.playerMaxHp) {
         state.regenTimer = 0;
@@ -1129,6 +1139,7 @@ export function updateHealthRegen(delta) {
     }
 }
 
+// Updates the red border warning vignette opacity and pulsation depending on player proximity to boundaries.
 export function updateWorldBorderOverlay(delta) {
     if (!state.isPlaying || !state.controls) return;
     const playerObj = state.controls.getObject();
