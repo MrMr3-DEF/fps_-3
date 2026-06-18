@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { state } from './state.js';
 import { spawnRocketFlame, spawnManeuveringBeam } from './particles.js';
+import { resetHook } from './grapple.js';
 import {
     PILLAR_WIDTH,
     PLAYER_RADIUS,
@@ -299,12 +300,18 @@ export function updatePlayerPhysics(delta) {
                 playerObj.position.x = nextX;
             } else {
                 state.velocity.x = 0;
+                if (state.hookState === 'PULLING') {
+                    resetHook();
+                }
             }
 
             if (!collisionZ) {
                 playerObj.position.z = nextZ;
             } else {
                 state.velocity.z = 0;
+                if (state.hookState === 'PULLING') {
+                    resetHook();
+                }
             }
 
             playerObj.position.y += state.velocity.y * delta;
