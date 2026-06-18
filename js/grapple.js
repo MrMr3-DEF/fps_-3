@@ -4,6 +4,7 @@ import {
     HOOK_MAX_RANGE,
     HOOK_SPEED,
     HOOK_RELEASE_DISTANCE,
+    HOOK_OBJECT_RELEASE_DISTANCE,
     HOOK_MAGNETIC_RADIUS,
     HOOK_MIN_PULL_SPEED,
     HOOK_MAX_SLINGSHOT_SPEED,
@@ -164,7 +165,7 @@ export function updateHook(delta) {
                 _toHook.subVectors(state.hookTarget, playerObj.position);
                 const dist = _toHook.length();
 
-                if (dist > HOOK_RELEASE_DISTANCE) {
+                if (dist > HOOK_OBJECT_RELEASE_DISTANCE) {
                     _pullDir.copy(_toHook).normalize();
 
                     state.velocity.x += _pullDir.x * HOOK_SLINGSHOT_ACCEL * delta;

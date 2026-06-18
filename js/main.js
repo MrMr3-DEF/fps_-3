@@ -90,9 +90,6 @@ export function updateHoverBar(fuelRatio) {
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
-let lastFrameTime = performance.now();
-const targetFps = 120;
-const frameMinTime = 1000 / targetFps; // 8.333 ms
 
 // Caches DOM queries for all UI elements, overlays, menus, and game action buttons at initial startup.
 function initDOMCache() {
@@ -738,19 +735,11 @@ export function init() {
     animate();
 }
 
-// Global render callback loop executing physics steps, weapons, network syncing, particles, and rendering frames at max 120 FPS.
+// Global render callback loop executing physics steps, weapons, network syncing, particles, and rendering frames at unlimited FPS.
 export function animate() {
     requestAnimationFrame(animate);
 
     const time = performance.now();
-    const elapsed = time - lastFrameTime;
-
-    if (elapsed < frameMinTime) {
-        return;
-    }
-
-    lastFrameTime = time - (elapsed % frameMinTime);
-
     const delta = (time - state.prevTime) / 1000;
 
     // 1) Update weapons recoil and switched models

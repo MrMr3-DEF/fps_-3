@@ -70,6 +70,7 @@ export const AIR_STEER_FORCE = 35.0;
 export const AIR_BACK_BRAKE_COEFF = 1.5;
 
 export const HOOK_RELEASE_DISTANCE = 3.0;
+export const HOOK_OBJECT_RELEASE_DISTANCE = 12.0;
 export const HOOK_MAGNETIC_RADIUS = 3.5;
 export const HOOK_MIN_PULL_SPEED = 35.0;
 export const HOOK_MAX_SLINGSHOT_SPEED = 120.0;
