@@ -1,9 +1,35 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { HOOK_MAX_RANGE, HOOK_SPEED } from './config.js';
+import {
+    HOOK_MAX_RANGE,
+    HOOK_SPEED,
+    HOOK_RELEASE_DISTANCE,
+    HOOK_MAGNETIC_RADIUS,
+    HOOK_MIN_PULL_SPEED,
+    HOOK_MAX_SLINGSHOT_SPEED,
+    HOOK_SLINGSHOT_ACCEL
+} from './config.js';
 
-const HOOK_SLINGSHOT_ACCEL = 400.0;
+// Module-level cached vectors to prevent per-frame garbage collection
+const _dirToTarget = new THREE.Vector3();
+const _toEnemy = new THREE.Vector3();
+const _pullDir = new THREE.Vector3();
+const _toHook = new THREE.Vector3();
+const _gunTip = new THREE.Vector3();
+const _midPoint = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
 
+// Shared aiming objects
+const _raycaster = new THREE.Raycaster();
+const _centerScreen = new THREE.Vector2(0, 0);
+
+// Gun tip offset constant
+const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, -0.19);
+
+// DOM caches
+let hookBadgeEl = null;
+
+// Handles resetting and holstering target positions, properties, and meshes of local player's grappling hook.
 export function resetHook() {
     state.hookState = 'IDLE';
     state.hookIsEnemy = false;
@@ -11,10 +37,11 @@ export function resetHook() {
     if (state.scene && state.hookMesh) {
         state.scene.remove(state.hookMesh);
     }
-    const badge = document.getElementById('hook-badge');
-    if (badge) badge.style.display = 'none';
+    if (!hookBadgeEl) hookBadgeEl = document.getElementById('hook-badge');
+    if (hookBadgeEl) hookBadgeEl.style.display = 'none';
 }
 
+// Initiates the grappling hook firing sequence, evaluating magnetic aim-assist on enemies and colliding surfaces.
 export function toggleGrapplingHook() {
     if (!state.scene || !state.camera || !state.leftGun || !state.controls) return;
 
@@ -27,16 +54,13 @@ export function toggleGrapplingHook() {
             state.leftGun.position.z += 0.15;
         }
 
-
         state.leftGun.updateWorldMatrix(true, false);
-        const barrelWorldPosition = new THREE.Vector3(0, 0, -0.19);
+        const barrelWorldPosition = _gunTip.copy(GUN_TIP_OFFSET);
         state.leftGun.localToWorld(barrelWorldPosition);
         state.hookPosition.copy(barrelWorldPosition);
 
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(0, 0), state.camera);
-        const ray = raycaster.ray;
-
+        _raycaster.setFromCamera(_centerScreen, state.camera);
+        const ray = _raycaster.ray;
 
         const playerObj = state.controls.getObject();
 
@@ -44,7 +68,8 @@ export function toggleGrapplingHook() {
         let bestEnemyHit = null;
         let closestEnemyDist = Infinity;
 
-        for (let j = 0; j < state.targets.length; j++) {
+        const targetLen = state.targets.length;
+        for (let j = 0; j < targetLen; j++) {
             const target = state.targets[j];
             const enemyPos = target.position;
 
@@ -52,15 +77,15 @@ export function toggleGrapplingHook() {
             const distToRay = ray.distanceToPoint(enemyPos);
             const enemyScale = target.userData.scale || 1.0;
 
-            // Generous magnetic hitbox: 3.5 * enemyScale
-            const magneticRadius = 3.5 * enemyScale;
+            // Generous magnetic hitbox
+            const magneticRadius = HOOK_MAGNETIC_RADIUS * enemyScale;
 
             if (distToRay <= magneticRadius) {
                 const distToPlayer = playerObj.position.distanceTo(enemyPos);
 
                 // Ensure enemy is in front of the player (dot product > 0)
-                const toEnemy = new THREE.Vector3().subVectors(enemyPos, playerObj.position);
-                const dot = toEnemy.dot(ray.direction);
+                _toEnemy.subVectors(enemyPos, playerObj.position);
+                const dot = _toEnemy.dot(ray.direction);
 
                 // Allow a small buffer beyond HOOK_MAX_RANGE (plus enemyScale) to account for large enemy size
                 if (dot > 0 && distToPlayer <= (HOOK_MAX_RANGE + enemyScale) && distToPlayer < closestEnemyDist) {
@@ -74,7 +99,7 @@ export function toggleGrapplingHook() {
         }
 
         // 2) Check surfaces (pillars and ground)
-        const surfaceHits = raycaster.intersectObjects(state.grappleSurfaces);
+        const surfaceHits = _raycaster.intersectObjects(state.grappleSurfaces);
         let bestSurfaceHit = null;
         if (surfaceHits.length > 0 && surfaceHits[0].distance <= HOOK_MAX_RANGE) {
             bestSurfaceHit = surfaceHits[0];
@@ -91,9 +116,8 @@ export function toggleGrapplingHook() {
             state.hookWillHit = true;
             state.hookIsEnemy = false;
         } else {
-            const camDir = new THREE.Vector3();
-            state.camera.getWorldDirection(camDir);
-            state.hookTarget.copy(playerObj.position).addScaledVector(camDir, HOOK_MAX_RANGE);
+            state.camera.getWorldDirection(_camDir);
+            state.hookTarget.copy(playerObj.position).addScaledVector(_camDir, HOOK_MAX_RANGE);
             state.hookWillHit = false;
             state.hookIsEnemy = false;
         }
@@ -104,19 +128,20 @@ export function toggleGrapplingHook() {
     }
 }
 
+// Ticks active grappling hook position movement and pulls player towards the hook target (slingshot physics).
 export function updateHook(delta) {
     if (state.hookState !== 'IDLE') {
         const playerObj = state.controls.getObject();
 
         if (state.hookState === 'FIRING') {
-            const dirToTarget = new THREE.Vector3().subVectors(state.hookTarget, state.hookPosition).normalize();
-            state.hookPosition.addScaledVector(dirToTarget, HOOK_SPEED * delta);
+            _dirToTarget.subVectors(state.hookTarget, state.hookPosition).normalize();
+            state.hookPosition.addScaledVector(_dirToTarget, HOOK_SPEED * delta);
 
             if (state.hookPosition.distanceTo(state.hookTarget) < 1.5) {
                 if (state.hookWillHit) {
                     state.hookState = 'PULLING';
-                    const badge = document.getElementById('hook-badge');
-                    if (badge) badge.style.display = 'inline-block';
+                    if (!hookBadgeEl) hookBadgeEl = document.getElementById('hook-badge');
+                    if (hookBadgeEl) hookBadgeEl.style.display = 'inline-block';
                 } else {
                     resetHook();
                 }
@@ -125,36 +150,34 @@ export function updateHook(delta) {
 
             if (state.hookIsEnemy && state.hookTargetEnemy) {
                 state.hookTarget.copy(state.hookTargetEnemy.position);
-                const toEnemy = new THREE.Vector3().subVectors(state.hookTarget, playerObj.position);
-                const dist = toEnemy.length();
+                _toEnemy.subVectors(state.hookTarget, playerObj.position);
+                const dist = _toEnemy.length();
 
-                if (dist > 3.0) {
-                    const pullDir = toEnemy.clone().normalize();
+                if (dist > HOOK_RELEASE_DISTANCE) {
+                    _pullDir.copy(_toEnemy).normalize();
                     const pullSpeed = HOOK_SPEED * 0.75;
-                    state.velocity.copy(pullDir).multiplyScalar(pullSpeed);
+                    state.velocity.copy(_pullDir).multiplyScalar(pullSpeed);
                 } else {
                     resetHook();
                 }
             } else {
-                const toHook = new THREE.Vector3().subVectors(state.hookTarget, playerObj.position);
-                const dist = toHook.length();
+                _toHook.subVectors(state.hookTarget, playerObj.position);
+                const dist = _toHook.length();
 
-                if (dist > 3.0) {
-                    const pullDir = toHook.clone().normalize();
+                if (dist > HOOK_RELEASE_DISTANCE) {
+                    _pullDir.copy(_toHook).normalize();
 
-                    state.velocity.x += pullDir.x * HOOK_SLINGSHOT_ACCEL * delta;
-                    state.velocity.y += pullDir.y * HOOK_SLINGSHOT_ACCEL * delta;
-                    state.velocity.z += pullDir.z * HOOK_SLINGSHOT_ACCEL * delta;
+                    state.velocity.x += _pullDir.x * HOOK_SLINGSHOT_ACCEL * delta;
+                    state.velocity.y += _pullDir.y * HOOK_SLINGSHOT_ACCEL * delta;
+                    state.velocity.z += _pullDir.z * HOOK_SLINGSHOT_ACCEL * delta;
 
-                    const dot = state.velocity.dot(pullDir);
-                    const minPullSpeed = 35.0;
-                    if (dot < minPullSpeed) {
-                        state.velocity.addScaledVector(pullDir, minPullSpeed - dot);
+                    const dot = state.velocity.dot(_pullDir);
+                    if (dot < HOOK_MIN_PULL_SPEED) {
+                        state.velocity.addScaledVector(_pullDir, HOOK_MIN_PULL_SPEED - dot);
                     }
 
-                    const maxSpeed = 120.0;
-                    if (state.velocity.length() > maxSpeed) {
-                        state.velocity.setLength(maxSpeed);
+                    if (state.velocity.length() > HOOK_MAX_SLINGSHOT_SPEED) {
+                        state.velocity.setLength(HOOK_MAX_SLINGSHOT_SPEED);
                     }
                 } else {
                     resetHook();
@@ -163,15 +186,14 @@ export function updateHook(delta) {
         }
 
         if (state.leftGun && state.hookMesh) {
-
             state.leftGun.updateWorldMatrix(true, false);
-            const gunTip = new THREE.Vector3(0, 0, -0.19);
-            state.leftGun.localToWorld(gunTip);
-            const distance = gunTip.distanceTo(state.hookPosition);
+            _gunTip.copy(GUN_TIP_OFFSET);
+            state.leftGun.localToWorld(_gunTip);
+            const distance = _gunTip.distanceTo(state.hookPosition);
 
             if (distance > 0.05) {
-                const midPoint = new THREE.Vector3().addVectors(gunTip, state.hookPosition).multiplyScalar(0.5);
-                state.hookMesh.position.copy(midPoint);
+                _midPoint.addVectors(_gunTip, state.hookPosition).multiplyScalar(0.5);
+                state.hookMesh.position.copy(_midPoint);
                 state.hookMesh.scale.set(1, 1, distance);
                 state.hookMesh.lookAt(state.hookPosition);
             }

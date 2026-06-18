@@ -7,9 +7,15 @@ import {
     MAX_PILLAR_HEIGHT,
     MAX_ENEMY_HEIGHT,
     ENEMY_CLASSES,
-    LAVA_POOL_HALF_SIZE
+    LAVA_POOL_HALF_SIZE,
+    BUSH_2D_COUNT,
+    BUSH_3D_COUNT,
+    BUSH_3D_RADIUS_CAP,
+    BUSH_2D_INNER_RADIUS,
+    BUSH_2D_SPREAD
 } from './config.js';
 
+// Respawn targeted remote target at random location within map boundaries and randomize target scale/class/health.
 export function respawnTarget(targetGroup) {
     targetGroup.position.x = (Math.random() - 0.5) * (MAP_SIZE - 40);
     targetGroup.position.y = 3.0 + Math.random() * (MAX_ENEMY_HEIGHT - 5.0);
@@ -30,21 +36,26 @@ export function respawnTarget(targetGroup) {
     targetGroup.userData.healthBarFg.scale.x = 1;
 }
 
-// Helper to check if a square center (sqX, sqZ) overlaps with any spawned pillar
-function overlapsWithPillars(sqX, sqZ) {
-    const halfPillar = PILLAR_WIDTH / 2; // 3.0
-    const checkDist = LAVA_POOL_HALF_SIZE + halfPillar; // 12.8 + 3.0 = 15.8
-    for (let i = 0; i < state.obstacles.length; i++) {
-        const obs = state.obstacles[i];
-        const dx = Math.abs(sqX - obs.position.x);
-        const dz = Math.abs(sqZ - obs.position.z);
-        if (dx < checkDist && dz < checkDist) {
+// Unified AABB collision helper
+function checkAABBOverlap(x, z, checkRadius, array, halfWidth) {
+    const len = array.length;
+    for (let i = 0; i < len; i++) {
+        const item = array[i];
+        const dx = Math.abs(x - item.position.x);
+        const dz = Math.abs(z - item.position.z);
+        if (dx < halfWidth + checkRadius && dz < halfWidth + checkRadius) {
             return true;
         }
     }
     return false;
 }
 
+// Helper to check if a square center (sqX, sqZ) overlaps with any spawned pillar
+function overlapsWithPillars(sqX, sqZ) {
+    return checkAABBOverlap(sqX, sqZ, PILLAR_WIDTH / 2, state.obstacles, LAVA_POOL_HALF_SIZE);
+}
+
+// Procedurally generates grass texture by rendering randomized organic green HSL strokes on an offscreen HTML canvas.
 function createGrassTexture() {
     const size = 512;
     const canvas = document.createElement('canvas');
@@ -83,6 +94,7 @@ function createGrassTexture() {
     return texture;
 }
 
+// Procedurally constructs 3D low-poly tree geometries using cylinder trunk and multiple dodacahedron leaf meshes.
 function createLowPolyBush() {
     const bushGroup = new THREE.Group();
     
@@ -131,6 +143,7 @@ function createLowPolyBush() {
     return bushGroup;
 }
 
+// Procedurally generates 2D flat-shaded billboard bush texture using custom face triangulation and light scaling.
 function create2DLowPolyBushTexture(baseColorHex) {
     const size = 256;
     const canvas = document.createElement('canvas');
@@ -213,6 +226,7 @@ function create2DLowPolyBushTexture(baseColorHex) {
     drawFacetedCluster(centerX, centerY - 80, 50, baseColorHex);
     // Top-most clusters
     drawFacetedCluster(centerX - 10, centerY - 110, 38, baseColorHex);
+    // Top-most right cluster
     drawFacetedCluster(centerX + 15, centerY - 105, 35, baseColorHex);
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -220,55 +234,19 @@ function create2DLowPolyBushTexture(baseColorHex) {
 }
 
 function overlapsWithPillarsOrLava(x, z, checkRadius) {
-    // 1. Check pillars
-    const halfPillar = PILLAR_WIDTH / 2; // 3.0
-    for (let i = 0; i < state.obstacles.length; i++) {
-        const obs = state.obstacles[i];
-        const dx = Math.abs(x - obs.position.x);
-        const dz = Math.abs(z - obs.position.z);
-        if (dx < halfPillar + checkRadius && dz < halfPillar + checkRadius) {
-            return true;
-        }
-    }
-
-    // 2. Check lava pools
-    const halfLava = LAVA_POOL_HALF_SIZE; // 12.8
-    for (let i = 0; i < state.lavaPools.length; i++) {
-        const pool = state.lavaPools[i];
-        const dx = Math.abs(x - pool.position.x);
-        const dz = Math.abs(z - pool.position.z);
-        if (dx < halfLava + checkRadius && dz < halfLava + checkRadius) {
-            return true;
-        }
-    }
-
-    // 3. Check player spawn area
-    const distFromCenter = Math.sqrt(x * x + z * z);
-    if (distFromCenter < 25) {
-        return true;
-    }
-
+    if (checkAABBOverlap(x, z, checkRadius, state.obstacles, PILLAR_WIDTH / 2)) return true;
+    if (checkAABBOverlap(x, z, checkRadius, state.lavaPools, LAVA_POOL_HALF_SIZE)) return true;
+    if (x * x + z * z < 625) return true; // check player spawn area (< 25 units squared)
     return false;
 }
 
 function overlapsWithFakePillars(x, z, checkRadius) {
     if (!state.fakePillars) return false;
-    const halfFakePillar = (PILLAR_WIDTH * 1.5) / 2; // 4.5
-    for (let i = 0; i < state.fakePillars.length; i++) {
-        const pillar = state.fakePillars[i];
-        const dx = Math.abs(x - pillar.position.x);
-        const dz = Math.abs(z - pillar.position.z);
-        if (dx < halfFakePillar + checkRadius && dz < halfFakePillar + checkRadius) {
-            return true;
-        }
-    }
-    return false;
+    return checkAABBOverlap(x, z, checkRadius, state.fakePillars, (PILLAR_WIDTH * 1.5) / 2);
 }
 
-export function createEnvironment() {
-    if (!state.scene) return;
-
-    // Floor Mesh Setup (Extended significantly to look like an unlimited world fading into the fog)
+// Environmental Generation Modular Sub-functions
+function createFloor() {
     const floorGeo = new THREE.PlaneGeometry(3500, 3500);
     const grassTex = createGrassTexture();
     const floorMat = new THREE.MeshLambertMaterial({ map: grassTex, color: 0xffffff });
@@ -277,31 +255,30 @@ export function createEnvironment() {
     floor.receiveShadow = true; 
     state.scene.add(floor);
     state.grappleSurfaces.push(floor);
+}
 
-    // Dynamic 2D distant world generation (Pillars and Lava Pools outside the playable area)
+function createFakeBillboards() {
     state.fakePillars = [];
-    const fakePillarGeo = new THREE.PlaneGeometry(PILLAR_WIDTH * 1.5, 1); // Plane width scaled, height scaled dynamically
-    const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x909aab, side: THREE.DoubleSide }); // Reacts to lighting and fog
+    const fakePillarGeo = new THREE.PlaneGeometry(PILLAR_WIDTH * 1.5, 1);
+    const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x909aab, side: THREE.DoubleSide });
 
-    // Generate 120 distant, widely spread 2D billboard pillars
     for (let i = 0; i < 120; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 1100; // From border edge to 1500 units out
+        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 1100;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
         const height = 20 + Math.random() * (MAX_PILLAR_HEIGHT - 20);
 
         const mesh = new THREE.Mesh(fakePillarGeo, fakePillarMat);
         mesh.scale.set(1, height, 1);
-        mesh.position.set(x, height / 2, z); // pivot is center, offset vertically by half height
+        mesh.position.set(x, height / 2, z);
         
         state.scene.add(mesh);
         state.fakePillars.push(mesh);
     }
 
-    // Generate 80 distant, widely spread 3D thin lava pools (using BoxGeometry to prevent Z-fighting)
     const fakeLavaGeo = new THREE.BoxGeometry(LAVA_POOL_HALF_SIZE * 2, 0.15, LAVA_POOL_HALF_SIZE * 2);
-    const fakeLavaMat = new THREE.MeshBasicMaterial({ color: 0xff3b00 }); // Bright, unlit lava color
+    const fakeLavaMat = new THREE.MeshBasicMaterial({ color: 0xff3b00 });
 
     for (let i = 0; i < 80; i++) {
         const angle = Math.random() * Math.PI * 2;
@@ -310,12 +287,13 @@ export function createEnvironment() {
         const z = Math.sin(angle) * radius;
 
         const mesh = new THREE.Mesh(fakeLavaGeo, fakeLavaMat);
-        mesh.position.set(x, 0.075, z); // Center positioned at y = 0.075 so top is at y = 0.15 (above floor)
+        mesh.position.set(x, 0.075, z);
         
         state.scene.add(mesh);
     }
+}
 
-    // 1) Instanced pillars for excellent draw-call performance - SPAWNED FIRST to allow lava overlap checks
+function createPillars() {
     const dummy = new THREE.Object3D();
     const boxGeo = new THREE.BoxGeometry(PILLAR_WIDTH, 1, PILLAR_WIDTH);
     const boxMat = new THREE.MeshStandardMaterial({ roughness: 0.3 });
@@ -324,9 +302,9 @@ export function createEnvironment() {
     pillarInstanced.castShadow = true;
     pillarInstanced.receiveShadow = true;
 
-    // Invisible collision boxes use a lightweight separate material so that
-    // future changes to pillar visuals don't accidentally affect colliders.
     const colliderMat = new THREE.MeshBasicMaterial();
+    // Shared unit box geometry to reduce heap garbage significantly
+    const sharedUnitBoxGeo = new THREE.BoxGeometry(1, 1, 1);
 
     for (let i = 0; i < PILLAR_COUNT; i++) {
         const height = 20.0 + Math.random() * (MAX_PILLAR_HEIGHT - 20.0);
@@ -339,8 +317,8 @@ export function createEnvironment() {
         dummy.updateMatrix();
         pillarInstanced.setMatrixAt(i, dummy.matrix);
 
-        // Keep invisible collision box
-        const obstacle = new THREE.Mesh(new THREE.BoxGeometry(PILLAR_WIDTH, height, PILLAR_WIDTH), colliderMat);
+        const obstacle = new THREE.Mesh(sharedUnitBoxGeo, colliderMat);
+        obstacle.scale.set(PILLAR_WIDTH, height, PILLAR_WIDTH);
         obstacle.position.copy(dummy.position);
         obstacle.userData.height = height;
         obstacle.userData.halfW = PILLAR_WIDTH / 2;
@@ -352,8 +330,9 @@ export function createEnvironment() {
         state.grappleSurfaces.push(obstacle);
     }
     state.scene.add(pillarInstanced);
+}
 
-    // 2) Spawn 30 glowing orange lava pool chains of 1 to 5 connected squares (completely avoiding pillars, using BoxGeometry to prevent Z-fighting)
+function createLavaPools() {
     const lavaGeo = new THREE.BoxGeometry(LAVA_POOL_HALF_SIZE * 2, 0.15, LAVA_POOL_HALF_SIZE * 2);
     const lavaMat = new THREE.MeshStandardMaterial({ 
         color: 0xff4500, 
@@ -371,7 +350,6 @@ export function createEnvironment() {
             attempts++;
             squares = [];
             
-            // Choose start position for the chain
             let startX, startZ;
             let posAttempts = 0;
             do {
@@ -387,8 +365,7 @@ export function createEnvironment() {
             
             squares.push({ x: startX, z: startZ });
             
-            // Random amount of squares between 1 and 5
-            const squareCount = 1 + Math.floor(Math.random() * 5); // 1 to 5
+            const squareCount = 1 + Math.floor(Math.random() * 5);
             
             let growthSuccess = true;
             for (let j = 1; j < squareCount; j++) {
@@ -397,41 +374,33 @@ export function createEnvironment() {
                 
                 while (!spotFound && spotAttempts < 30) {
                     spotAttempts++;
-                    // Pick a random existing square in the chain
                     const parent = squares[Math.floor(Math.random() * squares.length)];
-                    
-                    // Pick random cardinal direction
                     const dir = Math.floor(Math.random() * 4);
                     let nextX = parent.x;
                     let nextZ = parent.z;
-                    const step = LAVA_POOL_HALF_SIZE * 2; // adjacent placement
+                    const step = LAVA_POOL_HALF_SIZE * 2;
                     
-                    if (dir === 0) nextX += step; // East
-                    else if (dir === 1) nextX -= step; // West
-                    else if (dir === 2) nextZ += step; // North
-                    else nextZ -= step; // South
+                    if (dir === 0) nextX += step;
+                    else if (dir === 1) nextX -= step;
+                    else if (dir === 2) nextZ += step;
+                    else nextZ -= step;
                     
-                    // Check if already in the chain
                     const duplicate = squares.some(sq => Math.abs(sq.x - nextX) < 1.0 && Math.abs(sq.z - nextZ) < 1.0);
                     if (duplicate) continue;
                     
-                    // Check map bounds
                     if (Math.abs(nextX) > (MAP_SIZE / 2 - LAVA_POOL_HALF_SIZE - 10) || 
                         Math.abs(nextZ) > (MAP_SIZE / 2 - LAVA_POOL_HALF_SIZE - 10)) {
                         continue;
                     }
                     
-                    // Check player spawn safety
                     if (Math.sqrt(nextX * nextX + nextZ * nextZ) < 30) {
                         continue;
                     }
                     
-                    // Check pillar overlap
                     if (overlapsWithPillars(nextX, nextZ)) {
                         continue;
                     }
                     
-                    // Valid spot found!
                     squares.push({ x: nextX, z: nextZ });
                     spotFound = true;
                 }
@@ -447,28 +416,27 @@ export function createEnvironment() {
             }
         }
 
-        // If we successfully generated a valid chain configuration, instantiate all its squares
         if (chainValid) {
-            for (const sq of squares) {
+            const sqLen = squares.length;
+            for (let k = 0; k < sqLen; k++) {
+                const sq = squares[k];
                 const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
-                lavaMesh.position.set(sq.x, 0.075, sq.z); // Center at y = 0.075 so top is at y = 0.15 (above floor)
+                lavaMesh.position.set(sq.x, 0.075, sq.z);
                 state.scene.add(lavaMesh);
                 state.lavaPools.push(lavaMesh);
-                
-                // Lava pools are also grappleable surfaces!
                 state.grappleSurfaces.push(lavaMesh);
             }
         }
     }
+}
 
-    // Spawn 3D low poly bushes inside the world border (radius < 330)
+function createBushes() {
     let spawned3DBushes = 0;
-    const target3DBushes = 180;
     let attempts3D = 0;
-    while (spawned3DBushes < target3DBushes && attempts3D < 1000) {
+    while (spawned3DBushes < BUSH_3D_COUNT && attempts3D < 1000) {
         attempts3D++;
         const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * 330;
+        const radius = Math.random() * BUSH_3D_RADIUS_CAP;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
@@ -482,7 +450,6 @@ export function createEnvironment() {
         }
     }
 
-    // Pre-generate 2D low-poly bush textures (one for each of the 5 extra dark green shades)
     const bushGreenShades = [0x153018, 0x1a331c, 0x162c18, 0x0f2010, 0x132815];
     const bush2DTextures = bushGreenShades.map(color => create2DLowPolyBushTexture(color));
     const spriteMaterials = bush2DTextures.map(tex => new THREE.SpriteMaterial({
@@ -491,14 +458,12 @@ export function createEnvironment() {
         color: 0xffffff
     }));
 
-    // Spawn 2D billboard bushes outside the world border (radius between 345 and 1500)
     let spawned2DOutside = 0;
-    const target2DOutside = 250;
     let attempts2DOutside = 0;
-    while (spawned2DOutside < target2DOutside && attempts2DOutside < 1500) {
+    while (spawned2DOutside < BUSH_2D_COUNT && attempts2DOutside < 1500) {
         attempts2DOutside++;
         const angle = Math.random() * Math.PI * 2;
-        const radius = 345 + Math.random() * 1155; // 345 to 1500
+        const radius = BUSH_2D_INNER_RADIUS + Math.random() * BUSH_2D_SPREAD;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
@@ -513,13 +478,22 @@ export function createEnvironment() {
             spawned2DOutside++;
         }
     }
+}
 
-    // Spawn 16 enemies
+function createEnemies() {
+    const targetGeo = new THREE.BoxGeometry(2, 2, 2);
+    const targetMat = new THREE.MeshStandardMaterial({ roughness: 0.2 });
+
+    const barBgGeo = new THREE.PlaneGeometry(1.8, 0.15);
+    const barBgMat = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
+    
+    // Shared and pre-translated geometry to prevent duplicate heap allocations
+    const barFgGeo = new THREE.PlaneGeometry(1.8, 0.15).translate(0.9, 0, 0);
+    const barFgMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide });
+
     for (let i = 0; i < 16; i++) {
         const targetGroup = new THREE.Group();
 
-        const targetGeo = new THREE.BoxGeometry(2, 2, 2);
-        const targetMat = new THREE.MeshStandardMaterial({ roughness: 0.2 });
         const bodyMesh = new THREE.Mesh(targetGeo, targetMat);
         bodyMesh.castShadow = true;    
         bodyMesh.receiveShadow = true;
@@ -529,14 +503,9 @@ export function createEnvironment() {
         const healthBarGroup = new THREE.Group();
         healthBarGroup.position.y = 1.6;
 
-        const barBgGeo = new THREE.PlaneGeometry(1.8, 0.15);
-        const barBgMat = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
         const barBg = new THREE.Mesh(barBgGeo, barBgMat);
         healthBarGroup.add(barBg);
 
-        const barFgGeo = new THREE.PlaneGeometry(1.8, 0.15);
-        barFgGeo.translate(0.9, 0, 0);
-        const barFgMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide });
         const barFg = new THREE.Mesh(barFgGeo, barFgMat);
         barFg.position.set(-0.9, 0, 0.01);
         healthBarGroup.add(barFg);
@@ -552,20 +521,38 @@ export function createEnvironment() {
     }
 }
 
+// Creates the complete game floor geometry, instanced pillars, lava pools, 2D billboard environment and spawns enemies.
+export function createEnvironment() {
+    if (!state.scene) return;
+
+    createFloor();
+    createFakeBillboards();
+    createPillars();
+    createLavaPools();
+    createBushes();
+    createEnemies();
+}
+
 export function updateTargets(delta) {
-    state.targets.forEach((target) => {
+    const targetsLen = state.targets.length;
+    for (let i = 0; i < targetsLen; i++) {
+        const target = state.targets[i];
         target.userData.bodyMesh.rotation.x += 0.01;
         target.userData.bodyMesh.rotation.y += 0.015;
         if (state.camera) {
             target.userData.healthBarGroup.quaternion.copy(state.camera.quaternion);
         }
-    });
+    }
 
     // Update 2D fake billboard pillars to face the player's horizontal position
     if (state.fakePillars && state.controls) {
         const playerObj = state.controls.getObject();
-        state.fakePillars.forEach((pillar) => {
-            pillar.lookAt(playerObj.position.x, pillar.position.y, playerObj.position.z);
-        });
+        const px = playerObj.position.x;
+        const pz = playerObj.position.z;
+        const pillarsLen = state.fakePillars.length;
+        for (let i = 0; i < pillarsLen; i++) {
+            const pillar = state.fakePillars[i];
+            pillar.lookAt(px, pillar.position.y, pz);
+        }
     }
 }

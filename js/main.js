@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { state } from './state.js';
+import { state, resetPlayerState } from './state.js';
 import {
     JUMP_FORCE,
     PROJECTILE_SPEED,
@@ -15,35 +15,75 @@ import {
     FOV_LERP_SPEED,
     PLAYER_RADIUS,
     WEAPON_STATS,
-    TARGET_HIT_RANGE_MULTIPLIER
+    TARGET_HIT_RANGE_MULTIPLIER,
+    REGEN_DELAY_MS,
+    MAP_HALF_SIZE,
+    BORDER_WARN_THRESHOLD,
+    BORDER_PULSE_DISTANCE
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect } from './weapons.js';
 import { createEnvironment, respawnTarget, updateTargets } from './world.js';
-import { sendLocalState, disconnectMultiplayer, broadcastLocalJump } from './multiplayer.js';
+import {
+    sendLocalState,
+    disconnectMultiplayer,
+    broadcastLocalJump,
+    generateRoomCode,
+    hostGame,
+    joinGame,
+    broadcastTargetKill,
+    flashPeerMesh
+} from './multiplayer.js';
+
+// Module-level cached vectors to prevent per-frame garbage collection
+const _logicalCameraPos = new THREE.Vector3();
+const _tpCamDir = new THREE.Vector3();
+const _tpCamOffset = new THREE.Vector3();
+const _lavaFeetPos = new THREE.Vector3();
+
+// DOM caches
+let healthBarEl, hoverBarEl, fpsCounterEl, reloadBarEl, gogglesScopeEl, crosshairEl, uiEl,
+    healthContainerEl, reloadContainerEl, hoverContainerEl, pvpStatsEl, scoreEl,
+    deathsEl, killsEl, blockerEl, deathOverlayEl, hoverBadgeEl, worldBorderOverlayEl,
+    inputUsernameEl, sensSliderEl, sensValueEl, panelMainEl, panelMpEl, panelHostWaitingEl,
+    panelJoinRoomEl, panelPauseEl, btnPlaySpEl, btnMenuMpEl, btnMpBackEl, btnMpHostViewEl,
+    btnMpJoinViewEl, btnHostCancelEl, btnHostStartEl, btnJoinConnectEl, btnJoinCancelEl,
+    btnPauseResumeEl, btnPauseLeaveEl, inputRoomCodeEl, roomCodeDisplayEl, joinErrorLogEl,
+    pauseLobbyInfoEl, pauseRoomCodeEl, btnDeathRespawnEl, btnDeathLeaveEl, mpNameErrorEl,
+    btnCopyCodeEl;
+
+// Static Weapon cycles
+const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
+
+// Dirty flags for per-frame DOM write optimization
+let lastReloadProgress = -1;
+let lastHoverFuel = -1;
+let lastFov = -1;
+let lastScopedState = null;
 
 export function updateHealthBar(hpRatio, flashColor = null) {
-    const healthBar = document.getElementById('health-bar');
-    if (!healthBar) return;
-    healthBar.style.width = `${hpRatio}%`;
+    if (!healthBarEl) return;
+    healthBarEl.style.width = `${hpRatio}%`;
     if (flashColor) {
-        healthBar.style.backgroundColor = flashColor;
+        healthBarEl.style.backgroundColor = flashColor;
         setTimeout(() => {
-            if (state.playerHp > 0 && healthBar.style.backgroundColor === flashColor) {
-                healthBar.style.backgroundColor = '#2ed573';
+            if (state.playerHp > 0 && healthBarEl.style.backgroundColor === flashColor) {
+                healthBarEl.style.backgroundColor = '#2ed573';
             }
         }, 100);
     } else {
-        healthBar.style.backgroundColor = '#2ed573';
+        healthBarEl.style.backgroundColor = '#2ed573';
     }
 }
 
 export function updateHoverBar(fuelRatio) {
-    const hoverBar = document.getElementById('hover-bar');
-    if (!hoverBar) return;
-    hoverBar.style.height = `${fuelRatio * 100}%`;
+    if (!hoverBarEl) return;
+    if (fuelRatio !== lastHoverFuel) {
+        hoverBarEl.style.height = `${fuelRatio * 100}%`;
+        lastHoverFuel = fuelRatio;
+    }
 }
 
 let fpsFrames = 0;
@@ -51,14 +91,55 @@ let fpsLastTime = performance.now();
 let lastFrameTime = performance.now();
 const targetFps = 120;
 const frameMinTime = 1000 / targetFps; // 8.333 ms
-// Cached DOM element references — queried once at startup instead of every frame
-const fpsCounterEl      = document.getElementById('fps-counter');
-const reloadBarEl       = document.getElementById('reload-bar');
-const gogglesScopeEl    = document.getElementById('goggles-scope');
-const crosshairEl       = document.getElementById('crosshair');
-const uiEl              = document.getElementById('ui');
-const healthContainerEl = document.getElementById('health-container');
-const reloadContainerEl = document.getElementById('reload-container');
+
+function initDOMCache() {
+    healthBarEl = document.getElementById('health-bar');
+    hoverBarEl = document.getElementById('hover-bar');
+    fpsCounterEl = document.getElementById('fps-counter');
+    reloadBarEl = document.getElementById('reload-bar');
+    gogglesScopeEl = document.getElementById('goggles-scope');
+    crosshairEl = document.getElementById('crosshair');
+    uiEl = document.getElementById('ui');
+    healthContainerEl = document.getElementById('health-container');
+    reloadContainerEl = document.getElementById('reload-container');
+    hoverContainerEl = document.getElementById('hover-container');
+    pvpStatsEl = document.getElementById('pvp-stats');
+    scoreEl = document.getElementById('score');
+    deathsEl = document.getElementById('deaths');
+    killsEl = document.getElementById('kills');
+    blockerEl = document.getElementById('blocker');
+    deathOverlayEl = document.getElementById('death-overlay');
+    hoverBadgeEl = document.getElementById('hover-badge');
+    worldBorderOverlayEl = document.getElementById('world-border-overlay');
+    inputUsernameEl = document.getElementById('input-username');
+    sensSliderEl = document.getElementById('sensitivity');
+    sensValueEl = document.getElementById('sens-value');
+    panelMainEl = document.getElementById('panel-main');
+    panelMpEl = document.getElementById('panel-mp');
+    panelHostWaitingEl = document.getElementById('panel-host-waiting');
+    panelJoinRoomEl = document.getElementById('panel-join-room');
+    panelPauseEl = document.getElementById('panel-pause');
+    btnPlaySpEl = document.getElementById('btn-play-sp');
+    btnMenuMpEl = document.getElementById('btn-menu-mp');
+    btnMpBackEl = document.getElementById('btn-mp-back');
+    btnMpHostViewEl = document.getElementById('btn-mp-host-view');
+    btnMpJoinViewEl = document.getElementById('btn-mp-join-view');
+    btnHostCancelEl = document.getElementById('btn-host-cancel');
+    btnHostStartEl = document.getElementById('btn-host-start');
+    btnJoinConnectEl = document.getElementById('btn-join-connect');
+    btnJoinCancelEl = document.getElementById('btn-join-cancel');
+    btnPauseResumeEl = document.getElementById('btn-pause-resume');
+    btnPauseLeaveEl = document.getElementById('btn-pause-leave');
+    inputRoomCodeEl = document.getElementById('input-room-code');
+    roomCodeDisplayEl = document.getElementById('room-code-display');
+    joinErrorLogEl = document.getElementById('join-error-log');
+    pauseLobbyInfoEl = document.getElementById('pause-lobby-info');
+    pauseRoomCodeEl = document.getElementById('pause-room-code');
+    btnDeathRespawnEl = document.getElementById('btn-death-respawn');
+    btnDeathLeaveEl = document.getElementById('btn-death-leave');
+    mpNameErrorEl = document.getElementById('mp-name-error');
+    btnCopyCodeEl = document.getElementById('btn-copy-code');
+}
 
 function validateUsername(username) {
     if (!username) {
@@ -82,8 +163,9 @@ function onWindowResize() {
     }
 }
 
-export function init() {
-    state.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1500);
+// Sub-components of the init process
+function setupRenderer() {
+    state.camera = new THREE.PerspectiveCamera(DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.1, 1500);
 
     state.scene = new THREE.Scene();
     state.scene.background = new THREE.Color(0xd0dbf0);
@@ -92,7 +174,6 @@ export function init() {
     const ambientLight = new THREE.AmbientLight(0x777777);
     state.scene.add(ambientLight);
 
-    // Casting shadow directional light setup
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
     directionalLight.position.set(200, 400, 200); 
     directionalLight.castShadow = true;
@@ -121,80 +202,12 @@ export function init() {
     document.body.appendChild(state.renderer.domElement);
 
     state.controls = new PointerLockControls(state.camera, document.body);
+}
 
-    const blocker = document.getElementById('blocker');
-    const sensSlider = document.getElementById('sensitivity');
-    const sensValue = document.getElementById('sens-value');
-
-    // Initialize baseSensitivity and active pointerSpeed
-    let initialSens = 1.0;
-    if (sensSlider) {
-        let val = parseFloat(sensSlider.value);
-        if (!isNaN(val)) {
-            initialSens = val;
-        }
-    }
-    state.baseSensitivity = initialSens;
-    if (state.controls) {
-        state.controls.pointerSpeed = state.baseSensitivity;
-    }
-    if (sensValue) {
-        sensValue.innerText = state.baseSensitivity.toFixed(1);
-    }
-
-    if (sensSlider && sensValue) {
-        sensSlider.addEventListener('input', (e) => {
-            let val = parseFloat(e.target.value);
-            if (isNaN(val)) val = 1.0;
-            val = Math.max(0.1, Math.min(3.0, val));
-            state.baseSensitivity = val;
-            sensValue.innerText = val.toFixed(1);
-            if (state.controls) {
-                state.controls.pointerSpeed = val * (state.camera ? (state.camera.fov / DEFAULT_FOV) : 1.0);
-            }
-        });
-        sensSlider.addEventListener('click', (e) => e.stopPropagation());
-    }
-
-    // Setup multiplayer/singleplayer menu controls
-    const panelMain = document.getElementById('panel-main');
-    const panelMp = document.getElementById('panel-mp');
-    const panelHostWaiting = document.getElementById('panel-host-waiting');
-    const panelJoinRoom = document.getElementById('panel-join-room');
-    const panelPause = document.getElementById('panel-pause');
-
-    const btnPlaySp = document.getElementById('btn-play-sp');
-    const btnMenuMp = document.getElementById('btn-menu-mp');
-    
-    const btnMpBack = document.getElementById('btn-mp-back');
-    const btnMpHostView = document.getElementById('btn-mp-host-view');
-    const btnMpJoinView = document.getElementById('btn-mp-join-view');
-
-    const btnHostCancel = document.getElementById('btn-host-cancel');
-    const btnHostStart = document.getElementById('btn-host-start');
-
-    const btnJoinConnect = document.getElementById('btn-join-connect');
-    const btnJoinCancel = document.getElementById('btn-join-cancel');
-
-    const btnPauseResume = document.getElementById('btn-pause-resume');
-    const btnPauseLeave = document.getElementById('btn-pause-leave');
-
-    const inputUsername = document.getElementById('input-username');
-    const inputRoomCode = document.getElementById('input-room-code');
-    const roomCodeDisplay = document.getElementById('room-code-display');
-    const joinErrorLog = document.getElementById('join-error-log');
-    
-    const pauseLobbyInfo = document.getElementById('pause-lobby-info');
-    const pauseRoomCode = document.getElementById('pause-room-code');
-
-    const deathOverlay = document.getElementById('death-overlay');
-    const btnDeathRespawn = document.getElementById('btn-death-respawn');
-    const btnDeathLeave = document.getElementById('btn-death-leave');
-
-    const mpNameError = document.getElementById('mp-name-error');
-    
-    if (btnPlaySp) {
-        btnPlaySp.addEventListener('click', (e) => {
+function setupMenuListeners() {
+    // Singleplayer Play
+    if (btnPlaySpEl) {
+        btnPlaySpEl.addEventListener('click', (e) => {
             e.stopPropagation();
             state.isMultiplayer = false;
             state.isHost = false;
@@ -203,320 +216,185 @@ export function init() {
         });
     }
 
-    if (btnMenuMp) {
-        btnMenuMp.addEventListener('click', (e) => {
+    // Multiplayer view toggle
+    if (btnMenuMpEl) {
+        btnMenuMpEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            panelMain.style.display = 'none';
-            panelMp.style.display = 'flex';
+            if (panelMainEl) panelMainEl.style.display = 'none';
+            if (panelMpEl) panelMpEl.style.display = 'flex';
         });
     }
 
-    if (btnMpBack) {
-        btnMpBack.addEventListener('click', (e) => {
+    if (btnMpBackEl) {
+        btnMpBackEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (mpNameError) mpNameError.innerText = '';
-            panelMp.style.display = 'none';
-            panelMain.style.display = 'flex';
+            if (mpNameErrorEl) mpNameErrorEl.innerText = '';
+            if (panelMpEl) panelMpEl.style.display = 'none';
+            if (panelMainEl) panelMainEl.style.display = 'flex';
         });
     }
 
-    if (btnMpHostView) {
-        btnMpHostView.addEventListener('click', (e) => {
+    // Host Menu view
+    if (btnMpHostViewEl) {
+        btnMpHostViewEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            const username = inputUsername.value.trim();
+            const username = inputUsernameEl ? inputUsernameEl.value.trim() : 'Guest';
             const nameError = validateUsername(username);
 
             if (nameError) {
-                if (mpNameError) mpNameError.innerText = nameError;
+                if (mpNameErrorEl) mpNameErrorEl.innerText = nameError;
                 return;
             }
 
-            if (mpNameError) mpNameError.innerText = '';
-            panelMp.style.display = 'none';
-            panelHostWaiting.style.display = 'flex';
+            if (mpNameErrorEl) mpNameErrorEl.innerText = '';
+            if (panelMpEl) panelMpEl.style.display = 'none';
+            if (panelHostWaitingEl) panelHostWaitingEl.style.display = 'flex';
 
-            import('./multiplayer.js').then((mp) => {
-                const code = mp.generateRoomCode();
-                if (roomCodeDisplay) roomCodeDisplay.innerText = code;
-                mp.hostGame(username, code);
-            });
+            const code = generateRoomCode();
+            if (roomCodeDisplayEl) roomCodeDisplayEl.innerText = code;
+            hostGame(username, code);
         });
     }
 
-    if (btnHostCancel) {
-        btnHostCancel.addEventListener('click', (e) => {
+    if (btnHostCancelEl) {
+        btnHostCancelEl.addEventListener('click', (e) => {
             e.stopPropagation();
             disconnectMultiplayer();
-            panelHostWaiting.style.display = 'none';
-            panelMp.style.display = 'flex';
+            if (panelHostWaitingEl) panelHostWaitingEl.style.display = 'none';
+            if (panelMpEl) panelMpEl.style.display = 'flex';
         });
     }
 
-    if (btnHostStart) {
-        btnHostStart.addEventListener('click', (e) => {
+    if (btnHostStartEl) {
+        btnHostStartEl.addEventListener('click', (e) => {
             e.stopPropagation();
             state.pendingPlay = true;
-            if (blocker) blocker.style.display = 'none';
+            if (blockerEl) blockerEl.style.display = 'none';
             state.controls.lock();
         });
     }
 
-    if (btnMpJoinView) {
-        btnMpJoinView.addEventListener('click', (e) => {
+    // Join Menu view
+    if (btnMpJoinViewEl) {
+        btnMpJoinViewEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            const username = inputUsername.value.trim();
+            const username = inputUsernameEl ? inputUsernameEl.value.trim() : 'Guest';
             const nameError = validateUsername(username);
 
             if (nameError) {
-                if (mpNameError) mpNameError.innerText = nameError;
+                if (mpNameErrorEl) mpNameErrorEl.innerText = nameError;
                 return;
             }
 
-            if (mpNameError) mpNameError.innerText = '';
-            panelMp.style.display = 'none';
-            panelJoinRoom.style.display = 'flex';
-            if (joinErrorLog) joinErrorLog.innerText = '';
+            if (mpNameErrorEl) mpNameErrorEl.innerText = '';
+            if (panelMpEl) panelMpEl.style.display = 'none';
+            if (panelJoinRoomEl) panelJoinRoomEl.style.display = 'flex';
+            if (joinErrorLogEl) joinErrorLogEl.innerText = '';
         });
     }
 
-    if (btnJoinCancel) {
-        btnJoinCancel.addEventListener('click', (e) => {
+    if (btnJoinCancelEl) {
+        btnJoinCancelEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            panelJoinRoom.style.display = 'none';
-            panelMp.style.display = 'flex';
+            if (panelJoinRoomEl) panelJoinRoomEl.style.display = 'none';
+            if (panelMpEl) panelMpEl.style.display = 'flex';
         });
     }
 
-    if (btnJoinConnect) {
-        btnJoinConnect.addEventListener('click', (e) => {
+    if (btnJoinConnectEl) {
+        btnJoinConnectEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (btnJoinConnect.dataset.connected === 'true') {
+            if (btnJoinConnectEl.dataset.connected === 'true') {
                 state.pendingPlay = true;
-                if (blocker) blocker.style.display = 'none';
+                if (blockerEl) blockerEl.style.display = 'none';
                 state.controls.lock();
                 return;
             }
 
-            const username = inputUsername.value.trim() || 'Guest';
-            const code = inputRoomCode.value.trim().toUpperCase();
+            const username = inputUsernameEl ? inputUsernameEl.value.trim() : 'Guest';
+            const code = inputRoomCodeEl ? inputRoomCodeEl.value.trim().toUpperCase() : '';
 
             if (code.length !== 4) {
-                if (joinErrorLog) joinErrorLog.innerText = 'Code must be 4 characters long!';
+                if (joinErrorLogEl) joinErrorLogEl.innerText = 'Code must be 4 characters long!';
                 return;
             }
 
-            btnJoinConnect.disabled = true;
-            btnJoinConnect.innerText = 'Connecting...';
+            btnJoinConnectEl.disabled = true;
+            btnJoinConnectEl.innerText = 'Connecting...';
 
-            import('./multiplayer.js').then((mp) => {
-                mp.joinGame(username, code);
-            });
+            joinGame(username, code);
         });
     }
 
-    state.controls.addEventListener('lock', () => {
-        if (state.pendingPlay) {
-            state.isPlaying = true;
-            state.pendingPlay = false;
-            spawnLightBeam(new THREE.Vector3(0, 2, 0));
-        }
-        if (blocker) blocker.style.display = 'none';
-        if (panelPause) panelPause.style.display = 'none';
-        const healthContainer = document.getElementById('health-container');
-        if (healthContainer) healthContainer.style.display = 'block';
-        const reloadContainer = document.getElementById('reload-container');
-        if (reloadContainer) reloadContainer.style.display = 'block';
-        const hoverContainer = document.getElementById('hover-container');
-        if (hoverContainer) hoverContainer.style.display = 'block';
-
-        const pvpStats = document.getElementById('pvp-stats');
-        if (pvpStats) {
-            pvpStats.style.display = state.isMultiplayer ? 'block' : 'none';
-        }
-
-        if (crosshairEl) crosshairEl.style.display = 'block';
-        if (uiEl) uiEl.style.display = 'flex';
-        if (fpsCounterEl) fpsCounterEl.style.display = 'block';
-
-        document.body.focus();
-        if (state.renderer && state.renderer.domElement) {
-            state.renderer.domElement.tabIndex = 1;
-            state.renderer.domElement.focus();
-        }
-    });
-
-    state.controls.addEventListener('unlock', () => {
-        if (blocker) blocker.style.display = 'flex';
-        state.moveForward = false;
-        state.moveBackward = false;
-        state.moveLeft = false;
-        state.moveRight = false;
-        state.isShiftDown = false;
-        state.isHovering = false;
-        state.isMouseDown = false;
-        state.isScoped = false;
-        state.rightClickActive = false;
-        state.keyCActive = false;
-        cancelInspect();
-        if (healthContainerEl) healthContainerEl.style.display = 'none';
-        if (reloadContainerEl) reloadContainerEl.style.display = 'none';
-        const hoverContainer = document.getElementById('hover-container');
-        if (hoverContainer) hoverContainer.style.display = 'none';
-        const hoverBadge = document.getElementById('hover-badge');
-        if (hoverBadge) hoverBadge.style.display = 'none';
-
-        
-        // Hide all starting panels
-        if (panelMain) panelMain.style.display = 'none';
-        if (panelMp) panelMp.style.display = 'none';
-        if (panelHostWaiting) panelHostWaiting.style.display = 'none';
-        if (panelJoinRoom) panelJoinRoom.style.display = 'none';
-
-        if (state.isPlaying) {
-            const isDead = (deathOverlay && deathOverlay.style.display === 'flex');
-            
-            // Show pause panel if playing and NOT dead
-            if (panelPause) {
-                panelPause.style.display = isDead ? 'none' : 'flex';
-            }
-            
-            if (state.isMultiplayer) {
-                if (pauseLobbyInfo) pauseLobbyInfo.style.display = isDead ? 'none' : 'inline';
-                if (pauseRoomCode) pauseRoomCode.innerText = state.roomCode || '----';
-                if (btnPauseLeave) btnPauseLeave.innerText = 'Leave Lobby';
-            } else {
-                if (pauseLobbyInfo) pauseLobbyInfo.style.display = 'none';
-                if (btnPauseLeave) btnPauseLeave.innerText = 'Leave Game';
-            }
-        } else {
-            // Return to primary main selection screen
-            if (panelPause) panelPause.style.display = 'none';
-            if (panelMain) panelMain.style.display = 'flex';
-            
-            if (state.isMultiplayer) {
-                disconnectMultiplayer();
-            }
-        }
-
-        resetHook();
-    });
-
-    if (btnPauseResume) {
-        btnPauseResume.addEventListener('click', (e) => {
+    // Pause Handlers
+    if (btnPauseResumeEl) {
+        btnPauseResumeEl.addEventListener('click', (e) => {
             e.stopPropagation();
             state.controls.lock();
         });
     }
 
-    if (btnPauseLeave) {
-        btnPauseLeave.addEventListener('click', (e) => {
+    if (btnPauseLeaveEl) {
+        btnPauseLeaveEl.addEventListener('click', (e) => {
             e.stopPropagation();
             state.isPlaying = false;
             if (state.isMultiplayer) {
                 disconnectMultiplayer();
             }
-            if (panelPause) panelPause.style.display = 'none';
-            if (panelMain) panelMain.style.display = 'flex';
+            if (panelPauseEl) panelPauseEl.style.display = 'none';
+            if (panelMainEl) panelMainEl.style.display = 'flex';
             resetHook();
         });
     }
 
-    if (btnDeathRespawn) {
-        btnDeathRespawn.addEventListener('click', (e) => {
+    // Respawn / Death panel
+    if (btnDeathRespawnEl) {
+        btnDeathRespawnEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            
-            // Reset player stats
-            state.playerHp = state.playerMaxHp;
-            state.score = 0;
-            const scoreEl = document.getElementById('score');
-            if (scoreEl) scoreEl.innerText = '0';
-
-            updateHealthBar(100);
-
-            if (state.controls) {
-                const playerObj = state.controls.getObject();
-                playerObj.position.set(0, 2, 0);
-                spawnLightBeam(new THREE.Vector3(0, 2, 0));
-            }
-            state.velocity.set(0, 0, 0);
-            resetHook();
+            performPlayerReset();
+            spawnLightBeam(new THREE.Vector3(0, 2, 0));
 
             if (state.isThirdPerson && state.playerMesh) {
                 state.playerMesh.visible = true;
             }
 
-            // Hide death screen
-            if (deathOverlay) deathOverlay.style.display = 'none';
-
-            // Lock controls to resume playing
+            if (deathOverlayEl) deathOverlayEl.style.display = 'none';
             state.controls.lock();
         });
     }
 
-    if (btnDeathLeave) {
-        btnDeathLeave.addEventListener('click', (e) => {
+    if (btnDeathLeaveEl) {
+        btnDeathLeaveEl.addEventListener('click', (e) => {
             e.stopPropagation();
             state.isPlaying = false;
-            
-            // Reset stats
-            state.playerHp = state.playerMaxHp;
-            state.score = 0;
-            const scoreEl = document.getElementById('score');
-            if (scoreEl) scoreEl.innerText = '0';
-
-            updateHealthBar(100);
-
-            if (state.controls) {
-                const playerObj = state.controls.getObject();
-                playerObj.position.set(0, 2, 0);
-            }
-            state.velocity.set(0, 0, 0);
-            resetHook();
+            performPlayerReset();
 
             if (state.isMultiplayer) {
                 disconnectMultiplayer();
             }
 
-            // Hide death screen and return to main panel
-            if (deathOverlay) deathOverlay.style.display = 'none';
-            if (panelPause) panelPause.style.display = 'none';
-            if (panelMain) panelMain.style.display = 'flex';
+            if (deathOverlayEl) deathOverlayEl.style.display = 'none';
+            if (panelPauseEl) panelPauseEl.style.display = 'none';
+            if (panelMainEl) panelMainEl.style.display = 'flex';
         });
     }
 
-    const btnCopyCode = document.getElementById('btn-copy-code');
-    if (btnCopyCode) {
-        btnCopyCode.addEventListener('click', (e) => {
+    // Copy room code
+    if (btnCopyCodeEl) {
+        btnCopyCodeEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            const code = state.roomCode || (roomCodeDisplay ? roomCodeDisplay.innerText : '');
+            const code = state.roomCode || (roomCodeDisplayEl ? roomCodeDisplayEl.innerText : '');
             if (code && code !== '----') {
                 navigator.clipboard.writeText(code);
-                btnCopyCode.textContent = '✅ Kopiert';
-                setTimeout(() => btnCopyCode.textContent = '📋 Kopieren', 1500);
+                btnCopyCodeEl.textContent = '✅ Kopiert';
+                setTimeout(() => btnCopyCodeEl.textContent = '📋 Kopieren', 1500);
             }
         });
     }
+}
 
-    state.scene.add(state.controls.getObject());
-
-    // Generate sub-systems
-    createAkimboGuns();
-    createPlayerMesh();
-    createEnvironment();
-
-    // Hook Mesh Cable
-    const hookGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
-    hookGeo.rotateX(Math.PI / 2);
-    const hookMat = new THREE.MeshStandardMaterial({ 
-        color: 0x00aaff,
-        roughness: 0.3,
-        metalness: 0.6
-    });
-    state.hookMesh = new THREE.Mesh(hookGeo, hookMat);
-    state.hookMesh.castShadow = true;
-    state.hookMesh.receiveShadow = true;
-
-    // Keyboard bindings
+function setupInputListeners() {
+    // Keyboard inputs
     const onKeyDown = (e) => {
         switch (e.code) {
             case 'KeyW': state.moveForward = true; break;
@@ -552,16 +430,15 @@ export function init() {
                 break;
             case 'KeyR':
                 if (state.controls && state.controls.isLocked) {
-                    cancelInspect();          // Cancel inspect first so the gun is in its normal pose
-                    toggleGrapplingHook();    // Then fire from the correct barrel position
+                    cancelInspect();
+                    toggleGrapplingHook();
                 }
                 break;
             case 'KeyE':
                 if (state.controls && state.controls.isLocked) {
-                    const weaponCycle = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
-                    const currentIndex = weaponCycle.indexOf(state.desiredWeaponName);
-                    const nextIndex = (currentIndex + 1) % weaponCycle.length;
-                    state.desiredWeaponName = weaponCycle[nextIndex];
+                    const currentIndex = WEAPON_CYCLE.indexOf(state.desiredWeaponName);
+                    const nextIndex = (currentIndex + 1) % WEAPON_CYCLE.length;
+                    state.desiredWeaponName = WEAPON_CYCLE[nextIndex];
                     cancelInspect();
                 }
                 break;
@@ -616,7 +493,6 @@ export function init() {
         }
     };
 
-
     const onKeyUp = (e) => {
         switch (e.code) {
             case 'KeyW': state.moveForward = false; break;
@@ -634,10 +510,10 @@ export function init() {
         }
     };
 
-
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
+    // Mouse inputs
     window.addEventListener('mousedown', (e) => {
         if (state.controls && state.controls.isLocked) {
             e.preventDefault();
@@ -672,7 +548,6 @@ export function init() {
         }
     });
 
-
     window.addEventListener('contextmenu', (e) => {
         if (state.controls && state.controls.isLocked) {
             e.preventDefault();
@@ -680,13 +555,182 @@ export function init() {
     });
 
     window.addEventListener('resize', onWindowResize);
+}
+
+function setupGameSystems() {
+    state.scene.add(state.controls.getObject());
+
+    createAkimboGuns();
+    createPlayerMesh();
+    createEnvironment();
+
+    // Hook Mesh Cable setup
+    const hookGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
+    hookGeo.rotateX(Math.PI / 2);
+    const hookMat = new THREE.MeshStandardMaterial({ 
+        color: 0x00aaff,
+        roughness: 0.3,
+        metalness: 0.6
+    });
+    state.hookMesh = new THREE.Mesh(hookGeo, hookMat);
+    state.hookMesh.castShadow = true;
+    state.hookMesh.receiveShadow = true;
+}
+
+// Consolidated player state reset helper (replaces btnDeathRespawn & btnDeathLeave duplicates)
+function performPlayerReset() {
+    resetPlayerState();
+    if (scoreEl) scoreEl.innerText = '0';
+    updateHealthBar(100);
+    if (state.controls) {
+        state.controls.getObject().position.set(0, 2, 0);
+    }
+    resetHook();
+}
+
+// Broadcasts client player death details to remote peer DataChannels
+function broadcastPlayerDeath(victimName, killerName) {
+    if (!state.isMultiplayer || state.connections.length === 0) return;
+    const packet = {
+        type: 'player_died',
+        victimName: victimName,
+        killerName: killerName,
+        victimPeerId: state.peer?.id
+    };
+    state.connections.forEach((conn) => {
+        if (conn.open) {
+            try {
+                conn.send(packet);
+            } catch (err) {
+                console.error('Error broadcasting player_died:', err);
+            }
+        }
+    });
+}
+
+// Bootstraps the entire game: renderer, menu layout, key/mouse listeners and gameplay modules.
+export function init() {
+    setupRenderer();
+    initDOMCache();
+
+    // Sensitivity slider setup
+    let initialSens = 1.0;
+    if (sensSliderEl) {
+        let val = parseFloat(sensSliderEl.value);
+        if (!isNaN(val)) {
+            initialSens = val;
+        }
+    }
+    state.baseSensitivity = initialSens;
+    if (state.controls) {
+        state.controls.pointerSpeed = state.baseSensitivity;
+    }
+    if (sensValueEl) {
+        sensValueEl.innerText = state.baseSensitivity.toFixed(1);
+    }
+
+    if (sensSliderEl && sensValueEl) {
+        sensSliderEl.addEventListener('input', (e) => {
+            let val = parseFloat(e.target.value);
+            if (isNaN(val)) val = 1.0;
+            val = Math.max(0.1, Math.min(3.0, val));
+            state.baseSensitivity = val;
+            sensValueEl.innerText = val.toFixed(1);
+            if (state.controls) {
+                state.controls.pointerSpeed = val * (state.camera ? (state.camera.fov / DEFAULT_FOV) : 1.0);
+            }
+        });
+        sensSliderEl.addEventListener('click', (e) => e.stopPropagation());
+    }
+
+    setupMenuListeners();
+
+    // PointerLock controls change triggers
+    state.controls.addEventListener('lock', () => {
+        if (state.pendingPlay) {
+            state.isPlaying = true;
+            state.pendingPlay = false;
+            spawnLightBeam(new THREE.Vector3(0, 2, 0));
+        }
+        if (blockerEl) blockerEl.style.display = 'none';
+        if (panelPauseEl) panelPauseEl.style.display = 'none';
+        if (healthContainerEl) healthContainerEl.style.display = 'block';
+        if (reloadContainerEl) reloadContainerEl.style.display = 'block';
+        if (hoverContainerEl) hoverContainerEl.style.display = 'block';
+
+        if (pvpStatsEl) {
+            pvpStatsEl.style.display = state.isMultiplayer ? 'block' : 'none';
+        }
+
+        if (crosshairEl) crosshairEl.style.display = 'block';
+        if (uiEl) uiEl.style.display = 'flex';
+        if (fpsCounterEl) fpsCounterEl.style.display = 'block';
+
+        document.body.focus();
+        if (state.renderer && state.renderer.domElement) {
+            state.renderer.domElement.tabIndex = 1;
+            state.renderer.domElement.focus();
+        }
+    });
+
+    state.controls.addEventListener('unlock', () => {
+        if (blockerEl) blockerEl.style.display = 'flex';
+        state.moveForward = false;
+        state.moveBackward = false;
+        state.moveLeft = false;
+        state.moveRight = false;
+        state.isShiftDown = false;
+        state.isHovering = false;
+        state.isMouseDown = false;
+        state.isScoped = false;
+        state.rightClickActive = false;
+        state.keyCActive = false;
+        cancelInspect();
+        if (healthContainerEl) healthContainerEl.style.display = 'none';
+        if (reloadContainerEl) reloadContainerEl.style.display = 'none';
+        if (hoverContainerEl) hoverContainerEl.style.display = 'none';
+        if (hoverBadgeEl) hoverBadgeEl.style.display = 'none';
+
+        if (panelMainEl) panelMainEl.style.display = 'none';
+        if (panelMpEl) panelMpEl.style.display = 'none';
+        if (panelHostWaitingEl) panelHostWaitingEl.style.display = 'none';
+        if (panelJoinRoomEl) panelJoinRoomEl.style.display = 'none';
+
+        if (state.isPlaying) {
+            const isDead = (deathOverlayEl && deathOverlayEl.style.display === 'flex');
+            
+            if (panelPauseEl) {
+                panelPauseEl.style.display = isDead ? 'none' : 'flex';
+            }
+            
+            if (state.isMultiplayer) {
+                if (pauseLobbyInfoEl) pauseLobbyInfoEl.style.display = isDead ? 'none' : 'inline';
+                if (pauseRoomCodeEl) pauseRoomCodeEl.innerText = state.roomCode || '----';
+                if (btnPauseLeaveEl) btnPauseLeaveEl.innerText = 'Leave Lobby';
+            } else {
+                if (pauseLobbyInfoEl) pauseLobbyInfoEl.style.display = 'none';
+                if (btnPauseLeaveEl) btnPauseLeaveEl.innerText = 'Leave Game';
+            }
+        } else {
+            if (panelPauseEl) panelPauseEl.style.display = 'none';
+            if (panelMainEl) panelMainEl.style.display = 'flex';
+            
+            if (state.isMultiplayer) {
+                disconnectMultiplayer();
+            }
+        }
+
+        resetHook();
+    });
+
+    setupInputListeners();
+    setupGameSystems();
 
     // Start the render loop only after all systems are initialised
     animate();
 }
 
-
-
+// Global render callback loop executing physics steps, weapons, network syncing, particles, and rendering frames at max 120 FPS.
 export function animate() {
     requestAnimationFrame(animate);
 
@@ -710,7 +754,10 @@ export function animate() {
         const maxCooldown = stats ? stats.fireRate : 0.1;
 
         const progress = Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown)));
-        reloadBarEl.style.width = `${progress * 100}%`;
+        if (progress !== lastReloadProgress) {
+            reloadBarEl.style.width = `${progress * 100}%`;
+            lastReloadProgress = progress;
+        }
     }
 
     // 1.5) Automatic weapon firing
@@ -734,6 +781,11 @@ export function animate() {
     // 3) Update hook trajectories
     updateHook(delta);
 
+    // Fetch peer IDs once outside the nested projectile loop to reduce GC pressure
+    const peerIds = state.isMultiplayer ? Object.keys(state.peers) : [];
+    const peerIdsLen = peerIds.length;
+    const activeDamage = WEAPON_STATS[state.activeWeaponName]?.damage ?? 1;
+
     // 4) Update active bullets
     for (let i = state.projectiles.length - 1; i >= 0; i--) {
         const proj = state.projectiles[i];
@@ -742,7 +794,8 @@ export function animate() {
 
         let projectileHit = false;
 
-        for (let j = 0; j < state.targets.length; j++) {
+        const targetsLen = state.targets.length;
+        for (let j = 0; j < targetsLen; j++) {
             const target = state.targets[j];
             const distance = proj.position.distanceTo(target.position);
 
@@ -756,7 +809,7 @@ export function animate() {
                                     conn.send({
                                         type: 'hit_target',
                                         targetIndex: j,
-                                        damage: WEAPON_STATS[state.activeWeaponName]?.damage ?? 1
+                                        damage: activeDamage
                                     });
                                 } catch (err) {
                                     console.error('Error broadcasting hit_target:', err);
@@ -764,14 +817,13 @@ export function animate() {
                             }
                         });
                     } else {
-                        processTargetHit(j, WEAPON_STATS[state.activeWeaponName]?.damage ?? 1);
+                        processTargetHit(j, activeDamage);
                     }
                 } else {
-                    processTargetHit(j, WEAPON_STATS[state.activeWeaponName]?.damage ?? 1);
+                    processTargetHit(j, activeDamage);
                 }
                 
                 projectileHit = true;
-                // dynamic sparks hit sparks
                 spawnParticles(proj.position, 0xffaa00, 8, 12, 0.15, 20.0);
                 break;
             }
@@ -779,29 +831,29 @@ export function animate() {
 
         // B) Check hits on Remote Players (PVP) in Multiplayer
         if (!projectileHit && state.isMultiplayer) {
-            const peerIds = Object.keys(state.peers);
-            for (let j = 0; j < peerIds.length; j++) {
+            for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
                 const peerData = state.peers[peerId];
                 if (peerData && peerData.mesh) {
                     const distance = proj.position.distanceTo(peerData.mesh.position);
-                    const hitRange = PLAYER_RADIUS; // Player bean collision hit range
+                    const hitRange = PLAYER_RADIUS;
                     
                     if (distance < hitRange) {
                         projectileHit = true;
-                        
-                        // Spawn dynamic purple particles (remote player bean hit sparks)
                         spawnParticles(proj.position, 0x8c7ae6, 8, 12, 0.15, 20.0);
+                        flashPeerMesh(peerData, 0xff3333, 150);
                         
-                        // Send hit packet to all connections to relay in Star Topology
+                        const inputUsernameVal = inputUsernameEl ? inputUsernameEl.value.trim() : 'Guest';
+                        const attackerName = inputUsernameVal || 'Guest';
+
                         state.connections.forEach((conn) => {
                             if (conn.open) {
                                 try {
                                     conn.send({
                                         type: 'player_hit',
                                         targetPeerId: peerId,
-                                        damage: WEAPON_STATS[state.activeWeaponName]?.damage ?? 1,
-                                        attackerName: document.getElementById('input-username').value.trim() || 'Guest'
+                                        damage: activeDamage,
+                                        attackerName: attackerName
                                     });
                                 } catch (err) {
                                     console.error('Error broadcasting player_hit:', err);
@@ -861,51 +913,53 @@ export function animate() {
 
         // Dynamic pointer speed scaling based on zoom level
         if (state.controls) {
-            state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / DEFAULT_FOV);
-        }
-
-        // Toggle goggles, normal crosshair, and standard gameplay HUD overlays
-        // (uses module-level cached refs: gogglesScopeEl, crosshairEl, uiEl, etc.)
-        if (gogglesScopeEl && crosshairEl) {
-            const hoverContainer = document.getElementById('hover-container');
-            if (state.isScoped) {
-                gogglesScopeEl.style.display = 'block';
-                crosshairEl.style.display = 'none';
-                if (uiEl) uiEl.style.display = 'none';
-                if (fpsCounterEl) fpsCounterEl.style.display = 'none';
-                if (healthContainerEl) healthContainerEl.style.display = 'none';
-                if (reloadContainerEl) reloadContainerEl.style.display = 'none';
-                if (hoverContainer) hoverContainer.style.display = 'none';
-            } else {
-                gogglesScopeEl.style.display = 'none';
-                crosshairEl.style.display = 'block';
-                if (uiEl) uiEl.style.display = 'flex';
-                if (fpsCounterEl) fpsCounterEl.style.display = 'block';
-                if (healthContainerEl) {
-                    healthContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
-                }
-                if (reloadContainerEl) {
-                    reloadContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
-                }
-                if (hoverContainer) {
-                    hoverContainer.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
-                }
+            if (state.camera.fov !== lastFov) {
+                state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / DEFAULT_FOV);
+                lastFov = state.camera.fov;
             }
         }
 
+        // Toggle goggles, normal crosshair, and standard gameplay HUD overlays
+        if (gogglesScopeEl && crosshairEl) {
+            if (state.isScoped !== lastScopedState) {
+                if (state.isScoped) {
+                    gogglesScopeEl.style.display = 'block';
+                    crosshairEl.style.display = 'none';
+                    if (uiEl) uiEl.style.display = 'none';
+                    if (fpsCounterEl) fpsCounterEl.style.display = 'none';
+                    if (healthContainerEl) healthContainerEl.style.display = 'none';
+                    if (reloadContainerEl) reloadContainerEl.style.display = 'none';
+                    if (hoverContainerEl) hoverContainerEl.style.display = 'none';
+                } else {
+                    gogglesScopeEl.style.display = 'none';
+                    crosshairEl.style.display = 'block';
+                    if (uiEl) uiEl.style.display = 'flex';
+                    if (fpsCounterEl) fpsCounterEl.style.display = 'block';
+                    if (healthContainerEl) {
+                        healthContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
+                    }
+                    if (reloadContainerEl) {
+                        reloadContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
+                    }
+                    if (hoverContainerEl) {
+                        hoverContainerEl.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
+                    }
+                }
+                lastScopedState = state.isScoped;
+            }
+        }
     }
-
 
     if (state.renderer && state.scene && state.camera) {
         let logicalCameraPos = null;
         if (state.isThirdPerson) {
-            logicalCameraPos = state.camera.position.clone();
+            logicalCameraPos = _logicalCameraPos.copy(state.camera.position);
             
-            const camDir = new THREE.Vector3(0, 0, -1).applyQuaternion(state.camera.quaternion);
+            _tpCamDir.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
             const offsetDist = 6.0;
-            const camOffset = camDir.clone().multiplyScalar(-offsetDist);
-            camOffset.y += 1.5; // Offset camera upward slightly
-            state.camera.position.add(camOffset);
+            _tpCamOffset.copy(_tpCamDir).multiplyScalar(-offsetDist);
+            _tpCamOffset.y += 1.5; // Offset camera upward slightly
+            state.camera.position.add(_tpCamOffset);
         }
 
         state.renderer.render(state.scene, state.camera);
@@ -916,16 +970,15 @@ export function animate() {
     }
 }
 
-
+// Computes local player damage, displays blood splatter particles, flashes HUD bar, and broadcasts deaths.
 export function takePlayerDamage(damage, attackerName) {
     if (!state.isPlaying || state.playerHp <= 0) return;
 
     state.playerHp -= damage;
     state.lastDamageTime = performance.now(); // Reset passive regen ticker delay
 
-    // Spawn dynamic red splat particles locally on damage
     if (state.controls) {
-        const myPos = state.controls.getObject().position.clone();
+        const myPos = _lavaFeetPos.copy(state.controls.getObject().position);
         myPos.y -= 0.5;
         spawnParticles(myPos, 0xff3300, 10, 15, 0.2, 12.0);
     }
@@ -935,54 +988,34 @@ export function takePlayerDamage(damage, attackerName) {
     if (state.playerHp <= 0) {
         triggerDeath();
         
-        // Update local deaths score tally
         state.deaths++;
-        const deathsEl = document.getElementById('deaths');
         if (deathsEl) deathsEl.innerText = state.deaths;
 
-        // Broadcast death message to everyone in the lobby
-        const myName = document.getElementById('input-username').value.trim() || 'Guest';
-        state.connections.forEach((conn) => {
-            if (conn.open) {
-                try {
-                    conn.send({
-                        type: 'player_died',
-                        victimName: myName,
-                        killerName: attackerName,
-                        victimPeerId: state.peer.id
-                    });
-                } catch (err) {
-                    console.error('Error broadcasting player_died:', err);
-                }
-            }
-        });
+        const myName = inputUsernameEl ? inputUsernameEl.value.trim() : 'Guest';
+        const victimName = myName || 'Guest';
+        broadcastPlayerDeath(victimName, attackerName);
     }
 }
 
+// Triggers local player death sequence, displaying red menu screen, spawning explosion sparks, and releasing controls.
 export function triggerDeath() {
-    // Hide the pause menu if open
-    const panelPause = document.getElementById('panel-pause');
-    if (panelPause) {
-        panelPause.style.display = 'none';
+    if (panelPauseEl) {
+        panelPauseEl.style.display = 'none';
     }
 
-    // Hide all gameplay HUD UI elements behind the death screen
     if (crosshairEl) crosshairEl.style.display = 'none';
     if (uiEl) uiEl.style.display = 'none';
     if (fpsCounterEl) fpsCounterEl.style.display = 'none';
     if (healthContainerEl) healthContainerEl.style.display = 'none';
     if (reloadContainerEl) reloadContainerEl.style.display = 'none';
 
-    // Show the red Death Screen overlay
-    const deathOverlay = document.getElementById('death-overlay');
-    if (deathOverlay) {
-        deathOverlay.style.display = 'flex';
+    if (deathOverlayEl) {
+        deathOverlayEl.style.display = 'flex';
     }
 
     if (state.controls) {
         state.controls.unlock();
         const playerObj = state.controls.getObject();
-        // Explode player model (local bean color standard sci-fi blue 0x3b5998)
         spawnParticles(playerObj.position, 0x3b5998, 40, 16.0, 0.45, 6.0);
     }
 
@@ -990,14 +1023,13 @@ export function triggerDeath() {
         state.playerMesh.visible = false;
     }
 
-    // Immediately stop character physics movement and reset hook
     state.velocity.set(0, 0, 0);
     resetHook();
     state.isHovering = false;
-    const hoverBadge = document.getElementById('hover-badge');
-    if (hoverBadge) hoverBadge.style.display = 'none';
+    if (hoverBadgeEl) hoverBadgeEl.style.display = 'none';
 }
 
+// Processes hit confirmations on remote targets, updating hp ratios, spawning shockwaves and respawning target boxes.
 export function processTargetHit(targetIndex, damage) {
     const target = state.targets[targetIndex];
     if (!target) return;
@@ -1010,26 +1042,8 @@ export function processTargetHit(targetIndex, damage) {
         const enemyColor = target.userData.color || 0xff4500;
         spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
         
-        const shockwaveGeom = new THREE.SphereGeometry(1, 16, 16);
-        const shockwaveMat = new THREE.MeshBasicMaterial({
-            color: 0xffaa00,
-            wireframe: true,
-            transparent: true,
-            opacity: 0.8
-        });
-        const shockwave = new THREE.Mesh(shockwaveGeom, shockwaveMat);
-        shockwave.position.copy(target.position);
-        state.scene.add(shockwave);
-        
-        state.activeParticles.push({
-            mesh: shockwave,
-            velocity: new THREE.Vector3(0, 0, 0),
-            gravity: 0,
-            life: 0.35,
-            maxLife: 0.35,
-            isShockwave: true,
-            targetScale: 8.0 * (target.userData.scale || 1.0)
-        });
+        // Call particles shockwave helper instead of allocating fresh geometries inline
+        createShockwave(target.position, 8.0 * (target.userData.scale || 1.0), 0xffaa00);
         
         if (state.hookState === 'PULLING' && state.hookIsEnemy && state.hookTargetEnemy === target) {
             resetHook();
@@ -1038,13 +1052,10 @@ export function processTargetHit(targetIndex, damage) {
         respawnTarget(target);
         state.score++;
         
-        const scoreEl = document.getElementById('score');
         if (scoreEl) scoreEl.innerText = state.score;
         
         if (state.isMultiplayer && state.isHost) {
-            import('./multiplayer.js').then((mp) => {
-                mp.broadcastTargetKill(targetIndex, state.score, target.position, target.userData);
-            });
+            broadcastTargetKill(targetIndex, state.score, target.position, target.userData);
         }
     }
 }
@@ -1057,7 +1068,8 @@ export function checkLavaDamage(delta) {
 
     if (feetY <= 0.15) {
         let standingOnLava = false;
-        for (let i = 0; i < state.lavaPools.length; i++) {
+        const len = state.lavaPools.length;
+        for (let i = 0; i < len; i++) {
             const pool = state.lavaPools[i];
             const dx = Math.abs(playerObj.position.x - pool.position.x);
             const dz = Math.abs(playerObj.position.z - pool.position.z);
@@ -1072,9 +1084,9 @@ export function checkLavaDamage(delta) {
             if (now - state.lastDamageTime >= LAVA_DAMAGE_TICK_MS) {
                 state.playerHp -= LAVA_DAMAGE_PER_TICK;
                 state.lastDamageTime = now;
-                state.regenTimer = 0; // Prevent regen racing with lava damage
+                state.regenTimer = 0;
 
-                const feetPos = playerObj.position.clone();
+                const feetPos = _lavaFeetPos.copy(playerObj.position);
                 feetPos.y -= 1.8;
                 spawnParticles(feetPos, 0xff3300, 6, 10, 0.15, 5.0);
 
@@ -1083,28 +1095,13 @@ export function checkLavaDamage(delta) {
                 if (state.playerHp <= 0) {
                     triggerDeath();
 
-                    // Broadcast lava death in multiplayer (mirrors the bullet-death broadcast
-                    // in takePlayerDamage so the kill feed and death counter stay correct)
                     if (state.isMultiplayer && state.peer) {
                         state.deaths++;
-                        const deathsEl = document.getElementById('deaths');
                         if (deathsEl) deathsEl.innerText = state.deaths;
 
-                        const myName = document.getElementById('input-username').value.trim() || 'Guest';
-                        state.connections.forEach((conn) => {
-                            if (conn.open) {
-                                try {
-                                    conn.send({
-                                        type: 'player_died',
-                                        victimName: myName,
-                                        killerName: 'Lava',
-                                        victimPeerId: state.peer.id
-                                    });
-                                } catch (err) {
-                                    console.error('Error broadcasting lava death:', err);
-                                }
-                            }
-                        });
+                        const myName = inputUsernameEl ? inputUsernameEl.value.trim() : 'Guest';
+                        const victimName = myName || 'Guest';
+                        broadcastPlayerDeath(victimName, 'Lava');
                     }
                 }
             }
@@ -1119,13 +1116,12 @@ export function updateHealthRegen(delta) {
     }
 
     const now = performance.now();
-    if (now - state.lastDamageTime >= 4000) {
+    if (now - state.lastDamageTime >= REGEN_DELAY_MS) {
         state.regenTimer += delta;
         if (state.regenTimer >= 1.0) {
             state.playerHp = Math.min(state.playerMaxHp, state.playerHp + 1);
             state.regenTimer -= 1.0;
 
-            // Update the health bar UI
             updateHealthBar((state.playerHp / state.playerMaxHp) * 100);
         }
     } else {
@@ -1138,32 +1134,27 @@ export function updateWorldBorderOverlay(delta) {
     const playerObj = state.controls.getObject();
     const pos = playerObj.position;
     
-    const limit = 340; // MAP_SIZE / 2
+    const limit = MAP_HALF_SIZE;
     const distX = limit - Math.abs(pos.x);
     const distZ = limit - Math.abs(pos.z);
     const minDist = Math.min(distX, distZ);
     
-    const overlay = document.getElementById("world-border-overlay");
-    if (!overlay) return;
+    if (!worldBorderOverlayEl) return;
     
-    const warnThreshold = 50;
-    if (minDist < warnThreshold) {
-        overlay.style.display = "block";
+    if (minDist < BORDER_WARN_THRESHOLD) {
+        worldBorderOverlayEl.style.display = "block";
+        const distanceFactor = Math.max(0, Math.min(1.0, (BORDER_WARN_THRESHOLD - minDist) / BORDER_WARN_THRESHOLD));
         
-        // Base opacity from distance: goes from 0 at minDist=warnThreshold to 0.45 at minDist=0
-        const distanceFactor = Math.max(0, Math.min(1.0, (warnThreshold - minDist) / warnThreshold));
-        
-        // If touching or extremely close, trigger pulsating warning effect
-        if (minDist <= 1.5) {
+        if (minDist <= BORDER_PULSE_DISTANCE) {
             const time = performance.now() / 1000;
-            const pulse = 0.6 + 0.25 * Math.sin(time * 6); // Pulsates between 0.35 and 0.85
-            overlay.style.opacity = pulse;
+            const pulse = 0.6 + 0.25 * Math.sin(time * 6);
+            worldBorderOverlayEl.style.opacity = pulse;
         } else {
-            overlay.style.opacity = distanceFactor * 0.45;
+            worldBorderOverlayEl.style.opacity = distanceFactor * 0.45;
         }
     } else {
-        overlay.style.opacity = 0;
-        overlay.style.display = "none";
+        worldBorderOverlayEl.style.opacity = 0;
+        worldBorderOverlayEl.style.display = "none";
     }
 }
 

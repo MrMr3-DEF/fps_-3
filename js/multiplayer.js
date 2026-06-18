@@ -3,19 +3,38 @@ import { state } from './state.js';
 import { spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
 import { respawnTarget } from './world.js';
 import { resetHook } from './grapple.js';
+import { processTargetHit, takePlayerDamage } from './main.js';
 import {
     PROJECTILE_LIFETIME,
     NETWORK_TICK_MS,
     ROOM_CODE_LENGTH,
     PEER_Y_OFFSET,
-    HIT_FLASH_DURATION_MS
+    HIT_FLASH_DURATION_MS,
+    PEER_BULLET_COLORS
 } from './config.js';
-import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun } from './weapons.js';
-
+import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel } from './weapons.js';
 
 const _stateEuler = new THREE.Euler();
 
+// Module-level cached objects to prevent per-message heap allocations
+const _boosterPos = new THREE.Vector3();
+const _peerForward = new THREE.Vector3();
+const _peerRight = new THREE.Vector3();
+const _peerEuler = new THREE.Euler();
+const _gunTip = new THREE.Vector3();
+const _targetPos = new THREE.Vector3();
+const _midPoint = new THREE.Vector3();
+const _barrelPos = new THREE.Vector3();
+const _dir = new THREE.Vector3();
 
+// Gun tip offset constant matching grapple.js
+const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, -0.19);
+
+// DOM caches
+let inputUsernameEl = null;
+let cachedUsername = 'Guest';
+
+// Queries the TURN API server for dynamic TURN server configurations or falls back to public metered.ca servers.
 async function getPeerConfig() {
     const config = {
         debug: 2,
@@ -67,6 +86,20 @@ async function getPeerConfig() {
     return config;
 }
 
+// Direct helper to fetch or watch username input element changes
+function getCachedUsername() {
+    if (!inputUsernameEl) {
+        inputUsernameEl = document.getElementById('input-username');
+        if (inputUsernameEl) {
+            inputUsernameEl.addEventListener('input', () => {
+                cachedUsername = inputUsernameEl.value || 'Guest';
+            });
+            cachedUsername = inputUsernameEl.value || 'Guest';
+        }
+    }
+    return cachedUsername;
+}
+
 export function broadcastToAll(packet, excludePeerId = null) {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     state.connections.forEach((conn) => {
@@ -112,6 +145,7 @@ export function generateRoomCode() {
     return code;
 }
 
+// Initializes PeerJS as host, listens for incoming WebRTC client connections, and starts lobby listening.
 export async function hostGame(username, roomCode) {
     state.isMultiplayer = true;
     state.isHost = true;
@@ -153,6 +187,7 @@ export async function hostGame(username, roomCode) {
     });
 }
 
+// Initializes PeerJS as client and attempts connection to host player using room identifier.
 export async function joinGame(username, roomCode) {
     state.isMultiplayer = true;
     state.isHost = false;
@@ -334,16 +369,15 @@ function setupConnection(conn) {
     });
 }
 
+// Routes network packets, handles incoming player positions, syncs weapon changes, and spawns lasers/projectiles.
 function handlePeerMessage(fromPeerId, msg) {
     if (!state.isMultiplayer) return;
 
-    // Star-Topology Relay: Host broadcasts client messages to all other clients
+    // Star-Topology Relay: Host broadcasts client messages in-place without reallocation
     if (state.isHost) {
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
-            broadcastToAll({
-                ...msg,
-                senderPeerId: fromPeerId
-            }, fromPeerId);
+            msg.senderPeerId = fromPeerId;
+            broadcastToAll(msg, fromPeerId);
         }
     }
 
@@ -384,19 +418,27 @@ function handlePeerMessage(fromPeerId, msg) {
 
             // Spawn hover thruster flame particles if active
             if (msg.isHovering) {
-                const boosterPos = peerData.mesh.position.clone();
-                boosterPos.y -= 1.45;
-                spawnRocketFlame(boosterPos, 4, false);
+                _boosterPos.copy(peerData.mesh.position);
+                _boosterPos.y -= 1.45;
+                spawnRocketFlame(_boosterPos, 4, false);
 
                 // Spawn maneuvering side thruster plumes if active keys are sent
                 if (msg.hoverKeys) {
-                    const peerForward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, msg.yaw, 0));
-                    const peerRight = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, msg.yaw, 0));
+                    _peerEuler.set(0, msg.yaw, 0);
+                    _peerForward.set(0, 0, -1).applyEuler(_peerEuler);
+                    _peerRight.set(1, 0, 0).applyEuler(_peerEuler);
 
-                    if (msg.hoverKeys.w) spawnManeuveringBeam(boosterPos, 2, peerForward.clone().negate());
-                    if (msg.hoverKeys.s) spawnManeuveringBeam(boosterPos, 2, peerForward);
-                    if (msg.hoverKeys.a) spawnManeuveringBeam(boosterPos, 2, peerRight);
-                    if (msg.hoverKeys.d) spawnManeuveringBeam(boosterPos, 2, peerRight.clone().negate());
+                    if (msg.hoverKeys.w) {
+                        _peerForward.negate();
+                        spawnManeuveringBeam(_boosterPos, 2, _peerForward);
+                        _peerForward.negate(); // restore
+                    }
+                    if (msg.hoverKeys.s) spawnManeuveringBeam(_boosterPos, 2, _peerForward);
+                    if (msg.hoverKeys.a) spawnManeuveringBeam(_boosterPos, 2, _peerRight);
+                    if (msg.hoverKeys.d) {
+                        _peerRight.negate();
+                        spawnManeuveringBeam(_boosterPos, 2, _peerRight);
+                    }
                 }
             }
         }
@@ -448,16 +490,16 @@ function handlePeerMessage(fromPeerId, msg) {
             }
 
             peerData.leftGun.updateWorldMatrix(true, false);
-            const gunTip = new THREE.Vector3(0, 0, -0.19);
-            peerData.leftGun.localToWorld(gunTip);
-            const targetPos = new THREE.Vector3(msg.hookPos.x, msg.hookPos.y, msg.hookPos.z);
-            const distance = gunTip.distanceTo(targetPos);
+            _gunTip.copy(GUN_TIP_OFFSET);
+            peerData.leftGun.localToWorld(_gunTip);
+            _targetPos.set(msg.hookPos.x, msg.hookPos.y, msg.hookPos.z);
+            const distance = _gunTip.distanceTo(_targetPos);
 
             if (distance > 0.05) {
-                const midPoint = new THREE.Vector3().addVectors(gunTip, targetPos).multiplyScalar(0.5);
-                peerData.hookLine.position.copy(midPoint);
+                _midPoint.addVectors(_gunTip, _targetPos).multiplyScalar(0.5);
+                peerData.hookLine.position.copy(_midPoint);
                 peerData.hookLine.scale.set(1, 1, distance);
-                peerData.hookLine.lookAt(targetPos);
+                peerData.hookLine.lookAt(_targetPos);
                 peerData.hookLine.visible = true;
             }
         } else {
@@ -467,22 +509,21 @@ function handlePeerMessage(fromPeerId, msg) {
         }
     } else if (msg.type === 'fire') {
         // Visual gun recoil flash/explosion locally on peer's barrel
-        const barrelPos = new THREE.Vector3(msg.barrelPos.x, msg.barrelPos.y, msg.barrelPos.z);
-        const dir = new THREE.Vector3(msg.dir.x, msg.dir.y, msg.dir.z);
+        _barrelPos.set(msg.barrelPos.x, msg.barrelPos.y, msg.barrelPos.z);
+        _dir.set(msg.dir.x, msg.dir.y, msg.dir.z);
 
         if (msg.weapon === 'SNIPER') {
-            const targetPos = new THREE.Vector3();
+            const targetPos = _targetPos;
             if (msg.hitPoint) {
                 targetPos.set(msg.hitPoint.x, msg.hitPoint.y, msg.hitPoint.z);
             } else {
-                targetPos.copy(barrelPos).addScaledVector(dir, 500);
+                targetPos.copy(_barrelPos).addScaledVector(_dir, 500);
             }
-            createLaserBeam(barrelPos, targetPos, 0xffff00);
+            createLaserBeam(_barrelPos, targetPos, 0xffff00);
 
         } else {
             let bullet;
-            const bulletColors = { PISTOL: 0xff0055, SHOTGUN: 0xffaa00, AR: 0x00ff88, MINIGUN: 0xff6600 };
-            const bulletColor = bulletColors[msg.weapon] ?? 0xffffff;
+            const bulletColor = PEER_BULLET_COLORS[msg.weapon] ?? 0xffffff;
 
             if (state.projectilePool.length > 0) {
                 bullet = state.projectilePool.pop();
@@ -493,8 +534,8 @@ function handlePeerMessage(fromPeerId, msg) {
                 bullet.userData = {};
             }
 
-            bullet.position.copy(barrelPos).addScaledVector(dir, 0.1);
-            bullet.userData.direction = dir.clone();
+            bullet.position.copy(_barrelPos).addScaledVector(_dir, 0.1);
+            bullet.userData.direction = _dir.clone();
             bullet.userData.age = 0;
             
             state.scene.add(bullet);
@@ -508,23 +549,8 @@ function handlePeerMessage(fromPeerId, msg) {
             // Spawn explosions locally
             spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
 
-            // Spawn shockwave locally
-            const shockwave = new THREE.Mesh(
-                new THREE.SphereGeometry(1, 16, 16),
-                new THREE.MeshBasicMaterial({ color: 0xffaa00, wireframe: true, transparent: true, opacity: 0.8 })
-            );
-            shockwave.position.copy(target.position);
-            state.scene.add(shockwave);
-
-            state.activeParticles.push({
-                mesh: shockwave,
-                velocity: new THREE.Vector3(0, 0, 0),
-                gravity: 0,
-                life: 0.35,
-                maxLife: 0.35,
-                isShockwave: true,
-                targetScale: 8.0 * (msg.scale || 1.0)
-            });
+            // Spawn shockwave locally (using shared createShockwave function to prevent leaks)
+            createShockwave(target.position, 8.0 * (msg.scale || 1.0), 0xffaa00);
 
             // Reposition and re-scale target
             target.position.set(msg.newPosition.x, msg.newPosition.y, msg.newPosition.z);
@@ -544,15 +570,15 @@ function handlePeerMessage(fromPeerId, msg) {
         }
     } else if (msg.type === 'hit_target') {
         if (state.isMultiplayer && state.isHost) {
-            import('./main.js').then((main) => {
-                main.processTargetHit(msg.targetIndex, msg.damage);
-            });
+            processTargetHit(msg.targetIndex, msg.damage);
         }
     } else if (msg.type === 'player_hit') {
+        const targetPeer = state.peers[msg.targetPeerId];
+        if (targetPeer) {
+            flashPeerMesh(targetPeer, 0xff3333, 150);
+        }
         if (msg.targetPeerId === state.peer.id) {
-            import('./main.js').then((main) => {
-                main.takePlayerDamage(msg.damage, msg.attackerName);
-            });
+            takePlayerDamage(msg.damage, msg.attackerName);
         }
     } else if (msg.type === 'player_died') {
         // Spawn remote player death particle effect (bean color purple 0x8c7ae6) and hide model
@@ -562,7 +588,7 @@ function handlePeerMessage(fromPeerId, msg) {
             victimPeer.mesh.visible = false;
         }
 
-        const myName = document.getElementById('input-username').value.trim() || 'Guest';
+        const myName = getCachedUsername();
         if (msg.killerName === myName) {
             state.kills++;
             const killsEl = document.getElementById('kills');
@@ -582,10 +608,10 @@ function handlePeerMessage(fromPeerId, msg) {
     } else if (msg.type === 'jump') {
         const peerData = state.peers[senderId];
         if (peerData && peerData.mesh && peerData.mesh.visible) {
-            const boosterPos = peerData.mesh.position.clone();
-            boosterPos.y -= 1.45;
-            spawnRocketFlame(boosterPos, 50, true);
-            createShockwave(boosterPos, 15.0);
+            _boosterPos.copy(peerData.mesh.position);
+            _boosterPos.y -= 1.45;
+            spawnRocketFlame(_boosterPos, 50, true);
+            createShockwave(_boosterPos, 15.0);
         }
     }
 }
@@ -595,24 +621,29 @@ function removePeer(peerId) {
     if (peerData) {
         if (peerData.mesh) {
             state.scene.remove(peerData.mesh);
-            // Dispose geometries/materials
+            // Dispose geometries/materials, including SpriteMaterial and CanvasTexture to resolve leaks
             peerData.mesh.traverse((child) => {
                 if (child.isMesh) {
-                    child.geometry.dispose();
-                    child.material.dispose();
+                    child.geometry?.dispose();
+                    child.material?.dispose();
+                }
+                if (child.isSprite) {
+                    child.material?.map?.dispose();
+                    child.material?.dispose();
                 }
             });
         }
         if (peerData.hookLine) {
             state.scene.remove(peerData.hookLine);
-            peerData.hookLine.geometry.dispose();
-            peerData.hookLine.material.dispose();
+            peerData.hookLine.geometry?.dispose();
+            peerData.hookLine.material?.dispose();
         }
         delete state.peers[peerId];
         console.log(`Disposed remote peer mesh for: ${peerId}`);
     }
 }
 
+// Serializes and transmits local player state vectors (position, yaw, pitch, weapon, hover keys) to everyone.
 export function sendLocalState() {
     if (!state.isMultiplayer || !state.isPlaying || state.connections.length === 0 || !state.controls) return;
 
@@ -623,7 +654,7 @@ export function sendLocalState() {
     const playerObj = state.controls.getObject();
     const camEuler = _stateEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
 
-    const username = document.getElementById('input-username').value || 'Guest';
+    const username = getCachedUsername();
 
     const packet = {
         type: 'update',
@@ -689,72 +720,10 @@ export function broadcastLocalJump() {
     broadcastToAll(packet);
 }
 
+// Spawns remote player bean visual components (cylinder body, sphere heads, visor strips, akimbo attachments, username tags).
 function createPeerBean(username) {
-    const peerGroup = new THREE.Group();
-
-    // Body: bean color (standard purple 0x8c7ae6 for remote players)
-    const bodyMat = new THREE.MeshStandardMaterial({ 
-        color: 0x8c7ae6, 
-        roughness: 0.3,
-        metalness: 0.2
-    });
-
-    const cylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 1.0, 16);
-    const cylinder = new THREE.Mesh(cylinderGeo, bodyMat);
-    cylinder.castShadow = true;
-    cylinder.receiveShadow = true;
-    peerGroup.add(cylinder);
-    
-    const sphereGeo = new THREE.SphereGeometry(0.6, 16, 16);
-    
-    const topSphere = new THREE.Mesh(sphereGeo, bodyMat);
-    topSphere.position.y = 0.5;
-    topSphere.castShadow = true;
-    topSphere.receiveShadow = true;
-    peerGroup.add(topSphere);
-    
-    // Booster body material: silver metal
-    const boosterMat = new THREE.MeshStandardMaterial({
-        color: 0xc0c0c0, // Silver
-        roughness: 0.15,
-        metalness: 0.85
-    });
-
-    // Booster Cylinder attached to the bottom of the bean (runs from y = -0.5 to y = -0.9)
-    const boosterCylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
-    const boosterCylinder = new THREE.Mesh(boosterCylinderGeo, boosterMat);
-    boosterCylinder.position.y = -0.7;
-    boosterCylinder.castShadow = true;
-    boosterCylinder.receiveShadow = true;
-    peerGroup.add(boosterCylinder);
-
-    // Booster Nozzle at the very bottom (runs from y = -0.9 to y = -1.1)
-    const nozzleGeo = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
-    const nozzle = new THREE.Mesh(nozzleGeo, boosterMat);
-    nozzle.position.y = -1.0;
-    nozzle.castShadow = true;
-    nozzle.receiveShadow = true;
-    peerGroup.add(nozzle);
-
-    // Sleek dark shiny glass visor
-    const visorGeo = new THREE.BoxGeometry(0.85, 0.25, 0.45);
-    const visorMat = new THREE.MeshStandardMaterial({ 
-        color: 0x1e272e, 
-        roughness: 0.1,
-        metalness: 0.9
-    });
-    const visor = new THREE.Mesh(visorGeo, visorMat);
-    visor.position.set(0, 0.5, -0.35);
-    visor.castShadow = true;
-    visor.receiveShadow = true;
-    peerGroup.add(visor);
-
-    // Glowing neon pink horizontal visor strip
-    const visorStripGeo = new THREE.BoxGeometry(0.5, 0.05, 0.47);
-    const visorStripMat = new THREE.MeshBasicMaterial({ color: 0xff4757 });
-    const visorStrip = new THREE.Mesh(visorStripGeo, visorStripMat);
-    visorStrip.position.set(0, 0.5, -0.36);
-    peerGroup.add(visorStrip);
+    // Import and reuse shared buildBeanModel factory from weapons.js
+    const peerGroup = buildBeanModel(0x8c7ae6, 0xff4757);
 
     // Build remote peer weapons (Akimbo attachments) using imported builders from weapons.js
     const leftGun = buildGun(0x00aaff);
@@ -820,4 +789,3 @@ function createPeerBean(username) {
         hookLine: null
     };
 }
-

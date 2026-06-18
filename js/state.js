@@ -87,3 +87,16 @@ export const state = {
     isHovering: false,
 };
 
+export function resetPlayerState() {
+    state.playerHp = state.playerMaxHp;
+    state.score = 0;
+    state.velocity.set(0, 0, 0);
+    state.hookState = 'IDLE';
+    state.hookPosition.set(0, 0, 0);
+    state.hookTarget.set(0, 0, 0);
+    state.hookWillHit = false;
+    state.hookIsEnemy = false;
+    state.hookTargetEnemy = null;
+    state.hoverFuel = 1.0;
+}
+

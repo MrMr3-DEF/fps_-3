@@ -3,7 +3,6 @@ export const PILLAR_COUNT = 104;
 export const PILLAR_WIDTH = 6.0;
 
 export const WALK_SPEED = 35.0;
-export const SPRINT_SPEED = 65.0;
 export const PLAYER_RADIUS = 0.8;
 
 export const JUMP_FORCE = 164.0;
@@ -53,4 +52,61 @@ export const HIT_FLASH_DURATION_MS = 150;
 export const HOOK_SPEED = 300;
 export const LASER_BEAM_FADE_TIME = 0.3;
 export const TARGET_HIT_RANGE_MULTIPLIER = 1.6;
+
+// Cleaned up Config additions
+export const BUSH_2D_COUNT = 250;
+export const BUSH_3D_COUNT = 180;
+export const BUSH_3D_RADIUS_CAP = 330;
+export const BUSH_2D_INNER_RADIUS = 345;
+export const BUSH_2D_SPREAD = 1155;
+
+export const HOVER_DRAIN_RATE = 5.0;
+export const HOVER_RECHARGE_RATE = 3.0;
+export const GROUND_FRICTION = 10.0;
+export const GRAPPLE_GRAVITY_SCALE = 0.3;
+export const HOVER_GRAVITY_SCALE = 0.1;
+export const HOVER_MAX_FALL_SPEED = -4.5;
+export const AIR_STEER_FORCE = 35.0;
+export const AIR_BACK_BRAKE_COEFF = 1.5;
+
+export const HOOK_RELEASE_DISTANCE = 3.0;
+export const HOOK_MAGNETIC_RADIUS = 3.5;
+export const HOOK_MIN_PULL_SPEED = 35.0;
+export const HOOK_MAX_SLINGSHOT_SPEED = 120.0;
+export const HOOK_SLINGSHOT_ACCEL = 400.0;
+
+export const REGEN_DELAY_MS = 4000;
+export const MAP_HALF_SIZE = 340;
+export const BORDER_WARN_THRESHOLD = 50;
+export const BORDER_PULSE_DISTANCE = 1.5;
+export const MINIGUN_RAMP_TIME = 3.0;
+export const MINIGUN_MIN_RPM = 50.0;
+export const MINIGUN_MAX_RPM = 1000.0;
+
+export const MAX_PARTICLES = 500;
+
+export const HOOK_STATE = Object.freeze({
+    IDLE: 'IDLE',
+    FIRING: 'FIRING',
+    PULLING: 'PULLING'
+});
+
+export const WEAPON_SWITCH_STATE = Object.freeze({
+    IDLE: 'IDLE',
+    WITHDRAWING: 'WITHDRAWING',
+    BRINGING_IN: 'BRINGING_IN'
+});
+
+export const INSPECT_STATE = Object.freeze({
+    IDLE: 'IDLE',
+    INSPECTING: 'INSPECTING'
+});
+
+export const PEER_BULLET_COLORS = Object.freeze({
+    PISTOL: 0xff0055,
+    SHOTGUN: 0xffaa00,
+    AR: 0x00ff88,
+    MINIGUN: 0xff6600
+});
+
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { LASER_BEAM_FADE_TIME } from './config.js';
+import { LASER_BEAM_FADE_TIME, MAX_PARTICLES } from './config.js';
 
 // Module-level shared geometries to eliminate GC overhead
 const SHARED_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
@@ -9,13 +9,39 @@ SHARED_CYL_GEO.rotateX(Math.PI / 2); // Rotate Z axis forward
 const SHARED_RING_GEO = new THREE.RingGeometry(0.9, 1.0, 32);
 SHARED_RING_GEO.rotateX(-Math.PI / 2); // Rotate to lie flat horizontally in X-Z plane
 
+// Material pool for basic particles to avoid shader recompilations and heap allocations
+const materialPool = [];
+
+function acquireBasicMaterial(colorHex) {
+    if (materialPool.length > 0) {
+        const mat = materialPool.pop();
+        mat.color.setHex(colorHex);
+        mat.opacity = 1.0;
+        return mat;
+    }
+    return new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 1.0
+    });
+}
+
+function releaseBasicMaterial(mat) {
+    if (materialPool.length < 500) {
+        materialPool.push(mat);
+    } else {
+        mat.dispose();
+    }
+}
+
 export function spawnParticles(position, color, count, speed, size, gravity) {
-    for (let i = 0; i < count; i++) {
-        const mat = new THREE.MeshBasicMaterial({
-            color: color,
-            transparent: true,
-            opacity: 1.0
-        });
+    if (state.activeParticles.length >= MAX_PARTICLES) return;
+    
+    // Cap count to not exceed MAX_PARTICLES limit
+    const spawnCount = Math.min(count, MAX_PARTICLES - state.activeParticles.length);
+
+    for (let i = 0; i < spawnCount; i++) {
+        const mat = acquireBasicMaterial(color);
         const mesh = new THREE.Mesh(SHARED_BOX_GEO, mat);
         mesh.position.copy(position);
         mesh.scale.setScalar(size);
@@ -41,12 +67,15 @@ export function spawnParticles(position, color, count, speed, size, gravity) {
             gravity: gravity,
             life: maxLife,
             maxLife: maxLife,
-            isSharedGeo: true
+            isSharedGeo: true,
+            isBasicParticle: true
         });
     }
 }
 
 export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
+    if (state.activeParticles.length >= MAX_PARTICLES) return;
+
     const distance = startPos.distanceTo(endPos);
     if (distance <= 0) return;
 
@@ -74,6 +103,8 @@ export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
 }
 
 export function spawnLightBeam(position) {
+    if (state.activeParticles.length >= MAX_PARTICLES) return;
+
     const beamHeight = 120; // higher than pillars (as high as max spawn height of enemies)
     const beamGeo = new THREE.CylinderGeometry(2.5, 2.5, beamHeight, 16);
     const beamMat = new THREE.MeshBasicMaterial({
@@ -111,8 +142,17 @@ export function updateParticles(delta) {
             if (p.mesh.geometry && !p.isSharedGeo) {
                 p.mesh.geometry.dispose();
             }
-            if (p.mesh.material) p.mesh.material.dispose();
-            state.activeParticles.splice(i, 1);
+            if (p.mesh.material) {
+                if (p.isBasicParticle) {
+                    releaseBasicMaterial(p.mesh.material);
+                } else {
+                    p.mesh.material.dispose();
+                }
+            }
+            
+            // Swap-and-pop O(1) removal
+            state.activeParticles[i] = state.activeParticles[state.activeParticles.length - 1];
+            state.activeParticles.pop();
         } else {
             const ratio = Math.max(0, p.life / p.maxLife);
             
@@ -142,12 +182,13 @@ export function updateParticles(delta) {
 }
 
 export function spawnRocketFlame(position, count, isBurst) {
-    for (let i = 0; i < count; i++) {
-        const mat = new THREE.MeshBasicMaterial({
-            color: isBurst ? (Math.random() > 0.5 ? 0xffea00 : 0xffcc00) : (Math.random() > 0.4 ? 0xffd700 : 0xffaa00),
-            transparent: true,
-            opacity: 0.95
-        });
+    if (state.activeParticles.length >= MAX_PARTICLES) return;
+    const spawnCount = Math.min(count, MAX_PARTICLES - state.activeParticles.length);
+
+    for (let i = 0; i < spawnCount; i++) {
+        const color = isBurst ? (Math.random() > 0.5 ? 0xffea00 : 0xffcc00) : (Math.random() > 0.4 ? 0xffd700 : 0xffaa00);
+        const mat = acquireBasicMaterial(color);
+        mat.opacity = 0.95;
         const mesh = new THREE.Mesh(SHARED_BOX_GEO, mat);
         mesh.position.copy(position);
         
@@ -175,19 +216,21 @@ export function spawnRocketFlame(position, count, isBurst) {
             gravity: 0.0, // Let them just shoot down under their own velocity
             life: maxLife,
             maxLife: maxLife,
-            isSharedGeo: true
+            isSharedGeo: true,
+            isBasicParticle: true
         });
     }
 }
 
 export function spawnManeuveringBeam(position, count, dir) {
     if (!dir || dir.lengthSq() === 0) return;
-    for (let i = 0; i < count; i++) {
-        const mat = new THREE.MeshBasicMaterial({
-            color: Math.random() > 0.5 ? 0xffea00 : 0xffcc00, // shades of yellow
-            transparent: true,
-            opacity: 0.95
-        });
+    if (state.activeParticles.length >= MAX_PARTICLES) return;
+    const spawnCount = Math.min(count, MAX_PARTICLES - state.activeParticles.length);
+
+    for (let i = 0; i < spawnCount; i++) {
+        const color = Math.random() > 0.5 ? 0xffea00 : 0xffcc00; // shades of yellow
+        const mat = acquireBasicMaterial(color);
+        mat.opacity = 0.95;
         const mesh = new THREE.Mesh(SHARED_BOX_GEO, mat);
         mesh.position.copy(position);
         
@@ -214,12 +257,15 @@ export function spawnManeuveringBeam(position, count, dir) {
             gravity: 0.0,
             life: maxLife,
             maxLife: maxLife,
-            isSharedGeo: true
+            isSharedGeo: true,
+            isBasicParticle: true
         });
     }
 }
 
 export function createShockwave(position, targetRadius, color = 0xffcc00) {
+    if (state.activeParticles.length >= MAX_PARTICLES) return;
+
     const ringMat = new THREE.MeshBasicMaterial({
         color: color,
         transparent: true,
