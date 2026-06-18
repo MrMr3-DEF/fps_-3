@@ -549,10 +549,6 @@ function handlePeerMessage(fromPeerId, msg) {
             });
         }
     } else if (msg.type === 'player_hit') {
-        // Flash targeted remote player bean model bright neon-red to provide instant damage feedback
-        const targetPeer = state.peers[msg.targetPeerId];
-        flashPeerMesh(targetPeer, 0xff3333, 150);
-
         if (msg.targetPeerId === state.peer.id) {
             import('./main.js').then((main) => {
                 main.takePlayerDamage(msg.damage, msg.attackerName);

@@ -48,6 +48,9 @@ export function updateHoverBar(fuelRatio) {
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
+let lastFrameTime = performance.now();
+const targetFps = 120;
+const frameMinTime = 1000 / targetFps; // 8.333 ms
 // Cached DOM element references — queried once at startup instead of every frame
 const fpsCounterEl      = document.getElementById('fps-counter');
 const reloadBarEl       = document.getElementById('reload-bar');
@@ -344,6 +347,10 @@ export function init() {
 
     state.controls.addEventListener('unlock', () => {
         if (blocker) blocker.style.display = 'flex';
+        state.moveForward = false;
+        state.moveBackward = false;
+        state.moveLeft = false;
+        state.moveRight = false;
         state.isShiftDown = false;
         state.isHovering = false;
         state.isMouseDown = false;
@@ -684,6 +691,14 @@ export function animate() {
     requestAnimationFrame(animate);
 
     const time = performance.now();
+    const elapsed = time - lastFrameTime;
+
+    if (elapsed < frameMinTime) {
+        return;
+    }
+
+    lastFrameTime = time - (elapsed % frameMinTime);
+
     const delta = (time - state.prevTime) / 1000;
 
     // 1) Update weapons recoil and switched models

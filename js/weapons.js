@@ -501,11 +501,8 @@ export function fireProjectile() {
             // Hit remote player in PvP
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestPeerDist);
 
-            // Flash the hit remote player mesh locally on shooter's screen for instant hit confirmation
-            const peerData = state.peers[pvpPeerId];
+            // Broadcast the hit to everyone
             import('./multiplayer.js').then((mp) => {
-                mp.flashPeerMesh(peerData, 0xff3333, 150);
-                
                 mp.broadcastToAll({
                     type: 'player_hit',
                     targetPeerId: pvpPeerId,
