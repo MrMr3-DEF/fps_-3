@@ -81,6 +81,7 @@ export const MAP_HALF_SIZE = 340;
 export const BORDER_WARN_THRESHOLD = 50;
 export const BORDER_PULSE_DISTANCE = 1.5;
 export const MINIGUN_RAMP_TIME = 3.0;
+export const MINIGUN_SHOOT_DELAY = 0.3; // Delay in seconds (300ms) before the minigun starts shooting
 export const MINIGUN_MIN_RPM = 50.0;
 export const MINIGUN_MAX_RPM = 1000.0;
 

@@ -94,6 +94,161 @@ function createGrassTexture() {
     return texture;
 }
 
+// Procedurally generates bark texture by rendering organic vertical bark ridges and horizontal cracks on an offscreen HTML canvas.
+function createBarkTexture() {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    // Base dark brown bark color
+    ctx.fillStyle = '#3a2312';
+    ctx.fillRect(0, 0, size, size);
+
+    // Populate with vertical wood grain strokes of varying shades of brown
+    for (let i = 0; i < 4000; i++) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const length = 40 + Math.random() * 120;
+        
+        // Random brown shade
+        const hue = 22 + Math.random() * 8;       // 22 to 30 (browns)
+        const sat = 25 + Math.random() * 15;      // 25% to 40%
+        const light = 12 + Math.random() * 15;     // 12% to 27% (darker bark tones)
+
+        ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
+        ctx.lineWidth = 1.5 + Math.random() * 3.5;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        // Slightly jitter the x coordinate to make it look organic
+        const jitter = (Math.random() - 0.5) * 2;
+        ctx.lineTo(x + jitter, y + length);
+        ctx.stroke();
+    }
+
+    // Add deep vertical dark cracks (bark fissures)
+    ctx.strokeStyle = '#1a0d05';
+    for (let i = 0; i < 40; i++) {
+        let x = Math.random() * size;
+        ctx.lineWidth = 2 + Math.random() * 4;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        for (let y = 0; y < size; y += 20) {
+            // Jitter the crack horizontally
+            x += (Math.random() - 0.5) * 4;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 4); 
+    return texture;
+}
+
+// Procedurally generates aging tree rings texture by drawing concentric circles and radial splits on an offscreen HTML canvas.
+function createRingsTexture() {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
+    const cx = size / 2;
+    const cy = size / 2;
+
+    // Base light wood core color (lighter warm brown/tan)
+    ctx.fillStyle = '#e4c49f';
+    ctx.fillRect(0, 0, size, size);
+
+    // Draw concentric rings with wavy noise to simulate tree years growth
+    const maxRadius = size * 0.75;
+    const step = 6 + Math.random() * 4; // distance between rings
+
+    for (let r = 10; r < maxRadius; r += step) {
+        // Vary the color and opacity slightly for each ring
+        const hue = 25 + Math.random() * 8;
+        const sat = 30 + Math.random() * 15;
+        const light = 35 + Math.random() * 10;
+        ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
+        ctx.lineWidth = 1 + Math.random() * 1.5;
+
+        ctx.beginPath();
+        // Generate a wavy circle path
+        const segments = 120;
+        for (let i = 0; i <= segments; i++) {
+            const angle = (i / segments) * Math.PI * 2;
+            
+            // Generate some wavy noise using simple sine/cosine wave sum
+            const wave = Math.sin(angle * 6) * 3 + Math.cos(angle * 3) * 2 + Math.sin(angle * 12) * 0.8;
+            const radialJitter = wave + (Math.random() - 0.5) * 0.5;
+            const currentRadius = r + radialJitter;
+            
+            const px = cx + Math.cos(angle) * currentRadius;
+            const py = cy + Math.sin(angle) * currentRadius;
+            
+            if (i === 0) {
+                ctx.moveTo(px, py);
+            } else {
+                ctx.lineTo(px, py);
+            }
+        }
+        ctx.stroke();
+    }
+
+    // Add fine wood grain details (concentric noise)
+    ctx.fillStyle = 'rgba(150, 110, 80, 0.08)';
+    for (let i = 0; i < 5000; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * maxRadius;
+        const px = cx + Math.cos(angle) * radius;
+        const py = cy + Math.sin(angle) * radius;
+        
+        ctx.fillRect(px, py, 1.5, 1.5);
+    }
+
+    // Add radial cracks (split wood from aging/drying)
+    const numCracks = 3 + Math.floor(Math.random() * 3); // 3 to 5 cracks
+    ctx.strokeStyle = 'rgba(65, 40, 20, 0.85)';
+    
+    for (let i = 0; i < numCracks; i++) {
+        const baseAngle = Math.random() * Math.PI * 2;
+        const startRad = 15 + Math.random() * 30;
+        const endRad = maxRadius * (0.6 + Math.random() * 0.4);
+        
+        ctx.lineWidth = 1.5 + Math.random() * 2;
+        ctx.beginPath();
+        
+        let currentX = cx + Math.cos(baseAngle) * startRad;
+        let currentY = cy + Math.sin(baseAngle) * startRad;
+        ctx.moveTo(currentX, currentY);
+        
+        const steps = 15;
+        for (let j = 1; j <= steps; j++) {
+            const t = j / steps;
+            const r = startRad + t * (endRad - startRad);
+            const angleJitter = baseAngle + (Math.random() - 0.5) * 0.15;
+            
+            currentX = cx + Math.cos(angleJitter) * r;
+            currentY = cy + Math.sin(angleJitter) * r;
+            ctx.lineTo(currentX, currentY);
+        }
+        ctx.stroke();
+    }
+
+    // Add a dark central pith
+    ctx.fillStyle = '#412814';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3 + Math.random() * 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
 // Procedurally constructs 3D low-poly tree geometries using cylinder trunk and multiple dodacahedron leaf meshes.
 function createLowPolyBush() {
     const bushGroup = new THREE.Group();
@@ -260,7 +415,7 @@ function createFloor() {
 function createFakeBillboards() {
     state.fakePillars = [];
     const fakePillarGeo = new THREE.PlaneGeometry(PILLAR_WIDTH * 1.5, 1);
-    const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x909aab, side: THREE.DoubleSide });
+    const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x483224, side: THREE.DoubleSide });
 
     for (let i = 0; i < 120; i++) {
         const angle = Math.random() * Math.PI * 2;
@@ -296,9 +451,37 @@ function createFakeBillboards() {
 function createPillars() {
     const dummy = new THREE.Object3D();
     const boxGeo = new THREE.BoxGeometry(PILLAR_WIDTH, 1, PILLAR_WIDTH);
-    const boxMat = new THREE.MeshStandardMaterial({ roughness: 0.3 });
     
-    const pillarInstanced = new THREE.InstancedMesh(boxGeo, boxMat, PILLAR_COUNT);
+    // Generate procedural wood bark and wood ring textures
+    const barkTex = createBarkTexture();
+    const ringsTex = createRingsTexture();
+    
+    // Materials for the chopped tree trunk
+    const barkMat = new THREE.MeshStandardMaterial({ 
+        map: barkTex,
+        roughness: 0.9,
+        metalness: 0.1
+    });
+    
+    const ringsMat = new THREE.MeshStandardMaterial({ 
+        map: ringsTex,
+        roughness: 0.8,
+        metalness: 0.1
+    });
+    
+    // Multi-material setup for BoxGeometry:
+    // Indices 0,1,4,5 are the sides (barkMat).
+    // Indices 2,3 are the top/bottom (ringsMat).
+    const materials = [
+        barkMat,  // +X
+        barkMat,  // -X
+        ringsMat, // +Y (Top)
+        ringsMat, // -Y (Bottom)
+        barkMat,  // +Z
+        barkMat   // -Z
+    ];
+    
+    const pillarInstanced = new THREE.InstancedMesh(boxGeo, materials, PILLAR_COUNT);
     pillarInstanced.castShadow = true;
     pillarInstanced.receiveShadow = true;
 

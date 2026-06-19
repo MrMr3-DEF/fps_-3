@@ -4,6 +4,7 @@ import {
     SWITCH_DURATION,
     WEAPON_STATS,
     MINIGUN_RAMP_TIME,
+    MINIGUN_SHOOT_DELAY,
     MINIGUN_MIN_RPM,
     MINIGUN_MAX_RPM
 } from './config.js';
@@ -371,6 +372,11 @@ export function createAkimboGuns() {
 // Triggers a raycast or projectile launch in the direction of the camera based on active weapon fire cooldown.
 export function fireProjectile() {
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
+
+    // Prevent minigun from firing before it spins up for a minimum threshold time
+    if (state.activeWeaponName === 'MINIGUN' && state.minigunRamp < MINIGUN_SHOOT_DELAY) {
+        return;
+    }
 
     const stats = WEAPON_STATS[state.activeWeaponName];
     if (!stats) return;
