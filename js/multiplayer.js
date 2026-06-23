@@ -12,7 +12,7 @@ import {
     HIT_FLASH_DURATION_MS,
     PEER_BULLET_COLORS
 } from './config.js';
-import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel } from './weapons.js';
+import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, SHARED_PROJECTILE_GEO } from './weapons.js';
 
 const _stateEuler = new THREE.Euler();
 
@@ -530,7 +530,7 @@ function handlePeerMessage(fromPeerId, msg) {
                 bullet.visible = true;
                 bullet.material.color.setHex(bulletColor);
             } else {
-                bullet = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), new THREE.MeshBasicMaterial({ color: bulletColor }));
+                bullet = new THREE.Mesh(SHARED_PROJECTILE_GEO, new THREE.MeshBasicMaterial({ color: bulletColor }));
                 bullet.userData = {};
             }
 

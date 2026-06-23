@@ -34,6 +34,33 @@ function releaseBasicMaterial(mat) {
     }
 }
 
+// Material pool for double-sided depth-write-disabled shockwave rings
+const shockwaveMaterialPool = [];
+
+function acquireShockwaveMaterial(colorHex) {
+    if (shockwaveMaterialPool.length > 0) {
+        const mat = shockwaveMaterialPool.pop();
+        mat.color.setHex(colorHex);
+        mat.opacity = 0.8;
+        return mat;
+    }
+    return new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+}
+
+function releaseShockwaveMaterial(mat) {
+    if (shockwaveMaterialPool.length < 50) {
+        shockwaveMaterialPool.push(mat);
+    } else {
+        mat.dispose();
+    }
+}
+
 export function spawnParticles(position, color, count, speed, size, gravity) {
     if (state.activeParticles.length >= MAX_PARTICLES) return;
     
@@ -79,11 +106,8 @@ export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
     const distance = startPos.distanceTo(endPos);
     if (distance <= 0) return;
 
-    const cylMat = new THREE.MeshBasicMaterial({
-        color: color,
-        transparent: true,
-        opacity: 0.95
-    });
+    const cylMat = acquireBasicMaterial(color);
+    cylMat.opacity = 0.95;
 
     const mesh = new THREE.Mesh(SHARED_CYL_GEO, cylMat);
     const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
@@ -97,6 +121,7 @@ export function createLaserBeam(startPos, endPos, color = 0x00d2ff) {
         mesh: mesh,
         isSniperTrail: true,
         isSharedGeo: true,
+        isBasicParticle: true,
         life: LASER_BEAM_FADE_TIME,
         maxLife: LASER_BEAM_FADE_TIME
     });
@@ -145,6 +170,8 @@ export function updateParticles(delta) {
             if (p.mesh.material) {
                 if (p.isBasicParticle) {
                     releaseBasicMaterial(p.mesh.material);
+                } else if (p.isShockwaveMaterial) {
+                    releaseShockwaveMaterial(p.mesh.material);
                 } else {
                     p.mesh.material.dispose();
                 }
@@ -266,13 +293,7 @@ export function spawnManeuveringBeam(position, count, dir) {
 export function createShockwave(position, targetRadius, color = 0xffcc00) {
     if (state.activeParticles.length >= MAX_PARTICLES) return;
 
-    const ringMat = new THREE.MeshBasicMaterial({
-        color: color,
-        transparent: true,
-        opacity: 0.8,
-        side: THREE.DoubleSide,
-        depthWrite: false
-    });
+    const ringMat = acquireShockwaveMaterial(color);
     const mesh = new THREE.Mesh(SHARED_RING_GEO, ringMat);
     mesh.position.copy(position);
     mesh.position.y += 0.05; // slightly elevate to prevent clipping
@@ -283,6 +304,7 @@ export function createShockwave(position, targetRadius, color = 0xffcc00) {
         mesh: mesh,
         isShockwave: true,
         isSharedGeo: true,
+        isShockwaveMaterial: true,
         targetScale: targetRadius,
         life: 0.4,
         maxLife: 0.4

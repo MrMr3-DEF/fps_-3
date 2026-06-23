@@ -24,7 +24,7 @@ import {
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave } from './particles.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
-import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect } from './weapons.js';
+import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO } from './weapons.js';
 import { createEnvironment, respawnTarget, updateTargets } from './world.js';
 import {
     sendLocalState,
@@ -195,7 +195,7 @@ function setupRenderer() {
     state.scene.add(directionalLight);
 
     state.renderer = new THREE.WebGLRenderer({ antialias: true });
-    state.renderer.setPixelRatio(window.devicePixelRatio);
+    state.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
     state.renderer.setSize(window.innerWidth, window.innerHeight);
     
     state.renderer.shadowMap.enabled = true;
@@ -580,6 +580,16 @@ function setupGameSystems() {
     state.hookMesh = new THREE.Mesh(hookGeo, hookMat);
     state.hookMesh.castShadow = true;
     state.hookMesh.receiveShadow = true;
+
+    // Pre-populate projectile pool to prevent runtime allocation hitches
+    const preAllocCount = 128;
+    for (let i = 0; i < preAllocCount; i++) {
+        const projMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const projectile = new THREE.Mesh(SHARED_PROJECTILE_GEO, projMat);
+        projectile.userData = {};
+        projectile.visible = false;
+        state.projectilePool.push(projectile);
+    }
 }
 
 // Resets player state vectors, wipes HUD scores, restores health/fuel indicators, and respawns character.

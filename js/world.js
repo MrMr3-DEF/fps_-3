@@ -677,7 +677,7 @@ function createEnemies() {
     for (let i = 0; i < 16; i++) {
         const targetGroup = new THREE.Group();
 
-        const bodyMesh = new THREE.Mesh(targetGeo, targetMat);
+        const bodyMesh = new THREE.Mesh(targetGeo, targetMat.clone());
         bodyMesh.castShadow = true;    
         bodyMesh.receiveShadow = true;
         targetGroup.add(bodyMesh);

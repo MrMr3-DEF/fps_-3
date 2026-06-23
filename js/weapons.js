@@ -26,6 +26,8 @@ const INSPECT_PAUSE1_END   = 1.0;  // Short pause before spin
 const INSPECT_PHASE2_END   = 3.2;  // Spin animation complete
 const INSPECT_TOTAL        = 3.8;  // Entire animation length
 
+export const SHARED_PROJECTILE_GEO = new THREE.SphereGeometry(0.07, 8, 8);
+
 // Module-level cached vectors to prevent per-frame garbage collection
 const _camEuler = new THREE.Euler();
 const _barrelPos = new THREE.Vector3();
@@ -393,9 +395,8 @@ export function fireProjectile() {
             projectile.visible = true;
             projectile.material.color.setHex(bulletColor);
         } else {
-            const projGeo = new THREE.SphereGeometry(0.07, 8, 8);
             const projMat = new THREE.MeshBasicMaterial({ color: bulletColor });
-            projectile = new THREE.Mesh(projGeo, projMat);
+            projectile = new THREE.Mesh(SHARED_PROJECTILE_GEO, projMat);
             projectile.userData = {};
         }
         state.scene.add(projectile);
