@@ -1,0 +1,23 @@
+{
+  "name": "testfps",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "worker:dev": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.4",
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240512.0",
+    "@types/three": "^0.160.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11",
+    "wrangler": "^3.57.1"
+  }
+}

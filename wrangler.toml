@@ -1,8 +1,7 @@
 name = "fps3"
 compatibility_date = "2026-05-28"
-main = "worker.js"
+main = "src/worker.ts"
 
 [assets]
-directory = "./"
-# We exclude internal configuration and source-control directories from assets
-exclude = [".git/**", ".github/**", "worker.js", "wrangler.toml", "functions/**"]
+directory = "./dist"
+exclude = [".git/**", ".github/**", "wrangler.toml", "node_modules/**", "src/**"]
