@@ -659,7 +659,7 @@ function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
     if (!isGameInputLocked()) return;
 
     const wasMouseDown = state.isMouseDown;
-    updateMouseButtonState(e);
+    updateMouseButtonStateFromChange(e);
 
     if (!wasMouseDown && state.isMouseDown) {
         if (state.inspectState === 'INSPECTING') {
@@ -675,9 +675,15 @@ function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
     }
 }
 
-function updateMouseButtonState(e: MouseEvent | PointerEvent): void {
-    state.isMouseDown = (e.buttons & 1) !== 0;
-    state.rightClickActive = (e.buttons & 2) !== 0;
+function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
+    const isButtonDown = e.type === 'mousedown' || e.type === 'pointerdown';
+
+    if (e.button === 0) {
+        state.isMouseDown = isButtonDown;
+    } else if (e.button === 2) {
+        state.rightClickActive = isButtonDown;
+    }
+
     state.isScoped = state.rightClickActive || state.keyCActive;
 }
 
