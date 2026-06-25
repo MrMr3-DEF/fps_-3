@@ -25,9 +25,13 @@ function ensureBoxParticleMesh(): THREE.InstancedMesh | null {
     if (!state.scene) return null;
     if (!boxParticleMesh) {
         const mat = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
             vertexColors: true,
             transparent: true,
-            opacity: 0.95
+            opacity: 0.95,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false
         });
         boxParticleMesh = new THREE.InstancedMesh(SHARED_BOX_GEO, mat, MAX_PARTICLES);
         boxParticleMesh.frustumCulled = false;
@@ -314,11 +318,13 @@ export function spawnRocketFlame(position: THREE.Vector3, count: number, isBurst
     if (spawnCount <= 0) return;
 
     for (let i = 0; i < spawnCount; i++) {
-        const color = isBurst ? (Math.random() > 0.5 ? 0xffea00 : 0xffcc00) : (Math.random() > 0.4 ? 0xffd700 : 0xffaa00);
+        const color = isBurst
+            ? (Math.random() > 0.5 ? 0xfff06a : 0xffb21f)
+            : (Math.random() > 0.35 ? 0xff8a00 : 0xffc400);
         const px = position.x + (Math.random() - 0.5) * 0.3;
         const py = position.y + (Math.random() - 0.5) * 0.1;
         const pz = position.z + (Math.random() - 0.5) * 0.3;
-        const size = isBurst ? (0.25 + Math.random() * 0.25) : (0.15 + Math.random() * 0.15);
+        const size = isBurst ? (0.25 + Math.random() * 0.25) : (0.26 + Math.random() * 0.18);
         const vx = (Math.random() - 0.5) * (isBurst ? 22.0 : 4.0);
         const vy = isBurst ? (-8.0 - Math.random() * 20.0) : (-18.0 - Math.random() * 12.0);
         const vz = (Math.random() - 0.5) * (isBurst ? 22.0 : 4.0);
