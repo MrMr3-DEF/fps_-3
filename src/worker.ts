@@ -24,7 +24,7 @@ async function isRateLimited(request: Request): Promise<boolean> {
             count = data?.count || 0;
         }
 
-        if (count >= 5) {
+        if (count >= 30) {
             return true;
         }
 
@@ -85,10 +85,7 @@ export default {
         if (url.pathname === "/api/turn") {
             const limited = await isRateLimited(request);
             if (limited) {
-                return new Response(
-                    JSON.stringify({ error: "Too many requests. Please wait a minute." }),
-                    { status: 429, headers: { "Content-Type": "application/json" } }
-                );
+                return makeFallbackResponse("TURN credential rate limit reached for this minute. Using fallback servers.");
             }
 
             // Require a game-like room code before generating relay credentials.

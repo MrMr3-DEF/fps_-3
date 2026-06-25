@@ -78,6 +78,21 @@ const DOM = {
 
 let cachedUsername = 'Guest';
 
+function showTurnWarning(message: string): void {
+    console.warn(message);
+
+    const joinErrorLog = DOM.joinErrorLog();
+    if (joinErrorLog) {
+        joinErrorLog.style.color = '#ff9f43';
+        joinErrorLog.innerText = message;
+    }
+
+    const hostStatus = DOM.hostLobbyStatus();
+    if (hostStatus && state.isHost) {
+        hostStatus.innerText = message;
+    }
+}
+
 // Try project-provided ICE servers first, then fall back to public relay/STUN
 // entries so multiplayer can still work in local/dev setups.
 async function getPeerConfig(): Promise<PeerJSConfig> {
@@ -98,14 +113,23 @@ async function getPeerConfig(): Promise<PeerJSConfig> {
 
     try {
         const response = await fetch(`/api/turn?room=${state.roomCode || ''}`);
-        if (response.ok) {
-            const data = await response.json();
-            if (data && data.iceServers) {
-                config.config.iceServers = data.iceServers;
-                console.log('Successfully loaded Cloudflare TURN servers.');
-                return config;
-            }
+        if (!response.ok) {
+            showTurnWarning(`TURN endpoint returned ${response.status}. Using fallback ICE servers.`);
+            throw new Error(`TURN endpoint returned ${response.status}`);
         }
+
+        const data = await response.json();
+        if (data && data.iceServers) {
+            config.config.iceServers = data.iceServers;
+            if (data.warning) {
+                showTurnWarning(data.warning);
+            } else {
+                console.log('Successfully loaded Cloudflare TURN servers.');
+            }
+            return config;
+        }
+
+        showTurnWarning('TURN endpoint did not return iceServers. Using fallback ICE servers.');
     } catch (e) {
         console.warn('Failed to fetch Cloudflare TURN servers, using fallback ICE servers:', e);
     }
@@ -362,7 +386,7 @@ function setupConnection(conn: any): void {
             showJoinError('Connection failed. Please check the code and try again.');
             disconnectMultiplayer();
         }
-    }, 10000) : null;
+    }, 20000) : null;
 
     const handleOpen = () => {
         if (state.connections.includes(conn)) return;
