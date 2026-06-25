@@ -2,6 +2,9 @@
   "name": "testfps",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -14,7 +17,7 @@
     "three": "^0.160.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240512.0",
+    "@cloudflare/workers-types": "^4.20260624.1",
     "@types/three": "^0.160.0",
     "typescript": "^5.4.5",
     "vite": "^8.1.0",

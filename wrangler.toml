@@ -4,4 +4,3 @@ main = "src/worker.ts"
 
 [assets]
 directory = "./dist"
-exclude = [".git/**", ".github/**", "wrangler.toml", "node_modules/**", "src/**"]
