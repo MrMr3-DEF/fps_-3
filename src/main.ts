@@ -543,9 +543,6 @@ function setupInputListeners(): void {
             if (state.inspectState === 'INSPECTING') {
                 cancelInspect();
             }
-            if (state.fireCooldown <= 0 && state.switchState === 'IDLE') {
-                fireProjectile();
-            }
         }
 
         if (state.rightClickActive) {
@@ -557,6 +554,12 @@ function setupInputListeners(): void {
         if (state.controls && state.controls.isLocked) {
             e.preventDefault();
         }
+        if (state.controls && state.controls.isLocked) {
+            updateMouseButtonState(e);
+        }
+    });
+
+    window.addEventListener('mousemove', (e) => {
         if (state.controls && state.controls.isLocked) {
             updateMouseButtonState(e);
         }
@@ -675,9 +678,19 @@ function setCheckboxLabel(el: HTMLElement | null, enabled: boolean): void {
 }
 
 function updateMouseButtonState(e: MouseEvent): void {
+    const wasMouseDown = state.isMouseDown;
     state.isMouseDown = (e.buttons & 1) !== 0;
     state.rightClickActive = (e.buttons & 2) !== 0;
     state.isScoped = state.rightClickActive || state.keyCActive;
+
+    if (!wasMouseDown && state.isMouseDown && state.controls?.isLocked) {
+        if (state.inspectState === 'INSPECTING') {
+            cancelInspect();
+        }
+        if (state.fireCooldown <= 0 && state.switchState === 'IDLE') {
+            fireProjectile();
+        }
+    }
 }
 
 function resetHudCounters(): void {
