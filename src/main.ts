@@ -3,8 +3,6 @@ import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockCont
 import { state, resetPlayerState } from './state.js';
 import {
     JUMP_FORCE,
-    PROJECTILE_SPEED,
-    PROJECTILE_LIFETIME,
     PLAYER_HEIGHT,
     PLAYER_MAX_HP,
     LAVA_DAMAGE_TICK_MS,
@@ -15,17 +13,18 @@ import {
     FOV_LERP_SPEED,
     PLAYER_RADIUS,
     WEAPON_STATS,
-    TARGET_HIT_RANGE_MULTIPLIER,
     REGEN_DELAY_MS,
     MAP_HALF_SIZE,
     BORDER_WARN_THRESHOLD,
     BORDER_PULSE_DISTANCE
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave } from './particles.js';
+import { updateProjectiles } from './projectiles.js';
+import { setFpsText, setFpsVisible, updateHealthBar, updateHoverBar, updateReloadBar } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO } from './weapons.js';
-import { createEnvironment, respawnTarget, updateTargets } from './world.js';
+import { createEnvironment, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateTargets } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -35,8 +34,9 @@ import {
     hostGame,
     joinGame,
     broadcastTargetKill,
-    flashPeerMesh
+    updateRemotePeers
 } from './multiplayer.js';
+import { applyRendererSettings, loadUserSettings, resetUserSettings, saveUserSettings, userSettings } from './settings.js';
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
 const _logicalCameraPos = new THREE.Vector3();
@@ -44,6 +44,7 @@ const _tpCamDir = new THREE.Vector3();
 const _tpCamOffset = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
 const _jumpBoosterPos = new THREE.Vector3();
+const _lavaCandidates: THREE.Object3D[] = [];
 
 // Lazily cache HUD/menu elements. Most code paths touch the UI every frame.
 const UI_cache: Record<string, HTMLElement | null> = {};
@@ -72,13 +73,29 @@ const UI = {
     get inputUsername() { return getUI<HTMLInputElement>('input-username'); },
     get sensSlider() { return getUI<HTMLInputElement>('sensitivity'); },
     get sensValue() { return getUI<HTMLElement>('sens-value'); },
+    get settingFov() { return getUI<HTMLInputElement>('setting-fov'); },
+    get settingFovValue() { return getUI<HTMLElement>('setting-fov-value'); },
+    get settingScopedFov() { return getUI<HTMLInputElement>('setting-scoped-fov'); },
+    get settingScopedFovValue() { return getUI<HTMLElement>('setting-scoped-fov-value'); },
+    get settingRenderScale() { return getUI<HTMLInputElement>('setting-render-scale'); },
+    get settingRenderScaleValue() { return getUI<HTMLElement>('setting-render-scale-value'); },
+    get settingParticles() { return getUI<HTMLInputElement>('setting-particles'); },
+    get settingParticlesValue() { return getUI<HTMLElement>('setting-particles-value'); },
+    get settingShadows() { return getUI<HTMLInputElement>('setting-shadows'); },
+    get settingShadowsValue() { return getUI<HTMLElement>('setting-shadows-value'); },
+    get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
+    get settingFpsValue() { return getUI<HTMLElement>('setting-fps-value'); },
     get panelMain() { return getUI<HTMLElement>('panel-main'); },
+    get panelSettings() { return getUI<HTMLElement>('panel-settings'); },
     get panelMp() { return getUI<HTMLElement>('panel-mp'); },
     get panelHostWaiting() { return getUI<HTMLElement>('panel-host-waiting'); },
     get panelJoinRoom() { return getUI<HTMLElement>('panel-join-room'); },
     get panelPause() { return getUI<HTMLElement>('panel-pause'); },
     get btnPlaySp() { return getUI<HTMLElement>('btn-play-sp'); },
     get btnMenuMp() { return getUI<HTMLElement>('btn-menu-mp'); },
+    get btnMenuSettings() { return getUI<HTMLElement>('btn-menu-settings'); },
+    get btnSettingsBack() { return getUI<HTMLElement>('btn-settings-back'); },
+    get btnSettingsReset() { return getUI<HTMLElement>('btn-settings-reset'); },
     get btnMpBack() { return getUI<HTMLElement>('btn-mp-back'); },
     get btnMpHostView() { return getUI<HTMLElement>('btn-mp-host-view'); },
     get btnMpJoinView() { return getUI<HTMLElement>('btn-mp-join-view'); },
@@ -101,34 +118,8 @@ const UI = {
 // Sequential cycling order for E. Number keys below use a different, FPS-style layout.
 const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
 
-// Last-written UI values, so the animation loop only mutates the DOM on changes.
-let lastReloadProgress = -1;
-let lastHoverFuel = -1;
 let lastFov = -1;
 let lastScopedState: boolean | null = null;
-
-export function updateHealthBar(hpRatio: number, flashColor: string | null = null): void {
-    if (!UI.healthBar) return;
-    UI.healthBar.style.width = `${hpRatio}%`;
-    if (flashColor) {
-        UI.healthBar.style.backgroundColor = flashColor;
-        setTimeout(() => {
-            if (state.playerHp > 0 && UI.healthBar && UI.healthBar.style.backgroundColor === flashColor) {
-                UI.healthBar.style.backgroundColor = '#2ed573';
-            }
-        }, 100);
-    } else {
-        UI.healthBar.style.backgroundColor = '#2ed573';
-    }
-}
-
-export function updateHoverBar(fuelRatio: number): void {
-    if (!UI.hoverBar) return;
-    if (fuelRatio !== lastHoverFuel) {
-        UI.hoverBar.style.height = `${fuelRatio * 100}%`;
-        lastHoverFuel = fuelRatio;
-    }
-}
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
@@ -151,14 +142,14 @@ function onWindowResize(): void {
     if (state.camera && state.renderer) {
         state.camera.aspect = window.innerWidth / window.innerHeight;
         state.camera.updateProjectionMatrix();
-        state.renderer.setSize(window.innerWidth, window.innerHeight);
+        applyRendererSettings(state.renderer);
     }
 }
 
 // Renderer and camera setup is intentionally centralized because pointer lock,
 // third-person mode and weapon attachments all share the same camera object.
 function setupRenderer(): void {
-    state.camera = new THREE.PerspectiveCamera(DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.1, 1500);
+    state.camera = new THREE.PerspectiveCamera(userSettings.fov, window.innerWidth / window.innerHeight, 0.1, 1500);
 
     state.scene = new THREE.Scene();
     state.scene.background = new THREE.Color(0xd0dbf0);
@@ -186,11 +177,7 @@ function setupRenderer(): void {
     state.scene.add(directionalLight);
 
     state.renderer = new THREE.WebGLRenderer({ antialias: true });
-    state.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
-    state.renderer.setSize(window.innerWidth, window.innerHeight);
-    
-    state.renderer.shadowMap.enabled = true;
-    state.renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+    applyRendererSettings(state.renderer);
     
     document.body.appendChild(state.renderer.domElement);
 
@@ -213,6 +200,31 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             if (UI.panelMain) UI.panelMain.style.display = 'none';
             if (UI.panelMp) UI.panelMp.style.display = 'flex';
+        });
+    }
+
+    if (UI.btnMenuSettings) {
+        UI.btnMenuSettings.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (UI.panelMain) UI.panelMain.style.display = 'none';
+            if (UI.panelSettings) UI.panelSettings.style.display = 'flex';
+        });
+    }
+
+    if (UI.btnSettingsBack) {
+        UI.btnSettingsBack.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (UI.panelSettings) UI.panelSettings.style.display = 'none';
+            if (UI.panelMain) UI.panelMain.style.display = 'flex';
+        });
+    }
+
+    if (UI.btnSettingsReset) {
+        UI.btnSettingsReset.addEventListener('click', (e) => {
+            e.stopPropagation();
+            resetUserSettings();
+            syncSettingsControls();
+            applyLiveSettings();
         });
     }
 
@@ -609,37 +621,116 @@ function broadcastPlayerDeath(victimName: string, killerName: string): void {
     });
 }
 
-export function init(): void {
-    setDamageHandlers(processTargetHit, takePlayerDamage);
-    setupRenderer();
-    let initialSens = 1.0;
-    if (UI.sensSlider) {
-        let val = parseFloat(UI.sensSlider.value);
-        if (!isNaN(val)) {
-            initialSens = val;
-        }
-    }
-    state.baseSensitivity = initialSens;
-    if (state.controls) {
-        state.controls.pointerSpeed = state.baseSensitivity;
-    }
-    if (UI.sensValue) {
-        UI.sensValue.innerText = state.baseSensitivity.toFixed(1);
+function formatPercent(value: number): string {
+    return `${Math.round(value * 100)}%`;
+}
+
+function setCheckboxLabel(el: HTMLElement | null, enabled: boolean): void {
+    if (el) el.innerText = enabled ? 'On' : 'Off';
+}
+
+function syncSettingsControls(): void {
+    if (UI.sensSlider) UI.sensSlider.value = userSettings.sensitivity.toFixed(1);
+    if (UI.sensValue) UI.sensValue.innerText = userSettings.sensitivity.toFixed(1);
+    if (UI.settingFov) UI.settingFov.value = userSettings.fov.toFixed(0);
+    if (UI.settingFovValue) UI.settingFovValue.innerText = userSettings.fov.toFixed(0);
+    if (UI.settingScopedFov) UI.settingScopedFov.value = userSettings.scopedFov.toFixed(0);
+    if (UI.settingScopedFovValue) UI.settingScopedFovValue.innerText = userSettings.scopedFov.toFixed(0);
+    if (UI.settingRenderScale) UI.settingRenderScale.value = userSettings.renderScale.toFixed(2);
+    if (UI.settingRenderScaleValue) UI.settingRenderScaleValue.innerText = formatPercent(userSettings.renderScale);
+    if (UI.settingParticles) UI.settingParticles.value = userSettings.particleAmount.toFixed(2);
+    if (UI.settingParticlesValue) UI.settingParticlesValue.innerText = formatPercent(userSettings.particleAmount);
+    if (UI.settingShadows) UI.settingShadows.checked = userSettings.shadows;
+    setCheckboxLabel(UI.settingShadowsValue, userSettings.shadows);
+    if (UI.settingFps) UI.settingFps.checked = userSettings.showFps;
+    setCheckboxLabel(UI.settingFpsValue, userSettings.showFps);
+}
+
+function applyLiveSettings(): void {
+    state.baseSensitivity = userSettings.sensitivity;
+
+    if (state.camera) {
+        const targetFov = state.isScoped ? userSettings.scopedFov : userSettings.fov;
+        state.camera.fov = targetFov;
+        state.camera.updateProjectionMatrix();
     }
 
-    if (UI.sensSlider && UI.sensValue) {
-        UI.sensSlider.addEventListener('input', (e) => {
-            let val = parseFloat((e.target as HTMLInputElement).value);
-            if (isNaN(val)) val = 1.0;
-            val = Math.max(0.1, Math.min(3.0, val));
-            state.baseSensitivity = val;
-            UI.sensValue!.innerText = val.toFixed(1);
-            if (state.controls) {
-                state.controls.pointerSpeed = val * (state.camera ? (state.camera.fov / DEFAULT_FOV) : 1.0);
-            }
-        });
-        UI.sensSlider.addEventListener('click', (e) => e.stopPropagation());
+    if (state.controls && state.camera) {
+        state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / userSettings.fov);
     }
+
+    if (state.renderer) {
+        applyRendererSettings(state.renderer);
+    }
+
+    setFpsVisible(userSettings.showFps && Boolean(state.controls?.isLocked) && !state.isScoped);
+
+    lastFov = -1;
+}
+
+function setupSettingsControls(): void {
+    syncSettingsControls();
+
+    UI.sensSlider?.addEventListener('input', (e) => {
+        const val = parseFloat((e.target as HTMLInputElement).value);
+        userSettings.sensitivity = Number.isFinite(val) ? Math.max(0.1, Math.min(3.0, val)) : 1.0;
+        syncSettingsControls();
+        saveUserSettings();
+        applyLiveSettings();
+    });
+
+    UI.settingFov?.addEventListener('input', (e) => {
+        const val = parseFloat((e.target as HTMLInputElement).value);
+        userSettings.fov = Number.isFinite(val) ? Math.max(55, Math.min(105, val)) : DEFAULT_FOV;
+        syncSettingsControls();
+        saveUserSettings();
+        applyLiveSettings();
+    });
+
+    UI.settingScopedFov?.addEventListener('input', (e) => {
+        const val = parseFloat((e.target as HTMLInputElement).value);
+        userSettings.scopedFov = Number.isFinite(val) ? Math.max(8, Math.min(35, val)) : SCOPED_FOV;
+        syncSettingsControls();
+        saveUserSettings();
+        applyLiveSettings();
+    });
+
+    UI.settingRenderScale?.addEventListener('input', (e) => {
+        const val = parseFloat((e.target as HTMLInputElement).value);
+        userSettings.renderScale = Number.isFinite(val) ? Math.max(0.5, Math.min(1.0, val)) : 1.0;
+        syncSettingsControls();
+        saveUserSettings();
+        applyLiveSettings();
+    });
+
+    UI.settingParticles?.addEventListener('input', (e) => {
+        const val = parseFloat((e.target as HTMLInputElement).value);
+        userSettings.particleAmount = Number.isFinite(val) ? Math.max(0.2, Math.min(1.0, val)) : 1.0;
+        syncSettingsControls();
+        saveUserSettings();
+    });
+
+    UI.settingShadows?.addEventListener('change', (e) => {
+        userSettings.shadows = (e.target as HTMLInputElement).checked;
+        syncSettingsControls();
+        saveUserSettings();
+        applyLiveSettings();
+    });
+
+    UI.settingFps?.addEventListener('change', (e) => {
+        userSettings.showFps = (e.target as HTMLInputElement).checked;
+        syncSettingsControls();
+        saveUserSettings();
+        applyLiveSettings();
+    });
+}
+
+export function init(): void {
+    setDamageHandlers(processTargetHit, takePlayerDamage);
+    loadUserSettings();
+    setupRenderer();
+    setupSettingsControls();
+    applyLiveSettings();
 
     setupMenuListeners();
 
@@ -663,7 +754,7 @@ export function init(): void {
 
             if (UI.crosshair) UI.crosshair.style.display = 'block';
             if (UI.ui) UI.ui.style.display = 'flex';
-            if (UI.fpsCounter) UI.fpsCounter.style.display = 'block';
+            setFpsVisible(userSettings.showFps);
 
             document.body.focus();
             if (state.renderer && state.renderer.domElement) {
@@ -691,6 +782,7 @@ export function init(): void {
             if (UI.hoverBadge) UI.hoverBadge.style.display = 'none';
 
             if (UI.panelMain) UI.panelMain.style.display = 'none';
+            if (UI.panelSettings) UI.panelSettings.style.display = 'none';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'none';
             if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'none';
@@ -739,16 +831,9 @@ export function animate(): void {
 
     updateWeapons(delta);
 
-    if (UI.reloadBar) {
-        const stats = WEAPON_STATS[state.activeWeaponName];
-        const maxCooldown = stats ? stats.fireRate : 0.1;
-
-        const progress = Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown)));
-        if (progress !== lastReloadProgress) {
-            UI.reloadBar.style.width = `${progress * 100}%`;
-            lastReloadProgress = progress;
-        }
-    }
+    const stats = WEAPON_STATS[state.activeWeaponName];
+    const maxCooldown = stats ? stats.fireRate : 0.1;
+    updateReloadBar(Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown))));
 
     if (state.controls && state.controls.isLocked && state.isMouseDown && (state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
         if (state.inspectState === 'INSPECTING') {
@@ -765,100 +850,10 @@ export function animate(): void {
     updateHealthRegen(delta);
 
     updateHook(delta);
+    updateRemotePeers(delta);
 
-    const peerIds = state.isMultiplayer ? state.peerIds : [];
-    const peerIdsLen = peerIds.length;
-    const activeDamage = WEAPON_STATS[state.activeWeaponName]?.damage ?? 1;
-
-    // Local and remote non-sniper bullets share this projectile simulation.
-    for (let i = state.projectiles.length - 1; i >= 0; i--) {
-        const proj = state.projectiles[i];
-        proj.userData.age += delta;
-        proj.position.x += proj.userData.dx * PROJECTILE_SPEED * delta;
-        proj.position.y += proj.userData.dy * PROJECTILE_SPEED * delta;
-        proj.position.z += proj.userData.dz * PROJECTILE_SPEED * delta;
-
-        let projectileHit = false;
-
-        const targetsLen = state.targets.length;
-        for (let j = 0; j < targetsLen; j++) {
-            const target = state.targets[j];
-            const distance = proj.position.distanceTo(target.position);
-
-            const hitRange = TARGET_HIT_RANGE_MULTIPLIER * (target.userData.scale || 1.0);
-            if (distance < hitRange) {
-                if (state.isMultiplayer) {
-                    if (!state.isHost) {
-                        state.connections.forEach((conn) => {
-                            if (conn.open) {
-                                try {
-                                    conn.send({
-                                        type: 'hit_target',
-                                        targetIndex: j,
-                                        damage: activeDamage
-                                     });
-                                } catch (err) {
-                                    console.error('Error broadcasting hit_target:', err);
-                                }
-                            }
-                        });
-                    } else {
-                        processTargetHit(j, activeDamage);
-                    }
-                } else {
-                    processTargetHit(j, activeDamage);
-                }
-                
-                projectileHit = true;
-                spawnParticles(proj.position, 0xffaa00, 8, 12, 0.15, 20.0);
-                break;
-            }
-        }
-
-        if (!projectileHit && state.isMultiplayer) {
-            for (let j = 0; j < peerIdsLen; j++) {
-                const peerId = peerIds[j];
-                const peerData = state.peers[peerId];
-                if (peerData && peerData.mesh) {
-                    const distance = proj.position.distanceTo(peerData.mesh.position);
-                    const hitRange = PLAYER_RADIUS;
-                    
-                    if (distance < hitRange) {
-                        projectileHit = true;
-                        spawnParticles(proj.position, 0x8c7ae6, 8, 12, 0.15, 20.0);
-                        flashPeerMesh(peerData, 0xff3333, 150);
-                        
-                        const inputUsernameVal = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
-                        const attackerName = inputUsernameVal || 'Guest';
-
-                        state.connections.forEach((conn) => {
-                            if (conn.open) {
-                                try {
-                                    conn.send({
-                                        type: 'player_hit',
-                                        targetPeerId: peerId,
-                                        damage: activeDamage,
-                                        attackerName: attackerName
-                                    });
-                                } catch (err) {
-                                    console.error('Error broadcasting player_hit:', err);
-                                }
-                            }
-                        });
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (projectileHit || proj.userData.age > PROJECTILE_LIFETIME) {
-            state.scene!.remove(proj);
-            proj.visible = false;
-            state.projectilePool.push(proj);
-            state.projectiles[i] = state.projectiles[state.projectiles.length - 1];
-            state.projectiles.pop();
-        }
-    }
+    const attackerName = UI.inputUsername ? UI.inputUsername.value.trim() || 'Guest' : 'Guest';
+    updateProjectiles(delta, attackerName);
 
     updateTargets(delta);
 
@@ -872,8 +867,8 @@ export function animate(): void {
 
     fpsFrames++;
     if (time >= fpsLastTime + 1000) {
-        if (UI.fpsCounter) {
-            UI.fpsCounter.textContent = `FPS: ${Math.round((fpsFrames * 1000) / (time - fpsLastTime))}`;
+        if (userSettings.showFps) {
+            setFpsText(`FPS: ${Math.round((fpsFrames * 1000) / (time - fpsLastTime))}`);
         }
         fpsFrames = 0;
         fpsLastTime = time;
@@ -882,7 +877,7 @@ export function animate(): void {
     state.prevTime = time;
 
     if (state.camera) {
-        const targetFov = state.isScoped ? SCOPED_FOV : DEFAULT_FOV;
+        const targetFov = state.isScoped ? userSettings.scopedFov : userSettings.fov;
         if (Math.abs(state.camera.fov - targetFov) > 0.1) {
             state.camera.fov += (targetFov - state.camera.fov) * FOV_LERP_SPEED * delta;
             state.camera.updateProjectionMatrix();
@@ -894,7 +889,7 @@ export function animate(): void {
         // Scope zoom also reduces pointer speed so aiming does not feel twitchy.
         if (state.controls) {
             if (state.camera.fov !== lastFov) {
-                state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / DEFAULT_FOV);
+                state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / userSettings.fov);
                 lastFov = state.camera.fov;
             }
         }
@@ -905,7 +900,7 @@ export function animate(): void {
                     UI.gogglesScope.style.display = 'block';
                     UI.crosshair.style.display = 'none';
                     if (UI.ui) UI.ui.style.display = 'none';
-                    if (UI.fpsCounter) UI.fpsCounter.style.display = 'none';
+                    setFpsVisible(false);
                     if (UI.healthContainer) UI.healthContainer.style.display = 'none';
                     if (UI.reloadContainer) UI.reloadContainer.style.display = 'none';
                     if (UI.hoverContainer) UI.hoverContainer.style.display = 'none';
@@ -913,7 +908,7 @@ export function animate(): void {
                     UI.gogglesScope.style.display = 'none';
                     UI.crosshair.style.display = 'block';
                     if (UI.ui) UI.ui.style.display = 'flex';
-                    if (UI.fpsCounter) UI.fpsCounter.style.display = 'block';
+                    setFpsVisible(userSettings.showFps);
                     if (UI.healthContainer) {
                         UI.healthContainer.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
                     }
@@ -984,7 +979,7 @@ export function triggerDeath(): void {
 
     if (UI.crosshair) UI.crosshair.style.display = 'none';
     if (UI.ui) UI.ui.style.display = 'none';
-    if (UI.fpsCounter) UI.fpsCounter.style.display = 'none';
+    setFpsVisible(false);
     if (UI.healthContainer) UI.healthContainer.style.display = 'none';
     if (UI.reloadContainer) UI.reloadContainer.style.display = 'none';
 
@@ -1028,6 +1023,7 @@ export function processTargetHit(targetIndex: number, damage: number): void {
         }
         
         respawnTarget(target);
+        rebuildTargetHash();
         state.score++;
         
         if (UI.score) UI.score.innerText = state.score.toString();
@@ -1046,9 +1042,10 @@ export function checkLavaDamage(delta: number): void {
 
     if (feetY <= 0.15) {
         let standingOnLava = false;
-        const len = state.lavaPools.length;
+        const pools = queryLavaPoolsNear(playerObj.position.x, playerObj.position.z, LAVA_POOL_HALF_SIZE + PLAYER_RADIUS, _lavaCandidates);
+        const len = pools.length;
         for (let i = 0; i < len; i++) {
-            const pool = state.lavaPools[i];
+            const pool = pools[i];
             const dx = Math.abs(playerObj.position.x - pool.position.x);
             const dz = Math.abs(playerObj.position.z - pool.position.z);
             if (dx < LAVA_POOL_HALF_SIZE + PLAYER_RADIUS && dz < LAVA_POOL_HALF_SIZE + PLAYER_RADIUS) {

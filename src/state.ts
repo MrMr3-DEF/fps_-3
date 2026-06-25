@@ -20,6 +20,8 @@ export interface DataConnectionLike {
 
 export interface PeerData {
     mesh: THREE.Group;
+    targetPosition: THREE.Vector3;
+    targetYaw: number;
     leftGun: THREE.Group;
     rightGunContainer: THREE.Group;
     pistolMesh: THREE.Group;

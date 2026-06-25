@@ -11,6 +11,7 @@ import {
 import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './multiplayer.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
 import { processTargetHit } from './damage.js';
+import { queryTargetsNear } from './world.js';
 
 // Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
@@ -25,7 +26,32 @@ const INSPECT_TOTAL        = 3.8;
 
 export const SHARED_PROJECTILE_GEO = new THREE.SphereGeometry(0.07, 8, 8);
 export const SHARED_BODY_MAT = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
+const SHARED_GUN_BODY_GEO = new THREE.BoxGeometry(0.07, 0.11, 0.38);
+const SHARED_GUN_GRIP_GEO = new THREE.BoxGeometry(0.05, 0.16, 0.07);
+const SHARED_GUN_CORE_GEO = new THREE.BoxGeometry(0.03, 0.03, 0.36);
+const SHARED_BEAN_CYLINDER_GEO = new THREE.CylinderGeometry(0.6, 0.6, 1.0, 16);
+const SHARED_BEAN_SPHERE_GEO = new THREE.SphereGeometry(0.6, 16, 16);
+const SHARED_BOOSTER_CYLINDER_GEO = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
+const SHARED_NOZZLE_GEO = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
+const SHARED_VISOR_GEO = new THREE.BoxGeometry(0.85, 0.25, 0.45);
+const SHARED_VISOR_STRIP_GEO = new THREE.BoxGeometry(0.5, 0.05, 0.47);
+const SHARED_GEOMETRIES = new Set<THREE.BufferGeometry>([
+    SHARED_PROJECTILE_GEO,
+    SHARED_GUN_BODY_GEO,
+    SHARED_GUN_GRIP_GEO,
+    SHARED_GUN_CORE_GEO,
+    SHARED_BEAN_CYLINDER_GEO,
+    SHARED_BEAN_SPHERE_GEO,
+    SHARED_BOOSTER_CYLINDER_GEO,
+    SHARED_NOZZLE_GEO,
+    SHARED_VISOR_GEO,
+    SHARED_VISOR_STRIP_GEO
+]);
 let inputUsernameEl: HTMLInputElement | null = null;
+
+export function isSharedGeometry(geometry: THREE.BufferGeometry): boolean {
+    return SHARED_GEOMETRIES.has(geometry);
+}
 
 // Scratch values reused by firing, third-person alignment and hitscan checks.
 const _camEuler = new THREE.Euler();
@@ -34,6 +60,7 @@ const _camDirection = new THREE.Vector3();
 const _spreadVec = new THREE.Vector3();
 const _hitPoint = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
+const _targetCandidates: THREE.Group[] = [];
 
 // Weapon names are stored as strings in state/network packets, so these maps are
 // the single place that translates names into scene objects and switch offsets.
@@ -64,21 +91,18 @@ function getWeaponOffset(name: string): number {
 
 export const buildGun = (coreColor: number): THREE.Group => {
     const gunGroup = new THREE.Group();
-    const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
     const bodyMat = SHARED_BODY_MAT;
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    const body = new THREE.Mesh(SHARED_GUN_BODY_GEO, bodyMat);
     body.castShadow = true;
     gunGroup.add(body);
 
-    const gripGeo = new THREE.BoxGeometry(0.05, 0.16, 0.07);
-    const grip = new THREE.Mesh(gripGeo, bodyMat);
+    const grip = new THREE.Mesh(SHARED_GUN_GRIP_GEO, bodyMat);
     grip.position.set(0, -0.09, 0.09);
     grip.rotation.x = Math.PI / 6;
     gunGroup.add(grip);
 
-    const coreGeo = new THREE.BoxGeometry(0.03, 0.03, 0.36);
     const coreMat = new THREE.MeshBasicMaterial({ color: coreColor });
-    const core = new THREE.Mesh(coreGeo, coreMat);
+    const core = new THREE.Mesh(SHARED_GUN_CORE_GEO, coreMat);
     core.position.set(0, 0.042, -0.04);
     gunGroup.add(core);
     return gunGroup;
@@ -402,6 +426,8 @@ export function fireProjectile(): void {
         projectile.userData.dy = camDirection.y;
         projectile.userData.dz = camDirection.z;
         projectile.userData.age = 0;
+        projectile.userData.visualOnly = false;
+        projectile.userData.damage = stats.damage;
 
         state.projectiles.push(projectile);
     };
@@ -435,9 +461,10 @@ export function fireProjectile(): void {
         let closestTargetDist = Infinity;
         let hitTargetGroup: THREE.Object3D | null = null;
 
-        const targetsLen = state.targets.length;
+        const targetCandidates = queryTargetsNear(state.camera.position.x, state.camera.position.z, 500, _targetCandidates);
+        const targetsLen = targetCandidates.length;
         for (let j = 0; j < targetsLen; j++) {
-            const targetGroup = state.targets[j];
+            const targetGroup = targetCandidates[j];
             const bodyMesh = targetGroup.userData.bodyMesh;
             if (bodyMesh) {
                 const targetHits = _raycaster.intersectObject(bodyMesh);
@@ -445,7 +472,7 @@ export function fireProjectile(): void {
                     const dist = targetHits[0].distance;
                     if (dist < closestTargetDist) {
                         closestTargetDist = dist;
-                        hitTargetIndex = j;
+                        hitTargetIndex = targetGroup.userData.index as number;
                         hitTargetGroup = targetGroup;
                     }
                 }
@@ -455,7 +482,7 @@ export function fireProjectile(): void {
         let pvpPeerId: string | null = null;
         let closestPeerDist = Infinity;
         if (state.isMultiplayer) {
-            const peerIds = Object.keys(state.peers);
+            const peerIds = state.peerIds;
             const peerIdsLen = peerIds.length;
             for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
@@ -776,15 +803,12 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
         metalness: 0.2
     });
 
-    const cylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 1.0, 16);
-    const cylinder = new THREE.Mesh(cylinderGeo, bodyMat);
+    const cylinder = new THREE.Mesh(SHARED_BEAN_CYLINDER_GEO, bodyMat);
     cylinder.castShadow = true;
     cylinder.receiveShadow = true;
     playerGroup.add(cylinder);
 
-    const sphereGeo = new THREE.SphereGeometry(0.6, 16, 16);
-
-    const topSphere = new THREE.Mesh(sphereGeo, bodyMat);
+    const topSphere = new THREE.Mesh(SHARED_BEAN_SPHERE_GEO, bodyMat);
     topSphere.position.y = 0.5;
     topSphere.castShadow = true;
     topSphere.receiveShadow = true;
@@ -796,35 +820,31 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
         metalness: 0.85
     });
 
-    const boosterCylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
-    const boosterCylinder = new THREE.Mesh(boosterCylinderGeo, boosterMat);
+    const boosterCylinder = new THREE.Mesh(SHARED_BOOSTER_CYLINDER_GEO, boosterMat);
     boosterCylinder.position.y = -0.7;
     boosterCylinder.castShadow = true;
     boosterCylinder.receiveShadow = true;
     playerGroup.add(boosterCylinder);
 
-    const nozzleGeo = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
-    const nozzle = new THREE.Mesh(nozzleGeo, boosterMat);
+    const nozzle = new THREE.Mesh(SHARED_NOZZLE_GEO, boosterMat);
     nozzle.position.y = -1.0;
     nozzle.castShadow = true;
     nozzle.receiveShadow = true;
     playerGroup.add(nozzle);
 
-    const visorGeo = new THREE.BoxGeometry(0.85, 0.25, 0.45);
     const visorMat = new THREE.MeshStandardMaterial({
         color: 0x1e272e,
         roughness: 0.1,
         metalness: 0.9
     });
-    const visor = new THREE.Mesh(visorGeo, visorMat);
+    const visor = new THREE.Mesh(SHARED_VISOR_GEO, visorMat);
     visor.position.set(0, 0.5, -0.35);
     visor.castShadow = true;
     visor.receiveShadow = true;
     playerGroup.add(visor);
 
-    const visorStripGeo = new THREE.BoxGeometry(0.5, 0.05, 0.47);
     const visorStripMat = new THREE.MeshBasicMaterial({ color: visorStripColor });
-    const visorStrip = new THREE.Mesh(visorStripGeo, visorStripMat);
+    const visorStrip = new THREE.Mesh(SHARED_VISOR_STRIP_GEO, visorStripMat);
     visorStrip.position.set(0, 0.5, -0.36);
     playerGroup.add(visorStrip);
 

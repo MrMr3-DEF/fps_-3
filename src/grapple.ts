@@ -10,6 +10,7 @@ import {
     HOOK_MAX_SLINGSHOT_SPEED,
     HOOK_SLINGSHOT_ACCEL
 } from './config.js';
+import { queryTargetsNear } from './world.js';
 
 // Reused scratch values for aiming and cable placement.
 const _dirToTarget = new THREE.Vector3();
@@ -19,6 +20,7 @@ const _toHook = new THREE.Vector3();
 const _gunTip = new THREE.Vector3();
 const _midPoint = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
+const _targetCandidates: THREE.Group[] = [];
 
 const _raycaster = new THREE.Raycaster();
 const _centerScreen = new THREE.Vector2(0, 0);
@@ -65,9 +67,10 @@ export function toggleGrapplingHook(): void {
         let bestEnemyHit: { target: THREE.Object3D; distance: number } | null = null;
         let closestEnemyDist = Infinity;
 
-        const targetLen = state.targets.length;
+        const targetCandidates = queryTargetsNear(playerObj.position.x, playerObj.position.z, HOOK_MAX_RANGE + 20, _targetCandidates);
+        const targetLen = targetCandidates.length;
         for (let j = 0; j < targetLen; j++) {
-            const target = state.targets[j];
+            const target = targetCandidates[j];
             const enemyPos = target.position;
 
             const distToRay = ray.distanceToPoint(enemyPos);

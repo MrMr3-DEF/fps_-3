@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { state } from './state.js';
 import { spawnRocketFlame, spawnManeuveringBeam } from './particles.js';
 import { resetHook } from './grapple.js';
+import { queryObstaclesNear } from './world.js';
 import {
     PILLAR_WIDTH,
     PLAYER_RADIUS,
@@ -33,6 +34,8 @@ const _tempZ   = new THREE.Vector3();
 const _boosterPos = new THREE.Vector3();
 const _negCamForward = new THREE.Vector3();
 const _negCamRight = new THREE.Vector3();
+const _obstacleCandidates: THREE.Object3D[] = [];
+const _collisionCandidates: THREE.Object3D[] = [];
 
 // Cached HUD elements touched by movement effects.
 let speedlinesEl: HTMLElement | null = null;
@@ -41,6 +44,7 @@ let hoverBadgeEl: HTMLElement | null = null;
 
 const MAX_FALL_SPEED = JUMP_FORCE * 0.88;
 const MAP_LIMIT = (MAP_SIZE / 2) - 1;
+const OBSTACLE_QUERY_RADIUS = 40;
 
 interface ScanResult {
     colX: boolean;
@@ -58,9 +62,10 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     if (Math.abs(testPosX.x) > MAP_LIMIT || Math.abs(testPosX.z) > MAP_LIMIT) colX = true;
     if (Math.abs(testPosZ.x) > MAP_LIMIT || Math.abs(testPosZ.z) > MAP_LIMIT) colZ = true;
 
-    const len = state.obstacles.length;
+    const candidates = queryObstaclesNear(actualPos.x, actualPos.z, OBSTACLE_QUERY_RADIUS, _obstacleCandidates);
+    const len = candidates.length;
     for (let i = 0; i < len; i++) {
-        const box = state.obstacles[i];
+        const box = candidates[i];
         const ph  = box.userData.height;
         const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
         const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
@@ -92,9 +97,10 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
 
 export function checkCollision(position: THREE.Vector3, feetY: number): boolean {
     if (Math.abs(position.x) > MAP_LIMIT || Math.abs(position.z) > MAP_LIMIT) return true;
-    const len = state.obstacles.length;
+    const candidates = queryObstaclesNear(position.x, position.z, OBSTACLE_QUERY_RADIUS, _collisionCandidates);
+    const len = candidates.length;
     for (let i = 0; i < len; i++) {
-        const box = state.obstacles[i];
+        const box = candidates[i];
         const ph  = box.userData.height;
         const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
         const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
@@ -109,9 +115,10 @@ export function checkCollision(position: THREE.Vector3, feetY: number): boolean 
 
 export function getGroundY(position: THREE.Vector3): number {
     let highest = 0;
-    const len = state.obstacles.length;
+    const candidates = queryObstaclesNear(position.x, position.z, OBSTACLE_QUERY_RADIUS, _collisionCandidates);
+    const len = candidates.length;
     for (let i = 0; i < len; i++) {
-        const box = state.obstacles[i];
+        const box = candidates[i];
         const ph  = box.userData.height;
         const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
         const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);

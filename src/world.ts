@@ -8,6 +8,7 @@ import {
     MAX_ENEMY_HEIGHT,
     ENEMY_CLASSES,
     LAVA_POOL_HALF_SIZE,
+    TARGET_HIT_RANGE_MULTIPLIER,
     BUSH_2D_COUNT,
     BUSH_3D_COUNT,
     BUSH_3D_RADIUS_CAP,
@@ -15,6 +16,40 @@ import {
     BUSH_2D_SPREAD,
     GROUND_VISUAL_SIZE
 } from './config.js';
+import { SpatialHash } from './spatialHash.js';
+
+const obstacleHash = new SpatialHash<THREE.Object3D>(32);
+const lavaHash = new SpatialHash<THREE.Object3D>(32);
+const targetHash = new SpatialHash<THREE.Group>(48);
+const worldObjects: THREE.Object3D[] = [];
+let targetUpdateFrame = 0;
+
+function addWorldObject<T extends THREE.Object3D>(obj: T): T {
+    state.scene!.add(obj);
+    worldObjects.push(obj);
+    return obj;
+}
+
+export function queryObstaclesNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
+    return obstacleHash.query(x, z, radius, out);
+}
+
+export function queryLavaPoolsNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
+    return lavaHash.query(x, z, radius, out);
+}
+
+export function queryTargetsNear(x: number, z: number, radius: number, out?: THREE.Group[]): THREE.Group[] {
+    return targetHash.query(x, z, radius, out);
+}
+
+export function rebuildTargetHash(): void {
+    targetHash.clear();
+    for (let i = 0; i < state.targets.length; i++) {
+        const target = state.targets[i];
+        const radius = TARGET_HIT_RANGE_MULTIPLIER * (target.userData.scale || 1.0);
+        targetHash.insert(target.position.x, target.position.z, radius, target);
+    }
+}
 
 export function respawnTarget(targetGroup: THREE.Group): void {
     targetGroup.position.x = (Math.random() - 0.5) * (MAP_SIZE - 40);
@@ -233,6 +268,13 @@ function createRingsTexture(): THREE.CanvasTexture {
 const SHARED_TRUNK_GEO = new THREE.CylinderGeometry(0.15, 0.25, 1.0, 5);
 const SHARED_LEAF_GEO = new THREE.DodecahedronGeometry(1.0, 0);
 const SHARED_TRUNK_MAT = new THREE.MeshLambertMaterial({ color: 0x5a3d28, flatShading: true });
+const SHARED_WORLD_GEOMETRIES = new Set<THREE.BufferGeometry>([
+    SHARED_TRUNK_GEO,
+    SHARED_LEAF_GEO
+]);
+const SHARED_WORLD_MATERIALS = new Set<THREE.Material>([
+    SHARED_TRUNK_MAT
+]);
 
 function createLowPolyBush(): THREE.Group {
     const bushGroup = new THREE.Group();
@@ -371,7 +413,7 @@ function createFloor(): void {
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true; 
-    state.scene!.add(floor);
+    addWorldObject(floor);
     state.grappleSurfaces.push(floor);
 }
 
@@ -393,7 +435,7 @@ function createFakeBillboards(): void {
         mesh.scale.set(1, height, 1);
         mesh.position.set(x, height / 2, z);
         
-        state.scene!.add(mesh);
+        addWorldObject(mesh);
         state.fakePillars.push(mesh);
     }
 
@@ -409,11 +451,12 @@ function createFakeBillboards(): void {
         const mesh = new THREE.Mesh(fakeLavaGeo, fakeLavaMat);
         mesh.position.set(x, 0.075, z);
         
-        state.scene!.add(mesh);
+        addWorldObject(mesh);
     }
 }
 
 function createPillars(): void {
+    obstacleHash.clear();
     const dummy = new THREE.Object3D();
     const boxGeo = new THREE.BoxGeometry(PILLAR_WIDTH, 1, PILLAR_WIDTH);
     
@@ -462,14 +505,16 @@ function createPillars(): void {
         // Invisible meshes are the gameplay colliders and grapple targets; the
         // visible pillars are batched in the InstancedMesh above.
         obstacle.visible = false;
-        state.scene!.add(obstacle);
+        addWorldObject(obstacle);
         state.obstacles.push(obstacle);
         state.grappleSurfaces.push(obstacle);
+        obstacleHash.insert(obstacle.position.x, obstacle.position.z, PILLAR_WIDTH, obstacle);
     }
-    state.scene!.add(pillarInstanced);
+    addWorldObject(pillarInstanced);
 }
 
 function createLavaPools(): void {
+    lavaHash.clear();
     const lavaGeo = new THREE.BoxGeometry(LAVA_POOL_HALF_SIZE * 2, 0.15, LAVA_POOL_HALF_SIZE * 2);
     const lavaMat = new THREE.MeshStandardMaterial({ 
         color: 0xff4500, 
@@ -559,9 +604,10 @@ function createLavaPools(): void {
                 const sq = squares[k];
                 const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
                 lavaMesh.position.set(sq.x, 0.075, sq.z);
-                state.scene!.add(lavaMesh);
+                addWorldObject(lavaMesh);
                 state.lavaPools.push(lavaMesh);
                 state.grappleSurfaces.push(lavaMesh);
+                lavaHash.insert(lavaMesh.position.x, lavaMesh.position.z, LAVA_POOL_HALF_SIZE, lavaMesh);
             }
         }
     }
@@ -584,7 +630,7 @@ function createBushes(): void {
             const s = 0.75 + Math.random() * 0.5;
             bush.scale.set(s, s, s);
             bush.position.set(x, 0, z);
-            state.scene!.add(bush);
+            addWorldObject(bush);
             spawned3DBushes++;
         }
     }
@@ -613,7 +659,7 @@ function createBushes(): void {
             const width = height * (0.8 + Math.random() * 0.3);
             sprite.scale.set(width, height, 1.0);
             sprite.position.set(x, height / 2, z);
-            state.scene!.add(sprite);
+            addWorldObject(sprite);
             spawned2DOutside++;
         }
     }
@@ -631,6 +677,7 @@ function createEnemies(): void {
 
     for (let i = 0; i < 16; i++) {
         const targetGroup = new THREE.Group();
+        targetGroup.userData.index = i;
 
         const bodyMesh = new THREE.Mesh(targetGeo, targetMat.clone());
         bodyMesh.castShadow = true;    
@@ -654,9 +701,10 @@ function createEnemies(): void {
         targetGroup.userData.healthBarGroup = healthBarGroup;
 
         respawnTarget(targetGroup);
-        state.scene!.add(targetGroup);
+        addWorldObject(targetGroup);
         state.targets.push(targetGroup);
     }
+    rebuildTargetHash();
 }
 
 export function createEnvironment(): void {
@@ -670,19 +718,70 @@ export function createEnvironment(): void {
     createEnemies();
 }
 
+export function disposeWorld(): void {
+    if (!state.scene) return;
+    const disposedGeometries = new Set<THREE.BufferGeometry>();
+    const disposedMaterials = new Set<THREE.Material>();
+    const disposedTextures = new Set<THREE.Texture>();
+
+    const disposeMaterial = (mat: THREE.Material) => {
+        if (SHARED_WORLD_MATERIALS.has(mat) || disposedMaterials.has(mat)) return;
+        disposedMaterials.add(mat);
+
+        const texture = (mat as any).map as THREE.Texture | undefined;
+        if (texture && !disposedTextures.has(texture)) {
+            disposedTextures.add(texture);
+            texture.dispose();
+        }
+
+        mat.dispose();
+    };
+
+    const disposeObject = (obj: THREE.Object3D) => {
+        state.scene!.remove(obj);
+        obj.traverse((child: any) => {
+            if (child.isMesh || child.isSprite) {
+                if (child.geometry && !SHARED_WORLD_GEOMETRIES.has(child.geometry) && !disposedGeometries.has(child.geometry)) {
+                    disposedGeometries.add(child.geometry);
+                    child.geometry.dispose();
+                }
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(disposeMaterial);
+                } else {
+                    const mat = child.material as THREE.Material | undefined;
+                    if (mat) disposeMaterial(mat);
+                }
+            }
+        });
+    };
+
+    worldObjects.forEach(disposeObject);
+    worldObjects.length = 0;
+    state.targets = [];
+    state.obstacles = [];
+    state.grappleSurfaces = [];
+    state.lavaPools = [];
+    state.fakePillars = [];
+    obstacleHash.clear();
+    lavaHash.clear();
+    targetHash.clear();
+}
+
 export function updateTargets(delta: number): void {
+    targetUpdateFrame++;
+    const updateBillboards = (targetUpdateFrame % 2) === 0;
     const targetsLen = state.targets.length;
     for (let i = 0; i < targetsLen; i++) {
         const target = state.targets[i];
         target.userData.bodyMesh.rotation.x += 1.0 * delta;
         target.userData.bodyMesh.rotation.y += 1.5 * delta;
-        if (state.camera) {
+        if (updateBillboards && state.camera) {
             target.userData.healthBarGroup.quaternion.copy(state.camera.quaternion);
         }
     }
 
     // Billboard pillars face the player horizontally, not the full camera pitch.
-    if (state.fakePillars && state.controls) {
+    if (updateBillboards && state.fakePillars && state.controls) {
         const playerObj = state.controls.getObject();
         const px = playerObj.position.x;
         const pz = playerObj.position.z;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { state, type PeerData } from './state.js';
 import { spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
-import { respawnTarget } from './world.js';
+import { rebuildTargetHash } from './world.js';
 import { resetHook, GUN_TIP_OFFSET } from './grapple.js';
 import { processTargetHit, takePlayerDamage } from './damage.js';
 import {
@@ -12,7 +12,7 @@ import {
     HIT_FLASH_DURATION_MS,
     WEAPON_STATS
 } from './config.js';
-import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, SHARED_PROJECTILE_GEO, SHARED_BODY_MAT } from './weapons.js';
+import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
 
 const _stateEuler = new THREE.Euler();
 
@@ -161,6 +161,9 @@ export function flashPeerMesh(peerData: any, color = 0xff3333, durationMs = HIT_
     if (!peerData || !peerData.mesh) return;
     peerData.mesh.traverse((child: any) => {
         if (child.isMesh && child.material && child.material.color) {
+            if (child.material === SHARED_BODY_MAT) {
+                child.material = SHARED_BODY_MAT.clone();
+            }
             if (child.userData.originalColor === undefined) {
                 child.userData.originalColor = child.material.color.getHex();
             }
@@ -179,6 +182,19 @@ export function flashPeerMesh(peerData: any, color = 0xff3333, durationMs = HIT_
 
 let peerInstance: any = null;
 let lastSentTime = 0;
+let lastForceSendTime = 0;
+let lastSentSnapshot: {
+    x: number;
+    y: number;
+    z: number;
+    yaw: number;
+    pitch: number;
+    weapon: string;
+    flags: number;
+    hookX: number;
+    hookY: number;
+    hookZ: number;
+} | null = null;
 
 export function generateRoomCode(): string {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -278,6 +294,9 @@ export function disconnectMultiplayer(): void {
     state.roomCode = null;
     state.kills = 0;
     state.deaths = 0;
+    lastSentSnapshot = null;
+    lastSentTime = 0;
+    lastForceSendTime = 0;
 
     const pvpStats = DOM.pvpStats();
     if (pvpStats) pvpStats.style.display = 'none';
@@ -351,21 +370,7 @@ function setupConnection(conn: any): void {
 
         if (state.isHost) {
             const hostStatus = DOM.hostLobbyStatus();
-            if (hostStatus) hostStatus.innerText = 'Connected as Client. Waiting for host...';
-            
-            const joinErrorLog = DOM.joinErrorLog();
-            if (joinErrorLog) {
-                joinErrorLog.style.color = '#00ff88';
-                joinErrorLog.innerText = `Connected successfully to room: ${state.roomCode}`;
-            }
-
-            const btnJoinConnect = DOM.btnJoinConnect();
-            if (btnJoinConnect) {
-                btnJoinConnect.innerText = 'Join Game';
-                btnJoinConnect.style.background = 'linear-gradient(135deg, #2ed573, #26af5f)';
-                btnJoinConnect.disabled = false;
-                btnJoinConnect.dataset.connected = 'true';
-            }
+            if (hostStatus) hostStatus.innerText = `Waiting for players (${state.connections.length + 1}/5)...`;
         } else {
             const joinErrorLog = document.getElementById('join-error-log');
             if (joinErrorLog) {
@@ -454,9 +459,13 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             justJoined = true;
         }
 
-        peerData.mesh.position.copy(msg.pos);
-        peerData.mesh.position.y -= PEER_Y_OFFSET;
-        peerData.mesh.rotation.y = msg.yaw;
+        _targetPos.set(msg.pos.x, msg.pos.y - PEER_Y_OFFSET, msg.pos.z);
+        peerData.targetPosition.copy(_targetPos);
+        peerData.targetYaw = msg.yaw;
+        if (justJoined) {
+            peerData.mesh.position.copy(peerData.targetPosition);
+            peerData.mesh.rotation.y = msg.yaw;
+        }
 
         if (msg.isDead) {
             peerData.mesh.visible = false;
@@ -578,6 +587,7 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             bullet.userData.dy = _dir.y;
             bullet.userData.dz = _dir.z;
             bullet.userData.age = 0;
+            bullet.userData.visualOnly = true;
             
             state.scene!.add(bullet);
             state.projectiles.push(bullet);
@@ -601,6 +611,7 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             target.userData.healthBarFg.scale.x = 1.0;
             target.userData.healthBarGroup.position.y = 1.6 * msg.scale;
             target.userData.healthBarGroup.scale.set(msg.scale, msg.scale, 1);
+            rebuildTargetHash();
 
             state.score = msg.score;
             const scoreEl = document.getElementById('score');
@@ -661,7 +672,7 @@ function removePeer(peerId: string): void {
             state.scene!.remove(peerData.mesh);
             peerData.mesh.traverse((child: any) => {
                 if (child.isMesh) {
-                    if (child.geometry && child.geometry !== SHARED_PROJECTILE_GEO) {
+                    if (child.geometry && !isSharedGeometry(child.geometry)) {
                         child.geometry.dispose();
                     }
                     if (child.material && child.material !== SHARED_BODY_MAT) {
@@ -688,24 +699,67 @@ export function sendLocalState(): void {
 
     const now = performance.now();
     if (now - lastSentTime < NETWORK_TICK_MS) return;
-    lastSentTime = now;
 
     const playerObj = state.controls.getObject();
     const camEuler = _stateEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
 
     const username = getCachedUsername();
+    const q2 = (value: number) => Math.round(value * 100) / 100;
+    const q3 = (value: number) => Math.round(value * 1000) / 1000;
+    const flags =
+        (state.isMouseDown ? 1 : 0) |
+        (state.playerHp <= 0 ? 2 : 0) |
+        (state.isHovering ? 4 : 0) |
+        (state.moveForward ? 8 : 0) |
+        (state.moveBackward ? 16 : 0) |
+        (state.moveLeft ? 32 : 0) |
+        (state.moveRight ? 64 : 0);
+
+    const pos = playerObj.position;
+    const hookX = state.hookState !== 'IDLE' ? q2(state.hookPosition.x) : 0;
+    const hookY = state.hookState !== 'IDLE' ? q2(state.hookPosition.y) : 0;
+    const hookZ = state.hookState !== 'IDLE' ? q2(state.hookPosition.z) : 0;
+    const snapshot = {
+        x: q2(pos.x),
+        y: q2(pos.y),
+        z: q2(pos.z),
+        yaw: q3(camEuler.y),
+        pitch: q3(camEuler.x),
+        weapon: state.activeWeaponName,
+        flags,
+        hookX,
+        hookY,
+        hookZ
+    };
+
+    const changed = !lastSentSnapshot ||
+        Math.abs(snapshot.x - lastSentSnapshot.x) > 0.01 ||
+        Math.abs(snapshot.y - lastSentSnapshot.y) > 0.01 ||
+        Math.abs(snapshot.z - lastSentSnapshot.z) > 0.01 ||
+        Math.abs(snapshot.yaw - lastSentSnapshot.yaw) > 0.002 ||
+        Math.abs(snapshot.pitch - lastSentSnapshot.pitch) > 0.002 ||
+        snapshot.weapon !== lastSentSnapshot.weapon ||
+        snapshot.flags !== lastSentSnapshot.flags ||
+        snapshot.hookX !== lastSentSnapshot.hookX ||
+        snapshot.hookY !== lastSentSnapshot.hookY ||
+        snapshot.hookZ !== lastSentSnapshot.hookZ;
+
+    if (!changed && now - lastForceSendTime < 250) return;
+    lastSentTime = now;
+    lastForceSendTime = now;
+    lastSentSnapshot = snapshot;
 
     const packet = {
         type: 'update',
         username: username,
-        pos: { x: playerObj.position.x, y: playerObj.position.y, z: playerObj.position.z },
-        yaw: camEuler.y,
-        pitch: camEuler.x,
+        pos: { x: snapshot.x, y: snapshot.y, z: snapshot.z },
+        yaw: snapshot.yaw,
+        pitch: snapshot.pitch,
         activeWeapon: state.activeWeaponName,
         isMouseDown: state.isMouseDown,
         isDead: state.playerHp <= 0,
         hookState: state.hookState,
-        hookPos: state.hookState !== 'IDLE' ? { x: state.hookPosition.x, y: state.hookPosition.y, z: state.hookPosition.z } : null,
+        hookPos: state.hookState !== 'IDLE' ? { x: hookX, y: hookY, z: hookZ } : null,
         isHovering: state.isHovering,
         hoverKeys: state.isHovering ? {
             w: state.moveForward,
@@ -716,6 +770,25 @@ export function sendLocalState(): void {
     };
 
     broadcastToAll(packet);
+}
+
+export function updateRemotePeers(delta: number): void {
+    if (!state.isMultiplayer) return;
+
+    const peerIds = state.peerIds;
+    const alpha = 1 - Math.exp(-14 * delta);
+
+    for (let i = 0; i < peerIds.length; i++) {
+        const peerData = state.peers[peerIds[i]];
+        if (!peerData) continue;
+
+        peerData.mesh.position.lerp(peerData.targetPosition, alpha);
+
+        const currentYaw = peerData.mesh.rotation.y;
+        let yawDelta = peerData.targetYaw - currentYaw;
+        yawDelta = Math.atan2(Math.sin(yawDelta), Math.cos(yawDelta));
+        peerData.mesh.rotation.y = currentYaw + yawDelta * alpha;
+    }
 }
 
 export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3, hitPoint: THREE.Vector3 | null = null): void {
@@ -820,6 +893,8 @@ function createPeerBean(username: string): PeerData {
 
     return {
         mesh: peerGroup,
+        targetPosition: peerGroup.position.clone(),
+        targetYaw: 0,
         leftGun: leftGun,
         rightGunContainer: rightGunContainer,
         pistolMesh: pistolMesh,
