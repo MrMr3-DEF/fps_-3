@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="A fast-paced 3D browser FPS with multiplayer support, grappling hooks, and multiple weapon classes.">
+    <meta name="theme-color" content="#0a0a12">
+    <title>Totally epic arena FPS</title>
+    <!-- Prevent favicon 404/500 requests in browser console -->
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+    <style>
+        :root {
+            --accent-pink: #ff0055;
+            --accent-green: #2ed573;
+            --accent-blue: #00aaee;
+            --bg-dark: #0a0a12;
+            --text-primary: #e0e0e0;
+            --text-muted: #aaa;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            background-color: #d0dbf0;
+        }
+
+        #blocker {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(239, 243, 248, 0.85);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #1a1c24;
+            font-size: 24px;
+            cursor: pointer;
+            text-align: center;
+            z-index: 10;
+        }
+
+        #instructions {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 30px 40px;
+            border-radius: 16px;
+            border: 2px solid var(--accent-blue);
+            box-shadow: 0 10px 30px rgba(0, 170, 238, 0.15);
+            backdrop-filter: blur(4px);
+            max-width: 480px;
+            width: 90%;
+            box-sizing: border-box;
+        }
+
+        .settings-container {
+            margin-top: 25px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            text-align: left;
+            font-size: 16px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            margin: 10px 0;
+        }
+
+        .settings-container label {
+            color: #555;
+            font-weight: 500;
+        }
+
+        .settings-container input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 150px;
+            background: #ccd5e0;
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .settings-container input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #00aaee;
+            cursor: pointer;
+            box-shadow: 0 0 6px rgba(0, 170, 238, 0.5);
+        }
+
+        .settings-value {
+            color: #00aaee;
+            min-width: 30px;
+            display: inline-block;
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .settings-container input[type=checkbox] {
+            width: 18px;
+            height: 18px;
+            accent-color: #00aaee;
+        }
+
+        #speedlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 4;
+            opacity: 0;
+            transition: opacity 0.15s ease-in-out;
+            background: repeating-conic-gradient(from 0deg, transparent 0deg 3deg, rgba(0, 170, 238, 0.25) 4deg 5deg, transparent 6deg 12deg);
+            -webkit-mask-image: radial-gradient(circle, transparent 35%, black 75%);
+            mask-image: radial-gradient(circle, transparent 35%, black 75%);
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 12px;
+            height: 12px;
+            border: 2px solid var(--accent-pink);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #1a1c24;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px #ffffff;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #sprint-badge {
+            font-size: 14px;
+            color: #00aaee;
+            background: rgba(0, 170, 238, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            display: none;
+        }
+
+        #hook-badge {
+            font-size: 14px;
+            color: #00aaee;
+            background: rgba(0, 170, 238, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            display: none;
+            box-shadow: 0 0 8px rgba(0, 170, 238, 0.2);
+            border: 1px solid rgba(0, 170, 238, 0.3);
+        }
+
+        #hover-badge {
+            font-size: 14px;
+            color: #ffcc00;
+            background: rgba(255, 204, 0, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-left: 10px;
+            display: none;
+            box-shadow: 0 0 8px rgba(255, 204, 0, 0.2);
+            border: 1px solid rgba(255, 204, 0, 0.3);
+        }
+
+        #fps-counter {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #1a1c24;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px #ffffff;
+            pointer-events: none;
+            z-index: 5;
+            font-family: monospace;
+        }
+
+        #health-container {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 480px;
+            height: 28px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 2px solid rgba(255, 255, 255, 0.95);
+            border-radius: 4px;
+            overflow: hidden;
+            z-index: 5;
+            display: none;
+            box-shadow: 0 0 20px rgba(46, 213, 115, 0.35);
+        }
+
+        #health-bar {
+            width: 100%;
+            height: 100%;
+            background: #2ed573;
+            transition: width 0.1s ease-out, background-color 0.1s ease-out;
+        }
+
+        #reload-container {
+            position: absolute;
+            bottom: 68px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 480px;
+            height: 28px;
+            background: rgba(43, 43, 43, 0.95);
+            border: 2px solid rgba(255, 255, 255, 0.95);
+            border-radius: 4px;
+            overflow: hidden;
+            z-index: 5;
+            display: none;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
+        }
+
+        #reload-bar {
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+        }
+
+        #hover-container {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 28px;
+            height: 480px;
+            background: rgba(0, 0, 0, 0.65);
+            border: 2px solid rgba(255, 255, 255, 0.95);
+            border-radius: 4px;
+            overflow: hidden;
+            z-index: 5;
+            display: none;
+            box-shadow: 0 0 20px rgba(0, 170, 255, 0.35);
+        }
+
+        #hover-bar {
+            width: 100%;
+            height: 100%;
+            background: #00aaff;
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            transition: height 0.05s linear;
+        }
+
+        #world-border-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            display: none;
+            box-sizing: border-box;
+            border: 24px solid transparent;
+            border-image: repeating-linear-gradient(45deg, #ff3333, #ff3333 15px, transparent 15px, transparent 30px) 24;
+            background: radial-gradient(circle, rgba(255, 0, 0, 0) 50%, rgba(255, 0, 0, 0.15) 80%, rgba(255, 0, 0, 0.35) 100%);
+            z-index: 8;
+            opacity: 0;
+            transition: opacity 0.15s ease-out;
+        }
+
+        #world-border-text {
+            position: absolute;
+            top: 15%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff3333;
+            font-family: 'Outfit', 'Inter', sans-serif;
+            font-size: 42px;
+            font-weight: 900;
+            letter-spacing: 6px;
+            text-shadow: 0 0 10px rgba(255, 0, 0, 0.8), 0 0 20px rgba(255, 0, 0, 0.4);
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .menu-btn {
+            background: linear-gradient(135deg, #00aaee, #0077cc);
+            color: #ffffff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 8px;
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 4px 10px rgba(0, 170, 238, 0.3);
+        }
+
+        .menu-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 170, 238, 0.5);
+            background: linear-gradient(135deg, #00bfff, #0088dd);
+        }
+
+        .menu-btn:active {
+            transform: translateY(0);
+        }
+
+        .menu-btn.secondary {
+            background: linear-gradient(135deg, #747d8c, #2f3542);
+            box-shadow: 0 4px 10px rgba(47, 53, 66, 0.3);
+        }
+
+        .menu-btn.secondary:hover {
+            background: linear-gradient(135deg, #a4b0be, #57606f);
+            box-shadow: 0 6px 15px rgba(47, 53, 66, 0.5);
+        }
+
+        .menu-input {
+            background: rgba(255, 255, 255, 0.9);
+            border: 2px solid #ccd5e0;
+            padding: 10px 16px;
+            font-size: 16px;
+            border-radius: 8px;
+            outline: none;
+            width: 200px;
+            text-align: center;
+            transition: border-color 0.2s;
+            margin: 8px;
+            color: #1a1c24;
+            font-weight: bold;
+        }
+
+        .menu-input:focus {
+            border-color: #00aaee;
+        }
+
+        .menu-panel {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        #goggles-scope {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: none;
+            pointer-events: none;
+            z-index: 6;
+            background: radial-gradient(circle, rgba(0, 210, 255, 0.04) 30%, rgba(0, 80, 110, 0.18) 70%, rgba(0, 10, 20, 0.90) 100%);
+            box-shadow: inset 0 0 100px rgba(0, 210, 255, 0.25);
+        }
+
+        .goggles-scanlines {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: repeating-linear-gradient(0deg,
+                    rgba(0, 210, 255, 0.07) 0px,
+                    rgba(0, 210, 255, 0.07) 1px,
+                    transparent 2px,
+                    transparent 4px);
+            opacity: 0.55;
+        }
+
+        .goggles-dot {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 6px;
+            height: 6px;
+            background: #00d2ff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px #00d2ff, 0 0 20px rgba(0, 210, 255, 0.6);
+        }
+
+        .goggles-corner {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border-color: rgba(0, 210, 255, 0.7);
+            border-style: solid;
+            pointer-events: none;
+            box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
+        }
+
+        .goggles-tl {
+            top: 30px;
+            left: 30px;
+            border-width: 3px 0 0 3px;
+        }
+
+        .goggles-tr {
+            top: 30px;
+            right: 30px;
+            border-width: 3px 3px 0 0;
+        }
+
+        .goggles-bl {
+            bottom: 30px;
+            left: 30px;
+            border-width: 0 0 3px 3px;
+        }
+
+        .goggles-br {
+            bottom: 30px;
+            right: 30px;
+            border-width: 0 3px 3px 0;
+        }
+
+        #legal-link:hover {
+            color: var(--accent-blue) !important;
+            text-decoration: underline;
+        }
+    </style>
+
+  <script type="module" crossorigin src="/assets/index-CXKzQNxB.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/three-CbPL-GFE.js">
+</head>
+
+<body>
+
+    <div id="blocker">
+        <div id="instructions">
+            <h1 id="title"
+                style="color: var(--accent-blue); font-size: 32px; letter-spacing: 1px; margin-top: 0; margin-bottom: 20px; font-weight: bold; text-align: center;">
+                FPS ARENA :3</h1>
+
+            <!-- Panel 1: Main Selection Menu -->
+            <div id="panel-main" style="display: flex; flex-direction: column; align-items: center;">
+                <button class="menu-btn" id="btn-play-sp">Offline Singleplayer</button>
+                <button class="menu-btn secondary" id="btn-menu-mp">Online Multiplayer</button>
+                <button class="menu-btn secondary" id="btn-menu-settings">Settings</button>
+
+                <span style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
+                    WASD to Move | Shift to Sprint | Space to Jump<br />
+                    R for Grappling Hook | Left-Click to Shoot<br />
+                    E / 1, 2, 3, 4 to Switch Weapons | P for Third Person<br />
+                    Right-Click / Hold C to Aim (goggles)
+                </span>
+
+            </div>
+
+            <div id="panel-settings" class="menu-panel">
+                <strong style="color: #57606f; font-size: 20px;">Settings</strong>
+                <div class="settings-container">
+                    <div class="settings-row">
+                        <label for="sensitivity">Aim Sensitivity</label>
+                        <input type="range" id="sensitivity" min="0.1" max="3.0" step="0.1" value="1.0">
+                        <span class="settings-value" id="sens-value">1.0</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-fov">FOV</label>
+                        <input type="range" id="setting-fov" min="55" max="105" step="1" value="75">
+                        <span class="settings-value" id="setting-fov-value">75</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-scoped-fov">Scoped FOV</label>
+                        <input type="range" id="setting-scoped-fov" min="8" max="35" step="1" value="15">
+                        <span class="settings-value" id="setting-scoped-fov-value">15</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-render-scale">Render Scale</label>
+                        <input type="range" id="setting-render-scale" min="0.5" max="1.0" step="0.05" value="1.0">
+                        <span class="settings-value" id="setting-render-scale-value">100%</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-particles">Particles</label>
+                        <input type="range" id="setting-particles" min="0.2" max="1.0" step="0.05" value="1.0">
+                        <span class="settings-value" id="setting-particles-value">100%</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-shadows">Shadows</label>
+                        <input type="checkbox" id="setting-shadows" checked>
+                        <span class="settings-value" id="setting-shadows-value">On</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-fps">FPS Counter</label>
+                        <input type="checkbox" id="setting-fps" checked>
+                        <span class="settings-value" id="setting-fps-value">On</span>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button class="menu-btn secondary" id="btn-settings-reset">Reset</button>
+                    <button class="menu-btn" id="btn-settings-back">Back</button>
+                </div>
+            </div>
+
+            <!-- Panel 2: Multiplayer Dashboard -->
+            <div id="panel-mp" class="menu-panel">
+                <strong style="color: #57606f; font-size: 20px;">Multiplayer Setup</strong><br />
+                <input type="text" class="menu-input" id="input-username" placeholder="Your Username"
+                    maxlength="10"><br />
+                <span id="mp-name-error"
+                    style="font-size: 14px; color: #ff4757; font-weight: bold; margin-bottom: 8px; height: 18px; display: block;"></span>
+
+                <div style="display: flex; gap: 10px;">
+                    <button class="menu-btn" id="btn-mp-host-view">Host Game</button>
+                    <button class="menu-btn secondary" id="btn-mp-join-view">Join Game</button>
+                </div>
+                <br />
+                <button class="menu-btn secondary" id="btn-mp-back"
+                    style="padding: 6px 16px; font-size: 14px; margin-top: 5px;">Back to Main Menu</button>
+            </div>
+
+            <!-- Panel 3: Host Waiting Lobby -->
+            <div id="panel-host-waiting" class="menu-panel">
+                <strong style="color: #57606f; font-size: 20px;">Host Game</strong><br />
+                <span style="font-size: 15px; color: #555;">Your room code is:</span>
+                <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0;">
+                    <span id="room-code-display"
+                        style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">....</span>
+                    <button id="btn-copy-code" class="menu-btn" style="
+                        padding: 6px 14px;
+                        font-size: 14px;
+                        margin: 0;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                    " title="Copy room code">📋 Copy</button>
+                </div>
+                <span style="font-size: 14px; color: #777;" id="host-lobby-status">Creating room...</span><br />
+
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="menu-btn" id="btn-host-start" style="display: none;">Start Game</button>
+                    <button class="menu-btn secondary" id="btn-host-cancel">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Panel 4: Join Room Menu -->
+            <div id="panel-join-room" class="menu-panel">
+                <strong style="color: #57606f; font-size: 20px;">Join Game</strong><br />
+                <input type="text" class="menu-input" id="input-room-code" placeholder="CODE" maxlength="4"
+                    style="text-transform: uppercase; font-size: 20px; width: 140px; letter-spacing: 2px;"><br />
+                <span style="font-size: 14px; color: #ff4757; font-weight: bold;" id="join-error-log"></span><br />
+
+                <div style="display: flex; gap: 10px;">
+                    <button class="menu-btn" id="btn-join-connect">Connect</button>
+                    <button class="menu-btn secondary" id="btn-join-cancel">Back</button>
+                </div>
+            </div>
+
+            <!-- Panel 5: Pause Menu -->
+            <div id="panel-pause" class="menu-panel">
+                <strong style="color: #00aaee; font-size: 28px; letter-spacing: 1px;">PAUSE</strong><br />
+                <span id="pause-lobby-info" style="font-size: 15px; color: #555; margin-bottom: 15px; display: none;">
+                    Lobby Code: <strong id="pause-room-code"
+                        style="color: #00aaee; font-size: 20px; letter-spacing: 1px;">----</strong>
+                </span>
+
+                <div style="display: flex; flex-direction: column; align-items: center; width: 100%;">
+                    <button class="menu-btn" id="btn-pause-resume">Resume</button>
+                    <button class="menu-btn secondary" id="btn-pause-leave">Leave Lobby</button>
+                </div>
+            </div>
+
+        </div>
+        <a href="https://luigismansion.de" target="_blank" id="legal-link" onclick="event.stopPropagation();" style="
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 14px;
+            color: var(--text-muted, #aaa);
+            text-decoration: none;
+            font-family: inherit;
+            font-weight: 500;
+            transition: color 0.2s ease-in-out;
+            z-index: 11;
+        ">For legal information</a>
+    </div>
+
+    <!-- Panel 6: Death Screen Overlay -->
+    <div id="death-overlay" style="
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: radial-gradient(circle, rgba(255, 0, 0, 0.2) 20%, rgba(139, 0, 0, 0.75) 100%);
+        display: none;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 15;
+        backdrop-filter: blur(3px);
+        color: #ffffff;
+        text-align: center;
+        animation: fadeIn 0.4s ease-in-out;
+    ">
+        <strong
+            style="font-size: 48px; color: #ff3838; text-shadow: 0 0 20px rgba(255, 56, 56, 0.8), 0 0 40px rgba(255, 56, 56, 0.4); font-weight: 900; letter-spacing: 2px;">YOU DIED</strong>
+        <br /><br />
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 15px;">
+            <button class="menu-btn" id="btn-death-respawn"
+                style="background: linear-gradient(135deg, #ff3838, #c0392b); box-shadow: 0 4px 15px rgba(255, 56, 56, 0.4); min-width: 200px;">Respawn</button>
+            <button class="menu-btn secondary" id="btn-death-leave"
+                style="background: linear-gradient(135deg, #4b4b4b, #2f3542); color: #ccc; min-width: 200px;">Exit to Main Menu</button>
+        </div>
+    </div>
+
+    <div id="speedlines"></div>
+    <div id="crosshair"></div>
+    <div id="goggles-scope">
+        <div class="goggles-scanlines"></div>
+        <div class="goggles-dot"></div>
+        <div class="goggles-corner goggles-tl"></div>
+        <div class="goggles-corner goggles-tr"></div>
+        <div class="goggles-corner goggles-bl"></div>
+        <div class="goggles-corner goggles-br"></div>
+    </div>
+
+
+    <div id="ui" style="display: flex; flex-direction: column; gap: 4px;">
+        <div>Targets Eliminated: <span id="score">0</span></div>
+        <div id="pvp-stats" style="display: none;">
+            Kills: <span id="kills">0</span> &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+            <span id="sprint-badge">SPRINT</span>
+            <span id="hook-badge">HOOK ACTIVE</span>
+            <span id="hover-badge">HOVER ACTIVE</span>
+        </div>
+    </div>
+    <div id="fps-counter">FPS: 0</div>
+
+    <div id="reload-container">
+        <div id="reload-bar"></div>
+    </div>
+
+    <div id="health-container">
+        <div id="health-bar"></div>
+    </div>
+
+    <!-- Hover Fuel Container -->
+    <div id="hover-container">
+        <div id="hover-bar"></div>
+    </div>
+
+    <!-- World Border Overlay -->
+    <div id="world-border-overlay">
+        <div id="world-border-text">WORLD BORDER</div>
+    </div>
+
+</body>
+
+</html>
