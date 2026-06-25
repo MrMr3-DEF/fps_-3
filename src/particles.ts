@@ -29,12 +29,12 @@ function ensureBoxParticleMesh(): THREE.InstancedMesh | null {
             vertexColors: true,
             transparent: true,
             opacity: 0.95,
-            blending: THREE.AdditiveBlending,
+            depthTest: false,
             depthWrite: false,
-            toneMapped: false
         });
         boxParticleMesh = new THREE.InstancedMesh(SHARED_BOX_GEO, mat, MAX_PARTICLES);
         boxParticleMesh.frustumCulled = false;
+        boxParticleMesh.renderOrder = 20;
         boxParticleMesh.count = 0;
         for (let i = 0; i < MAX_PARTICLES; i++) {
             boxParticleMesh.setColorAt(i, _instanceColor.setHex(0xffaa00));
