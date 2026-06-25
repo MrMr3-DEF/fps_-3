@@ -531,45 +531,12 @@ function setupInputListeners(): void {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    window.addEventListener('mousedown', (e) => {
-        if (state.controls && state.controls.isLocked) {
-            e.preventDefault();
-        }
-        if (!state.controls || !state.controls.isLocked) return;
-
-        updateMouseButtonState(e);
-
-        if (state.isMouseDown) {
-            if (state.inspectState === 'INSPECTING') {
-                cancelInspect();
-            }
-        }
-
-        if (state.rightClickActive) {
-            cancelInspect();
-        }
-    });
-
-    window.addEventListener('mouseup', (e) => {
-        if (state.controls && state.controls.isLocked) {
-            e.preventDefault();
-        }
-        if (state.controls && state.controls.isLocked) {
-            updateMouseButtonState(e);
-        }
-    });
-
-    window.addEventListener('mousemove', (e) => {
-        if (state.controls && state.controls.isLocked) {
-            updateMouseButtonState(e);
-        }
-    });
-
-    window.addEventListener('contextmenu', (e) => {
-        if (state.controls && state.controls.isLocked) {
-            e.preventDefault();
-        }
-    });
+    window.addEventListener('mousedown', handleGameMouseButtons, true);
+    window.addEventListener('mouseup', handleGameMouseButtons, true);
+    window.addEventListener('pointerdown', handleGameMouseButtons, true);
+    window.addEventListener('pointerup', handleGameMouseButtons, true);
+    window.addEventListener('contextmenu', preventLockedMouseDefault, true);
+    window.addEventListener('auxclick', preventLockedMouseDefault, true);
 
     window.addEventListener('resize', onWindowResize);
 }
@@ -677,13 +644,24 @@ function setCheckboxLabel(el: HTMLElement | null, enabled: boolean): void {
     if (el) el.innerText = enabled ? 'On' : 'Off';
 }
 
-function updateMouseButtonState(e: MouseEvent): void {
-    const wasMouseDown = state.isMouseDown;
-    state.isMouseDown = (e.buttons & 1) !== 0;
-    state.rightClickActive = (e.buttons & 2) !== 0;
-    state.isScoped = state.rightClickActive || state.keyCActive;
+function isGameInputLocked(): boolean {
+    return Boolean(state.controls?.isLocked);
+}
 
-    if (!wasMouseDown && state.isMouseDown && state.controls?.isLocked) {
+function preventLockedMouseDefault(e: Event): void {
+    if (isGameInputLocked()) {
+        e.preventDefault();
+    }
+}
+
+function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
+    preventLockedMouseDefault(e);
+    if (!isGameInputLocked()) return;
+
+    const wasMouseDown = state.isMouseDown;
+    updateMouseButtonState(e);
+
+    if (!wasMouseDown && state.isMouseDown) {
         if (state.inspectState === 'INSPECTING') {
             cancelInspect();
         }
@@ -691,6 +669,16 @@ function updateMouseButtonState(e: MouseEvent): void {
             fireProjectile();
         }
     }
+
+    if (state.rightClickActive) {
+        cancelInspect();
+    }
+}
+
+function updateMouseButtonState(e: MouseEvent | PointerEvent): void {
+    state.isMouseDown = (e.buttons & 1) !== 0;
+    state.rightClickActive = (e.buttons & 2) !== 0;
+    state.isScoped = state.rightClickActive || state.keyCActive;
 }
 
 function resetHudCounters(): void {
