@@ -15,8 +15,10 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          three: ['three']
+        manualChunks(id) {
+          if (id.includes('/node_modules/three/')) {
+            return 'three';
+          }
         }
       }
     }
