@@ -10,9 +10,12 @@ import {
     ROOM_CODE_LENGTH,
     PEER_Y_OFFSET,
     HIT_FLASH_DURATION_MS,
-    WEAPON_STATS
+    WEAPON_STATS,
+    MAX_PROJECTILES
 } from './config.js';
 import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
+import type { FirePacket, JumpPacket, KillTargetPacket, NetworkPacket, UpdatePacket } from './networkTypes.js';
+import { projectileData, targetData, type TargetUserData } from './userDataTypes.js';
 
 const _stateEuler = new THREE.Euler();
 
@@ -138,7 +141,7 @@ function getCachedUsername(): string {
     return cachedUsername;
 }
 
-export function broadcastToAll(packet: any, excludePeerId: string | null = null): void {
+export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | null = null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     const connLen = state.connections.length;
     for (let i = 0; i < connLen; i++) {
@@ -393,7 +396,7 @@ function setupConnection(conn: any): void {
         conn.on('open', handleOpen);
     }
 
-    conn.on('data', (data: any) => {
+    conn.on('data', (data: NetworkPacket) => {
         handlePeerMessage(conn.peer, data);
     });
 
@@ -433,7 +436,7 @@ function setupConnection(conn: any): void {
 
 // Packet router. The host is authoritative for target health/respawns and also
 // relays client gameplay packets in a star topology.
-function handlePeerMessage(fromPeerId: string, msg: any): void {
+function handlePeerMessage(fromPeerId: string, msg: NetworkPacket): void {
     if (!state.isMultiplayer) return;
 
     if (state.isHost) {
@@ -570,6 +573,8 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             createLaserBeam(_barrelPos, targetPos, 0xffff00);
 
         } else {
+            if (state.projectiles.length >= MAX_PROJECTILES) return;
+
             let bullet: THREE.Mesh;
             const bulletColor = WEAPON_STATS[msg.weapon as string]?.bulletColor ?? 0xffffff;
 
@@ -583,11 +588,13 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             }
 
             bullet.position.copy(_barrelPos).addScaledVector(_dir, 0.1);
-            bullet.userData.dx = _dir.x;
-            bullet.userData.dy = _dir.y;
-            bullet.userData.dz = _dir.z;
-            bullet.userData.age = 0;
-            bullet.userData.visualOnly = true;
+            const data = projectileData(bullet);
+            data.dx = _dir.x;
+            data.dy = _dir.y;
+            data.dz = _dir.z;
+            data.age = 0;
+            data.visualOnly = true;
+            data.damage = undefined;
             
             state.scene!.add(bullet);
             state.projectiles.push(bullet);
@@ -602,15 +609,16 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             createShockwave(target.position, 8.0 * (msg.scale || 1.0), 0xffaa00);
 
             target.position.set(msg.newPosition.x, msg.newPosition.y, msg.newPosition.z);
-            target.userData.maxHp = msg.hp;
-            target.userData.hp = msg.hp;
-            target.userData.scale = msg.scale;
-            target.userData.color = msg.color;
-            target.userData.bodyMesh.material.color.setHex(msg.color);
-            target.userData.bodyMesh.scale.set(msg.scale, msg.scale, msg.scale);
-            target.userData.healthBarFg.scale.x = 1.0;
-            target.userData.healthBarGroup.position.y = 1.6 * msg.scale;
-            target.userData.healthBarGroup.scale.set(msg.scale, msg.scale, 1);
+            const data = targetData(target);
+            data.maxHp = msg.hp;
+            data.hp = msg.hp;
+            data.scale = msg.scale;
+            data.color = msg.color;
+            (data.bodyMesh.material as THREE.MeshStandardMaterial).color.setHex(msg.color);
+            data.bodyMesh.scale.set(msg.scale, msg.scale, msg.scale);
+            data.healthBarFg.scale.x = 1.0;
+            data.healthBarGroup.position.y = 1.6 * msg.scale;
+            data.healthBarGroup.scale.set(msg.scale, msg.scale, 1);
             rebuildTargetHash();
 
             state.score = msg.score;
@@ -749,7 +757,7 @@ export function sendLocalState(): void {
     lastForceSendTime = now;
     lastSentSnapshot = snapshot;
 
-    const packet = {
+    const packet: UpdatePacket = {
         type: 'update',
         username: username,
         pos: { x: snapshot.x, y: snapshot.y, z: snapshot.z },
@@ -794,7 +802,7 @@ export function updateRemotePeers(delta: number): void {
 export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3, hitPoint: THREE.Vector3 | null = null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
 
-    const packet: any = {
+    const packet: FirePacket = {
         type: 'fire',
         weapon: state.activeWeaponName,
         barrelPos: { x: barrelPos.x, y: barrelPos.y, z: barrelPos.z },
@@ -808,17 +816,17 @@ export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3,
     broadcastToAll(packet);
 }
 
-export function broadcastTargetKill(targetIndex: number, score: number, newPos: THREE.Vector3, targetData: any): void {
+export function broadcastTargetKill(targetIndex: number, score: number, newPos: THREE.Vector3, data: TargetUserData): void {
     if (!state.isMultiplayer || !state.isHost || state.connections.length === 0) return;
 
-    const packet = {
+    const packet: KillTargetPacket = {
         type: 'kill_target',
         targetIndex: targetIndex,
         score: score,
         newPosition: { x: newPos.x, y: newPos.y, z: newPos.z },
-        scale: targetData.scale,
-        hp: targetData.hp,
-        color: targetData.color
+        scale: data.scale,
+        hp: data.hp,
+        color: data.color
     };
 
     broadcastToAll(packet);
@@ -826,7 +834,7 @@ export function broadcastTargetKill(targetIndex: number, score: number, newPos: 
 
 export function broadcastLocalJump(): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
-    const packet = {
+    const packet: JumpPacket = {
         type: 'jump'
     };
     broadcastToAll(packet);

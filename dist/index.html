@@ -70,22 +70,23 @@
         }
 
         .settings-row {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(120px, 1fr) minmax(150px, 180px) 52px;
             align-items: center;
-            justify-content: space-between;
-            gap: 20px;
-            margin: 10px 0;
+            column-gap: 14px;
+            margin: 12px 0;
         }
 
         .settings-container label {
             color: #555;
             font-weight: 500;
+            line-height: 1.2;
         }
 
         .settings-container input[type=range] {
             -webkit-appearance: none;
             appearance: none;
-            width: 150px;
+            width: 100%;
             background: #ccd5e0;
             height: 6px;
             border-radius: 3px;
@@ -105,7 +106,7 @@
 
         .settings-value {
             color: #00aaee;
-            min-width: 30px;
+            min-width: 52px;
             display: inline-block;
             text-align: right;
             font-weight: bold;
@@ -115,6 +116,7 @@
             width: 18px;
             height: 18px;
             accent-color: #00aaee;
+            justify-self: start;
         }
 
         #speedlines {
@@ -459,7 +461,7 @@
         }
     </style>
 
-  <script type="module" crossorigin src="/assets/index-DOYVNSbq.js"></script>
+  <script type="module" crossorigin src="/assets/index-D4jEo3S3.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-CbPL-GFE.js">
 </head>
 

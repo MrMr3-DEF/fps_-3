@@ -6,12 +6,15 @@ import {
     MINIGUN_RAMP_TIME,
     MINIGUN_SHOOT_DELAY,
     MINIGUN_MIN_RPM,
-    MINIGUN_MAX_RPM
+    MINIGUN_MAX_RPM,
+    MAX_PROJECTILES
 } from './config.js';
 import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './multiplayer.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
 import { processTargetHit } from './damage.js';
 import { queryTargetsNear } from './world.js';
+import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
+import { projectileData, targetData } from './userDataTypes.js';
 
 // Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
@@ -392,6 +395,8 @@ export function fireProjectile(): void {
     state.rightGunContainer.position.z += stats.recoil;
 
     const fireSinglePellet = (spreadAmt: number) => {
+        if (state.projectiles.length >= MAX_PROJECTILES) return;
+
         let projectile: THREE.Mesh;
         const bulletColor = stats.bulletColor;
 
@@ -422,12 +427,13 @@ export function fireProjectile(): void {
         }
 
         projectile.position.copy(barrelWorldPosition).addScaledVector(camDirection, 0.1);
-        projectile.userData.dx = camDirection.x;
-        projectile.userData.dy = camDirection.y;
-        projectile.userData.dz = camDirection.z;
-        projectile.userData.age = 0;
-        projectile.userData.visualOnly = false;
-        projectile.userData.damage = stats.damage;
+        const data = projectileData(projectile);
+        data.dx = camDirection.x;
+        data.dy = camDirection.y;
+        data.dz = camDirection.z;
+        data.age = 0;
+        data.visualOnly = false;
+        data.damage = stats.damage;
 
         state.projectiles.push(projectile);
     };
@@ -465,14 +471,15 @@ export function fireProjectile(): void {
         const targetsLen = targetCandidates.length;
         for (let j = 0; j < targetsLen; j++) {
             const targetGroup = targetCandidates[j];
-            const bodyMesh = targetGroup.userData.bodyMesh;
+            const data = targetData(targetGroup);
+            const bodyMesh = data.bodyMesh;
             if (bodyMesh) {
                 const targetHits = _raycaster.intersectObject(bodyMesh);
                 if (targetHits.length > 0) {
                     const dist = targetHits[0].distance;
                     if (dist < closestTargetDist) {
                         closestTargetDist = dist;
-                        hitTargetIndex = targetGroup.userData.index as number;
+                        hitTargetIndex = data.index;
                         hitTargetGroup = targetGroup;
                     }
                 }
@@ -511,11 +518,12 @@ export function fireProjectile(): void {
             
             if (state.isMultiplayer) {
                 if (!state.isHost) {
-                    broadcastToAll({
+                    const packet: HitTargetPacket = {
                         type: 'hit_target',
                         targetIndex: hitTargetIndex,
                         damage: stats.damage
-                    });
+                    };
+                    broadcastToAll(packet);
                 } else {
                     processTargetHit(hitTargetIndex, stats.damage);
                 }
@@ -523,7 +531,7 @@ export function fireProjectile(): void {
                 processTargetHit(hitTargetIndex, stats.damage);
             }
 
-            spawnParticles(hitPoint, hitTargetGroup.userData.color || 0xffaa00, 15, 12, 0.15, 12.0);
+            spawnParticles(hitPoint, targetData(hitTargetGroup as THREE.Group).color || 0xffaa00, 15, 12, 0.15, 12.0);
         } else if (pvpPeerId !== null) {
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestPeerDist);
 
@@ -534,12 +542,13 @@ export function fireProjectile(): void {
 
             if (!inputUsernameEl) inputUsernameEl = document.getElementById('input-username') as HTMLInputElement | null;
             const attackerName = inputUsernameEl ? inputUsernameEl.value.trim() || 'Guest' : 'Guest';
-            broadcastToAll({
+            const packet: PlayerHitPacket = {
                 type: 'player_hit',
                 targetPeerId: pvpPeerId,
                 damage: stats.damage,
                 attackerName: attackerName
-            });
+            };
+            broadcastToAll(packet);
 
             spawnParticles(hitPoint, 0x8c7ae6, 15, 12, 0.15, 12.0);
         }
@@ -857,6 +866,43 @@ export function createPlayerMesh(): void {
     state.playerMesh.scale.set(1.5, 1.5, 1.5);
     state.playerMesh.visible = false;
     state.scene.add(state.playerMesh);
+}
+
+export function disposePlayerVisuals(): void {
+    if (!state.scene && !state.camera) return;
+    const disposedMaterials = new Set<THREE.Material>();
+
+    const disposeObject = (obj: THREE.Object3D | null) => {
+        if (!obj) return;
+        obj.parent?.remove(obj);
+        obj.traverse((child: any) => {
+            if (!child.isMesh) return;
+            if (child.geometry && !isSharedGeometry(child.geometry)) {
+                child.geometry.dispose();
+            }
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach((mat: THREE.Material | undefined) => {
+                if (!mat || mat === SHARED_BODY_MAT || disposedMaterials.has(mat)) return;
+                disposedMaterials.add(mat);
+                (mat as any).map?.dispose?.();
+                mat.dispose();
+            });
+        });
+    };
+
+    disposeObject(state.leftGun);
+    disposeObject(state.rightGunContainer);
+    disposeObject(state.playerMesh);
+
+    state.leftGun = null;
+    state.rightGun = null;
+    state.rightGunContainer = null;
+    state.pistolMesh = null;
+    state.shotgunMesh = null;
+    state.arMesh = null;
+    state.sniperMesh = null;
+    state.minigunMesh = null;
+    state.playerMesh = null;
 }
 
 // First-person attaches guns to the camera; third-person reparents the same

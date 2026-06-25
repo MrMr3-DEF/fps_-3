@@ -18,13 +18,13 @@ import {
     BORDER_WARN_THRESHOLD,
     BORDER_PULSE_DISTANCE
 } from './config.js';
-import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave } from './particles.js';
-import { updateProjectiles } from './projectiles.js';
+import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
+import { disposeProjectiles, updateProjectiles } from './projectiles.js';
 import { setFpsText, setFpsVisible, updateHealthBar, updateHoverBar, updateReloadBar } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
-import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO } from './weapons.js';
-import { createEnvironment, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateTargets } from './world.js';
+import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
+import { createEnvironment, disposeWorld, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateTargets } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -37,6 +37,8 @@ import {
     updateRemotePeers
 } from './multiplayer.js';
 import { applyRendererSettings, loadUserSettings, resetUserSettings, saveUserSettings, userSettings } from './settings.js';
+import { targetData } from './userDataTypes.js';
+import type { PlayerDiedPacket } from './networkTypes.js';
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
 const _logicalCameraPos = new THREE.Vector3();
@@ -343,9 +345,9 @@ function setupMenuListeners(): void {
             if (state.isMultiplayer) {
                 disconnectMultiplayer();
             }
+            prepareFreshArena();
             if (UI.panelPause) UI.panelPause.style.display = 'none';
             if (UI.panelMain) UI.panelMain.style.display = 'flex';
-            resetHook();
         });
     }
 
@@ -374,6 +376,7 @@ function setupMenuListeners(): void {
                 disconnectMultiplayer();
             }
 
+            prepareFreshArena();
             if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
             if (UI.panelPause) UI.panelPause.style.display = 'none';
             if (UI.panelMain) UI.panelMain.style.display = 'flex';
@@ -522,21 +525,21 @@ function setupInputListeners(): void {
         if (state.controls && state.controls.isLocked) {
             e.preventDefault();
         }
-        if (e.button === 0) {
-            state.isMouseDown = true;
-            if (!state.controls || !state.controls.isLocked) return;
+        if (!state.controls || !state.controls.isLocked) return;
+
+        updateMouseButtonState(e);
+
+        if (state.isMouseDown) {
             if (state.inspectState === 'INSPECTING') {
                 cancelInspect();
             }
             if (state.fireCooldown <= 0 && state.switchState === 'IDLE') {
                 fireProjectile();
             }
-        } else if (e.button === 2) {
-            if (state.controls && state.controls.isLocked) {
-                state.rightClickActive = true;
-                state.isScoped = state.rightClickActive || state.keyCActive;
-                cancelInspect();
-            }
+        }
+
+        if (state.rightClickActive) {
+            cancelInspect();
         }
     });
 
@@ -544,11 +547,8 @@ function setupInputListeners(): void {
         if (state.controls && state.controls.isLocked) {
             e.preventDefault();
         }
-        if (e.button === 0) {
-            state.isMouseDown = false;
-        } else if (e.button === 2) {
-            state.rightClickActive = false;
-            state.isScoped = state.rightClickActive || state.keyCActive;
+        if (state.controls && state.controls.isLocked) {
+            updateMouseButtonState(e);
         }
     });
 
@@ -592,9 +592,39 @@ function setupGameSystems(): void {
     }
 }
 
+function disposeHookMesh(): void {
+    if (!state.hookMesh) return;
+    state.hookMesh.parent?.remove(state.hookMesh);
+    state.hookMesh.geometry.dispose();
+    const materials = Array.isArray(state.hookMesh.material) ? state.hookMesh.material : [state.hookMesh.material];
+    materials.forEach((mat) => mat.dispose());
+    state.hookMesh = null;
+}
+
+function disposeGameRuntime(): void {
+    disconnectMultiplayer();
+    resetHook();
+    disposeProjectiles();
+    disposeParticles();
+    disposePlayerVisuals();
+    disposeHookMesh();
+    disposeWorld();
+}
+
+function prepareFreshArena(): void {
+    resetHook();
+    disposeProjectiles();
+    disposeParticles();
+    disposeWorld();
+    createEnvironment();
+    performPlayerReset();
+    resetHudCounters();
+    state.prevTime = performance.now();
+}
+
 function performPlayerReset(): void {
     resetPlayerState();
-    if (UI.score) UI.score.innerText = '0';
+    resetHudCounters();
     updateHealthBar(100);
     if (state.controls) {
         state.controls.getObject().position.set(0, 2, 0);
@@ -604,7 +634,7 @@ function performPlayerReset(): void {
 
 function broadcastPlayerDeath(victimName: string, killerName: string): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
-    const packet = {
+    const packet: PlayerDiedPacket = {
         type: 'player_died',
         victimName: victimName,
         killerName: killerName,
@@ -627,6 +657,18 @@ function formatPercent(value: number): string {
 
 function setCheckboxLabel(el: HTMLElement | null, enabled: boolean): void {
     if (el) el.innerText = enabled ? 'On' : 'Off';
+}
+
+function updateMouseButtonState(e: MouseEvent): void {
+    state.isMouseDown = (e.buttons & 1) !== 0;
+    state.rightClickActive = (e.buttons & 2) !== 0;
+    state.isScoped = state.rightClickActive || state.keyCActive;
+}
+
+function resetHudCounters(): void {
+    if (UI.score) UI.score.innerText = '0';
+    if (UI.kills) UI.kills.innerText = '0';
+    if (UI.deaths) UI.deaths.innerText = '0';
 }
 
 function syncSettingsControls(): void {
@@ -817,6 +859,7 @@ export function init(): void {
 
     setupInputListeners();
     setupGameSystems();
+    window.addEventListener('beforeunload', disposeGameRuntime, { once: true });
 
     animate();
 }
@@ -1007,16 +1050,17 @@ export function triggerDeath(): void {
 export function processTargetHit(targetIndex: number, damage: number): void {
     const target = state.targets[targetIndex];
     if (!target) return;
+    const data = targetData(target);
     
-    target.userData.hp -= damage;
-    const hpRatio = Math.max(0, target.userData.hp / target.userData.maxHp);
-    target.userData.healthBarFg.scale.x = hpRatio;
+    data.hp -= damage;
+    const hpRatio = Math.max(0, data.hp / data.maxHp);
+    data.healthBarFg.scale.x = hpRatio;
     
-    if (target.userData.hp <= 0) {
-        const enemyColor = target.userData.color || 0xff4500;
+    if (data.hp <= 0) {
+        const enemyColor = data.color || 0xff4500;
         spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
         
-        createShockwave(target.position, 8.0 * (target.userData.scale || 1.0), 0xffaa00);
+        createShockwave(target.position, 8.0 * (data.scale || 1.0), 0xffaa00);
         
         if (state.hookState === 'PULLING' && state.hookIsEnemy && state.hookTargetEnemy === target) {
             resetHook();
@@ -1029,7 +1073,7 @@ export function processTargetHit(targetIndex: number, damage: number): void {
         if (UI.score) UI.score.innerText = state.score.toString();
         
         if (state.isMultiplayer && state.isHost) {
-            broadcastTargetKill(targetIndex, state.score, target.position, target.userData);
+            broadcastTargetKill(targetIndex, state.score, target.position, data);
         }
     }
 }

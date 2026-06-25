@@ -15,6 +15,7 @@ export const HOOK_MAX_RANGE = 300.0;
 export const SWITCH_DURATION = 0.15;
 export const PROJECTILE_SPEED = 350;
 export const PROJECTILE_LIFETIME = 2.0;
+export const MAX_PROJECTILES = 220;
 
 export interface EnemyClass {
     hp: number;
@@ -105,4 +106,3 @@ export const GROUND_ACCEL_RATE = 10.0;
 export const APEX_VELOCITY_THRESHOLD = 20.0;
 export const DESCENT_FALL_RATIO_CAP = 45.0;
 export const GROUND_VISUAL_SIZE = 3500;
-

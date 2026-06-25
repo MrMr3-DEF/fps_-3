@@ -4,6 +4,7 @@ import {
     PLAYER_RADIUS,
     PROJECTILE_LIFETIME,
     PROJECTILE_SPEED,
+    MAX_PROJECTILES,
     TARGET_HIT_RANGE_MULTIPLIER,
     WEAPON_STATS
 } from './config.js';
@@ -11,18 +12,25 @@ import { processTargetHit } from './damage.js';
 import { flashPeerMesh } from './multiplayer.js';
 import { spawnParticles } from './particles.js';
 import { queryTargetsNear } from './world.js';
+import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
+import { projectileData, targetData } from './userDataTypes.js';
 
 const _targetCandidates: THREE.Group[] = [];
 
+export function canSpawnProjectile(extraCount = 1): boolean {
+    return state.projectiles.length + extraCount <= MAX_PROJECTILES;
+}
+
 function broadcastHitTarget(targetIndex: number, damage: number): void {
+    const packet: HitTargetPacket = {
+        type: 'hit_target',
+        targetIndex,
+        damage
+    };
     state.connections.forEach((conn) => {
         if (conn.open) {
             try {
-                conn.send({
-                    type: 'hit_target',
-                    targetIndex,
-                    damage
-                });
+                conn.send(packet);
             } catch (err) {
                 console.error('Error broadcasting hit_target:', err);
             }
@@ -31,15 +39,16 @@ function broadcastHitTarget(targetIndex: number, damage: number): void {
 }
 
 function broadcastPlayerHit(peerId: string, damage: number, attackerName: string): void {
+    const packet: PlayerHitPacket = {
+        type: 'player_hit',
+        targetPeerId: peerId,
+        damage,
+        attackerName
+    };
     state.connections.forEach((conn) => {
         if (conn.open) {
             try {
-                conn.send({
-                    type: 'player_hit',
-                    targetPeerId: peerId,
-                    damage,
-                    attackerName
-                });
+                conn.send(packet);
             } catch (err) {
                 console.error('Error broadcasting player_hit:', err);
             }
@@ -62,31 +71,32 @@ export function updateProjectiles(delta: number, attackerName: string): void {
 
     for (let i = state.projectiles.length - 1; i >= 0; i--) {
         const proj = state.projectiles[i];
-        proj.userData.age += delta;
-        proj.position.x += proj.userData.dx * PROJECTILE_SPEED * delta;
-        proj.position.y += proj.userData.dy * PROJECTILE_SPEED * delta;
-        proj.position.z += proj.userData.dz * PROJECTILE_SPEED * delta;
+        const data = projectileData(proj);
+        data.age += delta;
+        proj.position.x += data.dx * PROJECTILE_SPEED * delta;
+        proj.position.y += data.dy * PROJECTILE_SPEED * delta;
+        proj.position.z += data.dz * PROJECTILE_SPEED * delta;
 
         let projectileHit = false;
-        const visualOnly = proj.userData.visualOnly === true;
-        const damage = proj.userData.damage ?? fallbackDamage;
+        const visualOnly = data.visualOnly === true;
+        const damage = data.damage ?? fallbackDamage;
 
         if (!visualOnly) {
             const targetCandidates = queryTargetsNear(proj.position.x, proj.position.z, 14, _targetCandidates);
             const targetsLen = targetCandidates.length;
             for (let j = 0; j < targetsLen; j++) {
                 const target = targetCandidates[j];
-                const hitRange = TARGET_HIT_RANGE_MULTIPLIER * (target.userData.scale || 1.0);
+                const targetInfo = targetData(target);
+                const hitRange = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0);
                 if (proj.position.distanceToSquared(target.position) < hitRange * hitRange) {
-                    const targetIndex = target.userData.index as number;
                     if (state.isMultiplayer) {
                         if (!state.isHost) {
-                            broadcastHitTarget(targetIndex, damage);
+                            broadcastHitTarget(targetInfo.index, damage);
                         } else {
-                            processTargetHit(targetIndex, damage);
+                            processTargetHit(targetInfo.index, damage);
                         }
                     } else {
-                        processTargetHit(targetIndex, damage);
+                        processTargetHit(targetInfo.index, damage);
                     }
 
                     projectileHit = true;
@@ -112,8 +122,26 @@ export function updateProjectiles(delta: number, attackerName: string): void {
             }
         }
 
-        if (projectileHit || proj.userData.age > PROJECTILE_LIFETIME) {
+        if (projectileHit || data.age > PROJECTILE_LIFETIME) {
             retireProjectile(i, proj);
         }
     }
+}
+
+export function disposeProjectiles(): void {
+    if (!state.scene) return;
+
+    const disposeProjectile = (projectile: THREE.Object3D) => {
+        state.scene!.remove(projectile);
+        projectile.traverse((child: any) => {
+            if (child.isMesh) {
+                child.material?.dispose?.();
+            }
+        });
+    };
+
+    state.projectiles.forEach(disposeProjectile);
+    state.projectilePool.forEach(disposeProjectile);
+    state.projectiles.length = 0;
+    state.projectilePool.length = 0;
 }

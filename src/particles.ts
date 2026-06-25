@@ -32,6 +32,12 @@ function ensureBoxParticleMesh(): THREE.InstancedMesh | null {
         boxParticleMesh = new THREE.InstancedMesh(SHARED_BOX_GEO, mat, MAX_PARTICLES);
         boxParticleMesh.frustumCulled = false;
         boxParticleMesh.count = 0;
+        for (let i = 0; i < MAX_PARTICLES; i++) {
+            boxParticleMesh.setColorAt(i, _instanceColor.setHex(0xffaa00));
+        }
+        if (boxParticleMesh.instanceColor) {
+            boxParticleMesh.instanceColor.needsUpdate = true;
+        }
         state.scene.add(boxParticleMesh);
     }
     return boxParticleMesh;

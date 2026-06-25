@@ -3,6 +3,7 @@ import { state } from './state.js';
 import { spawnRocketFlame, spawnManeuveringBeam } from './particles.js';
 import { resetHook } from './grapple.js';
 import { queryObstaclesNear } from './world.js';
+import { obstacleData } from './userDataTypes.js';
 import {
     PILLAR_WIDTH,
     PLAYER_RADIUS,
@@ -66,9 +67,10 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     const len = candidates.length;
     for (let i = 0; i < len; i++) {
         const box = candidates[i];
-        const ph  = box.userData.height;
-        const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
-        const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
+        const data = obstacleData(box);
+        const ph  = data.height;
+        const halfW = data.halfW || (PILLAR_WIDTH / 2);
+        const halfD = data.halfD || (PILLAR_WIDTH / 2);
         const ex = halfW + PLAYER_RADIUS;
         const ez = halfD + PLAYER_RADIUS;
         const bx = box.position.x;
@@ -101,9 +103,10 @@ export function checkCollision(position: THREE.Vector3, feetY: number): boolean 
     const len = candidates.length;
     for (let i = 0; i < len; i++) {
         const box = candidates[i];
-        const ph  = box.userData.height;
-        const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
-        const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
+        const data = obstacleData(box);
+        const ph  = data.height;
+        const halfW = data.halfW || (PILLAR_WIDTH / 2);
+        const halfD = data.halfD || (PILLAR_WIDTH / 2);
         const ex = halfW + PLAYER_RADIUS, ez = halfD + PLAYER_RADIUS;
         if (position.x > box.position.x - ex && position.x < box.position.x + ex &&
             position.z > box.position.z - ez && position.z < box.position.z + ez) {
@@ -119,9 +122,10 @@ export function getGroundY(position: THREE.Vector3): number {
     const len = candidates.length;
     for (let i = 0; i < len; i++) {
         const box = candidates[i];
-        const ph  = box.userData.height;
-        const halfW = box.userData.halfW || (PILLAR_WIDTH / 2);
-        const halfD = box.userData.halfD || (PILLAR_WIDTH / 2);
+        const data = obstacleData(box);
+        const ph  = data.height;
+        const halfW = data.halfW || (PILLAR_WIDTH / 2);
+        const halfD = data.halfD || (PILLAR_WIDTH / 2);
         const ex = halfW + PLAYER_RADIUS, ez = halfD + PLAYER_RADIUS;
         if (position.x > box.position.x - ex && position.x < box.position.x + ex &&
             position.z > box.position.z - ez && position.z < box.position.z + ez) {

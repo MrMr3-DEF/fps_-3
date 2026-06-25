@@ -17,6 +17,7 @@ import {
     GROUND_VISUAL_SIZE
 } from './config.js';
 import { SpatialHash } from './spatialHash.js';
+import { obstacleData, targetData } from './userDataTypes.js';
 
 const obstacleHash = new SpatialHash<THREE.Object3D>(32);
 const lavaHash = new SpatialHash<THREE.Object3D>(32);
@@ -46,7 +47,7 @@ export function rebuildTargetHash(): void {
     targetHash.clear();
     for (let i = 0; i < state.targets.length; i++) {
         const target = state.targets[i];
-        const radius = TARGET_HIT_RANGE_MULTIPLIER * (target.userData.scale || 1.0);
+        const radius = TARGET_HIT_RANGE_MULTIPLIER * (targetData(target).scale || 1.0);
         targetHash.insert(target.position.x, target.position.z, radius, target);
     }
 }
@@ -58,17 +59,18 @@ export function respawnTarget(targetGroup: THREE.Group): void {
 
     const randClass = ENEMY_CLASSES[Math.floor(Math.random() * ENEMY_CLASSES.length)];
 
-    targetGroup.userData.maxHp = randClass.hp;
-    targetGroup.userData.hp = randClass.hp;
-    targetGroup.userData.scale = randClass.scale;
-    targetGroup.userData.color = randClass.color;
-    targetGroup.userData.bodyMesh.material.color.setHex(randClass.color);
+    const data = targetData(targetGroup);
+    data.maxHp = randClass.hp;
+    data.hp = randClass.hp;
+    data.scale = randClass.scale;
+    data.color = randClass.color;
+    (data.bodyMesh.material as THREE.MeshStandardMaterial).color.setHex(randClass.color);
     
-    targetGroup.userData.bodyMesh.scale.set(randClass.scale, randClass.scale, randClass.scale);
-    targetGroup.userData.healthBarGroup.position.y = 1.6 * randClass.scale;
-    targetGroup.userData.healthBarGroup.scale.set(randClass.scale, randClass.scale, 1);
+    data.bodyMesh.scale.set(randClass.scale, randClass.scale, randClass.scale);
+    data.healthBarGroup.position.y = 1.6 * randClass.scale;
+    data.healthBarGroup.scale.set(randClass.scale, randClass.scale, 1);
     
-    targetGroup.userData.healthBarFg.scale.x = 1;
+    data.healthBarFg.scale.x = 1;
 }
 
 function checkAABBOverlap(x: number, z: number, checkRadius: number, array: THREE.Object3D[], halfWidth: number): boolean {
@@ -498,10 +500,11 @@ function createPillars(): void {
         const obstacle = new THREE.Mesh(sharedUnitBoxGeo, colliderMat);
         obstacle.scale.set(PILLAR_WIDTH, height, PILLAR_WIDTH);
         obstacle.position.copy(dummy.position);
-        obstacle.userData.height = height;
-        obstacle.userData.halfW = PILLAR_WIDTH / 2;
-        obstacle.userData.halfD = PILLAR_WIDTH / 2;
-        obstacle.userData.halfH = height / 2;
+        const data = obstacleData(obstacle);
+        data.height = height;
+        data.halfW = PILLAR_WIDTH / 2;
+        data.halfD = PILLAR_WIDTH / 2;
+        data.halfH = height / 2;
         // Invisible meshes are the gameplay colliders and grapple targets; the
         // visible pillars are batched in the InstancedMesh above.
         obstacle.visible = false;
@@ -677,13 +680,14 @@ function createEnemies(): void {
 
     for (let i = 0; i < 16; i++) {
         const targetGroup = new THREE.Group();
-        targetGroup.userData.index = i;
+        const data = targetData(targetGroup);
+        data.index = i;
 
         const bodyMesh = new THREE.Mesh(targetGeo, targetMat.clone());
         bodyMesh.castShadow = true;    
         bodyMesh.receiveShadow = true;
         targetGroup.add(bodyMesh);
-        targetGroup.userData.bodyMesh = bodyMesh;
+        data.bodyMesh = bodyMesh;
 
         const healthBarGroup = new THREE.Group();
         healthBarGroup.position.y = 1.6;
@@ -696,9 +700,9 @@ function createEnemies(): void {
         healthBarGroup.add(barFg);
 
         targetGroup.add(healthBarGroup);
-        targetGroup.userData.healthBarFg = barFg;
-        targetGroup.userData.healthBarBg = barBg;
-        targetGroup.userData.healthBarGroup = healthBarGroup;
+        data.healthBarFg = barFg;
+        data.healthBarBg = barBg;
+        data.healthBarGroup = healthBarGroup;
 
         respawnTarget(targetGroup);
         addWorldObject(targetGroup);
@@ -773,10 +777,11 @@ export function updateTargets(delta: number): void {
     const targetsLen = state.targets.length;
     for (let i = 0; i < targetsLen; i++) {
         const target = state.targets[i];
-        target.userData.bodyMesh.rotation.x += 1.0 * delta;
-        target.userData.bodyMesh.rotation.y += 1.5 * delta;
+        const data = targetData(target);
+        data.bodyMesh.rotation.x += 1.0 * delta;
+        data.bodyMesh.rotation.y += 1.5 * delta;
         if (updateBillboards && state.camera) {
-            target.userData.healthBarGroup.quaternion.copy(state.camera.quaternion);
+            data.healthBarGroup.quaternion.copy(state.camera.quaternion);
         }
     }
 
