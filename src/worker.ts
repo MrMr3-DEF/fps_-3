@@ -7,7 +7,9 @@ interface Env {
     };
 }
 
-// Tracks and evaluates IP-based rate limits for TURN credentials requests using the Cloudflare cache.
+// Lightweight per-IP throttle for TURN credential generation. It is best-effort:
+// local development and some edge failures may skip it, but the endpoint should
+// still serve fallback ICE data.
 async function isRateLimited(request: Request): Promise<boolean> {
     const ip = request.headers.get("CF-Connecting-IP") || "local";
     const cacheKey = new Request(`https://rate-limit.local/ip/${ip}`);
@@ -23,14 +25,14 @@ async function isRateLimited(request: Request): Promise<boolean> {
         }
 
         if (count >= 5) {
-            return true; // Limit: 5 requests per minute per IP
+            return true;
         }
 
         const newCount = count + 1;
         const cacheResponse = new Response(JSON.stringify({ count: newCount }), {
             headers: {
                 "Content-Type": "application/json",
-                "Cache-Control": "public, max-age=60" // Expire record after 60 seconds
+                "Cache-Control": "public, max-age=60"
             }
         });
         
@@ -41,8 +43,8 @@ async function isRateLimited(request: Request): Promise<boolean> {
     return false;
 }
 
-// Generates fallback ICE and TURN server configurations when Cloudflare API calls fail or are disabled.
-// Note: This fallback list must match the client-side fallback list in multiplayer.ts.
+// Keep this fallback list in sync with multiplayer.ts so local and deployed
+// builds behave the same when Cloudflare TURN credentials are unavailable.
 function makeFallbackResponse(warningMessage: string): Response {
     const fallbackData = {
         warning: warningMessage,
@@ -80,9 +82,7 @@ export default {
     async fetch(request: Request, env: Env): Promise<Response> {
         const url = new URL(request.url);
 
-        // Route to the TURN credentials generator
         if (url.pathname === "/api/turn") {
-            // 1. IP-Based Rate Limiting (100% free protection)
             const limited = await isRateLimited(request);
             if (limited) {
                 return new Response(
@@ -91,9 +91,9 @@ export default {
                 );
             }
 
-            // 2. Validate Room Parameter (Prevents generic crawlers from spamming/abusing the endpoint)
+            // Require a game-like room code before generating relay credentials.
             const room = url.searchParams.get("room");
-            const roomPattern = /^[A-Z2-9]{4}$/; // Matches 4-character room codes (alphanumeric)
+            const roomPattern = /^[A-Z2-9]{4}$/;
             if (!room || !roomPattern.test(room.toUpperCase())) {
                 return new Response(
                     JSON.stringify({ error: "Invalid or missing room parameter. TURN generation is only allowed for active game rooms." }),
@@ -104,12 +104,11 @@ export default {
             const TURN_KEY_ID = env.TURN_KEY_ID;
             const TURN_KEY_API_TOKEN = env.TURN_KEY_API_TOKEN;
 
-            // Kill switch to prevent overcharging - return fallback servers with a warning (no 503 console error)
+            // Kill switch for Cloudflare Calls usage; clients can still try fallback relays.
             if (env.DISABLE_TURN === "true") {
                 return makeFallbackResponse("Cloudflare TURN service disabled via kill switch. Using fallback servers.");
             }
 
-            // If variables aren't set, return fallback servers with a warning (no 500 console error)
             if (!TURN_KEY_ID || !TURN_KEY_API_TOKEN) {
                 return makeFallbackResponse("Cloudflare TURN configuration missing. Using fallback servers.");
             }
@@ -123,7 +122,7 @@ export default {
                             "Authorization": `Bearer ${TURN_KEY_API_TOKEN}`,
                             "Content-Type": "application/json"
                         },
-                        body: JSON.stringify({ ttl: 86400 }) // Credentials valid for 24 hours
+                        body: JSON.stringify({ ttl: 86400 })
                     }
                 );
 
@@ -136,7 +135,7 @@ export default {
                 return new Response(JSON.stringify(data), {
                     headers: {
                         "Content-Type": "application/json",
-                        "Cache-Control": "public, max-age=3600" // Cache for 1 hour to reduce API hits (valid for 24h)
+                        "Cache-Control": "public, max-age=3600"
                     }
                 });
             } catch (error: any) {
@@ -144,7 +143,6 @@ export default {
             }
         }
 
-        // For all other requests, serve static assets from the binding
         return env.ASSETS.fetch(request);
     }
 };

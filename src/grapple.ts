@@ -11,7 +11,7 @@ import {
     HOOK_SLINGSHOT_ACCEL
 } from './config.js';
 
-// Module-level cached vectors to prevent per-frame garbage collection
+// Reused scratch values for aiming and cable placement.
 const _dirToTarget = new THREE.Vector3();
 const _toEnemy = new THREE.Vector3();
 const _pullDir = new THREE.Vector3();
@@ -20,17 +20,13 @@ const _gunTip = new THREE.Vector3();
 const _midPoint = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
 
-// Shared aiming objects
 const _raycaster = new THREE.Raycaster();
 const _centerScreen = new THREE.Vector2(0, 0);
 
-// Gun tip offset constant
 export const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, -0.19);
 
-// DOM caches
 let hookBadgeEl: HTMLElement | null = null;
 
-// Handles resetting and holstering target positions, properties, and meshes of local player's grappling hook.
 export function resetHook(): void {
     state.hookState = 'IDLE';
     state.hookIsEnemy = false;
@@ -42,7 +38,8 @@ export function resetHook(): void {
     if (hookBadgeEl) hookBadgeEl.style.display = 'none';
 }
 
-// Initiates the grappling hook firing sequence, evaluating magnetic aim-assist on enemies and colliding surfaces.
+// Fire from screen center. Enemy targets get a small aim-assist radius; surfaces
+// use exact ray hits so pillars and floor still feel precise.
 export function toggleGrapplingHook(): void {
     if (!state.scene || !state.camera || !state.leftGun || !state.controls) return;
 
@@ -65,7 +62,6 @@ export function toggleGrapplingHook(): void {
 
         const playerObj = state.controls.getObject();
 
-        // 1) Check enemies first with a premium magnetic aim assist
         let bestEnemyHit: { target: THREE.Object3D; distance: number } | null = null;
         let closestEnemyDist = Infinity;
 
@@ -74,21 +70,17 @@ export function toggleGrapplingHook(): void {
             const target = state.targets[j];
             const enemyPos = target.position;
 
-            // Shortest distance from camera looking ray to enemy center
             const distToRay = ray.distanceToPoint(enemyPos);
             const enemyScale = target.userData.scale || 1.0;
 
-            // Generous magnetic hitbox
             const magneticRadius = HOOK_MAGNETIC_RADIUS * enemyScale;
 
             if (distToRay <= magneticRadius) {
                 const distToPlayer = playerObj.position.distanceTo(enemyPos);
 
-                // Ensure enemy is in front of the player (dot product > 0)
                 _toEnemy.subVectors(enemyPos, playerObj.position);
                 const dot = _toEnemy.dot(ray.direction);
 
-                // Allow a small buffer beyond HOOK_MAX_RANGE (plus enemyScale) to account for large enemy size
                 if (dot > 0 && distToPlayer <= (HOOK_MAX_RANGE + enemyScale) && distToPlayer < closestEnemyDist) {
                     closestEnemyDist = distToPlayer;
                     bestEnemyHit = {
@@ -99,14 +91,13 @@ export function toggleGrapplingHook(): void {
             }
         }
 
-        // 2) Check surfaces (pillars and ground)
         const surfaceHits = _raycaster.intersectObjects(state.grappleSurfaces);
         let bestSurfaceHit: THREE.Intersection | null = null;
         if (surfaceHits.length > 0 && surfaceHits[0].distance <= HOOK_MAX_RANGE) {
             bestSurfaceHit = surfaceHits[0];
         }
 
-        // 3) Resolve target: Prefer magnetic enemy hit if closer than surface hit (not obstructed), fallback to surface
+        // Prefer an unobstructed enemy pull over a farther surface hit.
         if (bestEnemyHit && (!bestSurfaceHit || bestEnemyHit.distance <= bestSurfaceHit.distance)) {
             state.hookTargetEnemy = bestEnemyHit.target;
             state.hookTarget.copy(state.hookTargetEnemy.position);
@@ -129,7 +120,6 @@ export function toggleGrapplingHook(): void {
     }
 }
 
-// Ticks active grappling hook position movement and pulls player towards the hook target (slingshot physics).
 export function updateHook(delta: number): void {
     if (state.hookState !== 'IDLE') {
         if (!state.controls) return;

@@ -208,7 +208,6 @@
             overflow: hidden;
             z-index: 5;
             display: none;
-            /* Show only when playing */
             box-shadow: 0 0 20px rgba(46, 213, 115, 0.35);
         }
 
@@ -222,19 +221,16 @@
         #reload-container {
             position: absolute;
             bottom: 68px;
-            /* positioned directly on top of health bar with a 10px gap */
             left: 50%;
             transform: translateX(-50%);
             width: 480px;
             height: 28px;
             background: rgba(43, 43, 43, 0.95);
-            /* dark grey background */
             border: 2px solid rgba(255, 255, 255, 0.95);
             border-radius: 4px;
             overflow: hidden;
             z-index: 5;
             display: none;
-            /* Show only when playing */
             box-shadow: 0 0 20px rgba(255, 255, 255, 0.15);
         }
 
@@ -256,8 +252,8 @@
             border-radius: 4px;
             overflow: hidden;
             z-index: 5;
-            display: none; /* Show only when playing */
-            box-shadow: 0 0 20px rgba(0, 170, 255, 0.35); /* blue glow */
+            display: none;
+            box-shadow: 0 0 20px rgba(0, 170, 255, 0.35);
         }
 
         #hover-bar {
@@ -580,7 +576,7 @@
         flex-direction: column;
         justify-content: center;
         align-items: center;
-        z-index: 15; /* Sits on top of blocker (z-index 10) */
+        z-index: 15;
         backdrop-filter: blur(3px);
         color: #ffffff;
         text-align: center;

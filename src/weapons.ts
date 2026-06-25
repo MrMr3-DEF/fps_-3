@@ -12,25 +12,22 @@ import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './multiplayer
 import { spawnParticles, createLaserBeam } from './particles.js';
 import { processTargetHit } from './damage.js';
 
-// ---------------------------------------------------------------------------
-// Inspect animation — cached vectors (avoids per-frame Vector3 allocations)
-// ---------------------------------------------------------------------------
+// Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
 const _INSPECT_WEAPON_POS  = new THREE.Vector3(0.12, -0.15, -0.42);
 const _INSPECT_LEFT_BASE   = new THREE.Vector3(-0.32, -0.22, -0.5);
 const _INSPECT_HOLSTER_POS = new THREE.Vector3(-0.32, -0.65, -0.45);
 
-// Inspect phase boundary timestamps (seconds)
-const INSPECT_PHASE1_END   = 0.6;  // Gun lifts into view
-const INSPECT_PAUSE1_END   = 1.0;  // Short pause before spin
-const INSPECT_PHASE2_END   = 3.2;  // Spin animation complete
-const INSPECT_TOTAL        = 3.8;  // Entire animation length
+const INSPECT_PHASE1_END   = 0.6;
+const INSPECT_PAUSE1_END   = 1.0;
+const INSPECT_PHASE2_END   = 3.2;
+const INSPECT_TOTAL        = 3.8;
 
 export const SHARED_PROJECTILE_GEO = new THREE.SphereGeometry(0.07, 8, 8);
 export const SHARED_BODY_MAT = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
 let inputUsernameEl: HTMLInputElement | null = null;
 
-// Module-level cached vectors to prevent per-frame garbage collection
+// Scratch values reused by firing, third-person alignment and hitscan checks.
 const _camEuler = new THREE.Euler();
 const _barrelPos = new THREE.Vector3();
 const _camDirection = new THREE.Vector3();
@@ -38,9 +35,8 @@ const _spreadVec = new THREE.Vector3();
 const _hitPoint = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
 
-// ---------------------------------------------------------------------------
-// Weapon helpers — O(1) object maps
-// ---------------------------------------------------------------------------
+// Weapon names are stored as strings in state/network packets, so these maps are
+// the single place that translates names into scene objects and switch offsets.
 const WEAPON_MESH_KEYS: Record<string, keyof GameState> = {
     PISTOL: 'pistolMesh',
     SHOTGUN: 'shotgunMesh',
@@ -66,7 +62,6 @@ function getWeaponOffset(name: string): number {
     return WEAPON_OFFSETS[name] ?? 0.22;
 }
 
-// Builds a standard 3D pistol/rifle base group with a custom colored glowing core.
 export const buildGun = (coreColor: number): THREE.Group => {
     const gunGroup = new THREE.Group();
     const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
@@ -89,7 +84,6 @@ export const buildGun = (coreColor: number): THREE.Group => {
     return gunGroup;
 };
 
-// Builds standard 3D double barrel shotgun geometry with custom pump handles and glowing weapon core.
 export const buildShotgun = (): THREE.Group => {
     const shotgunGroup = new THREE.Group();
     const bodyMat = SHARED_BODY_MAT;
@@ -132,7 +126,6 @@ export const buildShotgun = (): THREE.Group => {
     return shotgunGroup;
 };
 
-// Builds a standard 3D automatic assault rifle (AR) model with a magazine box and green glowing core.
 export const buildAR = (): THREE.Group => {
     const arGroup = new THREE.Group();
     const bodyMat = SHARED_BODY_MAT;
@@ -170,14 +163,12 @@ export const buildAR = (): THREE.Group => {
     return arGroup;
 };
 
-// Builds 3D high-precision sniper rifle model featuring round muzzle brake cylinder, stock pad and optic scope.
 export const buildSniper = (): THREE.Group => {
     const sniperGroup = new THREE.Group();
     const bodyMat = SHARED_BODY_MAT;
     const coreMat = new THREE.MeshBasicMaterial({ color: 0xffea00 });
     const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
 
-    // 1. Pistol Base Structure
     const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.castShadow = true;
@@ -194,7 +185,6 @@ export const buildSniper = (): THREE.Group => {
     core.position.set(0, 0.042, -0.04);
     sniperGroup.add(core);
 
-    // 2. Continuous round barrel (centered on the end of the body, Y = 0, length increased by 20% to 1.14)
     const barrelGeo = new THREE.CylinderGeometry(0.027, 0.027, 1.14, 8);
     barrelGeo.rotateX(Math.PI / 2);
     const barrel = new THREE.Mesh(barrelGeo, bodyMat);
@@ -202,7 +192,6 @@ export const buildSniper = (): THREE.Group => {
     barrel.castShadow = true;
     sniperGroup.add(barrel);
 
-    // 3. Muzzle brake at the end of the barrel
     const brakeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.5, metalness: 0.8 });
     const ventMat = new THREE.MeshBasicMaterial({ color: 0x0a0a12 });
 
@@ -213,7 +202,6 @@ export const buildSniper = (): THREE.Group => {
     brakeBody.castShadow = true;
     sniperGroup.add(brakeBody);
 
-    // Side vent ports (2 on left, 2 on right)
     const ventGeo = new THREE.BoxGeometry(0.01, 0.05, 0.025);
     const ventL1 = new THREE.Mesh(ventGeo, ventMat);
     ventL1.position.set(-0.036, 0, -1.365);
@@ -231,19 +219,16 @@ export const buildSniper = (): THREE.Group => {
     ventR2.position.set(0.036, 0, -1.435);
     sniperGroup.add(ventR2);
 
-    // 4. Stock (butt of the gun)
     const stockGeo = new THREE.BoxGeometry(0.05, 0.11, 0.32);
     const stock = new THREE.Mesh(stockGeo, bodyMat);
     stock.position.set(0, -0.04, 0.35);
     sniperGroup.add(stock);
 
-    // Stock buttpad accent (yellow)
     const padGeo = new THREE.BoxGeometry(0.052, 0.112, 0.02);
     const pad = new THREE.Mesh(padGeo, coreMat);
     pad.position.set(0, -0.04, 0.51);
     sniperGroup.add(pad);
 
-    // 5. Scope on top
     const scopeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 8);
     scopeGeo.rotateX(Math.PI / 2);
     const scope = new THREE.Mesh(scopeGeo, scopeMat);
@@ -251,7 +236,6 @@ export const buildSniper = (): THREE.Group => {
     scope.castShadow = true;
     sniperGroup.add(scope);
 
-    // Scope mounts
     const mountGeo = new THREE.BoxGeometry(0.015, 0.04, 0.03);
     const mount1 = new THREE.Mesh(mountGeo, bodyMat);
     mount1.position.set(0, 0.065, 0.03);
@@ -260,7 +244,6 @@ export const buildSniper = (): THREE.Group => {
     mount2.position.set(0, 0.065, -0.13);
     sniperGroup.add(mount2);
 
-    // Glowing scope lens (yellow)
     const lensGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.01, 8);
     lensGeo.rotateX(Math.PI / 2);
     const lens = new THREE.Mesh(lensGeo, coreMat);
@@ -270,7 +253,6 @@ export const buildSniper = (): THREE.Group => {
     return sniperGroup;
 };
 
-// Builds 3D heavy minigun rotary model containing six spinning barrels wrapped in barrel rings.
 export const buildMinigun = (): THREE.Group => {
     const minigunGroup = new THREE.Group();
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5 });
@@ -280,24 +262,20 @@ export const buildMinigun = (): THREE.Group => {
     const Y_OFFSET = -0.06;
     const Z_OFFSET = 0.08;
 
-    // 1. Base is a cube
     const cubeGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
     const cube = new THREE.Mesh(cubeGeo, bodyMat);
     cube.position.set(0, Y_OFFSET, Z_OFFSET);
     cube.castShadow = true;
     minigunGroup.add(cube);
 
-    // 2. Handle on top - Thicker uniform L-shape connecting only at the rear (+Z)
     const handleGroup = new THREE.Group();
     
-    // Vertical rear support
     const s1Geo = new THREE.BoxGeometry(0.04, 0.12, 0.04);
     const s1 = new THREE.Mesh(s1Geo, handleMat);
     s1.position.set(0, Y_OFFSET + 0.09, 0.07 + Z_OFFSET);
     s1.castShadow = true;
     handleGroup.add(s1);
 
-    // Horizontal grip bar
     const gripGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.15, 8);
     gripGeo.rotateX(Math.PI / 2);
     const grip = new THREE.Mesh(gripGeo, handleMat);
@@ -307,7 +285,7 @@ export const buildMinigun = (): THREE.Group => {
 
     minigunGroup.add(handleGroup);
 
-    // 3. Barrels Group (so we can rotate it!)
+    // Stored separately so updateWeapons can spin the barrels without walking children.
     const barrelsGroup = new THREE.Group();
     barrelsGroup.position.set(0, Y_OFFSET, Z_OFFSET - 0.09);
     
@@ -328,7 +306,6 @@ export const buildMinigun = (): THREE.Group => {
         barrelsGroup.add(b);
     }
 
-    // 4. Square shaped plane (bracket) at half length from barrels
     const bracketGeo = new THREE.BoxGeometry(0.18, 0.18, 0.015);
     const bracket = new THREE.Mesh(bracketGeo, bodyMat);
     bracket.position.set(0, 0, -barrelLength / 2);
@@ -336,13 +313,11 @@ export const buildMinigun = (): THREE.Group => {
 
     minigunGroup.add(barrelsGroup);
 
-    // Save barrelsGroup reference in userData so we can spin it easily during updates
     minigunGroup.userData.barrels = barrelsGroup;
 
     return minigunGroup;
 };
 
-// Instantiates and attaches first-person weapon meshes (left grappling gun, right weapons container, and individual weapon options) to the camera.
 export function createAkimboGuns(): void {
     if (!state.camera || !state.scene) return;
 
@@ -378,11 +353,11 @@ export function createAkimboGuns(): void {
     state.scene.add(state.camera);
 }
 
-// Triggers a raycast or projectile launch in the direction of the camera based on active weapon fire cooldown.
+// Normal weapons spawn simulated projectiles. The sniper is hitscan so it can
+// resolve occlusion immediately and draw a beam to the exact hit point.
 export function fireProjectile(): void {
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
 
-    // Prevent minigun from firing before it spins up for a minimum threshold time
     if (state.activeWeaponName === 'MINIGUN' && state.minigunRamp < MINIGUN_SHOOT_DELAY) {
         return;
     }
@@ -390,7 +365,6 @@ export function fireProjectile(): void {
     const stats = WEAPON_STATS[state.activeWeaponName];
     if (!stats) return;
 
-    // Recoil Distances
     state.rightGunContainer.position.z += stats.recoil;
 
     const fireSinglePellet = (spreadAmt: number) => {
@@ -434,7 +408,7 @@ export function fireProjectile(): void {
 
     let currentFireRate = stats.fireRate;
     if (state.activeWeaponName === 'MINIGUN') {
-        const t = state.minigunRamp / MINIGUN_RAMP_TIME; // 0 to 1
+        const t = state.minigunRamp / MINIGUN_RAMP_TIME;
         const currentRpm = MINIGUN_MIN_RPM + (MINIGUN_MAX_RPM - MINIGUN_MIN_RPM) * t;
         currentFireRate = 60.0 / currentRpm;
     }
@@ -447,19 +421,16 @@ export function fireProjectile(): void {
         const camDirection = _camDirection;
         state.camera.getWorldDirection(camDirection);
 
-        // Raycasting for hitscan sniper aiming (using pre-allocated raycaster)
         _raycaster.set(state.camera.position, camDirection);
-        _raycaster.far = 500; // Sniper max effective range
+        _raycaster.far = 500;
         (_raycaster as any).camera = state.camera;
 
-        // Intersect obstacles (pillars)
         const obstacleHits = _raycaster.intersectObjects(state.obstacles);
         let closestObstacleDist = Infinity;
         if (obstacleHits.length > 0) {
             closestObstacleDist = obstacleHits[0].distance;
         }
 
-        // Intersect targets
         let hitTargetIndex = -1;
         let closestTargetDist = Infinity;
         let hitTargetGroup: THREE.Object3D | null = null;
@@ -481,7 +452,6 @@ export function fireProjectile(): void {
             }
         }
 
-        // Intersect PvP remote players
         let pvpPeerId: string | null = null;
         let closestPeerDist = Infinity;
         if (state.isMultiplayer) {
@@ -502,17 +472,14 @@ export function fireProjectile(): void {
                 }
             }
         }
-        _raycaster.far = Infinity; // Reset for other uses
+        _raycaster.far = Infinity;
 
-        // Determine hit point and what was hit
         const hitPoint = _hitPoint.copy(state.camera.position).addScaledVector(camDirection, 300);
 
         if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
-            // Hit pillar/wall
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestObstacleDist);
             spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
         } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist && hitTargetGroup) {
-            // Hit enemy target authoritatively
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestTargetDist);
             
             if (state.isMultiplayer) {
@@ -531,16 +498,13 @@ export function fireProjectile(): void {
 
             spawnParticles(hitPoint, hitTargetGroup.userData.color || 0xffaa00, 15, 12, 0.15, 12.0);
         } else if (pvpPeerId !== null) {
-            // Hit remote player in PvP
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestPeerDist);
 
-            // Flash the hit remote player mesh locally on shooter's screen for instant hit confirmation
             const peerData = state.peers[pvpPeerId];
             if (peerData) {
                 flashPeerMesh(peerData, 0xff3333, 150);
             }
 
-            // Broadcast the hit to everyone
             if (!inputUsernameEl) inputUsernameEl = document.getElementById('input-username') as HTMLInputElement | null;
             const attackerName = inputUsernameEl ? inputUsernameEl.value.trim() || 'Guest' : 'Guest';
             broadcastToAll({
@@ -553,10 +517,8 @@ export function fireProjectile(): void {
             spawnParticles(hitPoint, 0x8c7ae6, 15, 12, 0.15, 12.0);
         }
 
-        // Draw local sniper trace trail
         createLaserBeam(barrelWorldPosition, hitPoint, stats.bulletColor);
 
-        // Broadcast sniper fire to P2P network
         if (state.isMultiplayer) {
             broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
         }
@@ -570,7 +532,6 @@ export function fireProjectile(): void {
         fireSinglePellet(stats.spread);
     }
 
-    // Broadcast fire event in multiplayer
     if (state.isMultiplayer) {
         const barrelWorldPosition = _barrelPos;
         state.rightGun.getWorldPosition(barrelWorldPosition);
@@ -580,25 +541,21 @@ export function fireProjectile(): void {
     }
 }
 
-// Processes active weapon recoil, minigun rotary spin, weapon swap timers and third-person model alignments.
 export function updateWeapons(delta: number): void {
     if (state.fireCooldown > 0) {
         state.fireCooldown -= delta;
     }
 
     if (state.rightGunContainer) {
-        // Recoil recovery
         state.rightGunContainer.position.z += (-0.5 - state.rightGunContainer.position.z) * 15 * delta;
     }
 
     if (state.leftGun && state.inspectState === 'IDLE' && !state.isThirdPerson) {
-        // Recoil recovery for left gun (grappling gun)
         if (Math.abs(state.leftGun.position.z - (-0.5)) > 0.001) {
             state.leftGun.position.z += (-0.5 - state.leftGun.position.z) * 15 * delta;
         }
     }
 
-    // Minigun ramp up and barrel spin animation
     if (state.activeWeaponName === 'MINIGUN') {
         if (state.controls && state.controls.isLocked && state.isMouseDown && state.switchState === 'IDLE') {
             state.minigunRamp = Math.min(MINIGUN_RAMP_TIME, state.minigunRamp + delta);
@@ -615,14 +572,13 @@ export function updateWeapons(delta: number): void {
         state.minigunRamp = Math.max(0.0, state.minigunRamp - delta * 2.0);
     }
 
-    // Auto-trigger weapon switch cycle if desired weapon is not active
+    // desiredWeaponName is set by input; this block starts the actual visual swap.
     if (state.switchState === 'IDLE' && state.activeWeaponName !== state.desiredWeaponName) {
         state.nextWeaponName = state.desiredWeaponName;
         state.switchState = 'WITHDRAWING';
         state.switchTimer = 0;
     }
 
-    // Animate weapon switching
     if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh && state.sniperMesh && state.minigunMesh) {
         state.switchTimer += delta;
         const t = Math.min(1.0, state.switchTimer / SWITCH_DURATION);
@@ -670,7 +626,6 @@ export function updateWeapons(delta: number): void {
         }
     }
 
-    // --- Third Person Player Model Position & Pitch/Yaw Updates ---
     if (state.playerMesh && state.controls && state.camera) {
         const playerObj = state.controls.getObject();
         state.playerMesh.position.copy(playerObj.position);
@@ -688,7 +643,7 @@ export function updateWeapons(delta: number): void {
         }
     }
 
-    // Increment inspect timer and apply animation if inspecting
+    // Inspect animation is first-person only; third-person uses the player model.
     if (state.inspectState === 'INSPECTING') {
         state.inspectTimer += delta;
         if (state.inspectTimer >= INSPECT_TOTAL) {
@@ -715,7 +670,6 @@ export function updateWeapons(delta: number): void {
             const targetLeftRotX = Math.PI / 2;
 
             if (t < INSPECT_PHASE1_END) {
-                // Phase 1: Transition in
                 const r = t / INSPECT_PHASE1_END;
                 const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
                 
@@ -733,7 +687,6 @@ export function updateWeapons(delta: number): void {
                     state.leftGun.rotation.set(targetLeftRotX * ease, 0, 0);
                 }
             } else if (t < INSPECT_PAUSE1_END) {
-                // Phase 1 Pause
                 if (state.rightGunContainer) {
                     state.rightGunContainer.position.copy(inspectPos);
                     state.rightGunContainer.rotation.set(targetRotX, targetRotY, targetRotZ);
@@ -743,7 +696,6 @@ export function updateWeapons(delta: number): void {
                     state.leftGun.rotation.set(targetLeftRotX, 0, 0);
                 }
             } else if (t < INSPECT_PHASE2_END) {
-                // Phase 2: Spin inspect around Z axis with pauses
                 if (state.rightGunContainer) {
                     state.rightGunContainer.position.copy(inspectPos);
                 }
@@ -778,7 +730,6 @@ export function updateWeapons(delta: number): void {
                     state.rightGunContainer.rotation.set(targetRotX, targetRotY, rollZ);
                 }
             } else {
-                // Phase 3: Transition out
                 const r = (t - INSPECT_PHASE2_END) / (INSPECT_TOTAL - INSPECT_PHASE2_END);
                 const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
 
@@ -800,7 +751,6 @@ export function updateWeapons(delta: number): void {
     }
 }
 
-// Instantly halts the weapon inspection animation cycle and resets weapon models to their standard FPV alignment.
 export function cancelInspect(): void {
     if (state.inspectState === 'INSPECTING') {
         state.inspectState = 'IDLE';
@@ -816,18 +766,16 @@ export function cancelInspect(): void {
     }
 }
 
-// Shared factory model for player/peer beans
+// Shared player avatar factory for the local third-person mesh and remote peers.
 export function buildBeanModel(bodyColor: number, visorStripColor: number): THREE.Group {
     const playerGroup = new THREE.Group();
 
-    // Body: bean color
     const bodyMat = new THREE.MeshStandardMaterial({
         color: bodyColor,
         roughness: 0.3,
         metalness: 0.2
     });
 
-    // Create solid bean using Cylinder + top/bottom Spheres to ensure universal Three.js support
     const cylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 1.0, 16);
     const cylinder = new THREE.Mesh(cylinderGeo, bodyMat);
     cylinder.castShadow = true;
@@ -842,14 +790,12 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
     topSphere.receiveShadow = true;
     playerGroup.add(topSphere);
 
-    // Booster body material: silver metal
     const boosterMat = new THREE.MeshStandardMaterial({
-        color: 0xc0c0c0, // Silver
+        color: 0xc0c0c0,
         roughness: 0.15,
         metalness: 0.85
     });
 
-    // Booster Cylinder attached to the bottom of the bean
     const boosterCylinderGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
     const boosterCylinder = new THREE.Mesh(boosterCylinderGeo, boosterMat);
     boosterCylinder.position.y = -0.7;
@@ -857,7 +803,6 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
     boosterCylinder.receiveShadow = true;
     playerGroup.add(boosterCylinder);
 
-    // Booster Nozzle at the very bottom
     const nozzleGeo = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
     const nozzle = new THREE.Mesh(nozzleGeo, boosterMat);
     nozzle.position.y = -1.0;
@@ -865,7 +810,6 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
     nozzle.receiveShadow = true;
     playerGroup.add(nozzle);
 
-    // Sleek dark shiny glass visor
     const visorGeo = new THREE.BoxGeometry(0.85, 0.25, 0.45);
     const visorMat = new THREE.MeshStandardMaterial({
         color: 0x1e272e,
@@ -878,7 +822,6 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
     visor.receiveShadow = true;
     playerGroup.add(visor);
 
-    // Glowing center horizontal line inside visor
     const visorStripGeo = new THREE.BoxGeometry(0.5, 0.05, 0.47);
     const visorStripMat = new THREE.MeshBasicMaterial({ color: visorStripColor });
     const visorStrip = new THREE.Mesh(visorStripGeo, visorStripMat);
@@ -888,7 +831,6 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
     return playerGroup;
 }
 
-// Instantiates the local player's 3D third-person capsule (bean) mesh and registers it into the active scene.
 export function createPlayerMesh(): void {
     if (!state.scene) return;
     state.playerMesh = buildBeanModel(0x3b5998, 0x00ffcc);
@@ -897,28 +839,25 @@ export function createPlayerMesh(): void {
     state.scene.add(state.playerMesh);
 }
 
-// Configures third-person camera perspective states, toggles playermodel visibility, and reparents weapon models between camera and playermodel mesh.
+// First-person attaches guns to the camera; third-person reparents the same
+// objects onto the avatar so weapon state stays shared.
 export function setThirdPerson(enabled: boolean): void {
     state.isThirdPerson = enabled;
     if (enabled) {
         if (state.playerMesh) state.playerMesh.visible = true;
-        // Attach guns to playerMesh
         if (state.playerMesh && state.leftGun && state.rightGunContainer) {
             state.playerMesh.add(state.leftGun);
             state.playerMesh.add(state.rightGunContainer);
 
-            // Adjust gun positions relative to the bean center
             state.leftGun.position.set(-0.7, 0.0, -0.5);
             state.rightGunContainer.position.set(0.7, 0.0, -0.5);
         }
     } else {
         if (state.playerMesh) state.playerMesh.visible = false;
-        // Attach guns back to camera
         if (state.camera && state.leftGun && state.rightGunContainer) {
             state.camera.add(state.leftGun);
             state.camera.add(state.rightGunContainer);
 
-            // Reset gun positions for first-person view
             state.leftGun.position.set(-0.32, -0.22, -0.5);
             state.rightGunContainer.position.set(0.32, -0.22, -0.5);
         }

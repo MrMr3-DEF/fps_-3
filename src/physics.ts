@@ -24,7 +24,7 @@ import {
     DESCENT_FALL_RATIO_CAP
 } from './config.js';
 
-// Module-level cached vectors to prevent per-frame garbage collection
+// Scratch vectors reused by the hot physics path.
 const _camForward = new THREE.Vector3();
 const _camRight = new THREE.Vector3();
 const _moveDir = new THREE.Vector3();
@@ -34,12 +34,11 @@ const _boosterPos = new THREE.Vector3();
 const _negCamForward = new THREE.Vector3();
 const _negCamRight = new THREE.Vector3();
 
-// DOM caches
+// Cached HUD elements touched by movement effects.
 let speedlinesEl: HTMLElement | null = null;
 let sprintBadgeEl: HTMLElement | null = null;
 let hoverBadgeEl: HTMLElement | null = null;
 
-// Constant physics thresholds
 const MAX_FALL_SPEED = JUMP_FORCE * 0.88;
 const MAP_LIMIT = (MAP_SIZE / 2) - 1;
 
@@ -49,7 +48,8 @@ interface ScanResult {
     groundY: number;
 }
 
-// Scans 3D obstacle columns (pillars) to determine floor collision boundaries and returns player ground height.
+// Single obstacle pass used by the frame loop: independent X/Z collision checks
+// prevent snagging on corners while also finding the floor height under the player.
 function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPosZ: THREE.Vector3, feetY: number): ScanResult {
     let groundY = 0;
     let colX = false;
@@ -69,21 +69,18 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
         const bx = box.position.x;
         const bz = box.position.z;
 
-        // X-axis collision test
         if (!colX &&
             testPosX.x > bx - ex && testPosX.x < bx + ex &&
             testPosX.z > bz - ez && testPosX.z < bz + ez) {
             if (feetY < ph - 0.3) colX = true;
         }
 
-        // Z-axis collision test
         if (!colZ &&
             testPosZ.x > bx - ex && testPosZ.x < bx + ex &&
             testPosZ.z > bz - ez && testPosZ.z < bz + ez) {
             if (feetY < ph - 0.3) colZ = true;
         }
 
-        // Ground height from actual (current) position
         if (actualPos.x > bx - ex && actualPos.x < bx + ex &&
             actualPos.z > bz - ez && actualPos.z < bz + ez) {
             if (ph > groundY) groundY = ph;
@@ -93,8 +90,6 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     return { colX, colZ, groundY };
 }
 
-// Checks if a given player position and feet height collides with any 3D pillar obstacles or map limits.
-// Returns true if there is a collision, false otherwise.
 export function checkCollision(position: THREE.Vector3, feetY: number): boolean {
     if (Math.abs(position.x) > MAP_LIMIT || Math.abs(position.z) > MAP_LIMIT) return true;
     const len = state.obstacles.length;
@@ -112,8 +107,6 @@ export function checkCollision(position: THREE.Vector3, feetY: number): boolean 
     return false;
 }
 
-// Computes the maximum ground height (Y-coordinate) at the player's horizontal position (X/Z coordinates) relative to all 3D pillar obstacles.
-// Returns the height of the highest pillar the player is standing on, or 0 if they are on the ground.
 export function getGroundY(position: THREE.Vector3): number {
     let highest = 0;
     const len = state.obstacles.length;
@@ -131,7 +124,6 @@ export function getGroundY(position: THREE.Vector3): number {
     return highest;
 }
 
-// Updates player velocities, handles dynamic gravity scaling, clamps maximum speeds, and resolves AABB collisions.
 export function updatePlayerPhysics(delta: number): void {
     if (state.controls) {
         const isPaused = !state.controls.isLocked && state.isPlaying;
@@ -139,14 +131,14 @@ export function updatePlayerPhysics(delta: number): void {
         if (state.controls.isLocked || isPaused) {
             const playerObj = state.controls.getObject();
             
-            // Override keyboard movement inputs to false when paused
+            // Keep gravity/collisions alive while paused, but ignore movement input.
             const moveForward = isPaused ? false : state.moveForward;
             const moveBackward = isPaused ? false : state.moveBackward;
             const moveLeft = isPaused ? false : state.moveLeft;
             const moveRight = isPaused ? false : state.moveRight;
             const isMoving = moveForward || moveBackward || moveLeft || moveRight;
 
-            // --- WORLD SPACE DIRECTION INTEGRATION ---
+            // Convert camera-relative WASD into horizontal world-space directions.
             _camForward.set(0, 0, -1).applyQuaternion(state.camera!.quaternion);
             _camForward.y = 0;
             _camForward.normalize();
@@ -155,14 +147,12 @@ export function updatePlayerPhysics(delta: number): void {
             _camRight.y = 0;
             _camRight.normalize();
 
-            // Hide sprint UI permanently since sprint is replaced by hover (Cached DOM queries)
             if (!speedlinesEl) speedlinesEl = document.getElementById('speedlines');
             if (!sprintBadgeEl) sprintBadgeEl = document.getElementById('sprint-badge');
             if (speedlinesEl) speedlinesEl.style.opacity = '0';
             if (sprintBadgeEl) sprintBadgeEl.style.display = 'none';
 
-            // --- HOVER SYSTEM ---
-            // Activate hover only mid-air when Shift is held, we have fuel, and the grappling hook is not actively pulling
+            // Hover is a mid-air brake/thruster state; grappling gets priority.
             const wasHovering = state.isHovering;
             if (!state.canJump && state.isShiftDown && state.hoverFuel > 0.0 && state.hookState !== 'PULLING') {
                 state.isHovering = true;
@@ -170,7 +160,6 @@ export function updatePlayerPhysics(delta: number): void {
                 state.isHovering = false;
             }
 
-            // Consume or recharge fuel
             if (state.isHovering) {
                 state.hoverFuel -= delta / HOVER_DRAIN_RATE;
                 if (state.hoverFuel < 0) {
@@ -178,12 +167,10 @@ export function updatePlayerPhysics(delta: number): void {
                     state.isHovering = false;
                 }
 
-                // Spawn blue thruster flames downwards from the rocket booster (using module-level boosterPos)
                 _boosterPos.copy(playerObj.position);
                 _boosterPos.y -= 1.8;
                 spawnRocketFlame(_boosterPos, 2, false);
 
-                // Spawn absolute maneuvering thruster plumes when using WASD while hovering
                 if (moveForward) {
                     _negCamForward.copy(_camForward).negate();
                     spawnManeuveringBeam(_boosterPos, 1, _negCamForward);
@@ -195,7 +182,6 @@ export function updatePlayerPhysics(delta: number): void {
                     spawnManeuveringBeam(_boosterPos, 1, _negCamRight);
                 }
             } else {
-                // Recharge fuel when standing on solid ground or when grappling hook is engaged
                 if (state.canJump || state.hookState === 'PULLING') {
                     state.hoverFuel += delta / HOVER_RECHARGE_RATE;
                     if (state.hoverFuel > 1.0) {
@@ -211,37 +197,34 @@ export function updatePlayerPhysics(delta: number): void {
                 }
             }
 
-            // --- ACCELERATION & FRICTION PIPELINE ---
             const friction = (state.canJump && state.hookState !== 'PULLING') ? GROUND_FRICTION : 0.0;
             state.velocity.x -= state.velocity.x * friction * delta;
             state.velocity.z -= state.velocity.z * friction * delta;
 
-            // Gravity variations based on states
+            // Gravity is shaped for game feel: strong jumps, softer apexes,
+            // faster descents, and special cases for hover/grapple states.
             let dynamicGravity = BASE_GRAVITY;
             if (state.hookState === 'PULLING' && state.hookIsEnemy) {
-                dynamicGravity = 0; // Constant speed pull handles vertical velocity directly
+                dynamicGravity = 0;
             } else if (state.hookState === 'PULLING') {
-                dynamicGravity = BASE_GRAVITY * GRAPPLE_GRAVITY_SCALE; // Low gravity for smooth slingshots
+                dynamicGravity = BASE_GRAVITY * GRAPPLE_GRAVITY_SCALE;
             } else if (state.isHovering && state.velocity.y <= 0) {
-                dynamicGravity = BASE_GRAVITY * HOVER_GRAVITY_SCALE; // Minimal gravity while hovering downward
+                dynamicGravity = BASE_GRAVITY * HOVER_GRAVITY_SCALE;
             } else if (state.velocity.y > 0) {
                 if (state.velocity.y > APEX_VELOCITY_THRESHOLD) {
                     dynamicGravity = BASE_GRAVITY * 1.0;
                 } else {
-                    // Smooth deceleration before reaching max height (apex)
                     const ratio = state.velocity.y / APEX_VELOCITY_THRESHOLD;
-                    const ease = ratio * ratio; // quadratic ease
+                    const ease = ratio * ratio;
                     dynamicGravity = BASE_GRAVITY * (0.2 + 0.8 * ease);
                 }
             } else {
-                // Descent phase: quick but smooth reacceleration after changing direction
                 const fallSpeed = Math.abs(state.velocity.y);
                 const fallRatio = Math.min(1.0, fallSpeed / DESCENT_FALL_RATIO_CAP);
                 dynamicGravity = BASE_GRAVITY * (0.2 + 1.1 * fallRatio);
             }
             state.velocity.y -= dynamicGravity * delta;
 
-            // Clamp downward velocity when hovering or falling normally
             if (state.isHovering) {
                 if (state.velocity.y < HOVER_MAX_FALL_SPEED) {
                     state.velocity.y = HOVER_MAX_FALL_SPEED;
@@ -252,7 +235,6 @@ export function updatePlayerPhysics(delta: number): void {
                 }
             }
 
-            // Keyboard movement vector
             _moveDir.set(0, 0, 0);
             if (moveForward) _moveDir.add(_camForward);
             if (moveBackward) _moveDir.sub(_camForward);
@@ -270,7 +252,6 @@ export function updatePlayerPhysics(delta: number): void {
                     state.velocity.z += (targetVelZ - state.velocity.z) * GROUND_ACCEL_RATE * delta;
                 }
             } else {
-                // In-air steering & drag
                 if (state.hookState !== 'PULLING') {
                     state.velocity.x -= state.velocity.x * AIR_DRAG * delta;
                     state.velocity.z -= state.velocity.z * AIR_DRAG * delta;
@@ -297,7 +278,6 @@ export function updatePlayerPhysics(delta: number): void {
             const nextZ = playerObj.position.z + state.velocity.z * delta;
             const feetY = playerObj.position.y - PLAYER_HEIGHT;
 
-            // Single-pass scan: compute X collision, Z collision, and ground height together
             const testPosX = _tempPos.set(nextX, playerObj.position.y, playerObj.position.z);
             const testPosZ = _tempZ.set(playerObj.position.x, playerObj.position.y, nextZ);
             const { colX: collisionX, colZ: collisionZ, groundY: currentGroundY } =

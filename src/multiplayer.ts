@@ -14,11 +14,9 @@ import {
 } from './config.js';
 import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, SHARED_PROJECTILE_GEO, SHARED_BODY_MAT } from './weapons.js';
 
-
-
 const _stateEuler = new THREE.Euler();
 
-// Module-level cached objects to prevent per-message heap allocations
+// Scratch objects reused while applying remote packets.
 const _boosterPos = new THREE.Vector3();
 const _peerForward = new THREE.Vector3();
 const _peerRight = new THREE.Vector3();
@@ -29,7 +27,6 @@ const _midPoint = new THREE.Vector3();
 const _barrelPos = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 
-// Pre-allocated shared hook geometry and material at module level
 const SHARED_HOOK_GEO = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
 SHARED_HOOK_GEO.rotateX(Math.PI / 2);
 const SHARED_HOOK_MAT = new THREE.MeshStandardMaterial({
@@ -47,7 +44,7 @@ export interface PeerJSConfig {
     config: { iceServers: RTCIceServer[] };
 }
 
-// DOM caches
+// Lazily cached menu/HUD elements touched by networking callbacks.
 const UI = {
     inputUsername: null as HTMLInputElement | null,
     hostLobbyStatus: null as HTMLElement | null,
@@ -78,7 +75,8 @@ const DOM = {
 
 let cachedUsername = 'Guest';
 
-// Queries the TURN API server for dynamic TURN server configurations or falls back to public metered.ca servers.
+// Try project-provided ICE servers first, then fall back to public relay/STUN
+// entries so multiplayer can still work in local/dev setups.
 async function getPeerConfig(): Promise<PeerJSConfig> {
     const config: PeerJSConfig = {
         debug: 2,
@@ -109,7 +107,6 @@ async function getPeerConfig(): Promise<PeerJSConfig> {
         console.warn('Failed to fetch Cloudflare TURN servers, using fallback ICE servers:', e);
     }
 
-    // Fallback ICE/TURN servers if Cloudflare config is not set up or fails
     config.config.iceServers.push(
         {
             urls: 'turn:openrelay.metered.ca:80',
@@ -130,7 +127,6 @@ async function getPeerConfig(): Promise<PeerJSConfig> {
     return config;
 }
 
-// Direct helper to fetch or watch username input element changes
 function getCachedUsername(): string {
     const inputUsernameEl = DOM.inputUsername();
     if (inputUsernameEl && cachedUsername === 'Guest') {
@@ -142,7 +138,6 @@ function getCachedUsername(): string {
     return cachedUsername;
 }
 
-// Broadcasts a network data packet to all connected peers over active WebRTC DataChannels, optionally excluding one peer ID (e.g. sender).
 export function broadcastToAll(packet: any, excludePeerId: string | null = null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     const connLen = state.connections.length;
@@ -156,14 +151,12 @@ export function broadcastToAll(packet: any, excludePeerId: string | null = null)
                 try {
                     conn.close();
                 } catch (closeErr) {
-                    // Ignore close error
                 }
             }
         }
     }
 }
 
-// Temporarily changes the mesh materials of a remote peer to a flash color (default red) for instant visual hit confirmations.
 export function flashPeerMesh(peerData: any, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
     if (!peerData || !peerData.mesh) return;
     peerData.mesh.traverse((child: any) => {
@@ -187,9 +180,8 @@ export function flashPeerMesh(peerData: any, color = 0xff3333, durationMs = HIT_
 let peerInstance: any = null;
 let lastSentTime = 0;
 
-// Generates a random 4-character uppercase alphanumeric room code, avoiding visually confusing characters.
 export function generateRoomCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoid confusing characters
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -197,7 +189,8 @@ export function generateRoomCode(): string {
     return code;
 }
 
-// Initializes PeerJS as host, listens for incoming WebRTC client connections, and starts lobby listening.
+// The host owns the stable room peer ID. Clients connect to that ID, and the
+// host relays client packets to the rest of the room.
 export async function hostGame(username: string, roomCode: string): Promise<void> {
     state.isMultiplayer = true;
     state.isHost = true;
@@ -239,7 +232,6 @@ export async function hostGame(username: string, roomCode: string): Promise<void
     });
 }
 
-// Initializes PeerJS as client and attempts connection to host player using room identifier.
 export async function joinGame(username: string, roomCode: string): Promise<void> {
     state.isMultiplayer = true;
     state.isHost = false;
@@ -301,7 +293,6 @@ export function disconnectMultiplayer(): void {
         state.peer = null;
     }
 
-    // Clean up peer meshes
     Object.keys(state.peers).forEach((peerId) => {
         removePeer(peerId);
     });
@@ -324,7 +315,6 @@ export function disconnectMultiplayer(): void {
     }
 }
 
-// Renders a red error log string in the multiplayer join menu and restores the connect button states.
 function showJoinError(msg: string): void {
     const joinErrorLog = document.getElementById('join-error-log');
     if (joinErrorLog) {
@@ -340,11 +330,10 @@ function showJoinError(msg: string): void {
     }
 }
 
-// Configures WebRTC connection callbacks (open, data, close, error) for active peer DataConnections.
 function setupConnection(conn: any): void {
     let opened = false;
 
-    // Timeout: if the DataChannel doesn't open within 10 seconds, surface an error
+    // PeerJS can resolve a peer ID before the WebRTC DataChannel is usable.
     const timeoutId = !state.isHost ? setTimeout(() => {
         if (!opened) {
             console.warn('Connection timed out — WebRTC DataChannel never opened.');
@@ -437,11 +426,11 @@ function setupConnection(conn: any): void {
     });
 }
 
-// Routes network packets, handles incoming player positions, syncs weapon changes, and spawns lasers/projectiles.
+// Packet router. The host is authoritative for target health/respawns and also
+// relays client gameplay packets in a star topology.
 function handlePeerMessage(fromPeerId: string, msg: any): void {
     if (!state.isMultiplayer) return;
 
-    // Star-Topology Relay: Host broadcasts client messages in-place without reallocation
     if (state.isHost) {
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
             msg.senderPeerId = fromPeerId;
@@ -451,11 +440,9 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
 
     const senderId = msg.senderPeerId || fromPeerId;
 
-    // Ignore game actions/updates if the local client is not yet active in the game world
     if (!state.isPlaying) return;
 
     if (msg.type === 'update') {
-        // Retrieve or instantiate remote peer
         let peerData = state.peers[senderId] as PeerData | undefined;
         let justJoined = false;
         if (!peerData) {
@@ -467,7 +454,6 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             justJoined = true;
         }
 
-        // Apply position updates (with y-offset to align remote models with ground geometry)
         peerData.mesh.position.copy(msg.pos);
         peerData.mesh.position.y -= PEER_Y_OFFSET;
         peerData.mesh.rotation.y = msg.yaw;
@@ -475,23 +461,19 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
         if (msg.isDead) {
             peerData.mesh.visible = false;
         } else {
-            // If they just joined, play the spawn animation
             if (justJoined) {
                 peerData.mesh.visible = true;
                 spawnLightBeam(peerData.mesh.position);
             } else if (peerData.mesh.visible === false) {
-                // If they were dead and are now alive (respawned!)
                 peerData.mesh.visible = true;
                 spawnLightBeam(peerData.mesh.position);
             }
 
-            // Spawn hover thruster flame particles if active
             if (msg.isHovering) {
                 _boosterPos.copy(peerData.mesh.position);
                 _boosterPos.y -= 1.45;
                 spawnRocketFlame(_boosterPos, 4, false);
 
-                // Spawn maneuvering side thruster plumes if active keys are sent
                 if (msg.hoverKeys) {
                     _peerEuler.set(0, msg.yaw, 0);
                     _peerForward.set(0, 0, -1).applyEuler(_peerEuler);
@@ -500,7 +482,7 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
                     if (msg.hoverKeys.w) {
                         _peerForward.negate();
                         spawnManeuveringBeam(_boosterPos, 2, _peerForward);
-                        _peerForward.negate(); // restore
+                        _peerForward.negate();
                     }
                     if (msg.hoverKeys.s) spawnManeuveringBeam(_boosterPos, 2, _peerForward);
                     if (msg.hoverKeys.a) spawnManeuveringBeam(_boosterPos, 2, _peerRight);
@@ -512,18 +494,15 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             }
         }
 
-        // Apply weapon rotations (aiming pitches)
         peerData.leftGun.rotation.x = msg.pitch;
         peerData.rightGunContainer.rotation.x = msg.pitch;
 
-        // Toggle active weapon mesh visibility
         peerData.pistolMesh.visible = (msg.activeWeapon === 'PISTOL');
         peerData.shotgunMesh.visible = (msg.activeWeapon === 'SHOTGUN');
         peerData.arMesh.visible = (msg.activeWeapon === 'AR');
         peerData.sniperMesh.visible = (msg.activeWeapon === 'SNIPER');
         peerData.minigunMesh.visible = (msg.activeWeapon === 'MINIGUN');
 
-        // Rotate remote peer minigun barrels if active and firing
         if (msg.activeWeapon === 'MINIGUN' && peerData.minigunMesh && peerData.minigunMesh.userData.barrels) {
             if (peerData.minigunRamp === undefined)      peerData.minigunRamp = 0.0;
             if (peerData.lastUpdateTime === undefined)   peerData.lastUpdateTime = performance.now();
@@ -543,7 +522,6 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             peerData.minigunMesh.userData.barrels.rotation.z += spinSpeed * dt;
         }
 
-        // Draw remote grapple hook lines
         if (msg.hookState !== 'IDLE' && msg.hookPos) {
             if (!peerData.hookLine) {
                 peerData.hookLine = new THREE.Mesh(SHARED_HOOK_GEO, SHARED_HOOK_MAT);
@@ -570,7 +548,6 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             }
         }
     } else if (msg.type === 'fire') {
-        // Visual gun recoil flash/explosion locally on peer's barrel
         _barrelPos.set(msg.barrelPos.x, msg.barrelPos.y, msg.barrelPos.z);
         _dir.set(msg.dir.x, msg.dir.y, msg.dir.z);
 
@@ -606,17 +583,14 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             state.projectiles.push(bullet);
         }
     } else if (msg.type === 'kill_target') {
-        // Sync targets authoritatively as informed by the host
+        // Host broadcast: all clients apply the same target respawn and score.
         const target = state.targets[msg.targetIndex];
         if (target) {
             const enemyColor = msg.color || 0xff4500;
-            // Spawn explosions locally
             spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
 
-            // Spawn shockwave locally (using shared createShockwave function to prevent leaks)
             createShockwave(target.position, 8.0 * (msg.scale || 1.0), 0xffaa00);
 
-            // Reposition and re-scale target
             target.position.set(msg.newPosition.x, msg.newPosition.y, msg.newPosition.z);
             target.userData.maxHp = msg.hp;
             target.userData.hp = msg.hp;
@@ -645,7 +619,6 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             takePlayerDamage(msg.damage, msg.attackerName);
         }
     } else if (msg.type === 'player_died') {
-        // Spawn remote player death particle effect (bean color purple 0x8c7ae6) and hide model
         const victimPeer = state.peers[msg.victimPeerId || senderId];
         if (victimPeer && victimPeer.mesh) {
             spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
@@ -658,7 +631,6 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
             const killsEl = DOM.kills();
             if (killsEl) killsEl.innerText = state.kills.toString();
             
-            // Spawn visual hit indicator green flash on crosshair
             const crosshair = DOM.crosshair();
             if (crosshair) {
                 crosshair.style.borderColor = '#00ff88';
@@ -680,13 +652,13 @@ function handlePeerMessage(fromPeerId: string, msg: any): void {
     }
 }
 
-// Disposes and removes a remote peer's 3D bean model, attachments, and hook meshes from the scene, releasing materials/geometries to prevent memory leaks.
+// Peer avatars own cloned weapon/name-tag resources, so leaving a room must
+// dispose those objects instead of only removing them from the scene.
 function removePeer(peerId: string): void {
     const peerData = state.peers[peerId];
     if (peerData) {
         if (peerData.mesh) {
             state.scene!.remove(peerData.mesh);
-            // Dispose geometries/materials, including SpriteMaterial and CanvasTexture to resolve leaks
             peerData.mesh.traverse((child: any) => {
                 if (child.isMesh) {
                     if (child.geometry && child.geometry !== SHARED_PROJECTILE_GEO) {
@@ -711,12 +683,11 @@ function removePeer(peerId: string): void {
     }
 }
 
-// Serializes and transmits local player state vectors (position, yaw, pitch, weapon, hover keys) to everyone.
 export function sendLocalState(): void {
     if (!state.isMultiplayer || !state.isPlaying || state.connections.length === 0 || !state.controls || !state.camera) return;
 
     const now = performance.now();
-    if (now - lastSentTime < NETWORK_TICK_MS) return; // Cap at ~30 packets per second to conserve bandwidth
+    if (now - lastSentTime < NETWORK_TICK_MS) return;
     lastSentTime = now;
 
     const playerObj = state.controls.getObject();
@@ -747,7 +718,6 @@ export function sendLocalState(): void {
     broadcastToAll(packet);
 }
 
-// Transmits a local weapon fire event packet containing the gun barrel origin, aiming direction, and hit point coordinates.
 export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3, hitPoint: THREE.Vector3 | null = null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
 
@@ -765,7 +735,6 @@ export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3,
     broadcastToAll(packet);
 }
 
-// Transmits an authoritative target elimination packet from the Host, indicating the score and new randomized target parameters.
 export function broadcastTargetKill(targetIndex: number, score: number, newPos: THREE.Vector3, targetData: any): void {
     if (!state.isMultiplayer || !state.isHost || state.connections.length === 0) return;
 
@@ -782,7 +751,6 @@ export function broadcastTargetKill(targetIndex: number, score: number, newPos: 
     broadcastToAll(packet);
 }
 
-// Transmits a local jump event packet to trigger thruster flame and shockwave visuals on other clients.
 export function broadcastLocalJump(): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     const packet = {
@@ -791,15 +759,13 @@ export function broadcastLocalJump(): void {
     broadcastToAll(packet);
 }
 
-// Spawns remote player bean visual components (cylinder body, sphere heads, visor strips, akimbo attachments, username tags).
-// Procedurally builds a 3D playermodel bean, attaches akimbo weapon meshes, generates a 2D text canvas name tag, and returns the PeerData reference.
+// Remote players use the same bean/weapon builders as the local player, but with
+// a canvas-generated name tag attached as a Sprite.
 function createPeerBean(username: string): PeerData {
     if (!state.scene) throw new Error('Scene not initialized');
 
-    // Import and reuse shared buildBeanModel factory from weapons.js
     const peerGroup = buildBeanModel(0x8c7ae6, 0xff4757);
 
-    // Build remote peer weapons (Akimbo attachments) using imported builders from weapons.js
     const leftGun = buildGun(0x00aaff);
     leftGun.position.set(-0.7, 0.0, -0.5);
     peerGroup.add(leftGun);
@@ -827,7 +793,6 @@ function createPeerBean(username: string): PeerData {
     minigunMesh.visible = false;
     rightGunContainer.add(minigunMesh);
 
-    // Sprite username text label
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 64;

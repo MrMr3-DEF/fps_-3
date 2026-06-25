@@ -112,18 +112,18 @@ export interface GameState {
 }
 
 export const state: GameState = {
-    // Player controls input state
+    // Input flags consumed by the physics loop.
     moveForward: false,
     moveBackward: false,
     moveLeft: false,
     moveRight: false,
     canJump: false,
 
-    // Timing and physics
+    // Runtime physics state.
     prevTime: performance.now(),
     velocity: new THREE.Vector3(),
 
-    // Game stats
+    // Local player stats and lifecycle.
     score: 0,
     playerHp: PLAYER_MAX_HP,
     playerMaxHp: PLAYER_MAX_HP,
@@ -134,7 +134,7 @@ export const state: GameState = {
     kills: 0,
     deaths: 0,
 
-    // Multiplayer state fields
+    // PeerJS/WebRTC session state.
     isMultiplayer: false,
     isHost: false,
     roomCode: null,
@@ -143,7 +143,7 @@ export const state: GameState = {
     peers: {},
     peerIds: [],
 
-    // Active game object arrays
+    // Scene object registries used by update loops and collision checks.
     targets: [],
     obstacles: [],
     grappleSurfaces: [],
@@ -153,7 +153,7 @@ export const state: GameState = {
     lavaPools: [],
     fakePillars: [],
 
-    // Grappling hook details
+    // Local grappling hook state.
     hookState: 'IDLE',
     hookPosition: new THREE.Vector3(),
     hookTarget: new THREE.Vector3(),
@@ -162,7 +162,7 @@ export const state: GameState = {
     hookTargetEnemy: null,
     hookMesh: null,
 
-    // Weapon system state
+    // Current weapon, switching, firing and inspect animation state.
     activeWeaponName: 'PISTOL',
     nextWeaponName: null,
     desiredWeaponName: 'PISTOL',
@@ -174,7 +174,7 @@ export const state: GameState = {
     inspectState: 'IDLE',
     inspectTimer: 0.0,
 
-    // Three.js instances
+    // Three.js scene graph references and first/third-person view state.
     camera: null,
     scene: null,
     renderer: null,
@@ -198,7 +198,6 @@ export const state: GameState = {
     isHovering: false,
 };
 
-// Resets player health, score, velocity, grapple hook state variables, and hover fuel back to default initial values.
 export function resetPlayerState() {
     state.playerHp = state.playerMaxHp;
     state.score = 0;
@@ -216,4 +215,3 @@ export function resetPlayerState() {
     state.inspectTimer = 0;
     state.minigunRamp = 0;
 }
-

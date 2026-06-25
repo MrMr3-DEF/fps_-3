@@ -16,7 +16,6 @@ import {
     GROUND_VISUAL_SIZE
 } from './config.js';
 
-// Respawn targeted remote target at random location within map boundaries and randomize target scale/class/health.
 export function respawnTarget(targetGroup: THREE.Group): void {
     targetGroup.position.x = (Math.random() - 0.5) * (MAP_SIZE - 40);
     targetGroup.position.y = 3.0 + Math.random() * (MAX_ENEMY_HEIGHT - 5.0);
@@ -27,7 +26,7 @@ export function respawnTarget(targetGroup: THREE.Group): void {
     targetGroup.userData.maxHp = randClass.hp;
     targetGroup.userData.hp = randClass.hp;
     targetGroup.userData.scale = randClass.scale;
-    targetGroup.userData.color = randClass.color; // Keep color for explosions
+    targetGroup.userData.color = randClass.color;
     targetGroup.userData.bodyMesh.material.color.setHex(randClass.color);
     
     targetGroup.userData.bodyMesh.scale.set(randClass.scale, randClass.scale, randClass.scale);
@@ -37,7 +36,6 @@ export function respawnTarget(targetGroup: THREE.Group): void {
     targetGroup.userData.healthBarFg.scale.x = 1;
 }
 
-// Unified AABB collision helper
 function checkAABBOverlap(x: number, z: number, checkRadius: number, array: THREE.Object3D[], halfWidth: number): boolean {
     const len = array.length;
     for (let i = 0; i < len; i++) {
@@ -51,12 +49,12 @@ function checkAABBOverlap(x: number, z: number, checkRadius: number, array: THRE
     return false;
 }
 
-// Helper to check if a square center (sqX, sqZ) overlaps with any spawned pillar
 function overlapsWithPillars(sqX: number, sqZ: number): boolean {
     return checkAABBOverlap(sqX, sqZ, PILLAR_WIDTH / 2, state.obstacles, LAVA_POOL_HALF_SIZE);
 }
 
-// Procedurally generates grass texture by rendering randomized organic green HSL strokes on an offscreen HTML canvas.
+// Small canvas textures keep the game self-contained: no external art assets are
+// needed for the arena floor or pillar surfaces.
 function createGrassTexture(): THREE.CanvasTexture {
     const size = 512;
     const canvas = document.createElement('canvas');
@@ -64,24 +62,21 @@ function createGrassTexture(): THREE.CanvasTexture {
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
 
-    // Base green: rich, vibrant dark grass green
     ctx.fillStyle = '#1e4620';
     ctx.fillRect(0, 0, size, size);
 
-    // Populate with 5000 grass blades / flecks of varying shades (performance optimization)
     for (let i = 0; i < 5000; i++) {
         const x = Math.random() * size;
         const y = Math.random() * size;
         const length = 2 + Math.random() * 5;
-        const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.5; // Upward leaning
+        const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.5;
 
-        // Palette of grass colors
-        const hue = 90 + Math.random() * 25; // 90 to 115
-        const sat = 45 + Math.random() * 15; // 45% to 60%
-        const light = 22 + Math.random() * 18; // 22% to 40%
+        const hue = 90 + Math.random() * 25;
+        const sat = 45 + Math.random() * 15;
+        const light = 22 + Math.random() * 18;
 
         ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
-        ctx.lineWidth = 1.5 + Math.random() * 2.0; // Slightly thicker for visual density
+        ctx.lineWidth = 1.5 + Math.random() * 2.0;
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
@@ -95,7 +90,6 @@ function createGrassTexture(): THREE.CanvasTexture {
     return texture;
 }
 
-// Procedurally generates bark texture by rendering organic vertical bark ridges and horizontal cracks on an offscreen HTML canvas.
 function createBarkTexture(): THREE.CanvasTexture {
     const size = 512;
     const canvas = document.createElement('canvas');
@@ -103,32 +97,27 @@ function createBarkTexture(): THREE.CanvasTexture {
     canvas.height = size;
     const ctx = canvas.getContext('2d')!;
 
-    // Base dark brown bark color
     ctx.fillStyle = '#3a2312';
     ctx.fillRect(0, 0, size, size);
 
-    // Populate with vertical wood grain strokes of varying shades of brown
     for (let i = 0; i < 4000; i++) {
         const x = Math.random() * size;
         const y = Math.random() * size;
         const length = 40 + Math.random() * 120;
         
-        // Random brown shade
-        const hue = 22 + Math.random() * 8;       // 22 to 30 (browns)
-        const sat = 25 + Math.random() * 15;      // 25% to 40%
-        const light = 12 + Math.random() * 15;     // 12% to 27% (darker bark tones)
+        const hue = 22 + Math.random() * 8;
+        const sat = 25 + Math.random() * 15;
+        const light = 12 + Math.random() * 15;
 
         ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
         ctx.lineWidth = 1.5 + Math.random() * 3.5;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        // Slightly jitter the x coordinate to make it look organic
         const jitter = (Math.random() - 0.5) * 2;
         ctx.lineTo(x + jitter, y + length);
         ctx.stroke();
     }
 
-    // Add deep vertical dark cracks (bark fissures)
     ctx.strokeStyle = '#1a0d05';
     for (let i = 0; i < 40; i++) {
         let x = Math.random() * size;
@@ -136,7 +125,6 @@ function createBarkTexture(): THREE.CanvasTexture {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         for (let y = 0; y < size; y += 20) {
-            // Jitter the crack horizontally
             x += (Math.random() - 0.5) * 4;
             ctx.lineTo(x, y);
         }
@@ -150,7 +138,6 @@ function createBarkTexture(): THREE.CanvasTexture {
     return texture;
 }
 
-// Procedurally generates aging tree rings texture by drawing concentric circles and radial splits on an offscreen HTML canvas.
 function createRingsTexture(): THREE.CanvasTexture {
     const size = 512;
     const canvas = document.createElement('canvas');
@@ -161,16 +148,13 @@ function createRingsTexture(): THREE.CanvasTexture {
     const cx = size / 2;
     const cy = size / 2;
 
-    // Base light wood core color (lighter warm brown/tan)
     ctx.fillStyle = '#e4c49f';
     ctx.fillRect(0, 0, size, size);
 
-    // Draw concentric rings with wavy noise to simulate tree years growth
     const maxRadius = size * 0.75;
-    const step = 6 + Math.random() * 4; // distance between rings
+    const step = 6 + Math.random() * 4;
 
     for (let r = 10; r < maxRadius; r += step) {
-        // Vary the color and opacity slightly for each ring
         const hue = 25 + Math.random() * 8;
         const sat = 30 + Math.random() * 15;
         const light = 35 + Math.random() * 10;
@@ -178,12 +162,10 @@ function createRingsTexture(): THREE.CanvasTexture {
         ctx.lineWidth = 1 + Math.random() * 1.5;
 
         ctx.beginPath();
-        // Generate a wavy circle path
         const segments = 120;
         for (let i = 0; i <= segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
             
-            // Generate some wavy noise using simple sine/cosine wave sum
             const wave = Math.sin(angle * 6) * 3 + Math.cos(angle * 3) * 2 + Math.sin(angle * 12) * 0.8;
             const radialJitter = wave + (Math.random() - 0.5) * 0.5;
             const currentRadius = r + radialJitter;
@@ -200,7 +182,6 @@ function createRingsTexture(): THREE.CanvasTexture {
         ctx.stroke();
     }
 
-    // Add fine wood grain details (concentric noise)
     ctx.fillStyle = 'rgba(150, 110, 80, 0.08)';
     for (let i = 0; i < 5000; i++) {
         const angle = Math.random() * Math.PI * 2;
@@ -211,8 +192,7 @@ function createRingsTexture(): THREE.CanvasTexture {
         ctx.fillRect(px, py, 1.5, 1.5);
     }
 
-    // Add radial cracks (split wood from aging/drying)
-    const numCracks = 3 + Math.floor(Math.random() * 3); // 3 to 5 cracks
+    const numCracks = 3 + Math.floor(Math.random() * 3);
     ctx.strokeStyle = 'rgba(65, 40, 20, 0.85)';
     
     for (let i = 0; i < numCracks; i++) {
@@ -240,7 +220,6 @@ function createRingsTexture(): THREE.CanvasTexture {
         ctx.stroke();
     }
 
-    // Add a dark central pith
     ctx.fillStyle = '#412814';
     ctx.beginPath();
     ctx.arc(cx, cy, 3 + Math.random() * 4, 0, Math.PI * 2);
@@ -250,16 +229,14 @@ function createRingsTexture(): THREE.CanvasTexture {
     return texture;
 }
 
-// Module-level shared geometries and materials for bushes
+// Bushes use shared geometry/materials because there can be hundreds of them.
 const SHARED_TRUNK_GEO = new THREE.CylinderGeometry(0.15, 0.25, 1.0, 5);
 const SHARED_LEAF_GEO = new THREE.DodecahedronGeometry(1.0, 0);
 const SHARED_TRUNK_MAT = new THREE.MeshLambertMaterial({ color: 0x5a3d28, flatShading: true });
 
-// Procedurally constructs 3D low-poly tree geometries using cylinder trunk and multiple dodacahedron leaf meshes.
 function createLowPolyBush(): THREE.Group {
     const bushGroup = new THREE.Group();
     
-    // Choose a green base shade for the leaves
     const greenShades = [0x2f6633, 0x3d7a42, 0x4b8e51, 0x224c25, 0x3c7841];
     const leafColor = greenShades[Math.floor(Math.random() * greenShades.length)];
     const leafMat = new THREE.MeshLambertMaterial({ 
@@ -267,27 +244,23 @@ function createLowPolyBush(): THREE.Group {
         flatShading: true 
     });
 
-    // Trunk: small cylinder using shared geometries/materials
     const trunk = new THREE.Mesh(SHARED_TRUNK_GEO, SHARED_TRUNK_MAT);
     trunk.position.y = 0.5;
     trunk.castShadow = true;
     trunk.receiveShadow = true;
     bushGroup.add(trunk);
 
-    // Leaves clusters: overlapping dodecahedrons using shared geometry scaled dynamically
-    const numClusters = 3 + Math.floor(Math.random() * 3); // 3 to 5 clusters
+    const numClusters = 3 + Math.floor(Math.random() * 3);
     for (let i = 0; i < numClusters; i++) {
-        const radius = 0.7 + Math.random() * 0.7; // size of cluster
+        const radius = 0.7 + Math.random() * 0.7;
         const leafMesh = new THREE.Mesh(SHARED_LEAF_GEO, leafMat);
         leafMesh.scale.setScalar(radius);
         
-        // Offset leaf mesh relative to trunk
         const ox = (Math.random() - 0.5) * 1.0;
         const oy = 0.7 + Math.random() * 0.9;
         const oz = (Math.random() - 0.5) * 1.0;
         leafMesh.position.set(ox, oy, oz);
         
-        // Random rotation for low-poly look variation
         leafMesh.rotation.set(
             Math.random() * Math.PI,
             Math.random() * Math.PI,
@@ -302,7 +275,8 @@ function createLowPolyBush(): THREE.Group {
     return bushGroup;
 }
 
-// Procedurally generates 2D flat-shaded billboard bush texture using custom face triangulation and light scaling.
+// Distant vegetation is rendered as sprites to fill the horizon without a huge
+// mesh count. Nearby bushes remain real 3D objects.
 function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.CanvasTexture {
     const size = 256;
     const canvas = document.createElement('canvas');
@@ -313,9 +287,8 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
     ctx.clearRect(0, 0, size, size);
 
     const centerX = size / 2;
-    const centerY = size * 0.9; // Shift leaves down since there is no trunk/stem
+    const centerY = size * 0.9;
 
-    // Helper to draw a faceted low-poly leaf cluster using a base color
     function drawFacetedCluster(cx: number, cy: number, radius: number, colorHex: number | string) {
         let hex = colorHex;
         if (typeof hex === 'number') {
@@ -325,7 +298,7 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
 
-        const numVertices = 6 + Math.floor(Math.random() * 3); // 6 to 8 vertices
+        const numVertices = 6 + Math.floor(Math.random() * 3);
         const vertices: { x: number, y: number }[] = [];
         for (let i = 0; i < numVertices; i++) {
             const angle = (i / numVertices) * Math.PI * 2 + (Math.random() - 0.5) * 0.1;
@@ -336,33 +309,28 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
             });
         }
 
-        // Center vertex, slightly offset up-left to simulate light from top-right
         const centerOffsetX = (Math.random() - 0.3) * (radius * 0.25);
         const centerOffsetY = -radius * 0.15 + (Math.random() - 0.5) * (radius * 0.15);
         const center = { x: cx + centerOffsetX, y: cy + centerOffsetY };
 
-        // Draw triangular faces
         for (let i = 0; i < numVertices; i++) {
             const v1 = vertices[i];
             const v2 = vertices[(i + 1) % numVertices];
 
-            // Calculate angle of the face midpoint relative to the cluster center
             const midX = (v1.x + v2.x) / 2;
             const midY = (v1.y + v2.y) / 2;
             const faceAngle = Math.atan2(midY - cy, midX - cx);
 
-            // Light comes from top-right (-Math.PI/4)
             const dot = Math.cos(faceAngle - (-Math.PI / 4));
             const lightFactor = 0.95 + dot * 0.25;
 
-            // Apply light factor to color channels
             const newR = Math.min(255, Math.max(0, Math.round(r * lightFactor)));
             const newG = Math.min(255, Math.max(0, Math.round(g * lightFactor)));
             const newB = Math.min(255, Math.max(0, Math.round(b * lightFactor)));
             const colorStr = `rgb(${newR}, ${newG}, ${newB})`;
 
             ctx.fillStyle = colorStr;
-            ctx.strokeStyle = colorStr; // prevent seams between triangles
+            ctx.strokeStyle = colorStr;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(center.x, center.y);
@@ -374,7 +342,6 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
         }
     }
 
-    // Draw overlapping leaf clusters to simulate the 3D dodecahedrons
     drawFacetedCluster(centerX - 30, centerY - 35, 45, baseColorHex);
     drawFacetedCluster(centerX + 30, centerY - 35, 45, baseColorHex);
     drawFacetedCluster(centerX, centerY - 80, 50, baseColorHex);
@@ -388,7 +355,7 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
 function overlapsWithPillarsOrLava(x: number, z: number, checkRadius: number): boolean {
     if (checkAABBOverlap(x, z, checkRadius, state.obstacles, PILLAR_WIDTH / 2)) return true;
     if (checkAABBOverlap(x, z, checkRadius, state.lavaPools, LAVA_POOL_HALF_SIZE)) return true;
-    if (x * x + z * z < 625) return true; // check player spawn area (< 25 units squared)
+    if (x * x + z * z < 625) return true;
     return false;
 }
 
@@ -397,7 +364,6 @@ function overlapsWithFakePillars(x: number, z: number, checkRadius: number): boo
     return checkAABBOverlap(x, z, checkRadius, state.fakePillars, (PILLAR_WIDTH * 1.5) / 2);
 }
 
-// Environmental Generation Modular Sub-functions
 function createFloor(): void {
     const floorGeo = new THREE.PlaneGeometry(GROUND_VISUAL_SIZE, GROUND_VISUAL_SIZE);
     const grassTex = createGrassTexture();
@@ -410,6 +376,8 @@ function createFloor(): void {
 }
 
 function createFakeBillboards(): void {
+    // Background-only props outside the playable square. They add scale without
+    // participating in physics or gameplay.
     state.fakePillars = [];
     const fakePillarGeo = new THREE.PlaneGeometry(PILLAR_WIDTH * 1.5, 1);
     const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x483224, side: THREE.DoubleSide });
@@ -464,14 +432,7 @@ function createPillars(): void {
         metalness: 0.1
     });
     
-    const materials = [
-        barkMat,  // +X
-        barkMat,  // -X
-        ringsMat, // +Y (Top)
-        ringsMat, // -Y (Bottom)
-        barkMat,  // +Z
-        barkMat   // -Z
-    ];
+    const materials = [barkMat, barkMat, ringsMat, ringsMat, barkMat, barkMat];
     
     const pillarInstanced = new THREE.InstancedMesh(boxGeo, materials, PILLAR_COUNT);
     pillarInstanced.castShadow = true;
@@ -498,7 +459,9 @@ function createPillars(): void {
         obstacle.userData.halfW = PILLAR_WIDTH / 2;
         obstacle.userData.halfD = PILLAR_WIDTH / 2;
         obstacle.userData.halfH = height / 2;
-        obstacle.visible = false; 
+        // Invisible meshes are the gameplay colliders and grapple targets; the
+        // visible pillars are batched in the InstancedMesh above.
+        obstacle.visible = false;
         state.scene!.add(obstacle);
         state.obstacles.push(obstacle);
         state.grappleSurfaces.push(obstacle);
@@ -605,6 +568,8 @@ function createLavaPools(): void {
 }
 
 function createBushes(): void {
+    // Near-field bushes are geometry; far-field bushes are sprites. Both avoid
+    // blockers/hazards so the arena remains readable.
     let spawned3DBushes = 0;
     let attempts3D = 0;
     while (spawned3DBushes < BUSH_3D_COUNT && attempts3D < 1000) {
@@ -694,7 +659,6 @@ function createEnemies(): void {
     }
 }
 
-// Creates the complete game floor geometry, instanced pillars, lava pools, 2D billboard environment and spawns enemies.
 export function createEnvironment(): void {
     if (!state.scene) return;
 
@@ -706,7 +670,6 @@ export function createEnvironment(): void {
     createEnemies();
 }
 
-// Updates all active target groups, rotating the target meshes and orienting their 3D health bars to face the camera.
 export function updateTargets(delta: number): void {
     const targetsLen = state.targets.length;
     for (let i = 0; i < targetsLen; i++) {
@@ -718,7 +681,7 @@ export function updateTargets(delta: number): void {
         }
     }
 
-    // Update 2D fake billboard pillars to face the player's horizontal position
+    // Billboard pillars face the player horizontally, not the full camera pitch.
     if (state.fakePillars && state.controls) {
         const playerObj = state.controls.getObject();
         const px = playerObj.position.x;

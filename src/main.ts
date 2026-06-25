@@ -38,14 +38,14 @@ import {
     flashPeerMesh
 } from './multiplayer.js';
 
-// Module-level cached vectors to prevent per-frame garbage collection
+// Reused scratch vectors keep the hot render loop from allocating every frame.
 const _logicalCameraPos = new THREE.Vector3();
 const _tpCamDir = new THREE.Vector3();
 const _tpCamOffset = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
 const _jumpBoosterPos = new THREE.Vector3();
 
-// DOM caches
+// Lazily cache HUD/menu elements. Most code paths touch the UI every frame.
 const UI_cache: Record<string, HTMLElement | null> = {};
 const getUI = <T extends HTMLElement>(id: string): T | null => {
     return (UI_cache[id] || (UI_cache[id] = document.getElementById(id))) as T | null;
@@ -98,19 +98,15 @@ const UI = {
     get mpNameError() { return getUI<HTMLElement>('mp-name-error'); },
     get btnCopyCode() { return getUI<HTMLElement>('btn-copy-code'); },
 };
-// Static Weapon cycles
-// Note: The order in WEAPON_CYCLE is for sequential cycling (e.g. via 'E' key).
-// Digit key mappings are assigned differently (e.g. Digit2 -> AR, Digit3 -> Shotgun)
-// to align with gaming conventions (most-used weapons bound to closer, more accessible keys).
+// Sequential cycling order for E. Number keys below use a different, FPS-style layout.
 const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
 
-// Dirty flags for per-frame DOM write optimization
+// Last-written UI values, so the animation loop only mutates the DOM on changes.
 let lastReloadProgress = -1;
 let lastHoverFuel = -1;
 let lastFov = -1;
 let lastScopedState: boolean | null = null;
 
-// Updates the player's health bar width in the UI HUD overlay and plays a damage screen/bar color flash.
 export function updateHealthBar(hpRatio: number, flashColor: string | null = null): void {
     if (!UI.healthBar) return;
     UI.healthBar.style.width = `${hpRatio}%`;
@@ -126,7 +122,6 @@ export function updateHealthBar(hpRatio: number, flashColor: string | null = nul
     }
 }
 
-// Updates the hover fuel progress bar height in the UI HUD overlay to match current hover energy.
 export function updateHoverBar(fuelRatio: number): void {
     if (!UI.hoverBar) return;
     if (fuelRatio !== lastHoverFuel) {
@@ -138,7 +133,6 @@ export function updateHoverBar(fuelRatio: number): void {
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
 
-// Validates player username: must contain only letters, cannot be empty, and has a maximum length of 10 characters.
 function validateUsername(username: string | null): string | null {
     if (!username) {
         return 'Username cannot be empty!';
@@ -153,7 +147,6 @@ function validateUsername(username: string | null): string | null {
     return null;
 }
 
-// Resets camera aspect ratios and updates renderer size on window resize events to keep visuals aligned.
 function onWindowResize(): void {
     if (state.camera && state.renderer) {
         state.camera.aspect = window.innerWidth / window.innerHeight;
@@ -162,7 +155,8 @@ function onWindowResize(): void {
     }
 }
 
-// Creates Three.js camera, scene fog, ambient & directional lighting, configures shadow maps, and instantiates PointerLock controls.
+// Renderer and camera setup is intentionally centralized because pointer lock,
+// third-person mode and weapon attachments all share the same camera object.
 function setupRenderer(): void {
     state.camera = new THREE.PerspectiveCamera(DEFAULT_FOV, window.innerWidth / window.innerHeight, 0.1, 1500);
 
@@ -203,9 +197,7 @@ function setupRenderer(): void {
     state.controls = new PointerLockControls(state.camera, document.body);
 }
 
-// Binds all HTML button event listeners (singleplayer, hosting, joining lobby, pausing, respawns, and code copying).
 function setupMenuListeners(): void {
-    // Singleplayer Play
     if (UI.btnPlaySp) {
         UI.btnPlaySp.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -216,7 +208,6 @@ function setupMenuListeners(): void {
         });
     }
 
-    // Multiplayer view toggle
     if (UI.btnMenuMp) {
         UI.btnMenuMp.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -234,7 +225,6 @@ function setupMenuListeners(): void {
         });
     }
 
-    // Host Menu view
     if (UI.btnMpHostView) {
         UI.btnMpHostView.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -274,7 +264,6 @@ function setupMenuListeners(): void {
         });
     }
 
-    // Join Menu view
     if (UI.btnMpJoinView) {
         UI.btnMpJoinView.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -328,7 +317,6 @@ function setupMenuListeners(): void {
         });
     }
 
-    // Pause Handlers
     if (UI.btnPauseResume) {
         UI.btnPauseResume.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -349,7 +337,6 @@ function setupMenuListeners(): void {
         });
     }
 
-    // Respawn / Death panel
     if (UI.btnDeathRespawn) {
         UI.btnDeathRespawn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -381,7 +368,6 @@ function setupMenuListeners(): void {
         });
     }
 
-    // Copy room code
     if (UI.btnCopyCode) {
         UI.btnCopyCode.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -397,9 +383,9 @@ function setupMenuListeners(): void {
     }
 }
 
-// Sets up all mouse click, hover, window resize, and keyboard inputs (WASD, Space, Shift, C, X, E, 1-5).
+// Pointer lock means keyboard and mouse state must be tracked globally, then
+// consumed by the physics/weapons systems during the frame update.
 function setupInputListeners(): void {
-    // Keyboard inputs
     const onKeyDown = (e: KeyboardEvent) => {
         switch (e.code) {
             case 'KeyW': state.moveForward = true; break;
@@ -520,12 +506,11 @@ function setupInputListeners(): void {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // Mouse inputs
     window.addEventListener('mousedown', (e) => {
         if (state.controls && state.controls.isLocked) {
             e.preventDefault();
         }
-        if (e.button === 0) { // Left click
+        if (e.button === 0) {
             state.isMouseDown = true;
             if (!state.controls || !state.controls.isLocked) return;
             if (state.inspectState === 'INSPECTING') {
@@ -534,7 +519,7 @@ function setupInputListeners(): void {
             if (state.fireCooldown <= 0 && state.switchState === 'IDLE') {
                 fireProjectile();
             }
-        } else if (e.button === 2) { // Right click
+        } else if (e.button === 2) {
             if (state.controls && state.controls.isLocked) {
                 state.rightClickActive = true;
                 state.isScoped = state.rightClickActive || state.keyCActive;
@@ -549,7 +534,7 @@ function setupInputListeners(): void {
         }
         if (e.button === 0) {
             state.isMouseDown = false;
-        } else if (e.button === 2) { // Right click release
+        } else if (e.button === 2) {
             state.rightClickActive = false;
             state.isScoped = state.rightClickActive || state.keyCActive;
         }
@@ -564,7 +549,7 @@ function setupInputListeners(): void {
     window.addEventListener('resize', onWindowResize);
 }
 
-// Initialises core runtime components: player mesh, weapons, procedural world border, and grappling hook cable.
+// Build scene systems after controls exist because several meshes attach to the camera.
 function setupGameSystems(): void {
     if (!state.scene || !state.controls) return;
     state.scene.add(state.controls.getObject());
@@ -573,7 +558,6 @@ function setupGameSystems(): void {
     createPlayerMesh();
     createEnvironment();
 
-    // Hook Mesh Cable setup
     const hookGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
     hookGeo.rotateX(Math.PI / 2);
     const hookMat = new THREE.MeshStandardMaterial({ 
@@ -585,7 +569,7 @@ function setupGameSystems(): void {
     state.hookMesh.castShadow = true;
     state.hookMesh.receiveShadow = true;
 
-    // Pre-populate projectile pool to prevent runtime allocation hitches
+    // Bullets are pooled because rapid-fire weapons can otherwise cause frame spikes.
     const preAllocCount = 128;
     for (let i = 0; i < preAllocCount; i++) {
         const projMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
@@ -596,7 +580,6 @@ function setupGameSystems(): void {
     }
 }
 
-// Resets player state vectors, wipes HUD scores, restores health/fuel indicators, and respawns character.
 function performPlayerReset(): void {
     resetPlayerState();
     if (UI.score) UI.score.innerText = '0';
@@ -607,7 +590,6 @@ function performPlayerReset(): void {
     resetHook();
 }
 
-// Broadcasts client player death details to remote peer DataChannels
 function broadcastPlayerDeath(victimName: string, killerName: string): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     const packet = {
@@ -627,11 +609,9 @@ function broadcastPlayerDeath(victimName: string, killerName: string): void {
     });
 }
 
-// Bootstraps the entire game: renderer, menu layout, key/mouse listeners and gameplay modules.
 export function init(): void {
     setDamageHandlers(processTargetHit, takePlayerDamage);
     setupRenderer();
-    // Sensitivity slider setup
     let initialSens = 1.0;
     if (UI.sensSlider) {
         let val = parseFloat(UI.sensSlider.value);
@@ -663,7 +643,7 @@ export function init(): void {
 
     setupMenuListeners();
 
-    // PointerLock controls change triggers
+    // Lock/unlock events are the main UI state machine for playing, pausing and death menus.
     if (state.controls) {
         state.controls.addEventListener('lock', () => {
             if (state.pendingPlay) {
@@ -746,21 +726,19 @@ export function init(): void {
     setupInputListeners();
     setupGameSystems();
 
-    // Start the render loop only after all systems are initialised
     animate();
 }
 
-// Global render callback loop executing physics steps, weapons, network syncing, particles, and rendering frames at unlimited FPS.
+// Main frame loop. Order matters: input-driven systems update first, then gameplay
+// collisions/damage, then remote sync and rendering.
 export function animate(): void {
     requestAnimationFrame(animate);
 
     const time = performance.now();
     const delta = (time - state.prevTime) / 1000;
 
-    // 1) Update weapons recoil and switched models
     updateWeapons(delta);
 
-    // Update reload bar UI (indicates cooldown recovery)
     if (UI.reloadBar) {
         const stats = WEAPON_STATS[state.activeWeaponName];
         const maxCooldown = stats ? stats.fireRate : 0.1;
@@ -772,7 +750,6 @@ export function animate(): void {
         }
     }
 
-    // 1.5) Automatic weapon firing
     if (state.controls && state.controls.isLocked && state.isMouseDown && (state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
         if (state.inspectState === 'INSPECTING') {
             cancelInspect();
@@ -780,25 +757,20 @@ export function animate(): void {
         fireProjectile();
     }
 
-    // 2) Update player physics movements
     updatePlayerPhysics(delta);
     updateHoverBar(state.hoverFuel);
 
-    // 2.5) Check lava hazard damage ticks
     checkLavaDamage(delta);
 
-    // 2.6) Update passive health regeneration
     updateHealthRegen(delta);
 
-    // 3) Update hook trajectories
     updateHook(delta);
 
-    // Fetch peer IDs once outside the nested projectile loop to reduce GC pressure
     const peerIds = state.isMultiplayer ? state.peerIds : [];
     const peerIdsLen = peerIds.length;
     const activeDamage = WEAPON_STATS[state.activeWeaponName]?.damage ?? 1;
 
-    // 4) Update active bullets
+    // Local and remote non-sniper bullets share this projectile simulation.
     for (let i = state.projectiles.length - 1; i >= 0; i--) {
         const proj = state.projectiles[i];
         proj.userData.age += delta;
@@ -843,7 +815,6 @@ export function animate(): void {
             }
         }
 
-        // B) Check hits on Remote Players (PVP) in Multiplayer
         if (!projectileHit && state.isMultiplayer) {
             for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
@@ -889,21 +860,16 @@ export function animate(): void {
         }
     }
 
-    // 5) Update targets bilboardings
     updateTargets(delta);
 
-    // 6) Tick dynamic gravity particles
     updateParticles(delta);
 
-    // 6.5) Stream multiplayer client sync packets
     if (state.isMultiplayer) {
         sendLocalState();
     }
 
-    // 6.6) Update world border overlay warning opacity
     updateWorldBorderOverlay(delta);
 
-    // 7) Frame pacing calculations
     fpsFrames++;
     if (time >= fpsLastTime + 1000) {
         if (UI.fpsCounter) {
@@ -915,7 +881,6 @@ export function animate(): void {
 
     state.prevTime = time;
 
-    // Lerp FOV for scoping
     if (state.camera) {
         const targetFov = state.isScoped ? SCOPED_FOV : DEFAULT_FOV;
         if (Math.abs(state.camera.fov - targetFov) > 0.1) {
@@ -926,7 +891,7 @@ export function animate(): void {
             state.camera.updateProjectionMatrix();
         }
 
-        // Dynamic pointer speed scaling based on zoom level
+        // Scope zoom also reduces pointer speed so aiming does not feel twitchy.
         if (state.controls) {
             if (state.camera.fov !== lastFov) {
                 state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / DEFAULT_FOV);
@@ -934,7 +899,6 @@ export function animate(): void {
             }
         }
 
-        // Toggle goggles, normal crosshair, and standard gameplay HUD overlays
         if (UI.gogglesScope && UI.crosshair) {
             if (state.isScoped !== lastScopedState) {
                 if (state.isScoped) {
@@ -974,7 +938,7 @@ export function animate(): void {
                 _tpCamDir.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
                 const offsetDist = 6.0;
                 _tpCamOffset.copy(_tpCamDir).multiplyScalar(-offsetDist);
-                _tpCamOffset.y += 1.5; // Offset camera upward slightly
+                _tpCamOffset.y += 1.5;
                 state.camera.position.add(_tpCamOffset);
             }
 
@@ -987,12 +951,11 @@ export function animate(): void {
     }
 }
 
-// Computes local player damage, displays blood splatter particles, flashes HUD bar, and broadcasts deaths.
 export function takePlayerDamage(damage: number, attackerName: string): void {
     if (!state.isPlaying || state.playerHp <= 0) return;
 
     state.playerHp -= damage;
-    state.lastDamageTime = performance.now(); // Reset passive regen ticker delay
+    state.lastDamageTime = performance.now();
 
     if (state.controls) {
         const myPos = _lavaFeetPos.copy(state.controls.getObject().position);
@@ -1014,7 +977,6 @@ export function takePlayerDamage(damage: number, attackerName: string): void {
     }
 }
 
-// Triggers local player death sequence, displaying red menu screen, spawning explosion sparks, and releasing controls.
 export function triggerDeath(): void {
     if (UI.panelPause) {
         UI.panelPause.style.display = 'none';
@@ -1046,7 +1008,7 @@ export function triggerDeath(): void {
     if (UI.hoverBadge) UI.hoverBadge.style.display = 'none';
 }
 
-// Processes hit confirmations on remote targets, updating hp ratios, spawning shockwaves and respawning target boxes.
+// Host/singleplayer authority for target health. Clients ask the host to call this.
 export function processTargetHit(targetIndex: number, damage: number): void {
     const target = state.targets[targetIndex];
     if (!target) return;
@@ -1059,7 +1021,6 @@ export function processTargetHit(targetIndex: number, damage: number): void {
         const enemyColor = target.userData.color || 0xff4500;
         spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
         
-        // Call particles shockwave helper instead of allocating fresh geometries inline
         createShockwave(target.position, 8.0 * (target.userData.scale || 1.0), 0xffaa00);
         
         if (state.hookState === 'PULLING' && state.hookIsEnemy && state.hookTargetEnemy === target) {
@@ -1077,7 +1038,6 @@ export function processTargetHit(targetIndex: number, damage: number): void {
     }
 }
 
-// Detects if the player is standing inside a lava hazard pool and applies tick-based damage.
 export function checkLavaDamage(delta: number): void {
     if (!state.controls || (!state.controls.isLocked && !state.isMultiplayer)) return;
 
@@ -1126,7 +1086,6 @@ export function checkLavaDamage(delta: number): void {
     }
 }
 
-// Evaluates and updates passive health regeneration if the player has not taken damage recently.
 export function updateHealthRegen(delta: number): void {
     if (!state.isPlaying || state.playerHp <= 0 || state.playerHp >= state.playerMaxHp) {
         state.regenTimer = 0;
@@ -1147,7 +1106,6 @@ export function updateHealthRegen(delta: number): void {
     }
 }
 
-// Updates the red border warning vignette opacity and pulsation depending on player proximity to boundaries.
 export function updateWorldBorderOverlay(delta: number): void {
     if (!state.isPlaying || !state.controls) return;
     const playerObj = state.controls.getObject();
@@ -1177,5 +1135,4 @@ export function updateWorldBorderOverlay(delta: number): void {
     }
 }
 
-// Automatically bootstrap the game
 init();
