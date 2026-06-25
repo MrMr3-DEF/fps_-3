@@ -26,7 +26,6 @@ function ensureBoxParticleMesh(): THREE.InstancedMesh | null {
     if (!boxParticleMesh) {
         const mat = new THREE.MeshBasicMaterial({
             color: 0xffffff,
-            vertexColors: true,
             transparent: true,
             opacity: 0.95,
             depthTest: false,
