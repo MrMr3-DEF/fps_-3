@@ -36,7 +36,7 @@ import {
     broadcastTargetKill,
     updateRemotePeers
 } from './multiplayer.js';
-import { applyRendererSettings, loadUserSettings, resetUserSettings, saveUserSettings, userSettings } from './settings.js';
+import { applyRendererSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
 import { targetData } from './userDataTypes.js';
 import type { PlayerDiedPacket } from './networkTypes.js';
 
@@ -98,6 +98,7 @@ const UI = {
     get btnMenuSettings() { return getUI<HTMLElement>('btn-menu-settings'); },
     get btnSettingsBack() { return getUI<HTMLElement>('btn-settings-back'); },
     get btnSettingsReset() { return getUI<HTMLElement>('btn-settings-reset'); },
+    get btnSettingsApply() { return getUI<HTMLElement>('btn-settings-apply'); },
     get btnMpBack() { return getUI<HTMLElement>('btn-mp-back'); },
     get btnMpHostView() { return getUI<HTMLElement>('btn-mp-host-view'); },
     get btnMpJoinView() { return getUI<HTMLElement>('btn-mp-join-view'); },
@@ -122,6 +123,7 @@ const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
 
 let lastFov = -1;
 let lastScopedState: boolean | null = null;
+let pendingSettings: UserSettings = { ...userSettings };
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
@@ -208,6 +210,7 @@ function setupMenuListeners(): void {
     if (UI.btnMenuSettings) {
         UI.btnMenuSettings.addEventListener('click', (e) => {
             e.stopPropagation();
+            resetPendingSettings();
             if (UI.panelMain) UI.panelMain.style.display = 'none';
             if (UI.panelSettings) UI.panelSettings.style.display = 'flex';
         });
@@ -216,6 +219,7 @@ function setupMenuListeners(): void {
     if (UI.btnSettingsBack) {
         UI.btnSettingsBack.addEventListener('click', (e) => {
             e.stopPropagation();
+            resetPendingSettings();
             if (UI.panelSettings) UI.panelSettings.style.display = 'none';
             if (UI.panelMain) UI.panelMain.style.display = 'flex';
         });
@@ -224,9 +228,15 @@ function setupMenuListeners(): void {
     if (UI.btnSettingsReset) {
         UI.btnSettingsReset.addEventListener('click', (e) => {
             e.stopPropagation();
-            resetUserSettings();
+            pendingSettings = { ...DEFAULT_USER_SETTINGS };
             syncSettingsControls();
-            applyLiveSettings();
+        });
+    }
+
+    if (UI.btnSettingsApply) {
+        UI.btnSettingsApply.addEventListener('click', (e) => {
+            e.stopPropagation();
+            applyPendingSettings();
         });
     }
 
@@ -655,6 +665,11 @@ function formatPercent(value: number): string {
     return `${Math.round(value * 100)}%`;
 }
 
+function clampNumber(value: number, min: number, max: number, fallback: number): number {
+    if (!Number.isFinite(value)) return fallback;
+    return Math.max(min, Math.min(max, value));
+}
+
 function setCheckboxLabel(el: HTMLElement | null, enabled: boolean): void {
     if (el) el.innerText = enabled ? 'On' : 'Off';
 }
@@ -671,21 +686,55 @@ function resetHudCounters(): void {
     if (UI.deaths) UI.deaths.innerText = '0';
 }
 
-function syncSettingsControls(): void {
-    if (UI.sensSlider) UI.sensSlider.value = userSettings.sensitivity.toFixed(1);
-    if (UI.sensValue) UI.sensValue.innerText = userSettings.sensitivity.toFixed(1);
-    if (UI.settingFov) UI.settingFov.value = userSettings.fov.toFixed(0);
-    if (UI.settingFovValue) UI.settingFovValue.innerText = userSettings.fov.toFixed(0);
-    if (UI.settingScopedFov) UI.settingScopedFov.value = userSettings.scopedFov.toFixed(0);
-    if (UI.settingScopedFovValue) UI.settingScopedFovValue.innerText = userSettings.scopedFov.toFixed(0);
-    if (UI.settingRenderScale) UI.settingRenderScale.value = userSettings.renderScale.toFixed(2);
-    if (UI.settingRenderScaleValue) UI.settingRenderScaleValue.innerText = formatPercent(userSettings.renderScale);
-    if (UI.settingParticles) UI.settingParticles.value = userSettings.particleAmount.toFixed(2);
-    if (UI.settingParticlesValue) UI.settingParticlesValue.innerText = formatPercent(userSettings.particleAmount);
-    if (UI.settingShadows) UI.settingShadows.checked = userSettings.shadows;
-    setCheckboxLabel(UI.settingShadowsValue, userSettings.shadows);
-    if (UI.settingFps) UI.settingFps.checked = userSettings.showFps;
-    setCheckboxLabel(UI.settingFpsValue, userSettings.showFps);
+function settingsEqual(a: UserSettings, b: UserSettings): boolean {
+    return a.sensitivity === b.sensitivity &&
+        a.fov === b.fov &&
+        a.scopedFov === b.scopedFov &&
+        a.renderScale === b.renderScale &&
+        a.particleAmount === b.particleAmount &&
+        a.shadows === b.shadows &&
+        a.showFps === b.showFps;
+}
+
+function updateApplyButton(): void {
+    if (UI.btnSettingsApply) {
+        UI.btnSettingsApply.style.display = settingsEqual(pendingSettings, userSettings) ? 'none' : 'inline-block';
+    }
+}
+
+function syncSettingsControls(settings: UserSettings = pendingSettings): void {
+    if (UI.sensSlider) UI.sensSlider.value = settings.sensitivity.toFixed(1);
+    if (UI.sensValue) UI.sensValue.innerText = settings.sensitivity.toFixed(1);
+    if (UI.settingFov) UI.settingFov.value = settings.fov.toFixed(0);
+    if (UI.settingFovValue) UI.settingFovValue.innerText = settings.fov.toFixed(0);
+    if (UI.settingScopedFov) UI.settingScopedFov.value = settings.scopedFov.toFixed(0);
+    if (UI.settingScopedFovValue) UI.settingScopedFovValue.innerText = settings.scopedFov.toFixed(0);
+    if (UI.settingRenderScale) UI.settingRenderScale.value = settings.renderScale.toFixed(2);
+    if (UI.settingRenderScaleValue) UI.settingRenderScaleValue.innerText = formatPercent(settings.renderScale);
+    if (UI.settingParticles) UI.settingParticles.value = settings.particleAmount.toFixed(2);
+    if (UI.settingParticlesValue) UI.settingParticlesValue.innerText = formatPercent(settings.particleAmount);
+    if (UI.settingShadows) UI.settingShadows.checked = settings.shadows;
+    setCheckboxLabel(UI.settingShadowsValue, settings.shadows);
+    if (UI.settingFps) UI.settingFps.checked = settings.showFps;
+    setCheckboxLabel(UI.settingFpsValue, settings.showFps);
+    updateApplyButton();
+}
+
+function resetPendingSettings(): void {
+    pendingSettings = { ...userSettings };
+    syncSettingsControls();
+}
+
+function applyPendingSettings(): void {
+    Object.assign(userSettings, pendingSettings);
+    saveUserSettings();
+    applyLiveSettings();
+    syncSettingsControls();
+}
+
+function updatePendingSettings(mutator: (settings: UserSettings) => void): void {
+    mutator(pendingSettings);
+    syncSettingsControls();
 }
 
 function applyLiveSettings(): void {
@@ -711,59 +760,53 @@ function applyLiveSettings(): void {
 }
 
 function setupSettingsControls(): void {
-    syncSettingsControls();
+    resetPendingSettings();
 
     UI.sensSlider?.addEventListener('input', (e) => {
         const val = parseFloat((e.target as HTMLInputElement).value);
-        userSettings.sensitivity = Number.isFinite(val) ? Math.max(0.1, Math.min(3.0, val)) : 1.0;
-        syncSettingsControls();
-        saveUserSettings();
-        applyLiveSettings();
+        updatePendingSettings((settings) => {
+            settings.sensitivity = clampNumber(val, 0.1, 3.0, DEFAULT_USER_SETTINGS.sensitivity);
+        });
     });
 
     UI.settingFov?.addEventListener('input', (e) => {
         const val = parseFloat((e.target as HTMLInputElement).value);
-        userSettings.fov = Number.isFinite(val) ? Math.max(55, Math.min(105, val)) : DEFAULT_FOV;
-        syncSettingsControls();
-        saveUserSettings();
-        applyLiveSettings();
+        updatePendingSettings((settings) => {
+            settings.fov = clampNumber(val, 55, 105, DEFAULT_FOV);
+        });
     });
 
     UI.settingScopedFov?.addEventListener('input', (e) => {
         const val = parseFloat((e.target as HTMLInputElement).value);
-        userSettings.scopedFov = Number.isFinite(val) ? Math.max(8, Math.min(35, val)) : SCOPED_FOV;
-        syncSettingsControls();
-        saveUserSettings();
-        applyLiveSettings();
+        updatePendingSettings((settings) => {
+            settings.scopedFov = clampNumber(val, 8, 35, SCOPED_FOV);
+        });
     });
 
     UI.settingRenderScale?.addEventListener('input', (e) => {
         const val = parseFloat((e.target as HTMLInputElement).value);
-        userSettings.renderScale = Number.isFinite(val) ? Math.max(0.5, Math.min(1.0, val)) : 1.0;
-        syncSettingsControls();
-        saveUserSettings();
-        applyLiveSettings();
+        updatePendingSettings((settings) => {
+            settings.renderScale = clampNumber(val, 0.5, 1.0, DEFAULT_USER_SETTINGS.renderScale);
+        });
     });
 
     UI.settingParticles?.addEventListener('input', (e) => {
         const val = parseFloat((e.target as HTMLInputElement).value);
-        userSettings.particleAmount = Number.isFinite(val) ? Math.max(0.2, Math.min(1.0, val)) : 1.0;
-        syncSettingsControls();
-        saveUserSettings();
+        updatePendingSettings((settings) => {
+            settings.particleAmount = clampNumber(val, 0.2, 1.0, DEFAULT_USER_SETTINGS.particleAmount);
+        });
     });
 
     UI.settingShadows?.addEventListener('change', (e) => {
-        userSettings.shadows = (e.target as HTMLInputElement).checked;
-        syncSettingsControls();
-        saveUserSettings();
-        applyLiveSettings();
+        updatePendingSettings((settings) => {
+            settings.shadows = (e.target as HTMLInputElement).checked;
+        });
     });
 
     UI.settingFps?.addEventListener('change', (e) => {
-        userSettings.showFps = (e.target as HTMLInputElement).checked;
-        syncSettingsControls();
-        saveUserSettings();
-        applyLiveSettings();
+        updatePendingSettings((settings) => {
+            settings.showFps = (e.target as HTMLInputElement).checked;
+        });
     });
 }
 
