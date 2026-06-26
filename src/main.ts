@@ -455,10 +455,7 @@ function setupInputListeners(): void {
                 break;
             case 'KeyE':
                 if (state.controls && state.controls.isLocked) {
-                    const currentIndex = WEAPON_CYCLE.indexOf(state.desiredWeaponName);
-                    const nextIndex = (currentIndex + 1) % WEAPON_CYCLE.length;
-                    state.desiredWeaponName = WEAPON_CYCLE[nextIndex];
-                    cancelInspect();
+                    cycleWeapon(1);
                 }
                 break;
             case 'Digit1':
@@ -469,13 +466,13 @@ function setupInputListeners(): void {
                 break;
             case 'Digit2':
                 if (state.controls && state.controls.isLocked) {
-                    state.desiredWeaponName = 'AR';
+                    state.desiredWeaponName = 'SHOTGUN';
                     cancelInspect();
                 }
                 break;
             case 'Digit3':
                 if (state.controls && state.controls.isLocked) {
-                    state.desiredWeaponName = 'SHOTGUN';
+                    state.desiredWeaponName = 'AR';
                     cancelInspect();
                 }
                 break;
@@ -539,6 +536,7 @@ function setupInputListeners(): void {
     window.addEventListener('pointerrawupdate', (e) => handleGameMouseButtons(e as PointerEvent), true);
     window.addEventListener('contextmenu', preventLockedMouseDefault, true);
     window.addEventListener('auxclick', preventLockedMouseDefault, true);
+    window.addEventListener('wheel', handleWeaponWheel, { passive: false });
 
     window.addEventListener('resize', onWindowResize);
 }
@@ -675,6 +673,24 @@ function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
     if (state.rightClickActive) {
         cancelInspect();
     }
+}
+
+function handleWeaponWheel(e: WheelEvent): void {
+    if (!isGameInputLocked()) return;
+
+    e.preventDefault();
+    const direction = Math.sign(e.deltaY);
+    if (direction !== 0) {
+        cycleWeapon(direction);
+    }
+}
+
+function cycleWeapon(direction: number): void {
+    const currentIndex = WEAPON_CYCLE.indexOf(state.desiredWeaponName);
+    const safeIndex = currentIndex >= 0 ? currentIndex : WEAPON_CYCLE.indexOf(state.activeWeaponName);
+    const nextIndex = (safeIndex + Math.sign(direction) + WEAPON_CYCLE.length) % WEAPON_CYCLE.length;
+    state.desiredWeaponName = WEAPON_CYCLE[nextIndex];
+    cancelInspect();
 }
 
 function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
