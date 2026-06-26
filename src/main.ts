@@ -533,8 +533,8 @@ function setupInputListeners(): void {
 
     window.addEventListener('mousedown', handleGameMouseButtons, true);
     window.addEventListener('mouseup', handleGameMouseButtons, true);
-    window.addEventListener('pointerdown', handleGameMouseButtons, true);
-    window.addEventListener('pointerup', handleGameMouseButtons, true);
+    window.addEventListener('pointermove', handleGameMouseButtons, true);
+    window.addEventListener('pointerrawupdate', (e) => handleGameMouseButtons(e as PointerEvent), true);
     window.addEventListener('contextmenu', preventLockedMouseDefault, true);
     window.addEventListener('auxclick', preventLockedMouseDefault, true);
 
@@ -676,12 +676,21 @@ function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
 }
 
 function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
-    const isButtonDown = e.type === 'mousedown' || e.type === 'pointerdown';
+    if (e.type === 'mousedown' || e.type === 'mouseup') {
+        const isButtonDown = e.type === 'mousedown';
 
-    if (e.button === 0) {
-        state.isMouseDown = isButtonDown;
+        if (e.button === 0) {
+            state.isMouseDown = isButtonDown;
+        } else if (e.button === 2) {
+            state.rightClickActive = isButtonDown;
+        }
+    } else if (e.button === 0) {
+        state.isMouseDown = (e.buttons & 1) !== 0;
     } else if (e.button === 2) {
-        state.rightClickActive = isButtonDown;
+        state.rightClickActive = (e.buttons & 2) !== 0;
+    } else if (e.buttons === 0) {
+        state.isMouseDown = false;
+        state.rightClickActive = false;
     }
 
     state.isScoped = state.rightClickActive || state.keyCActive;
