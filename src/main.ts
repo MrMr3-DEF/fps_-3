@@ -124,6 +124,7 @@ const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
 let lastFov = -1;
 let lastScopedState: boolean | null = null;
 let pendingSettings: UserSettings = { ...userSettings };
+let middleMouseChordActive = false;
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
@@ -533,6 +534,7 @@ function setupInputListeners(): void {
 
     window.addEventListener('mousedown', handleGameMouseButtons, true);
     window.addEventListener('mouseup', handleGameMouseButtons, true);
+    window.addEventListener('mousemove', handleGameMouseButtons, true);
     window.addEventListener('pointermove', handleGameMouseButtons, true);
     window.addEventListener('pointerrawupdate', (e) => handleGameMouseButtons(e as PointerEvent), true);
     window.addEventListener('contextmenu', preventLockedMouseDefault, true);
@@ -683,12 +685,27 @@ function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
             state.isMouseDown = isButtonDown;
         } else if (e.button === 2) {
             state.rightClickActive = isButtonDown;
+        } else if (e.button === 1) {
+            if (isButtonDown && (state.isMouseDown || state.rightClickActive)) {
+                middleMouseChordActive = true;
+                state.isMouseDown = true;
+                state.rightClickActive = true;
+            } else if (!isButtonDown && middleMouseChordActive) {
+                middleMouseChordActive = false;
+                state.isMouseDown = false;
+                state.rightClickActive = false;
+            }
         }
     } else if (e.button === 0) {
         state.isMouseDown = (e.buttons & 1) !== 0;
     } else if (e.button === 2) {
         state.rightClickActive = (e.buttons & 2) !== 0;
+    } else if ((e.buttons & 4) !== 0 && (middleMouseChordActive || state.isMouseDown || state.rightClickActive)) {
+        middleMouseChordActive = true;
+        state.isMouseDown = true;
+        state.rightClickActive = true;
     } else if (e.buttons === 0) {
+        middleMouseChordActive = false;
         state.isMouseDown = false;
         state.rightClickActive = false;
     }
@@ -876,6 +893,7 @@ export function init(): void {
             state.isScoped = false;
             state.rightClickActive = false;
             state.keyCActive = false;
+            middleMouseChordActive = false;
             cancelInspect();
             if (UI.healthContainer) UI.healthContainer.style.display = 'none';
             if (UI.reloadContainer) UI.reloadContainer.style.display = 'none';
