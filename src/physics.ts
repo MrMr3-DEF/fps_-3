@@ -39,7 +39,6 @@ const _obstacleCandidates: THREE.Object3D[] = [];
 const _collisionCandidates: THREE.Object3D[] = [];
 
 // Cached HUD elements touched by movement effects.
-let speedlinesEl: HTMLElement | null = null;
 let sprintBadgeEl: HTMLElement | null = null;
 let hoverBadgeEl: HTMLElement | null = null;
 
@@ -158,9 +157,7 @@ export function updatePlayerPhysics(delta: number): void {
             _camRight.y = 0;
             _camRight.normalize();
 
-            if (!speedlinesEl) speedlinesEl = document.getElementById('speedlines');
             if (!sprintBadgeEl) sprintBadgeEl = document.getElementById('sprint-badge');
-            if (speedlinesEl) speedlinesEl.style.opacity = '0';
             if (sprintBadgeEl) sprintBadgeEl.style.display = 'none';
 
             // Hover is a mid-air brake/thruster state; grappling gets priority.

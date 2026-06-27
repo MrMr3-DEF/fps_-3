@@ -127,95 +127,21 @@
             height: 100%;
             pointer-events: none;
             z-index: 4;
-            --speedline-alpha: 0.12;
             opacity: 0;
-            transition: opacity 0.08s linear;
-            background:
-                radial-gradient(circle at center,
-                    transparent 0 24%,
-                    rgba(0, 210, 255, calc(var(--speedline-alpha) * 0.25)) 42%,
-                    transparent 78%),
-                repeating-conic-gradient(from 3deg,
-                    transparent 0deg 5deg,
-                    rgba(0, 170, 238, var(--speedline-alpha)) 6deg 7deg,
-                    transparent 9deg 15deg),
-                repeating-conic-gradient(from -2deg,
-                    transparent 0deg 11deg,
-                    rgba(0, 210, 255, calc(var(--speedline-alpha) * 0.8)) 12deg 14deg,
-                    transparent 16deg 24deg);
-            -webkit-mask-image: radial-gradient(circle, transparent 20%, black 52%, transparent 100%);
-            mask-image: radial-gradient(circle, transparent 20%, black 52%, transparent 100%);
-        }
-
-        #accelerometer {
-            position: absolute;
-            left: 30px;
-            bottom: 30px;
-            width: 124px;
-            height: 158px;
-            pointer-events: none;
-            z-index: 5;
-            display: none;
-        }
-
-        #accelerometer-face {
-            position: relative;
-            width: 124px;
-            height: 124px;
-            border-radius: 50%;
-            background:
-                radial-gradient(circle at center,
-                    transparent 0 16px,
-                    rgba(255, 255, 255, 0.95) 17px 18px,
-                    transparent 19px 33px,
-                    rgba(255, 255, 255, 0.85) 34px 35px,
-                    transparent 36px 50px,
-                    rgba(255, 255, 255, 0.75) 51px 52px,
-                    transparent 53px),
-                linear-gradient(90deg, transparent 49%, rgba(255, 255, 255, 0.8) 49.5%, rgba(255, 255, 255, 0.8) 50.5%, transparent 51%),
-                linear-gradient(0deg, transparent 49%, rgba(255, 255, 255, 0.8) 49.5%, rgba(255, 255, 255, 0.8) 50.5%, transparent 51%),
-                rgba(0, 0, 0, 0.65);
-            box-shadow:
-                inset 0 0 0 2px rgba(255, 255, 255, 0.9),
-                inset 0 0 18px rgba(255, 255, 255, 0.12),
-                0 0 16px rgba(0, 0, 0, 0.22);
             overflow: hidden;
+            transition: opacity 0.08s linear;
+            contain: strict;
         }
 
-        #accelerometer-face::before {
-            content: "";
+        .speedline-layer {
             position: absolute;
-            left: 50%;
-            top: 50%;
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: #ffffff;
-            transform: translate(-50%, -50%);
-            opacity: 0.9;
-        }
-
-        #accelerometer-dot {
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: #ff2b2b;
-            transform: translate(-50%, -50%);
-            box-shadow: 0 0 8px rgba(255, 43, 43, 0.85), 0 0 18px rgba(255, 43, 43, 0.35);
-        }
-
-        #accelerometer-value {
-            margin-top: 8px;
-            color: #000000;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            font-size: 24px;
-            font-weight: 900;
-            line-height: 1;
-            text-align: center;
-            text-shadow: 0 1px 2px rgba(255, 255, 255, 0.75);
+            inset: 0;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: cover;
+            opacity: 0;
+            transition: opacity 0.12s linear;
+            will-change: opacity;
         }
 
         #crosshair {
@@ -320,7 +246,7 @@
             transform: translateX(-50%);
             width: 480px;
             height: 28px;
-            background: rgba(0, 0, 0, 0.65);
+            background: rgba(43, 43, 43, 0.95);
             border: 2px solid rgba(255, 255, 255, 0.95);
             border-radius: 4px;
             overflow: hidden;
@@ -545,7 +471,7 @@
         }
     </style>
 
-  <script type="module" crossorigin src="/assets/index-B9HGSzq_.js"></script>
+  <script type="module" crossorigin src="/assets/index-CliJl15-.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-CbPL-GFE.js">
 </head>
 
@@ -730,12 +656,9 @@
         </div>
     </div>
 
-    <div id="speedlines"></div>
-    <div id="accelerometer">
-        <div id="accelerometer-face">
-            <div id="accelerometer-dot"></div>
-        </div>
-        <div id="accelerometer-value">0.0</div>
+    <div id="speedlines">
+        <div id="speedlines-a" class="speedline-layer"></div>
+        <div id="speedlines-b" class="speedline-layer"></div>
     </div>
     <div id="crosshair"></div>
     <div id="goggles-scope">

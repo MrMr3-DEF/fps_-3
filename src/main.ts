@@ -20,7 +20,7 @@ import {
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
 import { disposeProjectiles, updateProjectiles } from './projectiles.js';
-import { setFpsText, setFpsVisible, updateHealthBar, updateHoverBar, updateReloadBar } from './hud.js';
+import { setFpsText, setFpsVisible, updateHealthBar, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
@@ -980,6 +980,7 @@ export function animate(): void {
 
     updatePlayerPhysics(delta);
     updateHoverBar(state.hoverFuel);
+    updateSpeedlines(state.velocity.length(), Boolean(state.controls?.isLocked && !state.isScoped && state.playerHp > 0));
 
     checkLavaDamage(delta);
 

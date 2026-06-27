@@ -128,10 +128,20 @@
             pointer-events: none;
             z-index: 4;
             opacity: 0;
-            transition: opacity 0.15s ease-in-out;
-            background: repeating-conic-gradient(from 0deg, transparent 0deg 3deg, rgba(0, 170, 238, 0.25) 4deg 5deg, transparent 6deg 12deg);
-            -webkit-mask-image: radial-gradient(circle, transparent 35%, black 75%);
-            mask-image: radial-gradient(circle, transparent 35%, black 75%);
+            overflow: hidden;
+            transition: opacity 0.08s linear;
+            contain: strict;
+        }
+
+        .speedline-layer {
+            position: absolute;
+            inset: 0;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: cover;
+            opacity: 0;
+            transition: opacity 0.12s linear;
+            will-change: opacity;
         }
 
         #crosshair {
@@ -644,7 +654,10 @@
         </div>
     </div>
 
-    <div id="speedlines"></div>
+    <div id="speedlines">
+        <div id="speedlines-a" class="speedline-layer"></div>
+        <div id="speedlines-b" class="speedline-layer"></div>
+    </div>
     <div id="crosshair"></div>
     <div id="goggles-scope">
         <div class="goggles-scanlines"></div>
