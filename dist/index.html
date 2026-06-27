@@ -131,16 +131,20 @@
             opacity: 0;
             transition: opacity 0.08s linear;
             background:
+                radial-gradient(circle at center,
+                    transparent 0 24%,
+                    rgba(0, 210, 255, calc(var(--speedline-alpha) * 0.25)) 42%,
+                    transparent 78%),
                 repeating-conic-gradient(from 3deg,
                     transparent 0deg 5deg,
                     rgba(0, 170, 238, var(--speedline-alpha)) 6deg 7deg,
-                    transparent 8deg 15deg),
+                    transparent 9deg 15deg),
                 repeating-conic-gradient(from -2deg,
                     transparent 0deg 11deg,
-                    rgba(0, 210, 255, calc(var(--speedline-alpha) * 0.65)) 12deg 14deg,
-                    transparent 15deg 24deg);
-            -webkit-mask-image: radial-gradient(circle, transparent 22%, black 64%, transparent 100%);
-            mask-image: radial-gradient(circle, transparent 22%, black 64%, transparent 100%);
+                    rgba(0, 210, 255, calc(var(--speedline-alpha) * 0.8)) 12deg 14deg,
+                    transparent 16deg 24deg);
+            -webkit-mask-image: radial-gradient(circle, transparent 20%, black 52%, transparent 100%);
+            mask-image: radial-gradient(circle, transparent 20%, black 52%, transparent 100%);
         }
 
         #accelerometer {
@@ -541,7 +545,7 @@
         }
     </style>
 
-  <script type="module" crossorigin src="/assets/index-C_2P4kNB.js"></script>
+  <script type="module" crossorigin src="/assets/index-B9HGSzq_.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-CbPL-GFE.js">
 </head>
 
