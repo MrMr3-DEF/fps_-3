@@ -20,7 +20,7 @@ import {
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
 import { disposeProjectiles, updateProjectiles } from './projectiles.js';
-import { setFpsText, setFpsVisible, updateHealthBar, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
+import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer, updateHealthBar, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
@@ -46,6 +46,9 @@ const _tpCamDir = new THREE.Vector3();
 const _tpCamOffset = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
 const _jumpBoosterPos = new THREE.Vector3();
+const _lastMotionVelocity = new THREE.Vector3();
+const _motionAccel = new THREE.Vector3();
+const _motionRight = new THREE.Vector3();
 const _lavaCandidates: THREE.Object3D[] = [];
 
 // Lazily cache HUD/menu elements. Most code paths touch the UI every frame.
@@ -125,6 +128,9 @@ let lastFov = -1;
 let lastScopedState: boolean | null = null;
 let pendingSettings: UserSettings = { ...userSettings };
 let middleMouseChordActive = false;
+let motionHudInitialized = false;
+let smoothedGRight = 0;
+let smoothedGUp = 0;
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
@@ -693,6 +699,45 @@ function cycleWeapon(direction: number): void {
     cancelInspect();
 }
 
+function updateLocalAccelerometer(delta: number): void {
+    const isVisible = Boolean(state.controls?.isLocked && !state.isScoped && state.playerHp > 0);
+
+    if (!isVisible || delta <= 0 || !state.camera) {
+        setAccelerometerVisible(false);
+        _lastMotionVelocity.copy(state.velocity);
+        motionHudInitialized = false;
+        smoothedGRight = 0;
+        smoothedGUp = 0;
+        return;
+    }
+
+    setAccelerometerVisible(true);
+
+    let gRight = 0;
+    let gUp = 0;
+    if (motionHudInitialized) {
+        _motionAccel.copy(state.velocity).sub(_lastMotionVelocity).divideScalar(delta);
+        _motionRight.set(1, 0, 0).applyQuaternion(state.camera.quaternion);
+        _motionRight.y = 0;
+        if (_motionRight.lengthSq() > 0) {
+            _motionRight.normalize();
+        }
+
+        const unitsPerG = 98.0665;
+        gRight = _motionAccel.dot(_motionRight) / unitsPerG;
+        gUp = _motionAccel.y / unitsPerG;
+    } else {
+        motionHudInitialized = true;
+    }
+
+    _lastMotionVelocity.copy(state.velocity);
+
+    const smoothing = Math.min(1, delta * 8);
+    smoothedGRight += (gRight - smoothedGRight) * smoothing;
+    smoothedGUp += (gUp - smoothedGUp) * smoothing;
+    updateAccelerometer(smoothedGRight, smoothedGUp);
+}
+
 function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
     if (e.type === 'mousedown' || e.type === 'mouseup') {
         const isButtonDown = e.type === 'mousedown';
@@ -910,6 +955,7 @@ export function init(): void {
             state.rightClickActive = false;
             state.keyCActive = false;
             middleMouseChordActive = false;
+            setAccelerometerVisible(false);
             cancelInspect();
             if (UI.healthContainer) UI.healthContainer.style.display = 'none';
             if (UI.reloadContainer) UI.reloadContainer.style.display = 'none';
@@ -980,6 +1026,7 @@ export function animate(): void {
 
     updatePlayerPhysics(delta);
     updateHoverBar(state.hoverFuel);
+    updateLocalAccelerometer(delta);
     updateSpeedlines(state.velocity.length(), Boolean(state.controls?.isLocked && !state.isScoped && state.playerHp > 0));
 
     checkLavaDamage(delta);
@@ -1117,6 +1164,7 @@ export function triggerDeath(): void {
     if (UI.crosshair) UI.crosshair.style.display = 'none';
     if (UI.ui) UI.ui.style.display = 'none';
     setFpsVisible(false);
+    setAccelerometerVisible(false);
     if (UI.healthContainer) UI.healthContainer.style.display = 'none';
     if (UI.reloadContainer) UI.reloadContainer.style.display = 'none';
 

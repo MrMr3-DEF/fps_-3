@@ -14,6 +14,8 @@ let speedlinesActive = false;
 let speedlinePhase = 0;
 let lastSpeedlineOpacity = -1;
 let lastSpeedlineSwapTime = 0;
+let lastGText = '';
+let lastGDotTransform = '';
 
 export function updateHealthBar(hpRatio: number, flashColor: string | null = null): void {
     const healthBar = getUI<HTMLElement>('health-bar');
@@ -159,5 +161,36 @@ export function updateSpeedlines(speed: number, visible: boolean): void {
         speedlinePhase = speedlinePhase === 0 ? 1 : 0;
         lastSpeedlineSwapTime = now;
         setSpeedlineLayers(true);
+    }
+}
+
+export function setAccelerometerVisible(visible: boolean): void {
+    const accelerometer = getUI<HTMLElement>('accelerometer');
+    if (accelerometer) accelerometer.style.display = visible ? 'block' : 'none';
+}
+
+export function updateAccelerometer(gRight: number, gUp: number): void {
+    const accelerometerValue = getUI<HTMLElement>('accelerometer-value');
+    const accelerometerDot = getUI<HTMLElement>('accelerometer-dot');
+
+    const gMagnitude = Math.hypot(gRight, gUp);
+    const gText = gMagnitude.toFixed(1);
+    if (accelerometerValue && gText !== lastGText) {
+        accelerometerValue.textContent = gText;
+        lastGText = gText;
+    }
+
+    if (accelerometerDot) {
+        const maxDisplayG = 3;
+        const clampedMagnitude = Math.min(maxDisplayG, gMagnitude);
+        const scale = gMagnitude > 0 ? clampedMagnitude / gMagnitude : 0;
+        const pxPerG = 17;
+        const x = Math.round(gRight * scale * pxPerG);
+        const y = Math.round(-gUp * scale * pxPerG);
+        const transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+        if (transform !== lastGDotTransform) {
+            accelerometerDot.style.transform = transform;
+            lastGDotTransform = transform;
+        }
     }
 }
