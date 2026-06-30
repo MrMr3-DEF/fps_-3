@@ -28,7 +28,7 @@ function ensureBoxParticleMesh(): THREE.InstancedMesh | null {
             color: 0xffffff,
             transparent: true,
             opacity: 0.95,
-            depthTest: false,
+            depthTest: true,
             depthWrite: false,
         });
         boxParticleMesh = new THREE.InstancedMesh(SHARED_BOX_GEO, mat, MAX_PARTICLES);
