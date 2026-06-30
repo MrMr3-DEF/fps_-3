@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DEFAULT_FOV, MAX_PARTICLES, SCOPED_FOV } from './config.js';
+import { DEFAULT_FOV, MAX_PARTICLES, MAX_RENDER_DISTANCE_CHUNKS, SCOPED_FOV } from './config.js';
 
 const STORAGE_KEY = 'testfps-settings-v1';
 
@@ -46,7 +46,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.scopedFov = clamp(parsed.scopedFov ?? DEFAULT_USER_SETTINGS.scopedFov, 8, 35);
             userSettings.renderScale = clamp(parsed.renderScale ?? DEFAULT_USER_SETTINGS.renderScale, 0.5, 1.0);
             userSettings.particleAmount = clamp(parsed.particleAmount ?? DEFAULT_USER_SETTINGS.particleAmount, 0.2, 1.0);
-            userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, 8));
+            userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);
         }

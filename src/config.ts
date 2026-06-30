@@ -10,6 +10,7 @@ export const BASE_GRAVITY = 420.0;
 
 export const MAX_PILLAR_HEIGHT = 225.0;
 export const MAX_ENEMY_HEIGHT = 275.0;
+export const ENEMY_COUNT = 64;
 export const HOOK_MAX_RANGE = 300.0;
 
 export const SWITCH_DURATION = 0.15;
@@ -110,3 +111,4 @@ export const APEX_VELOCITY_THRESHOLD = 20.0;
 export const DESCENT_FALL_RATIO_CAP = 45.0;
 export const GROUND_VISUAL_SIZE = 3500;
 export const RENDER_CHUNK_SIZE = 200;
+export const MAX_RENDER_DISTANCE_CHUNKS = 16;

@@ -6,6 +6,7 @@ import {
     PILLAR_WIDTH,
     MAX_PILLAR_HEIGHT,
     MAX_ENEMY_HEIGHT,
+    ENEMY_COUNT,
     ENEMY_CLASSES,
     LAVA_POOL_HALF_SIZE,
     TARGET_HIT_RANGE_MULTIPLIER,
@@ -18,7 +19,8 @@ import {
     BUSH_2D_INNER_RADIUS,
     BUSH_2D_SPREAD,
     GROUND_VISUAL_SIZE,
-    RENDER_CHUNK_SIZE
+    RENDER_CHUNK_SIZE,
+    MAX_RENDER_DISTANCE_CHUNKS
 } from './config.js';
 import { SpatialHash } from './spatialHash.js';
 import { obstacleData, targetData } from './userDataTypes.js';
@@ -46,13 +48,40 @@ function getRenderChunkKey(x: number, z: number): string {
 
 function addChunkedRenderObject(obj: THREE.Object3D): void {
     const key = getRenderChunkKey(obj.position.x, obj.position.z);
+    obj.userData.renderChunkKey = key;
     const chunk = renderChunks.get(key);
     if (chunk) {
         chunk.push(obj);
     } else {
         renderChunks.set(key, [obj]);
     }
-    obj.visible = false;
+    obj.visible = activeRenderChunks.has(key);
+}
+
+function refreshChunkedRenderObject(obj: THREE.Object3D): void {
+    const oldKey = obj.userData.renderChunkKey as string | undefined;
+    const newKey = getRenderChunkKey(obj.position.x, obj.position.z);
+    if (!oldKey) return;
+    if (oldKey === newKey) {
+        obj.visible = activeRenderChunks.has(newKey);
+        return;
+    }
+
+    const oldChunk = renderChunks.get(oldKey);
+    if (oldChunk) {
+        const index = oldChunk.indexOf(obj);
+        if (index !== -1) oldChunk.splice(index, 1);
+        if (oldChunk.length === 0) renderChunks.delete(oldKey);
+    }
+
+    obj.userData.renderChunkKey = newKey;
+    const newChunk = renderChunks.get(newKey);
+    if (newChunk) {
+        newChunk.push(obj);
+    } else {
+        renderChunks.set(newKey, [obj]);
+    }
+    obj.visible = activeRenderChunks.has(newKey);
 }
 
 function setRenderChunkVisible(key: string, visible: boolean): void {
@@ -66,7 +95,7 @@ function setRenderChunkVisible(key: string, visible: boolean): void {
 export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChunks: number): void {
     const centerX = Math.floor(position.x / RENDER_CHUNK_SIZE);
     const centerZ = Math.floor(position.z / RENDER_CHUNK_SIZE);
-    const radius = Math.max(1, Math.min(8, Math.round(distanceChunks)));
+    const radius = Math.max(1, Math.min(MAX_RENDER_DISTANCE_CHUNKS, Math.round(distanceChunks)));
     if (centerX === lastRenderChunkX && centerZ === lastRenderChunkZ && radius === lastRenderDistanceChunks) return;
 
     lastRenderChunkX = centerX;
@@ -111,6 +140,7 @@ export function rebuildTargetHash(): void {
     targetHash.clear();
     for (let i = 0; i < state.targets.length; i++) {
         const target = state.targets[i];
+        refreshChunkedRenderObject(target);
         const radius = TARGET_HIT_RANGE_MULTIPLIER * (targetData(target).scale || 1.0);
         targetHash.insert(target.position.x, target.position.z, radius, target);
     }
@@ -120,6 +150,7 @@ export function respawnTarget(targetGroup: THREE.Group): void {
     targetGroup.position.x = (Math.random() - 0.5) * (MAP_SIZE - 40);
     targetGroup.position.y = 3.0 + Math.random() * (MAX_ENEMY_HEIGHT - 5.0);
     targetGroup.position.z = (Math.random() - 0.5) * (MAP_SIZE - 40);
+    refreshChunkedRenderObject(targetGroup);
 
     const randClass = ENEMY_CLASSES[Math.floor(Math.random() * ENEMY_CLASSES.length)];
 
@@ -332,25 +363,37 @@ function createRingsTexture(): THREE.CanvasTexture {
 
 // Bushes use shared geometry/materials because there can be hundreds of them.
 const SHARED_TRUNK_GEO = new THREE.CylinderGeometry(0.15, 0.25, 1.0, 5);
-const SHARED_LEAF_GEO = new THREE.DodecahedronGeometry(1.0, 0);
+const SHARED_LEAF_GEO = new THREE.DodecahedronGeometry(1.5, 0);
 const SHARED_TRUNK_MAT = new THREE.MeshLambertMaterial({ color: 0x5a3d28, flatShading: true });
+const SHARED_LEAF_MATERIALS = [
+    0x244f28,
+    0x2f6633,
+    0x3d7a42,
+    0x4b8e51,
+    0x1f5a37,
+    0x5f7f32,
+    0x7a5a2b,
+    0xa7662b
+].map((color) => new THREE.MeshLambertMaterial({ color, flatShading: true }));
 const SHARED_WORLD_GEOMETRIES = new Set<THREE.BufferGeometry>([
     SHARED_TRUNK_GEO,
     SHARED_LEAF_GEO
 ]);
 const SHARED_WORLD_MATERIALS = new Set<THREE.Material>([
-    SHARED_TRUNK_MAT
+    SHARED_TRUNK_MAT,
+    ...SHARED_LEAF_MATERIALS
 ]);
+
+function pickBushLeafMaterial(): THREE.MeshLambertMaterial {
+    const rareAutumnStart = SHARED_LEAF_MATERIALS.length - 2;
+    const materialIndex = Math.random() < 0.08
+        ? rareAutumnStart + Math.floor(Math.random() * 2)
+        : Math.floor(Math.random() * rareAutumnStart);
+    return SHARED_LEAF_MATERIALS[materialIndex];
+}
 
 function createLowPolyBush(): THREE.Group {
     const bushGroup = new THREE.Group();
-    
-    const greenShades = [0x2f6633, 0x3d7a42, 0x4b8e51, 0x224c25, 0x3c7841];
-    const leafColor = greenShades[Math.floor(Math.random() * greenShades.length)];
-    const leafMat = new THREE.MeshLambertMaterial({ 
-        color: leafColor, 
-        flatShading: true 
-    });
 
     const trunk = new THREE.Mesh(SHARED_TRUNK_GEO, SHARED_TRUNK_MAT);
     trunk.position.y = 0.5;
@@ -358,15 +401,15 @@ function createLowPolyBush(): THREE.Group {
     trunk.receiveShadow = true;
     bushGroup.add(trunk);
 
-    const numClusters = 3 + Math.floor(Math.random() * 3);
+    const numClusters = 1 + Math.floor(Math.random() * 3);
     for (let i = 0; i < numClusters; i++) {
-        const radius = 0.7 + Math.random() * 0.7;
-        const leafMesh = new THREE.Mesh(SHARED_LEAF_GEO, leafMat);
+        const radius = 0.85 + Math.random() * 0.8;
+        const leafMesh = new THREE.Mesh(SHARED_LEAF_GEO, pickBushLeafMaterial());
         leafMesh.scale.setScalar(radius);
         
-        const ox = (Math.random() - 0.5) * 1.0;
-        const oy = 0.7 + Math.random() * 0.9;
-        const oz = (Math.random() - 0.5) * 1.0;
+        const ox = numClusters === 1 ? 0 : (Math.random() - 0.5) * 1.1;
+        const oy = 0.75 + Math.random() * 0.85;
+        const oz = numClusters === 1 ? 0 : (Math.random() - 0.5) * 1.1;
         leafMesh.position.set(ox, oy, oz);
         
         leafMesh.rotation.set(
@@ -746,7 +789,7 @@ function createEnemies(): void {
     const barFgGeo = new THREE.PlaneGeometry(1.8, 0.15).translate(0.9, 0, 0);
     const barFgMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide });
 
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < ENEMY_COUNT; i++) {
         const targetGroup = new THREE.Group();
         const data = targetData(targetGroup);
         data.index = i;
@@ -774,6 +817,7 @@ function createEnemies(): void {
 
         respawnTarget(targetGroup);
         addWorldObject(targetGroup);
+        addChunkedRenderObject(targetGroup);
         state.targets.push(targetGroup);
     }
     rebuildTargetHash();
@@ -850,6 +894,7 @@ export function updateTargets(delta: number): void {
     const targetsLen = state.targets.length;
     for (let i = 0; i < targetsLen; i++) {
         const target = state.targets[i];
+        if (!target.visible) continue;
         const data = targetData(target);
         data.bodyMesh.rotation.x += 1.0 * delta;
         data.bodyMesh.rotation.y += 1.5 * delta;

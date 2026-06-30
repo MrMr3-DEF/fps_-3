@@ -471,6 +471,7 @@ export function fireProjectile(): void {
         const targetsLen = targetCandidates.length;
         for (let j = 0; j < targetsLen; j++) {
             const targetGroup = targetCandidates[j];
+            if (!targetGroup.visible) continue;
             const data = targetData(targetGroup);
             const bodyMesh = data.bodyMesh;
             if (bodyMesh) {

@@ -86,6 +86,7 @@ export function updateProjectiles(delta: number, attackerName: string): void {
             const targetsLen = targetCandidates.length;
             for (let j = 0; j < targetsLen; j++) {
                 const target = targetCandidates[j];
+                if (!target.visible) continue;
                 const targetInfo = targetData(target);
                 const hitRange = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0);
                 if (proj.position.distanceToSquared(target.position) < hitRange * hitRange) {

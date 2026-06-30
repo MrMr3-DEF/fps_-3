@@ -16,7 +16,8 @@ import {
     REGEN_DELAY_MS,
     MAP_HALF_SIZE,
     BORDER_WARN_THRESHOLD,
-    BORDER_PULSE_DISTANCE
+    BORDER_PULSE_DISTANCE,
+    MAX_RENDER_DISTANCE_CHUNKS
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
 import { disposeProjectiles, updateProjectiles } from './projectiles.js';
@@ -899,7 +900,7 @@ function setupSettingsControls(): void {
     UI.settingRenderDistance?.addEventListener('input', (e) => {
         const val = parseFloat((e.target as HTMLInputElement).value);
         updatePendingSettings((settings) => {
-            settings.renderDistanceChunks = Math.round(clampNumber(val, 1, 8, DEFAULT_USER_SETTINGS.renderDistanceChunks));
+            settings.renderDistanceChunks = Math.round(clampNumber(val, 1, MAX_RENDER_DISTANCE_CHUNKS, DEFAULT_USER_SETTINGS.renderDistanceChunks));
         });
     });
 

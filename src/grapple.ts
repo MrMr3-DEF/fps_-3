@@ -71,6 +71,7 @@ export function toggleGrapplingHook(): void {
         const targetLen = targetCandidates.length;
         for (let j = 0; j < targetLen; j++) {
             const target = targetCandidates[j];
+            if (!target.visible) continue;
             const enemyPos = target.position;
 
             const distToRay = ray.distanceToPoint(enemyPos);
