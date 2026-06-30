@@ -1,5 +1,5 @@
-export const MAP_SIZE = 680;
-export const PILLAR_COUNT = 104;
+export const MAP_SIZE = 2000;
+export const PILLAR_COUNT = 900;
 export const PILLAR_WIDTH = 6.0;
 
 export const WALK_SPEED = 35.0;
@@ -68,11 +68,14 @@ export const HOOK_SPEED = 300;
 export const LASER_BEAM_FADE_TIME = 0.3;
 export const TARGET_HIT_RANGE_MULTIPLIER = 1.6;
 
-export const BUSH_2D_COUNT = 250;
-export const BUSH_3D_COUNT = 180;
-export const BUSH_3D_RADIUS_CAP = 330;
-export const BUSH_2D_INNER_RADIUS = 345;
-export const BUSH_2D_SPREAD = 1155;
+export const FAKE_PILLAR_COUNT = 84;
+export const FAKE_LAVA_POOL_COUNT = 56;
+export const LAVA_CHAIN_COUNT = 260;
+export const BUSH_2D_COUNT = 175;
+export const BUSH_3D_COUNT = 700;
+export const BUSH_3D_RADIUS_CAP = 990;
+export const BUSH_2D_INNER_RADIUS = 1005;
+export const BUSH_2D_SPREAD = 745;
 
 export const HOVER_DRAIN_RATE = 5.0;
 export const HOVER_RECHARGE_RATE = 3.0;
@@ -91,7 +94,7 @@ export const HOOK_MAX_SLINGSHOT_SPEED = 120.0;
 export const HOOK_SLINGSHOT_ACCEL = 400.0;
 
 export const REGEN_DELAY_MS = 4000;
-export const MAP_HALF_SIZE = 340;
+export const MAP_HALF_SIZE = 1000;
 export const BORDER_WARN_THRESHOLD = 50;
 export const BORDER_PULSE_DISTANCE = 1.5;
 export const MINIGUN_RAMP_TIME = 3.0;
@@ -106,3 +109,4 @@ export const GROUND_ACCEL_RATE = 10.0;
 export const APEX_VELOCITY_THRESHOLD = 20.0;
 export const DESCENT_FALL_RATIO_CAP = 45.0;
 export const GROUND_VISUAL_SIZE = 3500;
+export const RENDER_CHUNK_SIZE = 200;

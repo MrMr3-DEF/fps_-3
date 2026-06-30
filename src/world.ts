@@ -9,12 +9,16 @@ import {
     ENEMY_CLASSES,
     LAVA_POOL_HALF_SIZE,
     TARGET_HIT_RANGE_MULTIPLIER,
+    FAKE_PILLAR_COUNT,
+    FAKE_LAVA_POOL_COUNT,
+    LAVA_CHAIN_COUNT,
     BUSH_2D_COUNT,
     BUSH_3D_COUNT,
     BUSH_3D_RADIUS_CAP,
     BUSH_2D_INNER_RADIUS,
     BUSH_2D_SPREAD,
-    GROUND_VISUAL_SIZE
+    GROUND_VISUAL_SIZE,
+    RENDER_CHUNK_SIZE
 } from './config.js';
 import { SpatialHash } from './spatialHash.js';
 import { obstacleData, targetData } from './userDataTypes.js';
@@ -23,12 +27,72 @@ const obstacleHash = new SpatialHash<THREE.Object3D>(32);
 const lavaHash = new SpatialHash<THREE.Object3D>(32);
 const targetHash = new SpatialHash<THREE.Group>(48);
 const worldObjects: THREE.Object3D[] = [];
+const renderChunks = new Map<string, THREE.Object3D[]>();
+const activeRenderChunks = new Set<string>();
 let targetUpdateFrame = 0;
+let lastRenderChunkX = Number.NaN;
+let lastRenderChunkZ = Number.NaN;
+let lastRenderDistanceChunks = -1;
 
 function addWorldObject<T extends THREE.Object3D>(obj: T): T {
     state.scene!.add(obj);
     worldObjects.push(obj);
     return obj;
+}
+
+function getRenderChunkKey(x: number, z: number): string {
+    return `${Math.floor(x / RENDER_CHUNK_SIZE)},${Math.floor(z / RENDER_CHUNK_SIZE)}`;
+}
+
+function addChunkedRenderObject(obj: THREE.Object3D): void {
+    const key = getRenderChunkKey(obj.position.x, obj.position.z);
+    const chunk = renderChunks.get(key);
+    if (chunk) {
+        chunk.push(obj);
+    } else {
+        renderChunks.set(key, [obj]);
+    }
+    obj.visible = false;
+}
+
+function setRenderChunkVisible(key: string, visible: boolean): void {
+    const objects = renderChunks.get(key);
+    if (!objects) return;
+    for (let i = 0; i < objects.length; i++) {
+        objects[i].visible = visible;
+    }
+}
+
+export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChunks: number): void {
+    const centerX = Math.floor(position.x / RENDER_CHUNK_SIZE);
+    const centerZ = Math.floor(position.z / RENDER_CHUNK_SIZE);
+    const radius = Math.max(1, Math.min(8, Math.round(distanceChunks)));
+    if (centerX === lastRenderChunkX && centerZ === lastRenderChunkZ && radius === lastRenderDistanceChunks) return;
+
+    lastRenderChunkX = centerX;
+    lastRenderChunkZ = centerZ;
+    lastRenderDistanceChunks = radius;
+
+    const nextActive = new Set<string>();
+
+    for (let dz = -radius; dz <= radius; dz++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+            const key = `${centerX + dx},${centerZ + dz}`;
+            nextActive.add(key);
+            if (!activeRenderChunks.has(key)) {
+                setRenderChunkVisible(key, true);
+            }
+        }
+    }
+
+    activeRenderChunks.forEach((key) => {
+        if (!nextActive.has(key)) {
+            setRenderChunkVisible(key, false);
+        }
+    });
+
+    activeRenderChunks.clear();
+    nextActive.forEach((key) => activeRenderChunks.add(key));
 }
 
 export function queryObstaclesNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
@@ -426,9 +490,9 @@ function createFakeBillboards(): void {
     const fakePillarGeo = new THREE.PlaneGeometry(PILLAR_WIDTH * 1.5, 1);
     const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x483224, side: THREE.DoubleSide });
 
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < FAKE_PILLAR_COUNT; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 1100;
+        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 700;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
         const height = 20 + Math.random() * (MAX_PILLAR_HEIGHT - 20);
@@ -444,9 +508,9 @@ function createFakeBillboards(): void {
     const fakeLavaGeo = new THREE.BoxGeometry(LAVA_POOL_HALF_SIZE * 2, 0.15, LAVA_POOL_HALF_SIZE * 2);
     const fakeLavaMat = new THREE.MeshBasicMaterial({ color: 0xff3b00 });
 
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < FAKE_LAVA_POOL_COUNT; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 1100;
+        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 700;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
@@ -454,6 +518,7 @@ function createFakeBillboards(): void {
         mesh.position.set(x, 0.075, z);
         
         addWorldObject(mesh);
+        addChunkedRenderObject(mesh);
     }
 }
 
@@ -526,7 +591,7 @@ function createLavaPools(): void {
         roughness: 0.5
     });
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < LAVA_CHAIN_COUNT; i++) {
         let chainValid = false;
         let squares: { x: number, z: number }[] = [];
         let attempts = 0;
@@ -608,6 +673,7 @@ function createLavaPools(): void {
                 const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
                 lavaMesh.position.set(sq.x, 0.075, sq.z);
                 addWorldObject(lavaMesh);
+                addChunkedRenderObject(lavaMesh);
                 state.lavaPools.push(lavaMesh);
                 state.grappleSurfaces.push(lavaMesh);
                 lavaHash.insert(lavaMesh.position.x, lavaMesh.position.z, LAVA_POOL_HALF_SIZE, lavaMesh);
@@ -621,7 +687,7 @@ function createBushes(): void {
     // blockers/hazards so the arena remains readable.
     let spawned3DBushes = 0;
     let attempts3D = 0;
-    while (spawned3DBushes < BUSH_3D_COUNT && attempts3D < 1000) {
+    while (spawned3DBushes < BUSH_3D_COUNT && attempts3D < BUSH_3D_COUNT * 10) {
         attempts3D++;
         const angle = Math.random() * Math.PI * 2;
         const radius = Math.random() * BUSH_3D_RADIUS_CAP;
@@ -634,6 +700,7 @@ function createBushes(): void {
             bush.scale.set(s, s, s);
             bush.position.set(x, 0, z);
             addWorldObject(bush);
+            addChunkedRenderObject(bush);
             spawned3DBushes++;
         }
     }
@@ -648,7 +715,7 @@ function createBushes(): void {
 
     let spawned2DOutside = 0;
     let attempts2DOutside = 0;
-    while (spawned2DOutside < BUSH_2D_COUNT && attempts2DOutside < 1500) {
+    while (spawned2DOutside < BUSH_2D_COUNT && attempts2DOutside < BUSH_2D_COUNT * 8) {
         attempts2DOutside++;
         const angle = Math.random() * Math.PI * 2;
         const radius = BUSH_2D_INNER_RADIUS + Math.random() * BUSH_2D_SPREAD;
@@ -663,6 +730,7 @@ function createBushes(): void {
             sprite.scale.set(width, height, 1.0);
             sprite.position.set(x, height / 2, z);
             addWorldObject(sprite);
+            addChunkedRenderObject(sprite);
             spawned2DOutside++;
         }
     }
@@ -769,6 +837,11 @@ export function disposeWorld(): void {
     obstacleHash.clear();
     lavaHash.clear();
     targetHash.clear();
+    renderChunks.clear();
+    activeRenderChunks.clear();
+    lastRenderChunkX = Number.NaN;
+    lastRenderChunkZ = Number.NaN;
+    lastRenderDistanceChunks = -1;
 }
 
 export function updateTargets(delta: number): void {

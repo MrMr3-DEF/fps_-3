@@ -9,6 +9,7 @@ export interface UserSettings {
     scopedFov: number;
     renderScale: number;
     particleAmount: number;
+    renderDistanceChunks: number;
     shadows: boolean;
     showFps: boolean;
 }
@@ -19,6 +20,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     scopedFov: SCOPED_FOV,
     renderScale: 1.0,
     particleAmount: 1.0,
+    renderDistanceChunks: 4,
     shadows: true,
     showFps: true,
 };
@@ -44,6 +46,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.scopedFov = clamp(parsed.scopedFov ?? DEFAULT_USER_SETTINGS.scopedFov, 8, 35);
             userSettings.renderScale = clamp(parsed.renderScale ?? DEFAULT_USER_SETTINGS.renderScale, 0.5, 1.0);
             userSettings.particleAmount = clamp(parsed.particleAmount ?? DEFAULT_USER_SETTINGS.particleAmount, 0.2, 1.0);
+            userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, 8));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);
         }

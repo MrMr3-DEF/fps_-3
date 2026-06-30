@@ -24,7 +24,7 @@ import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { createEnvironment, disposeWorld, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateTargets } from './world.js';
+import { createEnvironment, disposeWorld, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -86,6 +86,8 @@ const UI = {
     get settingRenderScaleValue() { return getUI<HTMLElement>('setting-render-scale-value'); },
     get settingParticles() { return getUI<HTMLInputElement>('setting-particles'); },
     get settingParticlesValue() { return getUI<HTMLElement>('setting-particles-value'); },
+    get settingRenderDistance() { return getUI<HTMLInputElement>('setting-render-distance'); },
+    get settingRenderDistanceValue() { return getUI<HTMLElement>('setting-render-distance-value'); },
     get settingShadows() { return getUI<HTMLInputElement>('setting-shadows'); },
     get settingShadowsValue() { return getUI<HTMLElement>('setting-shadows-value'); },
     get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
@@ -786,6 +788,7 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.scopedFov === b.scopedFov &&
         a.renderScale === b.renderScale &&
         a.particleAmount === b.particleAmount &&
+        a.renderDistanceChunks === b.renderDistanceChunks &&
         a.shadows === b.shadows &&
         a.showFps === b.showFps;
 }
@@ -807,6 +810,8 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     if (UI.settingRenderScaleValue) UI.settingRenderScaleValue.innerText = formatPercent(settings.renderScale);
     if (UI.settingParticles) UI.settingParticles.value = settings.particleAmount.toFixed(2);
     if (UI.settingParticlesValue) UI.settingParticlesValue.innerText = formatPercent(settings.particleAmount);
+    if (UI.settingRenderDistance) UI.settingRenderDistance.value = settings.renderDistanceChunks.toFixed(0);
+    if (UI.settingRenderDistanceValue) UI.settingRenderDistanceValue.innerText = settings.renderDistanceChunks.toFixed(0);
     if (UI.settingShadows) UI.settingShadows.checked = settings.shadows;
     setCheckboxLabel(UI.settingShadowsValue, settings.shadows);
     if (UI.settingFps) UI.settingFps.checked = settings.showFps;
@@ -888,6 +893,13 @@ function setupSettingsControls(): void {
         const val = parseFloat((e.target as HTMLInputElement).value);
         updatePendingSettings((settings) => {
             settings.particleAmount = clampNumber(val, 0.2, 1.0, DEFAULT_USER_SETTINGS.particleAmount);
+        });
+    });
+
+    UI.settingRenderDistance?.addEventListener('input', (e) => {
+        const val = parseFloat((e.target as HTMLInputElement).value);
+        updatePendingSettings((settings) => {
+            settings.renderDistanceChunks = Math.round(clampNumber(val, 1, 8, DEFAULT_USER_SETTINGS.renderDistanceChunks));
         });
     });
 
@@ -1025,6 +1037,9 @@ export function animate(): void {
     }
 
     updatePlayerPhysics(delta);
+    if (state.controls) {
+        updateEnvironmentVisibility(state.controls.getObject().position, userSettings.renderDistanceChunks);
+    }
     updateHoverBar(state.hoverFuel);
     updateLocalAccelerometer(delta);
     updateSpeedlines(state.velocity.length(), Boolean(state.controls?.isLocked && !state.isScoped && state.playerHp > 0));
