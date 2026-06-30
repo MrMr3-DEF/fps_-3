@@ -372,8 +372,8 @@ const SHARED_LEAF_MATERIALS = [
     0x4b8e51,
     0x1f5a37,
     0x5f7f32,
-    0x7a5a2b,
-    0xa7662b
+    0xb16824,
+    0xd47a1e
 ].map((color) => new THREE.MeshLambertMaterial({ color, flatShading: true }));
 const SHARED_WORLD_GEOMETRIES = new Set<THREE.BufferGeometry>([
     SHARED_TRUNK_GEO,
@@ -394,6 +394,7 @@ function pickBushLeafMaterial(): THREE.MeshLambertMaterial {
 
 function createLowPolyBush(): THREE.Group {
     const bushGroup = new THREE.Group();
+    const leafMat = pickBushLeafMaterial();
 
     const trunk = new THREE.Mesh(SHARED_TRUNK_GEO, SHARED_TRUNK_MAT);
     trunk.position.y = 0.5;
@@ -404,7 +405,7 @@ function createLowPolyBush(): THREE.Group {
     const numClusters = 1 + Math.floor(Math.random() * 3);
     for (let i = 0; i < numClusters; i++) {
         const radius = 0.85 + Math.random() * 0.8;
-        const leafMesh = new THREE.Mesh(SHARED_LEAF_GEO, pickBushLeafMaterial());
+        const leafMesh = new THREE.Mesh(SHARED_LEAF_GEO, leafMat);
         leafMesh.scale.setScalar(radius);
         
         const ox = numClusters === 1 ? 0 : (Math.random() - 0.5) * 1.1;
