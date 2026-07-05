@@ -14,6 +14,7 @@ import {
     PLAYER_RADIUS,
     WEAPON_STATS,
     REGEN_DELAY_MS,
+    MAX_PILLAR_HEIGHT,
     MAP_HALF_SIZE,
     BORDER_WARN_THRESHOLD,
     BORDER_PULSE_DISTANCE,
@@ -173,19 +174,23 @@ function setupRenderer(): void {
     state.scene.add(ambientLight);
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    directionalLight.position.set(200, 400, 200); 
+    // Keep the sun outside the expanded playable map so the full arena fits
+    // inside the directional shadow camera instead of losing shadows at edges.
+    const shadowLightOffset = MAP_HALF_SIZE * 0.75;
+    directionalLight.position.set(shadowLightOffset, shadowLightOffset * 2, shadowLightOffset);
     directionalLight.castShadow = true;
     
-    directionalLight.shadow.mapSize.width = 1024;
-    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
     directionalLight.shadow.camera.near = 0.5;
-    directionalLight.shadow.camera.far = 1200;
+    directionalLight.shadow.camera.far = MAP_HALF_SIZE * 3.2;
     
-    const d = 450;
+    const d = Math.SQRT2 * MAP_HALF_SIZE + MAX_PILLAR_HEIGHT;
     directionalLight.shadow.camera.left = -d;
     directionalLight.shadow.camera.right = d;
     directionalLight.shadow.camera.top = d;
     directionalLight.shadow.camera.bottom = -d;
+    directionalLight.shadow.camera.updateProjectionMatrix();
     
     directionalLight.shadow.bias = -0.0005;
     state.scene.add(directionalLight);
@@ -828,8 +833,7 @@ function resetPendingSettings(): void {
 function applyPendingSettings(): void {
     Object.assign(userSettings, pendingSettings);
     saveUserSettings();
-    applyLiveSettings();
-    syncSettingsControls();
+    window.location.reload();
 }
 
 function updatePendingSettings(mutator: (settings: UserSettings) => void): void {

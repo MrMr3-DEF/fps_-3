@@ -76,6 +76,7 @@ export function applyRendererSettings(renderer: THREE.WebGLRenderer): void {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = userSettings.shadows;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.needsUpdate = true;
 }
 
 export function getParticleLimit(): number {
