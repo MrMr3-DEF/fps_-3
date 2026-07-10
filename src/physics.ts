@@ -36,10 +36,8 @@ const _boosterPos = new THREE.Vector3();
 const _negCamForward = new THREE.Vector3();
 const _negCamRight = new THREE.Vector3();
 const _obstacleCandidates: THREE.Object3D[] = [];
-const _collisionCandidates: THREE.Object3D[] = [];
 
-// Cached HUD elements touched by movement effects.
-let sprintBadgeEl: HTMLElement | null = null;
+// Cached HUD element touched by movement effects.
 let hoverBadgeEl: HTMLElement | null = null;
 
 const MAX_FALL_SPEED = JUMP_FORCE * 0.88;
@@ -96,44 +94,6 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     return { colX, colZ, groundY };
 }
 
-export function checkCollision(position: THREE.Vector3, feetY: number): boolean {
-    if (Math.abs(position.x) > MAP_LIMIT || Math.abs(position.z) > MAP_LIMIT) return true;
-    const candidates = queryObstaclesNear(position.x, position.z, OBSTACLE_QUERY_RADIUS, _collisionCandidates);
-    const len = candidates.length;
-    for (let i = 0; i < len; i++) {
-        const box = candidates[i];
-        const data = obstacleData(box);
-        const ph  = data.height;
-        const halfW = data.halfW || (PILLAR_WIDTH / 2);
-        const halfD = data.halfD || (PILLAR_WIDTH / 2);
-        const ex = halfW + PLAYER_RADIUS, ez = halfD + PLAYER_RADIUS;
-        if (position.x > box.position.x - ex && position.x < box.position.x + ex &&
-            position.z > box.position.z - ez && position.z < box.position.z + ez) {
-            if (feetY < ph - 0.3) return true;
-        }
-    }
-    return false;
-}
-
-export function getGroundY(position: THREE.Vector3): number {
-    let highest = 0;
-    const candidates = queryObstaclesNear(position.x, position.z, OBSTACLE_QUERY_RADIUS, _collisionCandidates);
-    const len = candidates.length;
-    for (let i = 0; i < len; i++) {
-        const box = candidates[i];
-        const data = obstacleData(box);
-        const ph  = data.height;
-        const halfW = data.halfW || (PILLAR_WIDTH / 2);
-        const halfD = data.halfD || (PILLAR_WIDTH / 2);
-        const ex = halfW + PLAYER_RADIUS, ez = halfD + PLAYER_RADIUS;
-        if (position.x > box.position.x - ex && position.x < box.position.x + ex &&
-            position.z > box.position.z - ez && position.z < box.position.z + ez) {
-            if (ph > highest) highest = ph;
-        }
-    }
-    return highest;
-}
-
 export function updatePlayerPhysics(delta: number): void {
     if (state.controls) {
         const isPaused = !state.controls.isLocked && state.isPlaying;
@@ -156,9 +116,6 @@ export function updatePlayerPhysics(delta: number): void {
             _camRight.set(1, 0, 0).applyQuaternion(state.camera!.quaternion);
             _camRight.y = 0;
             _camRight.normalize();
-
-            if (!sprintBadgeEl) sprintBadgeEl = document.getElementById('sprint-badge');
-            if (sprintBadgeEl) sprintBadgeEl.style.display = 'none';
 
             // Hover is a mid-air brake/thruster state; grappling gets priority.
             const wasHovering = state.isHovering;
@@ -313,11 +270,14 @@ export function updatePlayerPhysics(delta: number): void {
 
             const minCameraY = currentGroundY + PLAYER_HEIGHT; 
 
-            if (playerObj.position.y < minCameraY) {
+            const isGrounded = playerObj.position.y <= minCameraY && state.velocity.y <= 0;
+            if (isGrounded) {
                 state.velocity.y = 0;
                 playerObj.position.y = minCameraY;
-                state.canJump = true; 
             }
+            // Grounded state must be recomputed every frame. Otherwise a player
+            // who walks off a pillar keeps their previous canJump=true state.
+            state.canJump = isGrounded;
         }
     }
 }

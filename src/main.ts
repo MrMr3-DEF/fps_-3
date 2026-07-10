@@ -1,10 +1,9 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
-import { state, resetPlayerState } from './state.js';
+import { state, resetMatchStats, resetPlayerState } from './state.js';
 import {
     JUMP_FORCE,
     PLAYER_HEIGHT,
-    PLAYER_MAX_HP,
     LAVA_DAMAGE_TICK_MS,
     LAVA_DAMAGE_PER_TICK,
     LAVA_POOL_HALF_SIZE,
@@ -15,13 +14,15 @@ import {
     WEAPON_STATS,
     REGEN_DELAY_MS,
     MAX_PILLAR_HEIGHT,
+    MAX_FRAME_DELTA,
+    ROOM_CODE_LENGTH,
     MAP_HALF_SIZE,
     BORDER_WARN_THRESHOLD,
     BORDER_PULSE_DISTANCE,
     MAX_RENDER_DISTANCE_CHUNKS
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
-import { disposeProjectiles, updateProjectiles } from './projectiles.js';
+import { disposeProjectiles, resetProjectiles, updateProjectiles } from './projectiles.js';
 import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer, updateHealthBar, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
@@ -41,6 +42,8 @@ import {
 import { applyRendererSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
 import { targetData } from './userDataTypes.js';
 import type { PlayerDiedPacket } from './networkTypes.js';
+import { clampFrameDelta } from './gameplayMath.js';
+import { RoomAccessChallenge } from './turnSecurity.js';
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
 const _logicalCameraPos = new THREE.Vector3();
@@ -92,6 +95,7 @@ const UI = {
     get settingRenderDistanceValue() { return getUI<HTMLElement>('setting-render-distance-value'); },
     get settingShadows() { return getUI<HTMLInputElement>('setting-shadows'); },
     get settingShadowsValue() { return getUI<HTMLElement>('setting-shadows-value'); },
+    get settingShadowQuality() { return getUI<HTMLSelectElement>('setting-shadow-quality'); },
     get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
     get settingFpsValue() { return getUI<HTMLElement>('setting-fps-value'); },
     get panelMain() { return getUI<HTMLElement>('panel-main'); },
@@ -124,6 +128,9 @@ const UI = {
     get btnDeathLeave() { return getUI<HTMLElement>('btn-death-leave'); },
     get mpNameError() { return getUI<HTMLElement>('mp-name-error'); },
     get btnCopyCode() { return getUI<HTMLElement>('btn-copy-code'); },
+    get hostLobbyStatus() { return getUI<HTMLElement>('host-lobby-status'); },
+    get turnstileHostChallenge() { return getUI<HTMLElement>('turnstile-host-challenge'); },
+    get turnstileJoinChallenge() { return getUI<HTMLElement>('turnstile-join-challenge'); },
 };
 // Sequential cycling order for E. Number keys below use a different, FPS-style layout.
 const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
@@ -135,6 +142,10 @@ let middleMouseChordActive = false;
 let motionHudInitialized = false;
 let smoothedGRight = 0;
 let smoothedGUp = 0;
+let roomFlowGeneration = 0;
+
+const hostRoomChallenge = new RoomAccessChallenge('create-room');
+const joinRoomChallenge = new RoomAccessChallenge('join-room');
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
@@ -151,6 +162,93 @@ function validateUsername(username: string | null): string | null {
         return 'Username must contain letters only!';
     }
     return null;
+}
+
+function validateRoomCode(code: string): string | null {
+    if (code.length !== ROOM_CODE_LENGTH) {
+        return `Code must be ${ROOM_CODE_LENGTH} characters long!`;
+    }
+    const allowedCharacters = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]+$/;
+    if (!allowedCharacters.test(code)) {
+        return 'Use only the letters and numbers shown in the room code.';
+    }
+    return null;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function resetHostLobbyUi(): void {
+    if (UI.roomCodeDisplay) UI.roomCodeDisplay.innerText = '-'.repeat(ROOM_CODE_LENGTH);
+    if (UI.btnHostStart) UI.btnHostStart.style.display = 'none';
+}
+
+async function beginHosting(username: string): Promise<void> {
+    const generation = ++roomFlowGeneration;
+    const challengeContainer = UI.turnstileHostChallenge;
+    resetHostLobbyUi();
+    if (UI.hostLobbyStatus) UI.hostLobbyStatus.innerText = 'Complete human verification to create a secure room...';
+
+    if (!challengeContainer) {
+        if (UI.hostLobbyStatus) UI.hostLobbyStatus.innerText = 'Secure room verification is unavailable.';
+        return;
+    }
+
+    try {
+        const turnstileToken = await hostRoomChallenge.requestToken(challengeContainer);
+        if (generation !== roomFlowGeneration) return;
+        hostRoomChallenge.cancel();
+
+        const code = generateRoomCode();
+        if (UI.roomCodeDisplay) UI.roomCodeDisplay.innerText = code;
+        if (UI.hostLobbyStatus) UI.hostLobbyStatus.innerText = 'Creating secure room...';
+        await hostGame(username, code, turnstileToken);
+    } catch (error) {
+        if (generation !== roomFlowGeneration) return;
+        const message = errorMessage(error, 'Unable to create a secure room. Please retry.');
+        if (message !== 'Room verification was cancelled.' && UI.hostLobbyStatus) {
+            UI.hostLobbyStatus.innerText = message;
+        }
+        resetHostLobbyUi();
+    }
+}
+
+async function beginJoining(username: string, roomCode: string): Promise<void> {
+    const generation = ++roomFlowGeneration;
+    const challengeContainer = UI.turnstileJoinChallenge;
+    if (!challengeContainer) {
+        if (UI.joinErrorLog) UI.joinErrorLog.innerText = 'Secure room verification is unavailable.';
+        return;
+    }
+
+    if (UI.joinErrorLog) {
+        UI.joinErrorLog.style.color = '#57606f';
+        UI.joinErrorLog.innerText = 'Complete human verification to join this room...';
+    }
+    if (UI.btnJoinConnect) {
+        UI.btnJoinConnect.disabled = true;
+        UI.btnJoinConnect.innerText = 'Verifying...';
+    }
+
+    try {
+        const turnstileToken = await joinRoomChallenge.requestToken(challengeContainer);
+        if (generation !== roomFlowGeneration) return;
+        joinRoomChallenge.cancel();
+        await joinGame(username, roomCode, turnstileToken);
+    } catch (error) {
+        if (generation !== roomFlowGeneration) return;
+        const message = errorMessage(error, 'Unable to join the secure room. Please retry.');
+        if (message !== 'Room verification was cancelled.' && UI.joinErrorLog) {
+            UI.joinErrorLog.style.color = '#ff4757';
+            UI.joinErrorLog.innerText = message;
+        }
+        if (UI.btnJoinConnect) {
+            UI.btnJoinConnect.disabled = false;
+            UI.btnJoinConnect.innerText = 'Connect';
+            UI.btnJoinConnect.removeAttribute('data-connected');
+        }
+    }
 }
 
 function onWindowResize(): void {
@@ -178,10 +276,11 @@ function setupRenderer(): void {
     // inside the directional shadow camera instead of losing shadows at edges.
     const shadowLightOffset = MAP_HALF_SIZE * 0.75;
     directionalLight.position.set(shadowLightOffset, shadowLightOffset * 2, shadowLightOffset);
-    directionalLight.castShadow = true;
+    directionalLight.castShadow = userSettings.shadows;
     
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
+    const shadowMapSize = userSettings.shadowQuality === 'high' ? 2048 : 1024;
+    directionalLight.shadow.mapSize.width = shadowMapSize;
+    directionalLight.shadow.mapSize.height = shadowMapSize;
     directionalLight.shadow.camera.near = 0.5;
     directionalLight.shadow.camera.far = MAP_HALF_SIZE * 3.2;
     
@@ -278,17 +377,17 @@ function setupMenuListeners(): void {
             if (UI.mpNameError) UI.mpNameError.innerText = '';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'flex';
-
-            const code = generateRoomCode();
-            if (UI.roomCodeDisplay) UI.roomCodeDisplay.innerText = code;
-            hostGame(username, code);
+            void beginHosting(username);
         });
     }
 
     if (UI.btnHostCancel) {
         UI.btnHostCancel.addEventListener('click', (e) => {
             e.stopPropagation();
+            roomFlowGeneration++;
+            hostRoomChallenge.cancel();
             disconnectMultiplayer();
+            resetHostLobbyUi();
             if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'none';
             if (UI.panelMp) UI.panelMp.style.display = 'flex';
         });
@@ -317,13 +416,20 @@ function setupMenuListeners(): void {
             if (UI.mpNameError) UI.mpNameError.innerText = '';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'flex';
-            if (UI.joinErrorLog) UI.joinErrorLog.innerText = '';
+            joinRoomChallenge.cancel();
+            if (UI.joinErrorLog) {
+                UI.joinErrorLog.style.color = '';
+                UI.joinErrorLog.innerText = '';
+            }
         });
     }
 
     if (UI.btnJoinCancel) {
         UI.btnJoinCancel.addEventListener('click', (e) => {
             e.stopPropagation();
+            roomFlowGeneration++;
+            joinRoomChallenge.cancel();
+            disconnectMultiplayer();
             if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'none';
             if (UI.panelMp) UI.panelMp.style.display = 'flex';
         });
@@ -342,17 +448,12 @@ function setupMenuListeners(): void {
             const username = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
             const code = UI.inputRoomCode ? UI.inputRoomCode.value.trim().toUpperCase() : '';
 
-            if (code.length !== 4) {
-                if (UI.joinErrorLog) UI.joinErrorLog.innerText = 'Code must be 4 characters long!';
+            const roomCodeError = validateRoomCode(code);
+            if (roomCodeError) {
+                if (UI.joinErrorLog) UI.joinErrorLog.innerText = roomCodeError;
                 return;
             }
-
-            if (UI.btnJoinConnect) {
-                UI.btnJoinConnect.disabled = true;
-                UI.btnJoinConnect.innerText = 'Connecting...';
-            }
-
-            joinGame(username, code);
+            void beginJoining(username, code);
         });
     }
 
@@ -412,7 +513,7 @@ function setupMenuListeners(): void {
         UI.btnCopyCode.addEventListener('click', (e) => {
             e.stopPropagation();
             const code = state.roomCode || (UI.roomCodeDisplay ? UI.roomCodeDisplay.innerText : '');
-            if (code && code !== '----' && UI.btnCopyCode) {
+            if (code && code !== '-'.repeat(ROOM_CODE_LENGTH) && UI.btnCopyCode) {
                 navigator.clipboard.writeText(code);
                 UI.btnCopyCode.textContent = '✅ Kopiert';
                 setTimeout(() => {
@@ -427,6 +528,10 @@ function setupMenuListeners(): void {
 // consumed by the physics/weapons systems during the frame update.
 function setupInputListeners(): void {
     const onKeyDown = (e: KeyboardEvent) => {
+        // Movement state is already held between key events; repeated keydown
+        // events must not toggle hook/view/weapon actions multiple times.
+        if (e.repeat) return;
+
         switch (e.code) {
             case 'KeyW': state.moveForward = true; break;
             case 'KeyA': state.moveLeft = true; break;
@@ -543,11 +648,12 @@ function setupInputListeners(): void {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    window.addEventListener('mousedown', handleGameMouseButtons, true);
-    window.addEventListener('mouseup', handleGameMouseButtons, true);
-    window.addEventListener('mousemove', handleGameMouseButtons, true);
+    // Keep button state on one pointer event stream. Registering both mouse and
+    // pointer/raw-pointer listeners made every move update run two or three times.
+    window.addEventListener('pointerdown', handleGameMouseButtons, true);
+    window.addEventListener('pointerup', handleGameMouseButtons, true);
     window.addEventListener('pointermove', handleGameMouseButtons, true);
-    window.addEventListener('pointerrawupdate', (e) => handleGameMouseButtons(e as PointerEvent), true);
+    window.addEventListener('pointercancel', handleGameMouseButtons, true);
     window.addEventListener('contextmenu', preventLockedMouseDefault, true);
     window.addEventListener('auxclick', preventLockedMouseDefault, true);
     window.addEventListener('wheel', handleWeaponWheel, { passive: false });
@@ -607,18 +713,18 @@ function disposeGameRuntime(): void {
 
 function prepareFreshArena(): void {
     resetHook();
-    disposeProjectiles();
+    resetProjectiles();
     disposeParticles();
     disposeWorld();
     createEnvironment();
-    performPlayerReset();
-    resetHudCounters();
+    performPlayerReset(true);
     state.prevTime = performance.now();
 }
 
-function performPlayerReset(): void {
+function performPlayerReset(resetMatch = false): void {
     resetPlayerState();
-    resetHudCounters();
+    if (resetMatch) resetMatchStats();
+    syncHudCounters();
     updateHealthBar(100);
     if (state.controls) {
         state.controls.getObject().position.set(0, 2, 0);
@@ -747,8 +853,10 @@ function updateLocalAccelerometer(delta: number): void {
 }
 
 function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
-    if (e.type === 'mousedown' || e.type === 'mouseup') {
-        const isButtonDown = e.type === 'mousedown';
+    const isButtonEvent = e.type === 'mousedown' || e.type === 'mouseup' ||
+        e.type === 'pointerdown' || e.type === 'pointerup';
+    if (isButtonEvent) {
+        const isButtonDown = e.type === 'mousedown' || e.type === 'pointerdown';
 
         if (e.button === 0) {
             state.isMouseDown = isButtonDown;
@@ -782,10 +890,10 @@ function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
     state.isScoped = state.rightClickActive || state.keyCActive;
 }
 
-function resetHudCounters(): void {
-    if (UI.score) UI.score.innerText = '0';
-    if (UI.kills) UI.kills.innerText = '0';
-    if (UI.deaths) UI.deaths.innerText = '0';
+function syncHudCounters(): void {
+    if (UI.score) UI.score.innerText = state.score.toString();
+    if (UI.kills) UI.kills.innerText = state.kills.toString();
+    if (UI.deaths) UI.deaths.innerText = state.deaths.toString();
 }
 
 function settingsEqual(a: UserSettings, b: UserSettings): boolean {
@@ -796,6 +904,7 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.particleAmount === b.particleAmount &&
         a.renderDistanceChunks === b.renderDistanceChunks &&
         a.shadows === b.shadows &&
+        a.shadowQuality === b.shadowQuality &&
         a.showFps === b.showFps;
 }
 
@@ -820,6 +929,10 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     if (UI.settingRenderDistanceValue) UI.settingRenderDistanceValue.innerText = settings.renderDistanceChunks.toFixed(0);
     if (UI.settingShadows) UI.settingShadows.checked = settings.shadows;
     setCheckboxLabel(UI.settingShadowsValue, settings.shadows);
+    if (UI.settingShadowQuality) {
+        UI.settingShadowQuality.value = settings.shadowQuality;
+        UI.settingShadowQuality.disabled = !settings.shadows;
+    }
     if (UI.settingFps) UI.settingFps.checked = settings.showFps;
     setCheckboxLabel(UI.settingFpsValue, settings.showFps);
     updateApplyButton();
@@ -914,6 +1027,12 @@ function setupSettingsControls(): void {
         });
     });
 
+    UI.settingShadowQuality?.addEventListener('change', (e) => {
+        updatePendingSettings((settings) => {
+            settings.shadowQuality = (e.target as HTMLSelectElement).value === 'high' ? 'high' : 'low';
+        });
+    });
+
     UI.settingFps?.addEventListener('change', (e) => {
         updatePendingSettings((settings) => {
             settings.showFps = (e.target as HTMLInputElement).checked;
@@ -994,7 +1113,7 @@ export function init(): void {
                 
                 if (state.isMultiplayer) {
                     if (UI.pauseLobbyInfo) UI.pauseLobbyInfo.style.display = isDead ? 'none' : 'inline';
-                    if (UI.pauseRoomCode) UI.pauseRoomCode.innerText = state.roomCode || '----';
+                    if (UI.pauseRoomCode) UI.pauseRoomCode.innerText = state.roomCode || '-'.repeat(ROOM_CODE_LENGTH);
                     if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Lobby';
                 } else {
                     if (UI.pauseLobbyInfo) UI.pauseLobbyInfo.style.display = 'none';
@@ -1026,7 +1145,7 @@ export function animate(): void {
     requestAnimationFrame(animate);
 
     const time = performance.now();
-    const delta = (time - state.prevTime) / 1000;
+    const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
 
     updateWeapons(delta);
 
@@ -1049,7 +1168,7 @@ export function animate(): void {
     updateLocalAccelerometer(delta);
     updateSpeedlines(state.velocity.length(), Boolean(state.controls?.isLocked && !state.isScoped && state.playerHp > 0));
 
-    checkLavaDamage(delta);
+    checkLavaDamage();
 
     updateHealthRegen(delta);
 
@@ -1067,7 +1186,7 @@ export function animate(): void {
         sendLocalState();
     }
 
-    updateWorldBorderOverlay(delta);
+    updateWorldBorderOverlay();
 
     fpsFrames++;
     if (time >= fpsLastTime + 1000) {
@@ -1240,8 +1359,10 @@ export function processTargetHit(targetIndex: number, damage: number): void {
     }
 }
 
-export function checkLavaDamage(delta: number): void {
-    if (!state.controls || (!state.controls.isLocked && !state.isMultiplayer)) return;
+export function checkLavaDamage(): void {
+    // Damage is gameplay-only. Keeping this path active while a multiplayer
+    // player is paused or dead caused repeated deaths and broadcasts on lava.
+    if (!state.isPlaying || state.playerHp <= 0 || !state.controls?.isLocked) return;
 
     const playerObj = state.controls.getObject();
     const feetY = playerObj.position.y - PLAYER_HEIGHT;
@@ -1263,27 +1384,7 @@ export function checkLavaDamage(delta: number): void {
         if (standingOnLava) {
             const now = performance.now();
             if (now - state.lastDamageTime >= LAVA_DAMAGE_TICK_MS) {
-                state.playerHp -= LAVA_DAMAGE_PER_TICK;
-                state.lastDamageTime = now;
-                state.regenTimer = 0;
-
-                const feetPos = _lavaFeetPos.copy(playerObj.position);
-                feetPos.y -= 1.8;
-                spawnParticles(feetPos, 0xff3300, 6, 10, 0.15, 5.0);
-
-                updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp) * 100, '#ff4757');
-
-                if (state.playerHp <= 0) {
-                    triggerDeath();
-                    state.deaths++;
-                    if (UI.deaths) UI.deaths.innerText = state.deaths.toString();
-
-                    if (state.isMultiplayer && state.peer) {
-                        const myName = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
-                        const victimName = myName || 'Guest';
-                        broadcastPlayerDeath(victimName, 'Lava');
-                    }
-                }
+                takePlayerDamage(LAVA_DAMAGE_PER_TICK, 'Lava');
             }
         }
     }
@@ -1309,7 +1410,7 @@ export function updateHealthRegen(delta: number): void {
     }
 }
 
-export function updateWorldBorderOverlay(delta: number): void {
+export function updateWorldBorderOverlay(): void {
     if (!state.isPlaying || !state.controls) return;
     const playerObj = state.controls.getObject();
     const pos = playerObj.position;

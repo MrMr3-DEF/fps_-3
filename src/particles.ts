@@ -18,6 +18,7 @@ const _laserMidPoint = new THREE.Vector3();
 
 const materialPool: THREE.MeshBasicMaterial[] = [];
 const shockwaveMaterialPool: THREE.MeshBasicMaterial[] = [];
+const boxParticlePool: Particle[] = [];
 
 let boxParticleMesh: THREE.InstancedMesh | null = null;
 
@@ -35,12 +36,6 @@ function ensureBoxParticleMesh(): THREE.InstancedMesh | null {
         boxParticleMesh.frustumCulled = false;
         boxParticleMesh.renderOrder = 20;
         boxParticleMesh.count = 0;
-        for (let i = 0; i < MAX_PARTICLES; i++) {
-            boxParticleMesh.setColorAt(i, _instanceColor.setHex(0xffaa00));
-        }
-        if (boxParticleMesh.instanceColor) {
-            boxParticleMesh.instanceColor.needsUpdate = true;
-        }
         state.scene.add(boxParticleMesh);
     }
     return boxParticleMesh;
@@ -135,20 +130,22 @@ function pushBoxParticle(
     maxLife: number
 ): void {
     ensureBoxParticleMesh();
-    state.activeParticles.push({
-        kind,
-        x: position.x,
-        y: position.y,
-        z: position.z,
-        vx,
-        vy,
-        vz,
-        gravity,
-        size,
-        color,
-        life: maxLife,
-        maxLife
-    });
+    const particle = boxParticlePool.pop() || ({} as Particle);
+    particle.kind = kind;
+    particle.mesh = undefined;
+    particle.x = position.x;
+    particle.y = position.y;
+    particle.z = position.z;
+    particle.vx = vx;
+    particle.vy = vy;
+    particle.vz = vz;
+    particle.gravity = gravity;
+    particle.size = size;
+    particle.color = color;
+    particle.targetScale = undefined;
+    particle.life = maxLife;
+    particle.maxLife = maxLife;
+    state.activeParticles.push(particle);
 }
 
 function availableParticleSlots(): number {
@@ -244,9 +241,16 @@ function releaseMeshParticle(p: Particle): void {
     }
 }
 
-function updateBoxInstances(): void {
-    const mesh = ensureBoxParticleMesh();
-    if (!mesh) return;
+function updateBoxInstances(hasBoxParticles: boolean): void {
+    // Do not create an InstancedMesh or upload its buffers before the first
+    // actual particle. The main loop calls this path while menus are open.
+    if (!boxParticleMesh) return;
+    if (!hasBoxParticles) {
+        if (boxParticleMesh.count !== 0) boxParticleMesh.count = 0;
+        return;
+    }
+
+    const mesh = boxParticleMesh;
 
     const limit = getParticleLimit();
     if (mesh.count > limit) mesh.count = limit;
@@ -275,12 +279,16 @@ function updateBoxInstances(): void {
 }
 
 export function updateParticles(delta: number): void {
+    let hasBoxParticles = false;
     for (let i = state.activeParticles.length - 1; i >= 0; i--) {
         const p = state.activeParticles[i];
         p.life -= delta;
 
         if (p.life <= 0) {
             releaseMeshParticle(p);
+            if (isBoxParticle(p.kind) && boxParticlePool.length < MAX_PARTICLES) {
+                boxParticlePool.push(p);
+            }
             state.activeParticles[i] = state.activeParticles[state.activeParticles.length - 1];
             state.activeParticles.pop();
             continue;
@@ -289,6 +297,7 @@ export function updateParticles(delta: number): void {
         const ratio = Math.max(0, p.life / p.maxLife);
 
         if (isBoxParticle(p.kind)) {
+            hasBoxParticles = true;
             if (p.vx !== undefined && p.vy !== undefined && p.vz !== undefined && p.gravity !== undefined) {
                 p.vy -= p.gravity * delta;
                 p.x = (p.x || 0) + p.vx * delta;
@@ -309,7 +318,7 @@ export function updateParticles(delta: number): void {
         }
     }
 
-    updateBoxInstances();
+    updateBoxInstances(hasBoxParticles);
 }
 
 export function spawnRocketFlame(position: THREE.Vector3, count: number, isBurst: boolean): void {
@@ -376,8 +385,9 @@ export function createShockwave(position: THREE.Vector3, targetRadius: number, c
 }
 
 export function disposeParticles(): void {
-    if (boxParticleMesh && state.scene) {
-        state.scene.remove(boxParticleMesh);
+    if (boxParticleMesh) {
+        state.scene?.remove(boxParticleMesh);
+        boxParticleMesh.dispose();
         (boxParticleMesh.material as THREE.Material).dispose();
         boxParticleMesh = null;
     }
@@ -386,6 +396,7 @@ export function disposeParticles(): void {
         releaseMeshParticle(state.activeParticles[i]);
     }
     state.activeParticles.length = 0;
+    boxParticlePool.length = 0;
     materialPool.splice(0).forEach((mat) => mat.dispose());
     shockwaveMaterialPool.splice(0).forEach((mat) => mat.dispose());
 }

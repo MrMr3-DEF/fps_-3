@@ -4,3 +4,15 @@ main = "src/worker.ts"
 
 [assets]
 directory = "./dist"
+
+[[durable_objects.bindings]]
+name = "TURN_RATE_LIMITER"
+class_name = "TurnRateLimiter"
+
+[[durable_objects.bindings]]
+name = "ACTIVE_TURN_ROOM"
+class_name = "ActiveTurnRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TurnRateLimiter", "ActiveTurnRoom"]

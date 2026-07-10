@@ -31,10 +31,69 @@ const targetHash = new SpatialHash<THREE.Group>(48);
 const worldObjects: THREE.Object3D[] = [];
 const renderChunks = new Map<string, THREE.Object3D[]>();
 const activeRenderChunks = new Set<string>();
+let grappleFloor: THREE.Object3D | null = null;
+
+interface ChunkedInstanceSet {
+    mesh: THREE.InstancedMesh;
+    matricesByChunk: Map<string, THREE.Matrix4[]>;
+}
+
+// Static props keep one draw call per material while their instance buffers are
+// refreshed only when the player crosses a render-chunk boundary.
+const chunkedInstanceSets: ChunkedInstanceSet[] = [];
 let targetUpdateFrame = 0;
 let lastRenderChunkX = Number.NaN;
 let lastRenderChunkZ = Number.NaN;
 let lastRenderDistanceChunks = -1;
+
+// Procedural gameplay geometry must be identical for every player in a room.
+// Keep its PRNG private to world generation so particle/UI randomness cannot
+// perturb the level sequence between peers.
+let worldSeed = generateWorldSeed();
+let worldRandomState = worldSeed;
+
+export function generateWorldSeed(): number {
+    const cryptoApi = globalThis.crypto;
+    if (cryptoApi?.getRandomValues) {
+        const values = new Uint32Array(1);
+        cryptoApi.getRandomValues(values);
+        return values[0];
+    }
+    return (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+}
+
+export function getWorldSeed(): number {
+    return worldSeed;
+}
+
+export function setWorldSeed(seed: number): void {
+    worldSeed = seed >>> 0;
+    worldRandomState = worldSeed;
+}
+
+/** Rebuilds only the procedural arena; player and networking visuals survive. */
+export function rebuildEnvironmentWithSeed(seed: number): void {
+    if (!state.scene) return;
+    setWorldSeed(seed);
+    disposeWorld();
+    createEnvironment();
+}
+
+function resetWorldRandom(): void {
+    worldRandomState = worldSeed;
+}
+
+function worldRandom(): number {
+    // Mulberry32: deterministic, fast, and sufficient for cosmetic/procedural layout.
+    let value = (worldRandomState += 0x6d2b79f5);
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+}
+
+const _placementObstacleCandidates: THREE.Object3D[] = [];
+const _placementLavaCandidates: THREE.Object3D[] = [];
+const _grappleLavaCandidates: THREE.Object3D[] = [];
 
 function addWorldObject<T extends THREE.Object3D>(obj: T): T {
     state.scene!.add(obj);
@@ -44,6 +103,59 @@ function addWorldObject<T extends THREE.Object3D>(obj: T): T {
 
 function getRenderChunkKey(x: number, z: number): string {
     return `${Math.floor(x / RENDER_CHUNK_SIZE)},${Math.floor(z / RENDER_CHUNK_SIZE)}`;
+}
+
+function createChunkedInstanceSet(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material | THREE.Material[],
+    capacity: number,
+    castShadow = false,
+    receiveShadow = false
+): ChunkedInstanceSet {
+    const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    mesh.count = 0;
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = receiveShadow;
+    // The active instances move between chunks while the mesh itself stays at
+    // the origin, so its static bounding sphere cannot safely cull it.
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    addWorldObject(mesh);
+
+    const instanceSet: ChunkedInstanceSet = {
+        mesh,
+        matricesByChunk: new Map<string, THREE.Matrix4[]>()
+    };
+    chunkedInstanceSets.push(instanceSet);
+    return instanceSet;
+}
+
+function addChunkedInstance(instanceSet: ChunkedInstanceSet, x: number, z: number, matrix: THREE.Matrix4): void {
+    const key = getRenderChunkKey(x, z);
+    const matrices = instanceSet.matricesByChunk.get(key);
+    if (matrices) {
+        matrices.push(matrix.clone());
+    } else {
+        instanceSet.matricesByChunk.set(key, [matrix.clone()]);
+    }
+}
+
+function refreshChunkedInstances(): void {
+    for (let setIndex = 0; setIndex < chunkedInstanceSets.length; setIndex++) {
+        const instanceSet = chunkedInstanceSets[setIndex];
+        let instanceIndex = 0;
+
+        activeRenderChunks.forEach((key) => {
+            const matrices = instanceSet.matricesByChunk.get(key);
+            if (!matrices) return;
+            for (let i = 0; i < matrices.length; i++) {
+                instanceSet.mesh.setMatrixAt(instanceIndex++, matrices[i]);
+            }
+        });
+
+        instanceSet.mesh.count = instanceIndex;
+        instanceSet.mesh.instanceMatrix.needsUpdate = true;
+    }
 }
 
 function addChunkedRenderObject(obj: THREE.Object3D): void {
@@ -122,6 +234,7 @@ export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChu
 
     activeRenderChunks.clear();
     nextActive.forEach((key) => activeRenderChunks.add(key));
+    refreshChunkedInstances();
 }
 
 export function queryObstaclesNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
@@ -136,6 +249,44 @@ export function queryTargetsNear(x: number, z: number, radius: number, out?: THR
     return targetHash.query(x, z, radius, out);
 }
 
+export function queryObstaclesAlongSegment(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    out?: THREE.Object3D[]
+): THREE.Object3D[] {
+    return obstacleHash.querySegment(startX, startZ, endX, endZ, out);
+}
+
+export function queryTargetsAlongSegment(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    out?: THREE.Group[]
+): THREE.Group[] {
+    return targetHash.querySegment(startX, startZ, endX, endZ, out);
+}
+
+/**
+ * The floor is always a candidate, while pillars and lava are gathered only
+ * from cells crossed by the hook ray. This replaces a full-scene raycast.
+ */
+export function queryGrappleSurfacesAlongSegment(
+    startX: number,
+    startZ: number,
+    endX: number,
+    endZ: number,
+    out: THREE.Object3D[] = []
+): THREE.Object3D[] {
+    const candidates = obstacleHash.querySegment(startX, startZ, endX, endZ, out);
+    const lavaCandidates = lavaHash.querySegment(startX, startZ, endX, endZ, _grappleLavaCandidates);
+    for (let i = 0; i < lavaCandidates.length; i++) candidates.push(lavaCandidates[i]);
+    if (grappleFloor) candidates.push(grappleFloor);
+    return candidates;
+}
+
 export function rebuildTargetHash(): void {
     targetHash.clear();
     for (let i = 0; i < state.targets.length; i++) {
@@ -147,12 +298,12 @@ export function rebuildTargetHash(): void {
 }
 
 export function respawnTarget(targetGroup: THREE.Group): void {
-    targetGroup.position.x = (Math.random() - 0.5) * (MAP_SIZE - 40);
-    targetGroup.position.y = 3.0 + Math.random() * (MAX_ENEMY_HEIGHT - 5.0);
-    targetGroup.position.z = (Math.random() - 0.5) * (MAP_SIZE - 40);
+    targetGroup.position.x = (worldRandom() - 0.5) * (MAP_SIZE - 40);
+    targetGroup.position.y = 3.0 + worldRandom() * (MAX_ENEMY_HEIGHT - 5.0);
+    targetGroup.position.z = (worldRandom() - 0.5) * (MAP_SIZE - 40);
     refreshChunkedRenderObject(targetGroup);
 
-    const randClass = ENEMY_CLASSES[Math.floor(Math.random() * ENEMY_CLASSES.length)];
+    const randClass = ENEMY_CLASSES[Math.floor(worldRandom() * ENEMY_CLASSES.length)];
 
     const data = targetData(targetGroup);
     data.maxHp = randClass.hp;
@@ -182,7 +333,13 @@ function checkAABBOverlap(x: number, z: number, checkRadius: number, array: THRE
 }
 
 function overlapsWithPillars(sqX: number, sqZ: number): boolean {
-    return checkAABBOverlap(sqX, sqZ, PILLAR_WIDTH / 2, state.obstacles, LAVA_POOL_HALF_SIZE);
+    const candidates = obstacleHash.query(
+        sqX,
+        sqZ,
+        LAVA_POOL_HALF_SIZE + PILLAR_WIDTH,
+        _placementObstacleCandidates
+    );
+    return checkAABBOverlap(sqX, sqZ, PILLAR_WIDTH / 2, candidates, LAVA_POOL_HALF_SIZE);
 }
 
 // Small canvas textures keep the game self-contained: no external art assets are
@@ -198,17 +355,17 @@ function createGrassTexture(): THREE.CanvasTexture {
     ctx.fillRect(0, 0, size, size);
 
     for (let i = 0; i < 5000; i++) {
-        const x = Math.random() * size;
-        const y = Math.random() * size;
-        const length = 2 + Math.random() * 5;
-        const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.5;
+        const x = worldRandom() * size;
+        const y = worldRandom() * size;
+        const length = 2 + worldRandom() * 5;
+        const angle = -Math.PI / 2 + (worldRandom() - 0.5) * 0.5;
 
-        const hue = 90 + Math.random() * 25;
-        const sat = 45 + Math.random() * 15;
-        const light = 22 + Math.random() * 18;
+        const hue = 90 + worldRandom() * 25;
+        const sat = 45 + worldRandom() * 15;
+        const light = 22 + worldRandom() * 18;
 
         ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
-        ctx.lineWidth = 1.5 + Math.random() * 2.0;
+        ctx.lineWidth = 1.5 + worldRandom() * 2.0;
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
@@ -233,31 +390,31 @@ function createBarkTexture(): THREE.CanvasTexture {
     ctx.fillRect(0, 0, size, size);
 
     for (let i = 0; i < 4000; i++) {
-        const x = Math.random() * size;
-        const y = Math.random() * size;
-        const length = 40 + Math.random() * 120;
+        const x = worldRandom() * size;
+        const y = worldRandom() * size;
+        const length = 40 + worldRandom() * 120;
         
-        const hue = 22 + Math.random() * 8;
-        const sat = 25 + Math.random() * 15;
-        const light = 12 + Math.random() * 15;
+        const hue = 22 + worldRandom() * 8;
+        const sat = 25 + worldRandom() * 15;
+        const light = 12 + worldRandom() * 15;
 
         ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
-        ctx.lineWidth = 1.5 + Math.random() * 3.5;
+        ctx.lineWidth = 1.5 + worldRandom() * 3.5;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        const jitter = (Math.random() - 0.5) * 2;
+        const jitter = (worldRandom() - 0.5) * 2;
         ctx.lineTo(x + jitter, y + length);
         ctx.stroke();
     }
 
     ctx.strokeStyle = '#1a0d05';
     for (let i = 0; i < 40; i++) {
-        let x = Math.random() * size;
-        ctx.lineWidth = 2 + Math.random() * 4;
+        let x = worldRandom() * size;
+        ctx.lineWidth = 2 + worldRandom() * 4;
         ctx.beginPath();
         ctx.moveTo(x, 0);
         for (let y = 0; y < size; y += 20) {
-            x += (Math.random() - 0.5) * 4;
+            x += (worldRandom() - 0.5) * 4;
             ctx.lineTo(x, y);
         }
         ctx.stroke();
@@ -284,14 +441,14 @@ function createRingsTexture(): THREE.CanvasTexture {
     ctx.fillRect(0, 0, size, size);
 
     const maxRadius = size * 0.75;
-    const step = 6 + Math.random() * 4;
+    const step = 6 + worldRandom() * 4;
 
     for (let r = 10; r < maxRadius; r += step) {
-        const hue = 25 + Math.random() * 8;
-        const sat = 30 + Math.random() * 15;
-        const light = 35 + Math.random() * 10;
+        const hue = 25 + worldRandom() * 8;
+        const sat = 30 + worldRandom() * 15;
+        const light = 35 + worldRandom() * 10;
         ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
-        ctx.lineWidth = 1 + Math.random() * 1.5;
+        ctx.lineWidth = 1 + worldRandom() * 1.5;
 
         ctx.beginPath();
         const segments = 120;
@@ -299,7 +456,7 @@ function createRingsTexture(): THREE.CanvasTexture {
             const angle = (i / segments) * Math.PI * 2;
             
             const wave = Math.sin(angle * 6) * 3 + Math.cos(angle * 3) * 2 + Math.sin(angle * 12) * 0.8;
-            const radialJitter = wave + (Math.random() - 0.5) * 0.5;
+            const radialJitter = wave + (worldRandom() - 0.5) * 0.5;
             const currentRadius = r + radialJitter;
             
             const px = cx + Math.cos(angle) * currentRadius;
@@ -316,23 +473,23 @@ function createRingsTexture(): THREE.CanvasTexture {
 
     ctx.fillStyle = 'rgba(150, 110, 80, 0.08)';
     for (let i = 0; i < 5000; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * maxRadius;
+        const angle = worldRandom() * Math.PI * 2;
+        const radius = worldRandom() * maxRadius;
         const px = cx + Math.cos(angle) * radius;
         const py = cy + Math.sin(angle) * radius;
         
         ctx.fillRect(px, py, 1.5, 1.5);
     }
 
-    const numCracks = 3 + Math.floor(Math.random() * 3);
+    const numCracks = 3 + Math.floor(worldRandom() * 3);
     ctx.strokeStyle = 'rgba(65, 40, 20, 0.85)';
     
     for (let i = 0; i < numCracks; i++) {
-        const baseAngle = Math.random() * Math.PI * 2;
-        const startRad = 15 + Math.random() * 30;
-        const endRad = maxRadius * (0.6 + Math.random() * 0.4);
+        const baseAngle = worldRandom() * Math.PI * 2;
+        const startRad = 15 + worldRandom() * 30;
+        const endRad = maxRadius * (0.6 + worldRandom() * 0.4);
         
-        ctx.lineWidth = 1.5 + Math.random() * 2;
+        ctx.lineWidth = 1.5 + worldRandom() * 2;
         ctx.beginPath();
         
         let currentX = cx + Math.cos(baseAngle) * startRad;
@@ -343,7 +500,7 @@ function createRingsTexture(): THREE.CanvasTexture {
         for (let j = 1; j <= steps; j++) {
             const t = j / steps;
             const r = startRad + t * (endRad - startRad);
-            const angleJitter = baseAngle + (Math.random() - 0.5) * 0.15;
+            const angleJitter = baseAngle + (worldRandom() - 0.5) * 0.15;
             
             currentX = cx + Math.cos(angleJitter) * r;
             currentY = cy + Math.sin(angleJitter) * r;
@@ -354,7 +511,7 @@ function createRingsTexture(): THREE.CanvasTexture {
 
     ctx.fillStyle = '#412814';
     ctx.beginPath();
-    ctx.arc(cx, cy, 3 + Math.random() * 4, 0, Math.PI * 2);
+    ctx.arc(cx, cy, 3 + worldRandom() * 4, 0, Math.PI * 2);
     ctx.fill();
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -384,47 +541,53 @@ const SHARED_WORLD_MATERIALS = new Set<THREE.Material>([
     ...SHARED_LEAF_MATERIALS
 ]);
 
-function pickBushLeafMaterial(): THREE.MeshLambertMaterial {
+function pickBushLeafMaterialIndex(): number {
     const rareAutumnStart = SHARED_LEAF_MATERIALS.length - 2;
-    const materialIndex = Math.random() < 0.08
-        ? rareAutumnStart + Math.floor(Math.random() * 2)
-        : Math.floor(Math.random() * rareAutumnStart);
-    return SHARED_LEAF_MATERIALS[materialIndex];
+    return worldRandom() < 0.08
+        ? rareAutumnStart + Math.floor(worldRandom() * 2)
+        : Math.floor(worldRandom() * rareAutumnStart);
 }
 
-function createLowPolyBush(): THREE.Group {
-    const bushGroup = new THREE.Group();
-    const leafMat = pickBushLeafMaterial();
+function appendLowPolyBush(
+    trunkInstances: ChunkedInstanceSet,
+    leafInstances: ChunkedInstanceSet[],
+    x: number,
+    z: number,
+    scale: number,
+    root: THREE.Object3D,
+    part: THREE.Object3D,
+    matrix: THREE.Matrix4
+): void {
+    root.position.set(x, 0, z);
+    root.rotation.set(0, 0, 0);
+    root.scale.setScalar(scale);
+    root.updateMatrix();
 
-    const trunk = new THREE.Mesh(SHARED_TRUNK_GEO, SHARED_TRUNK_MAT);
-    trunk.position.y = 0.5;
-    trunk.castShadow = true;
-    trunk.receiveShadow = true;
-    bushGroup.add(trunk);
+    part.position.set(0, 0.5, 0);
+    part.rotation.set(0, 0, 0);
+    part.scale.set(1, 1, 1);
+    part.updateMatrix();
+    matrix.multiplyMatrices(root.matrix, part.matrix);
+    addChunkedInstance(trunkInstances, x, z, matrix);
 
-    const numClusters = 1 + Math.floor(Math.random() * 3);
+    const leafMaterialIndex = pickBushLeafMaterialIndex();
+    const numClusters = 1 + Math.floor(worldRandom() * 3);
     for (let i = 0; i < numClusters; i++) {
-        const radius = 0.85 + Math.random() * 0.8;
-        const leafMesh = new THREE.Mesh(SHARED_LEAF_GEO, leafMat);
-        leafMesh.scale.setScalar(radius);
-        
-        const ox = numClusters === 1 ? 0 : (Math.random() - 0.5) * 1.1;
-        const oy = 0.75 + Math.random() * 0.85;
-        const oz = numClusters === 1 ? 0 : (Math.random() - 0.5) * 1.1;
-        leafMesh.position.set(ox, oy, oz);
-        
-        leafMesh.rotation.set(
-            Math.random() * Math.PI,
-            Math.random() * Math.PI,
-            Math.random() * Math.PI
+        const radius = 0.85 + worldRandom() * 0.8;
+        const ox = numClusters === 1 ? 0 : (worldRandom() - 0.5) * 1.1;
+        const oy = 0.75 + worldRandom() * 0.85;
+        const oz = numClusters === 1 ? 0 : (worldRandom() - 0.5) * 1.1;
+        part.position.set(ox, oy, oz);
+        part.rotation.set(
+            worldRandom() * Math.PI,
+            worldRandom() * Math.PI,
+            worldRandom() * Math.PI
         );
-        
-        leafMesh.castShadow = true;
-        leafMesh.receiveShadow = true;
-        bushGroup.add(leafMesh);
+        part.scale.setScalar(radius);
+        part.updateMatrix();
+        matrix.multiplyMatrices(root.matrix, part.matrix);
+        addChunkedInstance(leafInstances[leafMaterialIndex], x, z, matrix);
     }
-    
-    return bushGroup;
 }
 
 // Distant vegetation is rendered as sprites to fill the horizon without a huge
@@ -450,19 +613,19 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
         const g = parseInt(hex.slice(3, 5), 16);
         const b = parseInt(hex.slice(5, 7), 16);
 
-        const numVertices = 6 + Math.floor(Math.random() * 3);
+        const numVertices = 6 + Math.floor(worldRandom() * 3);
         const vertices: { x: number, y: number }[] = [];
         for (let i = 0; i < numVertices; i++) {
-            const angle = (i / numVertices) * Math.PI * 2 + (Math.random() - 0.5) * 0.1;
-            const dist = radius * (0.85 + Math.random() * 0.3);
+            const angle = (i / numVertices) * Math.PI * 2 + (worldRandom() - 0.5) * 0.1;
+            const dist = radius * (0.85 + worldRandom() * 0.3);
             vertices.push({
                 x: cx + Math.cos(angle) * dist,
                 y: cy + Math.sin(angle) * dist
             });
         }
 
-        const centerOffsetX = (Math.random() - 0.3) * (radius * 0.25);
-        const centerOffsetY = -radius * 0.15 + (Math.random() - 0.5) * (radius * 0.15);
+        const centerOffsetX = (worldRandom() - 0.3) * (radius * 0.25);
+        const centerOffsetY = -radius * 0.15 + (worldRandom() - 0.5) * (radius * 0.15);
         const center = { x: cx + centerOffsetX, y: cy + centerOffsetY };
 
         for (let i = 0; i < numVertices; i++) {
@@ -505,8 +668,21 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
 }
 
 function overlapsWithPillarsOrLava(x: number, z: number, checkRadius: number): boolean {
-    if (checkAABBOverlap(x, z, checkRadius, state.obstacles, PILLAR_WIDTH / 2)) return true;
-    if (checkAABBOverlap(x, z, checkRadius, state.lavaPools, LAVA_POOL_HALF_SIZE)) return true;
+    const obstacleCandidates = obstacleHash.query(
+        x,
+        z,
+        PILLAR_WIDTH + checkRadius,
+        _placementObstacleCandidates
+    );
+    if (checkAABBOverlap(x, z, checkRadius, obstacleCandidates, PILLAR_WIDTH / 2)) return true;
+
+    const lavaCandidates = lavaHash.query(
+        x,
+        z,
+        LAVA_POOL_HALF_SIZE + checkRadius,
+        _placementLavaCandidates
+    );
+    if (checkAABBOverlap(x, z, checkRadius, lavaCandidates, LAVA_POOL_HALF_SIZE)) return true;
     if (x * x + z * z < 625) return true;
     return false;
 }
@@ -524,7 +700,7 @@ function createFloor(): void {
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true; 
     addWorldObject(floor);
-    state.grappleSurfaces.push(floor);
+    grappleFloor = floor;
 }
 
 function createFakeBillboards(): void {
@@ -535,11 +711,11 @@ function createFakeBillboards(): void {
     const fakePillarMat = new THREE.MeshLambertMaterial({ color: 0x483224, side: THREE.DoubleSide });
 
     for (let i = 0; i < FAKE_PILLAR_COUNT; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 700;
+        const angle = worldRandom() * Math.PI * 2;
+        const radius = (MAP_SIZE / 2) + 20 + worldRandom() * 700;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
-        const height = 20 + Math.random() * (MAX_PILLAR_HEIGHT - 20);
+        const height = 20 + worldRandom() * (MAX_PILLAR_HEIGHT - 20);
 
         const mesh = new THREE.Mesh(fakePillarGeo, fakePillarMat);
         mesh.scale.set(1, height, 1);
@@ -553,8 +729,8 @@ function createFakeBillboards(): void {
     const fakeLavaMat = new THREE.MeshBasicMaterial({ color: 0xff3b00 });
 
     for (let i = 0; i < FAKE_LAVA_POOL_COUNT; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = (MAP_SIZE / 2) + 20 + Math.random() * 700;
+        const angle = worldRandom() * Math.PI * 2;
+        const radius = (MAP_SIZE / 2) + 20 + worldRandom() * 700;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
@@ -588,23 +764,21 @@ function createPillars(): void {
     
     const materials = [barkMat, barkMat, ringsMat, ringsMat, barkMat, barkMat];
     
-    const pillarInstanced = new THREE.InstancedMesh(boxGeo, materials, PILLAR_COUNT);
-    pillarInstanced.castShadow = true;
-    pillarInstanced.receiveShadow = true;
+    const pillarInstances = createChunkedInstanceSet(boxGeo, materials, PILLAR_COUNT, true, true);
 
     const colliderMat = new THREE.MeshBasicMaterial();
     const sharedUnitBoxGeo = new THREE.BoxGeometry(1, 1, 1);
 
     for (let i = 0; i < PILLAR_COUNT; i++) {
-        const height = 20.0 + Math.random() * (MAX_PILLAR_HEIGHT - 20.0);
+        const height = 20.0 + worldRandom() * (MAX_PILLAR_HEIGHT - 20.0);
         dummy.scale.set(1, height, 1);
         dummy.position.set(
-            (Math.random() - 0.5) * (MAP_SIZE - 40),
+            (worldRandom() - 0.5) * (MAP_SIZE - 40),
             height / 2,
-            (Math.random() - 0.5) * (MAP_SIZE - 40)
+            (worldRandom() - 0.5) * (MAP_SIZE - 40)
         );
         dummy.updateMatrix();
-        pillarInstanced.setMatrixAt(i, dummy.matrix);
+        addChunkedInstance(pillarInstances, dummy.position.x, dummy.position.z, dummy.matrix);
 
         const obstacle = new THREE.Mesh(sharedUnitBoxGeo, colliderMat);
         obstacle.scale.set(PILLAR_WIDTH, height, PILLAR_WIDTH);
@@ -619,10 +793,8 @@ function createPillars(): void {
         obstacle.visible = false;
         addWorldObject(obstacle);
         state.obstacles.push(obstacle);
-        state.grappleSurfaces.push(obstacle);
         obstacleHash.insert(obstacle.position.x, obstacle.position.z, PILLAR_WIDTH, obstacle);
     }
-    addWorldObject(pillarInstanced);
 }
 
 function createLavaPools(): void {
@@ -634,6 +806,9 @@ function createLavaPools(): void {
         emissiveIntensity: 1.5,
         roughness: 0.5
     });
+    const lavaInstances = createChunkedInstanceSet(lavaGeo, lavaMat, LAVA_CHAIN_COUNT * 5);
+    const lavaColliderMat = new THREE.MeshBasicMaterial();
+    const lavaDummy = new THREE.Object3D();
 
     for (let i = 0; i < LAVA_CHAIN_COUNT; i++) {
         let chainValid = false;
@@ -647,8 +822,8 @@ function createLavaPools(): void {
             let startX = 0, startZ = 0;
             let posAttempts = 0;
             do {
-                startX = (Math.random() - 0.5) * (MAP_SIZE - 80);
-                startZ = (Math.random() - 0.5) * (MAP_SIZE - 80);
+                startX = (worldRandom() - 0.5) * (MAP_SIZE - 80);
+                startZ = (worldRandom() - 0.5) * (MAP_SIZE - 80);
                 posAttempts++;
             } while (
                 (Math.sqrt(startX * startX + startZ * startZ) < 30 || overlapsWithPillars(startX, startZ)) && 
@@ -659,7 +834,7 @@ function createLavaPools(): void {
             
             squares.push({ x: startX, z: startZ });
             
-            const squareCount = 1 + Math.floor(Math.random() * 5);
+            const squareCount = 1 + Math.floor(worldRandom() * 5);
             
             let growthSuccess = true;
             for (let j = 1; j < squareCount; j++) {
@@ -668,8 +843,8 @@ function createLavaPools(): void {
                 
                 while (!spotFound && spotAttempts < 30) {
                     spotAttempts++;
-                    const parent = squares[Math.floor(Math.random() * squares.length)];
-                    const dir = Math.floor(Math.random() * 4);
+                    const parent = squares[Math.floor(worldRandom() * squares.length)];
+                    const dir = Math.floor(worldRandom() * 4);
                     let nextX = parent.x;
                     let nextZ = parent.z;
                     const step = LAVA_POOL_HALF_SIZE * 2;
@@ -714,13 +889,20 @@ function createLavaPools(): void {
             const sqLen = squares.length;
             for (let k = 0; k < sqLen; k++) {
                 const sq = squares[k];
-                const lavaMesh = new THREE.Mesh(lavaGeo, lavaMat);
-                lavaMesh.position.set(sq.x, 0.075, sq.z);
-                addWorldObject(lavaMesh);
-                addChunkedRenderObject(lavaMesh);
-                state.lavaPools.push(lavaMesh);
-                state.grappleSurfaces.push(lavaMesh);
-                lavaHash.insert(lavaMesh.position.x, lavaMesh.position.z, LAVA_POOL_HALF_SIZE, lavaMesh);
+                lavaDummy.position.set(sq.x, 0.075, sq.z);
+                lavaDummy.scale.set(1, 1, 1);
+                lavaDummy.rotation.set(0, 0, 0);
+                lavaDummy.updateMatrix();
+                addChunkedInstance(lavaInstances, sq.x, sq.z, lavaDummy.matrix);
+
+                // Keep lightweight invisible meshes for the existing collision
+                // and grappling registries; the visible pools are batched above.
+                const lavaCollider = new THREE.Mesh(lavaGeo, lavaColliderMat);
+                lavaCollider.position.copy(lavaDummy.position);
+                lavaCollider.visible = false;
+                addWorldObject(lavaCollider);
+                state.lavaPools.push(lavaCollider);
+                lavaHash.insert(lavaCollider.position.x, lavaCollider.position.z, LAVA_POOL_HALF_SIZE, lavaCollider);
             }
         }
     }
@@ -729,22 +911,41 @@ function createLavaPools(): void {
 function createBushes(): void {
     // Near-field bushes are geometry; far-field bushes are sprites. Both avoid
     // blockers/hazards so the arena remains readable.
+    const trunkInstances = createChunkedInstanceSet(
+        SHARED_TRUNK_GEO,
+        SHARED_TRUNK_MAT,
+        BUSH_3D_COUNT
+    );
+    const leafInstances = SHARED_LEAF_MATERIALS.map((material) => createChunkedInstanceSet(
+        SHARED_LEAF_GEO,
+        material,
+        BUSH_3D_COUNT * 3
+    ));
+    const bushRoot = new THREE.Object3D();
+    const bushPart = new THREE.Object3D();
+    const bushMatrix = new THREE.Matrix4();
+
     let spawned3DBushes = 0;
     let attempts3D = 0;
     while (spawned3DBushes < BUSH_3D_COUNT && attempts3D < BUSH_3D_COUNT * 10) {
         attempts3D++;
-        const angle = Math.random() * Math.PI * 2;
-        const radius = Math.random() * BUSH_3D_RADIUS_CAP;
+        const angle = worldRandom() * Math.PI * 2;
+        const radius = worldRandom() * BUSH_3D_RADIUS_CAP;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
         if (!overlapsWithPillarsOrLava(x, z, 3.5)) {
-            const bush = createLowPolyBush();
-            const s = 0.75 + Math.random() * 0.5;
-            bush.scale.set(s, s, s);
-            bush.position.set(x, 0, z);
-            addWorldObject(bush);
-            addChunkedRenderObject(bush);
+            const s = 0.75 + worldRandom() * 0.5;
+            appendLowPolyBush(
+                trunkInstances,
+                leafInstances,
+                x,
+                z,
+                s,
+                bushRoot,
+                bushPart,
+                bushMatrix
+            );
             spawned3DBushes++;
         }
     }
@@ -761,16 +962,16 @@ function createBushes(): void {
     let attempts2DOutside = 0;
     while (spawned2DOutside < BUSH_2D_COUNT && attempts2DOutside < BUSH_2D_COUNT * 8) {
         attempts2DOutside++;
-        const angle = Math.random() * Math.PI * 2;
-        const radius = BUSH_2D_INNER_RADIUS + Math.random() * BUSH_2D_SPREAD;
+        const angle = worldRandom() * Math.PI * 2;
+        const radius = BUSH_2D_INNER_RADIUS + worldRandom() * BUSH_2D_SPREAD;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
 
         if (!overlapsWithFakePillars(x, z, 3.5)) {
-            const mat = spriteMaterials[Math.floor(Math.random() * spriteMaterials.length)];
+            const mat = spriteMaterials[Math.floor(worldRandom() * spriteMaterials.length)];
             const sprite = new THREE.Sprite(mat);
-            const height = 4.0 + Math.random() * 2.0;
-            const width = height * (0.8 + Math.random() * 0.3);
+            const height = 4.0 + worldRandom() * 2.0;
+            const width = height * (0.8 + worldRandom() * 0.3);
             sprite.scale.set(width, height, 1.0);
             sprite.position.set(x, height / 2, z);
             addWorldObject(sprite);
@@ -813,7 +1014,6 @@ function createEnemies(): void {
 
         targetGroup.add(healthBarGroup);
         data.healthBarFg = barFg;
-        data.healthBarBg = barBg;
         data.healthBarGroup = healthBarGroup;
 
         respawnTarget(targetGroup);
@@ -826,6 +1026,11 @@ function createEnemies(): void {
 
 export function createEnvironment(): void {
     if (!state.scene) return;
+
+    // Standalone arenas should remain fresh between matches. Multiplayer sets
+    // its seed explicitly before rebuilding, so every peer keeps the same map.
+    if (!state.isMultiplayer) setWorldSeed(generateWorldSeed());
+    resetWorldRandom();
 
     createFloor();
     createFakeBillboards();
@@ -858,6 +1063,9 @@ export function disposeWorld(): void {
         state.scene!.remove(obj);
         obj.traverse((child: any) => {
             if (child.isMesh || child.isSprite) {
+                if (child.isInstancedMesh) {
+                    child.dispose();
+                }
                 if (child.geometry && !SHARED_WORLD_GEOMETRIES.has(child.geometry) && !disposedGeometries.has(child.geometry)) {
                     disposedGeometries.add(child.geometry);
                     child.geometry.dispose();
@@ -876,7 +1084,7 @@ export function disposeWorld(): void {
     worldObjects.length = 0;
     state.targets = [];
     state.obstacles = [];
-    state.grappleSurfaces = [];
+    grappleFloor = null;
     state.lavaPools = [];
     state.fakePillars = [];
     obstacleHash.clear();
@@ -884,6 +1092,7 @@ export function disposeWorld(): void {
     targetHash.clear();
     renderChunks.clear();
     activeRenderChunks.clear();
+    chunkedInstanceSets.length = 0;
     lastRenderChunkX = Number.NaN;
     lastRenderChunkZ = Number.NaN;
     lastRenderDistanceChunks = -1;

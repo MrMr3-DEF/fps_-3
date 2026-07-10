@@ -1,12 +1,11 @@
 # Dependencies
 node_modules/
 /.wrangler
-/docs
-/tests
 
 # OS files
 .DS_Store
 Thumbs.db
+~$*.docx
 
 # Logs
 npm-debug.log*

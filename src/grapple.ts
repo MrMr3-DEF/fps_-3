@@ -10,7 +10,7 @@ import {
     HOOK_MAX_SLINGSHOT_SPEED,
     HOOK_SLINGSHOT_ACCEL
 } from './config.js';
-import { queryTargetsNear } from './world.js';
+import { queryGrappleSurfacesAlongSegment, queryTargetsNear } from './world.js';
 
 // Reused scratch values for aiming and cable placement.
 const _dirToTarget = new THREE.Vector3();
@@ -21,6 +21,8 @@ const _gunTip = new THREE.Vector3();
 const _midPoint = new THREE.Vector3();
 const _camDir = new THREE.Vector3();
 const _targetCandidates: THREE.Group[] = [];
+const _surfaceCandidates: THREE.Object3D[] = [];
+const _rayEnd = new THREE.Vector3();
 
 const _raycaster = new THREE.Raycaster();
 const _centerScreen = new THREE.Vector2(0, 0);
@@ -31,6 +33,7 @@ let hookBadgeEl: HTMLElement | null = null;
 
 export function resetHook(): void {
     state.hookState = 'IDLE';
+    state.hookWillHit = false;
     state.hookIsEnemy = false;
     state.hookTargetEnemy = null;
     if (state.scene && state.hookMesh) {
@@ -95,7 +98,15 @@ export function toggleGrapplingHook(): void {
             }
         }
 
-        const surfaceHits = _raycaster.intersectObjects(state.grappleSurfaces);
+        _rayEnd.copy(ray.origin).addScaledVector(ray.direction, HOOK_MAX_RANGE);
+        const surfaceCandidates = queryGrappleSurfacesAlongSegment(
+            ray.origin.x,
+            ray.origin.z,
+            _rayEnd.x,
+            _rayEnd.z,
+            _surfaceCandidates
+        );
+        const surfaceHits = _raycaster.intersectObjects(surfaceCandidates);
         let bestSurfaceHit: THREE.Intersection | null = null;
         if (surfaceHits.length > 0 && surfaceHits[0].distance <= HOOK_MAX_RANGE) {
             bestSurfaceHit = surfaceHits[0];
@@ -118,7 +129,11 @@ export function toggleGrapplingHook(): void {
             state.hookIsEnemy = false;
         }
 
-        state.scene.add(state.hookMesh!);
+        if (!state.hookMesh) {
+            resetHook();
+            return;
+        }
+        state.scene.add(state.hookMesh);
     } else {
         resetHook();
     }
@@ -130,10 +145,15 @@ export function updateHook(delta: number): void {
         const playerObj = state.controls.getObject();
 
         if (state.hookState === 'FIRING') {
-            _dirToTarget.subVectors(state.hookTarget, state.hookPosition).normalize();
-            state.hookPosition.addScaledVector(_dirToTarget, HOOK_SPEED * delta);
+            _dirToTarget.subVectors(state.hookTarget, state.hookPosition);
+            const distanceToTarget = _dirToTarget.length();
+            const travelDistance = HOOK_SPEED * delta;
 
-            if (state.hookPosition.distanceTo(state.hookTarget) < 1.5) {
+            // Snap when this frame would cross the target. Checking only the
+            // post-step distance lets the hook overshoot forever on a slow or
+            // stalled frame.
+            if (distanceToTarget <= travelDistance + 1.5) {
+                state.hookPosition.copy(state.hookTarget);
                 if (state.hookWillHit) {
                     state.hookState = 'PULLING';
                     if (!hookBadgeEl) hookBadgeEl = document.getElementById('hook-badge');
@@ -141,6 +161,9 @@ export function updateHook(delta: number): void {
                 } else {
                     resetHook();
                 }
+            } else {
+                _dirToTarget.multiplyScalar(1 / distanceToTarget);
+                state.hookPosition.addScaledVector(_dirToTarget, travelDistance);
             }
         } else if (state.hookState === 'PULLING') {
 

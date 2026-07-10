@@ -1,21 +1,55 @@
 import * as THREE from 'three';
-import { state, type PeerData } from './state.js';
+import { state, type DataConnectionLike, type PeerData } from './state.js';
 import { spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
-import { rebuildTargetHash } from './world.js';
+import {
+    generateWorldSeed,
+    getWorldSeed,
+    queryObstaclesAlongSegment,
+    rebuildEnvironmentWithSeed,
+    rebuildTargetHash,
+} from './world.js';
 import { resetHook, GUN_TIP_OFFSET } from './grapple.js';
 import { processTargetHit, takePlayerDamage } from './damage.js';
 import {
-    PROJECTILE_LIFETIME,
     NETWORK_TICK_MS,
+    MAX_PLAYERS,
+    PROJECTILE_LIFETIME,
+    PROJECTILE_SPEED,
+    PROJECTILE_RADIUS,
+    TARGET_HIT_RANGE_MULTIPLIER,
+    PLAYER_HIT_RANGE,
+    PILLAR_WIDTH,
     ROOM_CODE_LENGTH,
+    MAP_HALF_SIZE,
     PEER_Y_OFFSET,
     HIT_FLASH_DURATION_MS,
     WEAPON_STATS,
     MAX_PROJECTILES
 } from './config.js';
 import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
-import type { FirePacket, JumpPacket, KillTargetPacket, NetworkPacket, UpdatePacket } from './networkTypes.js';
-import { projectileData, targetData, type TargetUserData } from './userDataTypes.js';
+import {
+    parseNetworkPacket,
+    type FirePacket,
+    type JumpPacket,
+    type KillTargetPacket,
+    type NetworkPacket,
+    type TargetState,
+    type TargetStatePacket,
+    type UpdatePacket,
+    type WeaponName,
+    type WorldSnapshotPacket
+} from './networkTypes.js';
+import { obstacleData, projectileData, targetData, type TargetUserData } from './userDataTypes.js';
+import { segmentAabbHitT, segmentSphereHitT } from './gameplayMath.js';
+import { setWeaponNetworkPort } from './weaponNetworkPort.js';
+import {
+    closeTurnRoom,
+    fetchTurnIceServers,
+    heartbeatTurnRoom,
+    registerTurnRoom,
+    registerTurnSession,
+    releaseTurnSession,
+} from './turnSecurity.js';
 
 const _stateEuler = new THREE.Euler();
 
@@ -29,6 +63,13 @@ const _targetPos = new THREE.Vector3();
 const _midPoint = new THREE.Vector3();
 const _barrelPos = new THREE.Vector3();
 const _dir = new THREE.Vector3();
+const _baseFireDir = new THREE.Vector3();
+const _shotEnd = new THREE.Vector3();
+const _shotImpact = new THREE.Vector3();
+const _shotAabbMin = new THREE.Vector3();
+const _shotAabbMax = new THREE.Vector3();
+const _peerTargetPosition = new THREE.Vector3();
+const _shotObstacleCandidates: THREE.Object3D[] = [];
 
 const SHARED_HOOK_GEO = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
 SHARED_HOOK_GEO.rotateX(Math.PI / 2);
@@ -77,91 +118,46 @@ const DOM = {
 };
 
 let cachedUsername = 'Guest';
+let usernameInputEl: HTMLInputElement | null = null;
+let usernameInputListener: (() => void) | null = null;
 
-function showTurnWarning(message: string): void {
-    console.warn(message);
-
-    const joinErrorLog = DOM.joinErrorLog();
-    if (joinErrorLog) {
-        joinErrorLog.style.color = '#ff9f43';
-        joinErrorLog.innerText = message;
-    }
-
-    const hostStatus = DOM.hostLobbyStatus();
-    if (hostStatus && state.isHost) {
-        hostStatus.innerText = message;
-    }
+function setCachedUsername(username: string): void {
+    cachedUsername = username.trim() || 'Guest';
 }
 
-// Try project-provided ICE servers first, then fall back to public relay/STUN
-// entries so multiplayer can still work in local/dev setups.
-async function getPeerConfig(): Promise<PeerJSConfig> {
-    const config: PeerJSConfig = {
-        debug: 2,
+function releaseIdentityListener(): void {
+    if (usernameInputEl && usernameInputListener) {
+        usernameInputEl.removeEventListener('input', usernameInputListener);
+    }
+    usernameInputEl = null;
+    usernameInputListener = null;
+}
+
+// Secure rooms supply their own short-lived STUN/TURN configuration. There is
+// intentionally no public-relay fallback: it would turn a deployment outage
+// into an unmetered abuse path under someone else's credentials.
+async function getPeerConfig(roomCode: string, turnSessionToken: string): Promise<PeerJSConfig> {
+    return {
+        debug: 0,
         host: '0.peerjs.com',
         port: 443,
         path: '/',
         secure: true,
         config: {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun.cloudflare.com:3478' }
-            ]
+            iceServers: await fetchTurnIceServers(roomCode, turnSessionToken),
         }
     };
-
-    try {
-        const response = await fetch(`/api/turn?room=${state.roomCode || ''}`);
-        if (!response.ok) {
-            showTurnWarning(`TURN endpoint returned ${response.status}. Using fallback ICE servers.`);
-            throw new Error(`TURN endpoint returned ${response.status}`);
-        }
-
-        const data = await response.json();
-        if (data && data.iceServers) {
-            config.config.iceServers = data.iceServers;
-            if (data.warning) {
-                showTurnWarning(data.warning);
-            } else {
-                console.log('Successfully loaded Cloudflare TURN servers.');
-            }
-            return config;
-        }
-
-        showTurnWarning('TURN endpoint did not return iceServers. Using fallback ICE servers.');
-    } catch (e) {
-        console.warn('Failed to fetch Cloudflare TURN servers, using fallback ICE servers:', e);
-    }
-
-    config.config.iceServers.push(
-        {
-            urls: 'turn:openrelay.metered.ca:80',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        },
-        {
-            urls: 'turn:openrelay.metered.ca:443',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        },
-        {
-            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-            username: 'openrelayproject',
-            credential: 'openrelayproject'
-        }
-    );
-    return config;
 }
 
 function getCachedUsername(): string {
     const inputUsernameEl = DOM.inputUsername();
-    if (inputUsernameEl && cachedUsername === 'Guest') {
-        inputUsernameEl.addEventListener('input', () => {
-            cachedUsername = inputUsernameEl.value || 'Guest';
-        });
-        cachedUsername = inputUsernameEl.value || 'Guest';
+    if (inputUsernameEl && inputUsernameEl !== usernameInputEl) {
+        releaseIdentityListener();
+        usernameInputEl = inputUsernameEl;
+        usernameInputListener = () => setCachedUsername(inputUsernameEl.value);
+        inputUsernameEl.addEventListener('input', usernameInputListener);
     }
+    if (inputUsernameEl) setCachedUsername(inputUsernameEl.value);
     return cachedUsername;
 }
 
@@ -208,6 +204,44 @@ export function flashPeerMesh(peerData: any, color = 0xff3333, durationMs = HIT_
 }
 
 let peerInstance: any = null;
+let sessionGeneration = 0;
+let disconnecting = false;
+let persistentJoinError: string | null = null;
+let worldSyncTimeout: ReturnType<typeof setTimeout> | null = null;
+let clientWorldSynchronized = false;
+let nextFireSeed = 1;
+let roomCloseToken: string | null = null;
+let turnSessionToken: string | null = null;
+let roomHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+const pendingConnectionPeers = new Set<string>();
+const targetStateFingerprints = new Map<number, string>();
+const lastDamageByVictim = new Map<string, { attackerPeerId: string; at: number }>();
+const MAX_PLAYER_HORIZONTAL_POSITION = MAP_HALF_SIZE + 100;
+const MAX_PLAYER_VERTICAL_POSITION = 600;
+
+interface PeerRuntimeState {
+    username: string;
+    position: THREE.Vector3;
+    lastUpdateAt: number;
+    lastFireAt: number;
+    recentFires: FireIntent[];
+    hitWindowStart: number;
+    hitsInWindow: number;
+    activeWeapon: WeaponName;
+    wasDead: boolean;
+}
+
+interface FireIntent {
+    at: number;
+    weapon: WeaponName;
+    origin: THREE.Vector3;
+    direction: THREE.Vector3;
+    remainingHits: number;
+}
+
+const peerRuntime = new Map<string, PeerRuntimeState>();
+
 let lastSentTime = 0;
 let lastForceSendTime = 0;
 let lastSentSnapshot: {
@@ -225,96 +259,359 @@ let lastSentSnapshot: {
 
 export function generateRoomCode(): string {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const values = new Uint32Array(ROOM_CODE_LENGTH);
+    const cryptoApi = globalThis.crypto;
+    if (!cryptoApi?.getRandomValues) {
+        throw new Error('Secure room creation requires Web Crypto support.');
+    }
+    cryptoApi.getRandomValues(values);
     let code = '';
     for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
+        // The alphabet is exactly 32 symbols, so the cryptographic random
+        // value maps without modulo bias.
+        const index = values[i] & 31;
+        code += chars.charAt(index);
     }
     return code;
 }
 
+function getHostPeerId(): string | null {
+    return state.roomCode ? `testfps-room-${state.roomCode}` : null;
+}
+
+function isCurrentSession(generation: number): boolean {
+    return sessionGeneration === generation && state.isMultiplayer;
+}
+
+function clearWorldSyncTimeout(): void {
+    if (worldSyncTimeout) {
+        clearTimeout(worldSyncTimeout);
+        worldSyncTimeout = null;
+    }
+}
+
+function stopRoomHeartbeat(): void {
+    if (roomHeartbeatInterval) {
+        clearInterval(roomHeartbeatInterval);
+        roomHeartbeatInterval = null;
+    }
+}
+
+function startRoomHeartbeat(room: string, closeToken: string, generation: number): void {
+    stopRoomHeartbeat();
+    roomHeartbeatInterval = setInterval(() => {
+        if (!isCurrentSession(generation) || !state.isHost || roomCloseToken !== closeToken) {
+            stopRoomHeartbeat();
+            return;
+        }
+        void heartbeatTurnRoom(room, closeToken).catch(() => {
+            // The active connection may continue, but do not hide the fact that
+            // new relay credentials can no longer be issued for this room.
+            const hostStatus = DOM.hostLobbyStatus();
+            if (hostStatus) hostStatus.innerText = 'Room relay access could not be refreshed. New joins may be unavailable.';
+        });
+    }, 10 * 60 * 1_000);
+}
+
+function setJoinReady(ready: boolean, message?: string): void {
+    const joinErrorLog = DOM.joinErrorLog();
+    if (joinErrorLog && message) {
+        joinErrorLog.style.color = ready ? '#00ff88' : '#57606f';
+        joinErrorLog.innerText = message;
+    }
+
+    const btnJoinConnect = DOM.btnJoinConnect();
+    if (!btnJoinConnect) return;
+    btnJoinConnect.disabled = !ready;
+    if (ready) {
+        btnJoinConnect.innerText = 'Join Game';
+        btnJoinConnect.style.background = 'linear-gradient(135deg, #2ed573, #26af5f)';
+        btnJoinConnect.dataset.connected = 'true';
+    } else {
+        btnJoinConnect.innerText = 'Synchronizing world...';
+        btnJoinConnect.style.background = '';
+        btnJoinConnect.removeAttribute('data-connected');
+    }
+}
+
+function buildTargetState(targetIndex: number): TargetState | null {
+    const target = state.targets[targetIndex];
+    if (!target) return null;
+    const data = targetData(target);
+    return {
+        targetIndex,
+        position: { x: target.position.x, y: target.position.y, z: target.position.z },
+        maxHp: data.maxHp,
+        hp: data.hp,
+        scale: data.scale,
+        color: data.color
+    };
+}
+
+function targetStateFingerprint(target: TargetState): string {
+    const { position } = target;
+    return `${position.x.toFixed(3)}:${position.y.toFixed(3)}:${position.z.toFixed(3)}:${target.maxHp}:${target.hp}:${target.scale}:${target.color}`;
+}
+
+function applyTargetState(targetState: TargetState): boolean {
+    const target = state.targets[targetState.targetIndex];
+    if (!target) return false;
+    const data = targetData(target);
+    target.position.set(targetState.position.x, targetState.position.y, targetState.position.z);
+    data.maxHp = targetState.maxHp;
+    data.hp = targetState.hp;
+    data.scale = targetState.scale;
+    data.color = targetState.color;
+    (data.bodyMesh.material as THREE.MeshStandardMaterial).color.setHex(targetState.color);
+    data.bodyMesh.scale.setScalar(targetState.scale);
+    data.healthBarFg.scale.x = Math.max(0, Math.min(1, targetState.hp / targetState.maxHp));
+    data.healthBarGroup.position.y = 1.6 * targetState.scale;
+    data.healthBarGroup.scale.set(targetState.scale, targetState.scale, 1);
+    return true;
+}
+
+function setScore(score: number): void {
+    state.score = score;
+    const scoreEl = DOM.score();
+    if (scoreEl) scoreEl.innerText = score.toString();
+}
+
+function sendWorldSnapshot(conn: DataConnectionLike): void {
+    if (!state.isHost || !conn.open) return;
+    const targets: TargetState[] = [];
+    for (let i = 0; i < state.targets.length; i++) {
+        const target = buildTargetState(i);
+        if (target) {
+            targets.push(target);
+            targetStateFingerprints.set(i, targetStateFingerprint(target));
+        }
+    }
+    const packet: WorldSnapshotPacket = {
+        type: 'world_snapshot',
+        senderPeerId: state.peer?.id,
+        seed: getWorldSeed(),
+        score: state.score,
+        targets
+    };
+    try {
+        conn.send(packet);
+    } catch (error) {
+        console.error(`Failed to send world snapshot to ${conn.peer}:`, error);
+        conn.close();
+    }
+}
+
+function syncHostTargetStates(): void {
+    if (!state.isHost || !state.isMultiplayer || state.connections.length === 0) return;
+
+    for (let i = 0; i < state.targets.length; i++) {
+        const target = buildTargetState(i);
+        if (!target) continue;
+        const fingerprint = targetStateFingerprint(target);
+        if (targetStateFingerprints.get(i) === fingerprint) continue;
+        targetStateFingerprints.set(i, fingerprint);
+        const packet: TargetStatePacket = { type: 'target_state', ...target };
+        broadcastToAll(packet);
+    }
+}
+
+function applyWorldSnapshot(packet: WorldSnapshotPacket): void {
+    rebuildEnvironmentWithSeed(packet.seed);
+    for (const target of packet.targets) {
+        applyTargetState(target);
+    }
+    rebuildTargetHash();
+    setScore(packet.score);
+    clientWorldSynchronized = true;
+    clearWorldSyncTimeout();
+    setJoinReady(true, 'World synchronized. Ready to join!');
+}
+
+function isExpectedHost(fromPeerId: string): boolean {
+    // The client only installs a data listener on its outbound host connection;
+    // accepting the expected ID before its local `open` callback avoids dropping
+    // a snapshot that races that callback.
+    return !state.isHost && fromPeerId === getHostPeerId();
+}
+
+function isKnownClient(fromPeerId: string): boolean {
+    return state.connections.some((connection) => connection.peer === fromPeerId);
+}
+
+function getActiveWeaponName(): WeaponName {
+    return Object.prototype.hasOwnProperty.call(WEAPON_STATS, state.activeWeaponName)
+        ? state.activeWeaponName as WeaponName
+        : 'PISTOL';
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error && error.message ? error.message : fallback;
+}
+
 // The host owns the stable room peer ID. Clients connect to that ID, and the
 // host relays client packets to the rest of the room.
-export async function hostGame(username: string, roomCode: string): Promise<void> {
+export async function hostGame(username: string, roomCode: string, turnstileToken: string): Promise<void> {
+    if (state.isMultiplayer || peerInstance || roomCloseToken || turnSessionToken) disconnectMultiplayer();
+
+    const generation = ++sessionGeneration;
+    const normalizedRoomCode = roomCode.toUpperCase();
+    disconnecting = false;
     state.isMultiplayer = true;
     state.isHost = true;
-    state.roomCode = roomCode.toUpperCase();
-    
-    const hostPeerId = `testfps-room-${state.roomCode}`;
-    const hostStatus = document.getElementById('host-lobby-status');
+    state.roomCode = normalizedRoomCode;
+    setCachedUsername(username);
+    targetStateFingerprints.clear();
 
-    if (peerInstance) {
-        peerInstance.destroy();
-    }
+    const hostPeerId = getHostPeerId()!;
+    const hostStatus = DOM.hostLobbyStatus();
 
-    const { Peer } = await import('peerjs');
-    const activeConfig = await getPeerConfig();
-    peerInstance = new Peer(hostPeerId, activeConfig);
-    state.peer = peerInstance;
-
-    peerInstance.on('open', (id: string) => {
-        console.log('Host registered successfully on PeerJS with ID:', id);
-        if (hostStatus) hostStatus.innerText = 'Waiting for players (1/5)...';
-        const startBtn = document.getElementById('btn-host-start');
-        if (startBtn) startBtn.style.display = 'inline-block';
-    });
-
-    peerInstance.on('connection', (conn: any) => {
-        setupConnection(conn);
-    });
-
-    peerInstance.on('error', (err: any) => {
-        console.error('Host peer error:', err);
-        if (hostStatus) {
-            if (err.type === 'unavailable-id') {
-                hostStatus.innerText = 'Error: Code already in use! Please try again in 5 seconds.';
-            } else {
-                hostStatus.innerText = `Error: ${err.type}`;
-            }
+    try {
+        const registration = await registerTurnRoom(normalizedRoomCode, turnstileToken);
+        if (!isCurrentSession(generation) || !state.isHost || state.roomCode !== normalizedRoomCode) {
+            void closeTurnRoom(normalizedRoomCode, registration.closeToken);
+            return;
         }
+
+        roomCloseToken = registration.closeToken;
+        turnSessionToken = registration.turnSessionToken;
+        startRoomHeartbeat(normalizedRoomCode, registration.closeToken, generation);
+        rebuildEnvironmentWithSeed(generateWorldSeed());
+        setScore(0);
+
+        const { Peer } = await import('peerjs');
+        const activeConfig = await getPeerConfig(normalizedRoomCode, registration.turnSessionToken);
+        if (!isCurrentSession(generation) || !state.isHost) return;
+
+        const peer = new Peer(hostPeerId, activeConfig);
+        if (!isCurrentSession(generation) || !state.isHost) {
+            peer.destroy();
+            return;
+        }
+        peerInstance = peer;
+        state.peer = peer;
+
+        peer.on('open', (id: string) => {
+            if (!isCurrentSession(generation)) return;
+            console.log('Host registered successfully on PeerJS with ID:', id);
+            if (hostStatus) hostStatus.innerText = `Waiting for players (1/${MAX_PLAYERS})...`;
+            const startBtn = DOM.btnHostStart();
+            if (startBtn) startBtn.style.display = 'inline-block';
+        });
+
+        peer.on('connection', (conn: any) => {
+            if (!isCurrentSession(generation) || !state.isHost) {
+                conn.close();
+                return;
+            }
+            const currentPlayers = state.connections.length + pendingConnectionPeers.size + 1;
+            const duplicate = pendingConnectionPeers.has(conn.peer) || state.connections.some((item) => item.peer === conn.peer);
+            if (duplicate || currentPlayers >= MAX_PLAYERS) {
+                console.warn(`Rejecting ${duplicate ? 'duplicate' : 'full-room'} connection from ${conn.peer}`);
+                conn.close();
+                return;
+            }
+            pendingConnectionPeers.add(conn.peer);
+            setupConnection(conn, generation);
+        });
+
+        peer.on('error', (err: any) => {
+            if (!isCurrentSession(generation)) return;
+            console.error('Host peer error:', err);
+            if (hostStatus) {
+                if (err.type === 'unavailable-id') {
+                    hostStatus.innerText = 'Error: Code already in use! Please try again.';
+                } else {
+                    hostStatus.innerText = `Error: ${err.type || 'connection failed'}`;
+                }
+            }
+            disconnectMultiplayer();
+        });
+    } catch (error) {
+        if (!isCurrentSession(generation)) return;
+        console.error('Failed to create host peer:', error);
         disconnectMultiplayer();
-    });
+        throw new Error(errorMessage(error, 'Unable to create the room. Please retry.'));
+    }
 }
 
-export async function joinGame(username: string, roomCode: string): Promise<void> {
+export async function joinGame(username: string, roomCode: string, turnstileToken: string): Promise<void> {
+    if (state.isMultiplayer || peerInstance || roomCloseToken || turnSessionToken) disconnectMultiplayer();
+
+    const generation = ++sessionGeneration;
+    const normalizedRoomCode = roomCode.toUpperCase();
+    disconnecting = false;
     state.isMultiplayer = true;
     state.isHost = false;
-    state.roomCode = roomCode.toUpperCase();
+    state.roomCode = normalizedRoomCode;
+    setCachedUsername(username);
+    clientWorldSynchronized = false;
+    persistentJoinError = null;
+    clearWorldSyncTimeout();
 
-    const joinError = document.getElementById('join-error-log');
-    if (joinError) joinError.innerText = 'Connecting to server...';
+    const joinError = DOM.joinErrorLog();
+    if (joinError) joinError.innerText = 'Authorizing secure room access...';
 
-    if (peerInstance) {
-        peerInstance.destroy();
-    }
-
-    const { Peer } = await import('peerjs');
-    const activeConfig = await getPeerConfig();
-    peerInstance = new Peer(activeConfig);
-    state.peer = peerInstance;
-
-    peerInstance.on('open', (clientId: string) => {
-        console.log('Client registered with ID:', clientId);
-        if (joinError) joinError.innerText = `Searching room ${state.roomCode}...`;
-        const hostPeerId = `testfps-room-${state.roomCode}`;
-        const conn = peerInstance.connect(hostPeerId);
-
-        setupConnection(conn);
-    });
-
-    peerInstance.on('error', (err: any) => {
-        console.error('Client peer error:', err);
-        if (joinError) {
-            if (err.type === 'peer-unavailable') {
-                joinError.innerText = 'Error: Room not found! Please check the code.';
-            } else {
-                joinError.innerText = `Error: ${err.type}`;
-            }
+    try {
+        const registration = await registerTurnSession(normalizedRoomCode, turnstileToken);
+        if (!isCurrentSession(generation) || state.isHost || state.roomCode !== normalizedRoomCode) {
+            void releaseTurnSession(normalizedRoomCode, registration.turnSessionToken);
+            return;
         }
-        disconnectMultiplayer();
-    });
+
+        turnSessionToken = registration.turnSessionToken;
+        const { Peer } = await import('peerjs');
+        const activeConfig = await getPeerConfig(normalizedRoomCode, registration.turnSessionToken);
+        if (!isCurrentSession(generation) || state.isHost) return;
+
+        const peer = new Peer(activeConfig);
+        if (!isCurrentSession(generation) || state.isHost) {
+            peer.destroy();
+            return;
+        }
+        peerInstance = peer;
+        state.peer = peer;
+
+        peer.on('open', (clientId: string) => {
+            if (!isCurrentSession(generation)) return;
+            console.log('Client registered with ID:', clientId);
+            if (joinError) joinError.innerText = `Searching room ${state.roomCode}...`;
+            const hostPeerId = getHostPeerId();
+            if (!hostPeerId) return;
+            const conn = peer.connect(hostPeerId);
+
+            setupConnection(conn, generation);
+        });
+
+        peer.on('error', (err: any) => {
+            if (!isCurrentSession(generation)) return;
+            console.error('Client peer error:', err);
+            showJoinError(err.type === 'peer-unavailable'
+                ? 'Error: Room not found! Please check the code.'
+                : `Error: ${err.type || 'connection failed'}`);
+            disconnectMultiplayer({ preserveJoinError: true });
+        });
+    } catch (error) {
+        if (!isCurrentSession(generation)) return;
+        const message = errorMessage(error, 'Unable to start a connection. Please try again.');
+        console.error('Failed to create client peer:', error);
+        showJoinError(message);
+        disconnectMultiplayer({ preserveJoinError: true });
+        throw new Error(message);
+    }
 }
 
-export function disconnectMultiplayer(): void {
+export function disconnectMultiplayer(options: { preserveJoinError?: boolean } = {}): void {
+    if (disconnecting) return;
+    disconnecting = true;
+    const roomToRelease = state.roomCode;
+    const wasHost = state.isHost;
+    const closeToken = roomCloseToken;
+    const sessionToken = turnSessionToken;
+    roomCloseToken = null;
+    turnSessionToken = null;
+    stopRoomHeartbeat();
+    sessionGeneration++;
+    clearWorldSyncTimeout();
     state.isMultiplayer = false;
     state.isHost = false;
     state.isPlaying = false;
@@ -324,20 +621,25 @@ export function disconnectMultiplayer(): void {
     lastSentSnapshot = null;
     lastSentTime = 0;
     lastForceSendTime = 0;
+    clientWorldSynchronized = false;
+    targetStateFingerprints.clear();
+    peerRuntime.clear();
+    pendingConnectionPeers.clear();
+    lastDamageByVictim.clear();
+    releaseIdentityListener();
 
     const pvpStats = DOM.pvpStats();
     if (pvpStats) pvpStats.style.display = 'none';
 
-    if (state.connections.length > 0) {
-        state.connections.forEach(conn => conn.close());
-    }
+    const connections = state.connections;
     state.connections = [];
+    connections.forEach((conn) => conn.close());
 
     if (peerInstance) {
         peerInstance.destroy();
         peerInstance = null;
-        state.peer = null;
     }
+    state.peer = null;
 
     Object.keys(state.peers).forEach((peerId) => {
         removePeer(peerId);
@@ -355,19 +657,40 @@ export function disconnectMultiplayer(): void {
         btnJoinConnect.removeAttribute('data-connected');
     }
     const joinErrorLog = DOM.joinErrorLog();
-    if (joinErrorLog) {
-        joinErrorLog.style.color = '';
-        joinErrorLog.innerText = '';
+    if (options.preserveJoinError && persistentJoinError) {
+        if (joinErrorLog) {
+            joinErrorLog.style.color = '#ff4757';
+            joinErrorLog.innerText = persistentJoinError;
+        }
+    } else {
+        persistentJoinError = null;
+        if (joinErrorLog) {
+            joinErrorLog.style.color = '';
+            joinErrorLog.innerText = '';
+        }
     }
+
+    if (roomToRelease && wasHost && closeToken) {
+        void closeTurnRoom(roomToRelease, closeToken).catch(() => {
+            // Credential expiry and the Worker room timeout still limit a
+            // failed best-effort close when the browser is going away.
+        });
+    } else if (roomToRelease && sessionToken) {
+        void releaseTurnSession(roomToRelease, sessionToken).catch(() => {
+            // A short server-side session expiry is the fallback cleanup path.
+        });
+    }
+    disconnecting = false;
 }
 
 function showJoinError(msg: string): void {
-    const joinErrorLog = document.getElementById('join-error-log');
+    persistentJoinError = msg;
+    const joinErrorLog = DOM.joinErrorLog();
     if (joinErrorLog) {
         joinErrorLog.style.color = '#ff4757';
         joinErrorLog.innerText = msg;
     }
-    const btnJoinConnect = document.getElementById('btn-join-connect') as HTMLButtonElement | null;
+    const btnJoinConnect = DOM.btnJoinConnect();
     if (btnJoinConnect) {
         btnJoinConnect.innerText = 'Connect';
         btnJoinConnect.style.background = '';
@@ -376,69 +699,81 @@ function showJoinError(msg: string): void {
     }
 }
 
-function setupConnection(conn: any): void {
+function setupConnection(conn: any, generation: number): void {
     let opened = false;
 
     // PeerJS can resolve a peer ID before the WebRTC DataChannel is usable.
-    const timeoutId = !state.isHost ? setTimeout(() => {
+    // Time out host-side pending connections too, otherwise they can consume all
+    // lobby slots without ever opening a usable channel.
+    const timeoutId = setTimeout(() => {
         if (!opened) {
-            console.warn('Connection timed out — WebRTC DataChannel never opened.');
-            showJoinError('Connection failed. Please check the code and try again.');
-            disconnectMultiplayer();
+            pendingConnectionPeers.delete(conn.peer);
+            if (state.isHost) {
+                console.warn(`Dropping unopened connection from ${conn.peer}`);
+                conn.close();
+            } else {
+                console.warn('Connection timed out — WebRTC DataChannel never opened.');
+                showJoinError('Connection failed. Please check the code and try again.');
+                disconnectMultiplayer({ preserveJoinError: true });
+            }
         }
-    }, 20000) : null;
+    }, 20000);
 
     const handleOpen = () => {
-        if (state.connections.includes(conn)) return;
+        if (!isCurrentSession(generation) || state.connections.includes(conn)) {
+            conn.close();
+            return;
+        }
         opened = true;
-        if (timeoutId) clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
         console.log('Direct WebRTC DataConnection open with peer:', conn.peer);
         state.connections.push(conn);
 
         if (state.isHost) {
+            pendingConnectionPeers.delete(conn.peer);
             const hostStatus = DOM.hostLobbyStatus();
-            if (hostStatus) hostStatus.innerText = `Waiting for players (${state.connections.length + 1}/5)...`;
+            if (hostStatus) hostStatus.innerText = `Waiting for players (${state.connections.length + 1}/${MAX_PLAYERS})...`;
+            sendWorldSnapshot(conn);
         } else {
-            const joinErrorLog = document.getElementById('join-error-log');
-            if (joinErrorLog) {
-                joinErrorLog.style.color = '#00ff88';
-                joinErrorLog.innerText = 'Successfully connected!';
-            }
-            const btnJoinConnect = document.getElementById('btn-join-connect') as HTMLButtonElement | null;
-            if (btnJoinConnect) {
-                btnJoinConnect.innerText = 'Join Game';
-                btnJoinConnect.style.background = 'linear-gradient(135deg, #2ed573, #26af5f)';
-                btnJoinConnect.disabled = false;
-                btnJoinConnect.dataset.connected = 'true';
+            if (clientWorldSynchronized) {
+                setJoinReady(true, 'World synchronized. Ready to join!');
+            } else {
+                setJoinReady(false, 'Connected. Synchronizing host world...');
+                worldSyncTimeout = setTimeout(() => {
+                    if (!clientWorldSynchronized && isCurrentSession(generation)) {
+                        showJoinError('World synchronization timed out. Please try again.');
+                        disconnectMultiplayer({ preserveJoinError: true });
+                    }
+                }, 10000);
             }
         }
     };
 
-    if (conn.open) {
-        handleOpen();
-    } else {
-        conn.on('open', handleOpen);
-    }
-
-    conn.on('data', (data: NetworkPacket) => {
+    conn.on('data', (data: unknown) => {
         handlePeerMessage(conn.peer, data);
     });
 
     conn.on('close', () => {
         console.log('Connection closed for peer:', conn.peer);
+        clearTimeout(timeoutId);
+        pendingConnectionPeers.delete(conn.peer);
         const index = state.connections.indexOf(conn);
         if (index > -1) {
             state.connections.splice(index, 1);
         }
 
+        peerRuntime.delete(conn.peer);
         removePeer(conn.peer);
+
+        if (!isCurrentSession(generation) || disconnecting) return;
 
         if (state.isHost) {
             const hostStatus = DOM.hostLobbyStatus();
             const currentPlayers = state.connections.length + 1;
-            if (hostStatus) hostStatus.innerText = `Waiting for players (${currentPlayers}/5)...`;
+            if (hostStatus) hostStatus.innerText = `Waiting for players (${currentPlayers}/${MAX_PLAYERS})...`;
         } else {
-            disconnectMultiplayer();
+            showJoinError('Connection to the host was closed.');
+            disconnectMultiplayer({ preserveJoinError: true });
             if (state.controls) state.controls.unlock();
             const blocker = DOM.blocker();
             if (blocker) blocker.style.display = 'flex';
@@ -451,28 +786,302 @@ function setupConnection(conn: any): void {
 
     conn.on('error', (err: any) => {
         console.error('DataConnection error:', err);
+        clearTimeout(timeoutId);
+        pendingConnectionPeers.delete(conn.peer);
         if (!state.isHost) {
             showJoinError(`Connection error: ${err.type || err.message || 'unknown'}`);
-            disconnectMultiplayer();
+            disconnectMultiplayer({ preserveJoinError: true });
         }
     });
+
+    // Register the data listener first: a host can send the world snapshot as
+    // soon as the channel opens.
+    if (conn.open) {
+        handleOpen();
+    } else {
+        conn.on('open', handleOpen);
+    }
+}
+
+function getPeerRuntime(peerId: string): PeerRuntimeState | null {
+    return peerRuntime.get(peerId) ?? null;
+}
+
+function allowHit(runtime: PeerRuntimeState, now: number): boolean {
+    // A shotgun may produce five legitimate hits in one frame. The fire-intent
+    // path check below validates geometry; this remains a burst safety cap.
+    if (now - runtime.hitWindowStart >= 200) {
+        runtime.hitWindowStart = now;
+        runtime.hitsInWindow = 0;
+    }
+    if (runtime.hitsInWindow >= 8) return false;
+    runtime.hitsInWindow++;
+    return true;
+}
+
+function pruneExpiredFires(runtime: PeerRuntimeState, now: number): void {
+    const expiresAt = now - (PROJECTILE_LIFETIME * 1_000 + 250);
+    for (let index = runtime.recentFires.length - 1; index >= 0; index--) {
+        if (runtime.recentFires[index].at < expiresAt || runtime.recentFires[index].remainingHits <= 0) {
+            runtime.recentFires.splice(index, 1);
+        }
+    }
+}
+
+function rememberFire(runtime: PeerRuntimeState, packet: FirePacket, now: number): void {
+    const stats = WEAPON_STATS[packet.weapon];
+    pruneExpiredFires(runtime, now);
+    runtime.recentFires.push({
+        at: now,
+        weapon: packet.weapon,
+        origin: new THREE.Vector3(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z),
+        direction: new THREE.Vector3(packet.dir.x, packet.dir.y, packet.dir.z).normalize(),
+        remainingHits: packet.weapon === 'SHOTGUN' ? stats.pellets ?? 5 : 1,
+    });
+    if (runtime.recentFires.length > 24) runtime.recentFires.splice(0, runtime.recentFires.length - 24);
+}
+
+function shotRange(weapon: WeaponName): number {
+    return weapon === 'SNIPER' ? 500 : PROJECTILE_SPEED * PROJECTILE_LIFETIME;
+}
+
+function shotIsBlocked(start: THREE.Vector3, end: THREE.Vector3): boolean {
+    const obstacleCandidates = queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, _shotObstacleCandidates);
+    for (let index = 0; index < obstacleCandidates.length; index++) {
+        const obstacle = obstacleCandidates[index];
+        const data = obstacleData(obstacle);
+        const halfW = (data.halfW || PILLAR_WIDTH / 2) + PROJECTILE_RADIUS;
+        const halfD = (data.halfD || PILLAR_WIDTH / 2) + PROJECTILE_RADIUS;
+        const halfH = (data.halfH || data.height / 2) + PROJECTILE_RADIUS;
+        _shotAabbMin.set(obstacle.position.x - halfW, obstacle.position.y - halfH, obstacle.position.z - halfD);
+        _shotAabbMax.set(obstacle.position.x + halfW, obstacle.position.y + halfH, obstacle.position.z + halfD);
+        const hitT = segmentAabbHitT(start, end, _shotAabbMin, _shotAabbMax);
+        if (hitT !== null && hitT < 0.999) return true;
+    }
+    return false;
+}
+
+/**
+ * The host accepts a hit only when it can be explained by a recent, rate-valid
+ * fire intent along an unobstructed path. It is deliberately conservative for
+ * shotgun spread, while preventing arbitrary target-index and wall-hit RPCs.
+ */
+function consumeValidatedFireHit(
+    runtime: PeerRuntimeState,
+    targetPosition: THREE.Vector3,
+    targetRadius: number,
+    damage: number,
+    now: number,
+): boolean {
+    pruneExpiredFires(runtime, now);
+
+    for (let index = runtime.recentFires.length - 1; index >= 0; index--) {
+        const fire = runtime.recentFires[index];
+        const stats = WEAPON_STATS[fire.weapon];
+        if (damage !== stats.damage || fire.remainingHits <= 0) continue;
+
+        const range = shotRange(fire.weapon);
+        // Local pellet spread offsets each axis by up to half `spread`; the
+        // full range-scaled value safely bounds that vector at max distance.
+        const spreadAllowance = stats.spread * range;
+        _shotEnd.copy(fire.origin).addScaledVector(fire.direction, range);
+        const hitT = segmentSphereHitT(
+            fire.origin,
+            _shotEnd,
+            targetPosition,
+            targetRadius + PROJECTILE_RADIUS + spreadAllowance,
+        );
+        if (hitT === null) continue;
+
+        _shotImpact.lerpVectors(fire.origin, _shotEnd, hitT);
+        if (shotIsBlocked(fire.origin, _shotImpact)) continue;
+
+        fire.remainingHits--;
+        return true;
+    }
+
+    return false;
+}
+
+function getPeerHitPosition(peerId: string): THREE.Vector3 | null {
+    if (peerId === state.peer?.id) {
+        const player = state.controls?.getObject();
+        return player ? _peerTargetPosition.copy(player.position) : null;
+    }
+
+    const runtime = getPeerRuntime(peerId);
+    if (!runtime) return null;
+    _peerTargetPosition.copy(runtime.position);
+    _peerTargetPosition.y -= PEER_Y_OFFSET;
+    return _peerTargetPosition;
+}
+
+function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket): NetworkPacket | null {
+    if (!isKnownClient(fromPeerId)) return null;
+    const now = performance.now();
+
+    if (packet.type === 'update') {
+        if (Math.abs(packet.pos.x) > MAX_PLAYER_HORIZONTAL_POSITION ||
+            Math.abs(packet.pos.z) > MAX_PLAYER_HORIZONTAL_POSITION ||
+            packet.pos.y < -20 || packet.pos.y > MAX_PLAYER_VERTICAL_POSITION) return null;
+        let runtime = getPeerRuntime(fromPeerId);
+        if (!runtime) {
+            runtime = {
+                username: packet.username,
+                position: new THREE.Vector3(packet.pos.x, packet.pos.y, packet.pos.z),
+                lastUpdateAt: now,
+                lastFireAt: -Infinity,
+                recentFires: [],
+                hitWindowStart: now,
+                hitsInWindow: 0,
+                activeWeapon: packet.activeWeapon,
+                wasDead: packet.isDead
+            };
+            peerRuntime.set(fromPeerId, runtime);
+        } else {
+            const elapsed = Math.min(1, Math.max(0.016, (now - runtime.lastUpdateAt) / 1000));
+            const maxTravel = 75 + 450 * elapsed;
+            const nextPosition = _targetPos.set(packet.pos.x, packet.pos.y, packet.pos.z);
+            if (nextPosition.distanceTo(runtime.position) > maxTravel && !packet.isDead && !runtime.wasDead) {
+                return null;
+            }
+            runtime.position.copy(nextPosition);
+            runtime.lastUpdateAt = now;
+            runtime.username = packet.username;
+            runtime.activeWeapon = packet.activeWeapon;
+            runtime.wasDead = packet.isDead;
+        }
+        return { ...packet, senderPeerId: fromPeerId };
+    }
+
+    const runtime = getPeerRuntime(fromPeerId);
+    if (!runtime) return null;
+
+    if (packet.type === 'fire') {
+        const stats = WEAPON_STATS[packet.weapon];
+        if (!stats || packet.weapon !== runtime.activeWeapon || now - runtime.lastFireAt < stats.fireRate * 0.45) return null;
+        _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
+        if (_barrelPos.distanceTo(runtime.position) > 5) return null;
+        runtime.lastFireAt = now;
+        rememberFire(runtime, packet, now);
+        return { ...packet, senderPeerId: fromPeerId };
+    }
+
+    if (packet.type === 'hit_target') {
+        const target = state.targets[packet.targetIndex];
+        if (!target) return null;
+        const targetInfo = targetData(target);
+        const targetRadius = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0);
+        if (!consumeValidatedFireHit(runtime, target.position, targetRadius, packet.damage, now) || !allowHit(runtime, now)) return null;
+        return { ...packet, senderPeerId: fromPeerId };
+    }
+
+    if (packet.type === 'player_hit') {
+        const targetsHost = packet.targetPeerId === state.peer?.id;
+        const targetPosition = getPeerHitPosition(packet.targetPeerId);
+        if (packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition ||
+            !consumeValidatedFireHit(runtime, targetPosition, PLAYER_HIT_RANGE + 0.8, packet.damage, now) || !allowHit(runtime, now)) return null;
+        lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: fromPeerId, at: now });
+        return { ...packet, senderPeerId: fromPeerId, attackerName: runtime.username };
+    }
+
+    if (packet.type === 'player_died') {
+        let killerName = 'Lava';
+        if (packet.killerName !== 'Lava') {
+            const latestDamage = lastDamageByVictim.get(fromPeerId);
+            if (!latestDamage || now - latestDamage.at > 10000) return null;
+            const attacker = getPeerRuntime(latestDamage.attackerPeerId);
+            if (!attacker) return null;
+            killerName = attacker.username;
+        }
+        return {
+            ...packet,
+            senderPeerId: fromPeerId,
+            victimPeerId: fromPeerId,
+            victimName: runtime.username,
+            killerName
+        };
+    }
+
+    if (packet.type === 'jump') {
+        return { ...packet, senderPeerId: fromPeerId };
+    }
+
+    // World snapshots and target mutation packets are host-only.
+    return null;
+}
+
+function remoteSpreadDirection(base: THREE.Vector3, seed: number, pelletIndex: number, spread: number): THREE.Vector3 {
+    let value = (seed + Math.imul(pelletIndex + 1, 0x9e3779b9)) >>> 0;
+    const next = () => {
+        value += 0x6d2b79f5;
+        let mixed = Math.imul(value ^ (value >>> 15), value | 1);
+        mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+        return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+    };
+    return _dir.set(
+        base.x + (next() - 0.5) * spread,
+        base.y + (next() - 0.5) * spread,
+        base.z + (next() - 0.5) * spread
+    ).normalize();
+}
+
+function spawnRemoteBullet(barrelPos: THREE.Vector3, direction: THREE.Vector3, color: number): void {
+    if (state.projectiles.length >= MAX_PROJECTILES || !state.scene) return;
+    let bullet: THREE.Mesh;
+    if (state.projectilePool.length > 0) {
+        bullet = state.projectilePool.pop() as THREE.Mesh;
+        bullet.visible = true;
+        (bullet.material as THREE.MeshBasicMaterial).color.setHex(color);
+    } else {
+        bullet = new THREE.Mesh(SHARED_PROJECTILE_GEO, new THREE.MeshBasicMaterial({ color }));
+        bullet.userData = {};
+    }
+    bullet.position.copy(barrelPos).addScaledVector(direction, 0.1);
+    const data = projectileData(bullet);
+    data.dx = direction.x;
+    data.dy = direction.y;
+    data.dz = direction.z;
+    data.age = 0;
+    data.visualOnly = true;
+    data.damage = undefined;
+    state.scene.add(bullet);
+    state.projectiles.push(bullet);
 }
 
 // Packet router. The host is authoritative for target health/respawns and also
-// relays client gameplay packets in a star topology.
-function handlePeerMessage(fromPeerId: string, msg: NetworkPacket): void {
+// relays validated client gameplay packets in a star topology.
+function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
     if (!state.isMultiplayer) return;
+    const parsed = parseNetworkPacket(rawPacket);
+    if (!parsed) {
+        console.warn(`Discarded malformed packet from ${fromPeerId}`);
+        return;
+    }
 
+    let msg: NetworkPacket = parsed;
     if (state.isHost) {
+        const authorized = authorizeClientPacket(fromPeerId, parsed);
+        if (!authorized) return;
+        msg = authorized;
+        if (!state.isPlaying) return;
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
-            msg.senderPeerId = fromPeerId;
             broadcastToAll(msg, fromPeerId);
         }
+    } else {
+        if (!isExpectedHost(fromPeerId)) return;
+        if (msg.type === 'world_snapshot') {
+            applyWorldSnapshot(msg);
+            return;
+        }
+        if (msg.type === 'target_state') {
+            if (applyTargetState(msg)) rebuildTargetHash();
+            return;
+        }
+        if (!clientWorldSynchronized || !state.isPlaying) return;
     }
 
     const senderId = msg.senderPeerId || fromPeerId;
-
-    if (!state.isPlaying) return;
 
     if (msg.type === 'update') {
         let peerData = state.peers[senderId] as PeerData | undefined;
@@ -506,25 +1115,32 @@ function handlePeerMessage(fromPeerId: string, msg: NetworkPacket): void {
             }
 
             if (msg.isHovering) {
-                _boosterPos.copy(peerData.mesh.position);
-                _boosterPos.y -= 1.45;
-                spawnRocketFlame(_boosterPos, 4, false);
+                const now = performance.now();
+                // Packets arrive at 30 Hz per peer. Exhaust is visual-only, so
+                // limit it to a render-friendly cadence instead of allowing a
+                // full room to consume the global particle budget every tick.
+                if ((peerData.lastRemoteExhaustTime ?? -Infinity) + 100 <= now) {
+                    peerData.lastRemoteExhaustTime = now;
+                    _boosterPos.copy(peerData.mesh.position);
+                    _boosterPos.y -= 1.45;
+                    spawnRocketFlame(_boosterPos, 4, false);
 
-                if (msg.hoverKeys) {
-                    _peerEuler.set(0, msg.yaw, 0);
-                    _peerForward.set(0, 0, -1).applyEuler(_peerEuler);
-                    _peerRight.set(1, 0, 0).applyEuler(_peerEuler);
+                    if (msg.hoverKeys) {
+                        _peerEuler.set(0, msg.yaw, 0);
+                        _peerForward.set(0, 0, -1).applyEuler(_peerEuler);
+                        _peerRight.set(1, 0, 0).applyEuler(_peerEuler);
 
-                    if (msg.hoverKeys.w) {
-                        _peerForward.negate();
-                        spawnManeuveringBeam(_boosterPos, 2, _peerForward);
-                        _peerForward.negate();
-                    }
-                    if (msg.hoverKeys.s) spawnManeuveringBeam(_boosterPos, 2, _peerForward);
-                    if (msg.hoverKeys.a) spawnManeuveringBeam(_boosterPos, 2, _peerRight);
-                    if (msg.hoverKeys.d) {
-                        _peerRight.negate();
-                        spawnManeuveringBeam(_boosterPos, 2, _peerRight);
+                        if (msg.hoverKeys.w) {
+                            _peerForward.negate();
+                            spawnManeuveringBeam(_boosterPos, 2, _peerForward);
+                            _peerForward.negate();
+                        }
+                        if (msg.hoverKeys.s) spawnManeuveringBeam(_boosterPos, 2, _peerForward);
+                        if (msg.hoverKeys.a) spawnManeuveringBeam(_boosterPos, 2, _peerRight);
+                        if (msg.hoverKeys.d) {
+                            _peerRight.negate();
+                            spawnManeuveringBeam(_boosterPos, 2, _peerRight);
+                        }
                     }
                 }
             }
@@ -585,43 +1201,30 @@ function handlePeerMessage(fromPeerId: string, msg: NetworkPacket): void {
         }
     } else if (msg.type === 'fire') {
         _barrelPos.set(msg.barrelPos.x, msg.barrelPos.y, msg.barrelPos.z);
-        _dir.set(msg.dir.x, msg.dir.y, msg.dir.z);
+        _baseFireDir.set(msg.dir.x, msg.dir.y, msg.dir.z).normalize();
 
         if (msg.weapon === 'SNIPER') {
             const targetPos = _targetPos;
             if (msg.hitPoint) {
                 targetPos.set(msg.hitPoint.x, msg.hitPoint.y, msg.hitPoint.z);
             } else {
-                targetPos.copy(_barrelPos).addScaledVector(_dir, 500);
+                targetPos.copy(_barrelPos).addScaledVector(_baseFireDir, 500);
             }
             createLaserBeam(_barrelPos, targetPos, 0xffff00);
 
         } else {
-            if (state.projectiles.length >= MAX_PROJECTILES) return;
-
-            let bullet: THREE.Mesh;
-            const bulletColor = WEAPON_STATS[msg.weapon as string]?.bulletColor ?? 0xffffff;
-
-            if (state.projectilePool.length > 0) {
-                bullet = state.projectilePool.pop() as THREE.Mesh;
-                bullet.visible = true;
-                (bullet.material as THREE.MeshBasicMaterial).color.setHex(bulletColor);
-            } else {
-                bullet = new THREE.Mesh(SHARED_PROJECTILE_GEO, new THREE.MeshBasicMaterial({ color: bulletColor }));
-                bullet.userData = {};
+            const stats = WEAPON_STATS[msg.weapon];
+            const pelletCount = msg.weapon === 'SHOTGUN'
+                ? Math.min(msg.pelletCount ?? stats.pellets ?? 5, 16)
+                : 1;
+            const fallbackSeed = (Math.floor(_barrelPos.x * 100) ^ Math.floor(_barrelPos.y * 100) ^ Math.floor(_barrelPos.z * 100)) >>> 0;
+            const spreadSeed = msg.spreadSeed ?? fallbackSeed;
+            for (let pellet = 0; pellet < pelletCount; pellet++) {
+                const direction = pelletCount > 1
+                    ? remoteSpreadDirection(_baseFireDir, spreadSeed, pellet, stats.spread)
+                    : _baseFireDir;
+                spawnRemoteBullet(_barrelPos, direction, stats.bulletColor);
             }
-
-            bullet.position.copy(_barrelPos).addScaledVector(_dir, 0.1);
-            const data = projectileData(bullet);
-            data.dx = _dir.x;
-            data.dy = _dir.y;
-            data.dz = _dir.z;
-            data.age = 0;
-            data.visualOnly = true;
-            data.damage = undefined;
-            
-            state.scene!.add(bullet);
-            state.projectiles.push(bullet);
         }
     } else if (msg.type === 'kill_target') {
         // Host broadcast: all clients apply the same target respawn and score.
@@ -631,27 +1234,21 @@ function handlePeerMessage(fromPeerId: string, msg: NetworkPacket): void {
             spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
 
             createShockwave(target.position, 8.0 * (msg.scale || 1.0), 0xffaa00);
-
-            target.position.set(msg.newPosition.x, msg.newPosition.y, msg.newPosition.z);
-            const data = targetData(target);
-            data.maxHp = msg.hp;
-            data.hp = msg.hp;
-            data.scale = msg.scale;
-            data.color = msg.color;
-            (data.bodyMesh.material as THREE.MeshStandardMaterial).color.setHex(msg.color);
-            data.bodyMesh.scale.set(msg.scale, msg.scale, msg.scale);
-            data.healthBarFg.scale.x = 1.0;
-            data.healthBarGroup.position.y = 1.6 * msg.scale;
-            data.healthBarGroup.scale.set(msg.scale, msg.scale, 1);
+            applyTargetState({
+                targetIndex: msg.targetIndex,
+                position: msg.newPosition,
+                maxHp: msg.hp,
+                hp: msg.hp,
+                scale: msg.scale,
+                color: msg.color
+            });
             rebuildTargetHash();
-
-            state.score = msg.score;
-            const scoreEl = document.getElementById('score');
-            if (scoreEl) scoreEl.innerText = state.score.toString();
+            setScore(msg.score);
         }
     } else if (msg.type === 'hit_target') {
         if (state.isMultiplayer && state.isHost) {
             processTargetHit(msg.targetIndex, msg.damage);
+            syncHostTargetStates();
         }
     } else if (msg.type === 'player_hit') {
         const targetPeer = state.peers[msg.targetPeerId];
@@ -731,9 +1328,11 @@ export function sendLocalState(): void {
 
     const now = performance.now();
     if (now - lastSentTime < NETWORK_TICK_MS) return;
+    if (state.isHost) syncHostTargetStates();
 
     const playerObj = state.controls.getObject();
     const camEuler = _stateEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
+    const activeWeapon = getActiveWeaponName();
 
     const username = getCachedUsername();
     const q2 = (value: number) => Math.round(value * 100) / 100;
@@ -757,7 +1356,7 @@ export function sendLocalState(): void {
         z: q2(pos.z),
         yaw: q3(camEuler.y),
         pitch: q3(camEuler.x),
-        weapon: state.activeWeaponName,
+        weapon: activeWeapon,
         flags,
         hookX,
         hookY,
@@ -787,7 +1386,7 @@ export function sendLocalState(): void {
         pos: { x: snapshot.x, y: snapshot.y, z: snapshot.z },
         yaw: snapshot.yaw,
         pitch: snapshot.pitch,
-        activeWeapon: state.activeWeaponName,
+        activeWeapon,
         isMouseDown: state.isMouseDown,
         isDead: state.playerHp <= 0,
         hookState: state.hookState,
@@ -825,13 +1424,20 @@ export function updateRemotePeers(delta: number): void {
 
 export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3, hitPoint: THREE.Vector3 | null = null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
+    const weapon = getActiveWeaponName();
 
     const packet: FirePacket = {
         type: 'fire',
-        weapon: state.activeWeaponName,
+        weapon,
         barrelPos: { x: barrelPos.x, y: barrelPos.y, z: barrelPos.z },
         dir: { x: dir.x, y: dir.y, z: dir.z }
     };
+
+    if (weapon === 'SHOTGUN') {
+        packet.pelletCount = WEAPON_STATS.SHOTGUN.pellets ?? 5;
+        packet.spreadSeed = nextFireSeed >>> 0;
+        nextFireSeed = (nextFireSeed + 1) >>> 0;
+    }
 
     if (hitPoint) {
         packet.hitPoint = { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z };
@@ -853,6 +1459,11 @@ export function broadcastTargetKill(targetIndex: number, score: number, newPos: 
         color: data.color
     };
 
+    const targetState = buildTargetState(targetIndex);
+    if (targetState) {
+        targetStateFingerprints.set(targetIndex, targetStateFingerprint(targetState));
+    }
+
     broadcastToAll(packet);
 }
 
@@ -863,6 +1474,14 @@ export function broadcastLocalJump(): void {
     };
     broadcastToAll(packet);
 }
+
+// Keep weapon simulation independent from the networking module so scene-model
+// construction does not participate in a weapons ↔ multiplayer import cycle.
+setWeaponNetworkPort({
+    broadcastLocalFire,
+    broadcastToAll,
+    flashPeerMesh,
+});
 
 // Remote players use the same bean/weapon builders as the local player, but with
 // a canvas-generated name tag attached as a Sprite.

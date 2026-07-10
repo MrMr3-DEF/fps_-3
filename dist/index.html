@@ -240,16 +240,6 @@
             z-index: 5;
         }
 
-        #sprint-badge {
-            font-size: 14px;
-            color: #00aaee;
-            background: rgba(0, 170, 238, 0.1);
-            padding: 2px 8px;
-            border-radius: 4px;
-            margin-left: 10px;
-            display: none;
-        }
-
         #hook-badge {
             font-size: 14px;
             color: #00aaee;
@@ -542,8 +532,8 @@
         }
     </style>
 
-  <script type="module" crossorigin src="/assets/index-BLfV4Wi0.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/three-CbPL-GFE.js">
+  <script type="module" crossorigin src="/assets/index--pkZRuSd.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/three-DDl6D2w7.js">
 </head>
 
 <body>
@@ -561,7 +551,7 @@
                 <button class="menu-btn secondary" id="btn-menu-settings">Settings</button>
 
                 <span style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
-                    WASD to Move | Shift to Sprint | Space to Jump<br />
+                    WASD to Move | Shift in Air to Hover | Space to Jump<br />
                     R for Grappling Hook | Left-Click to Shoot<br />
                     E / 1, 2, 3, 4 to Switch Weapons | P for Third Person<br />
                     Right-Click / Hold C to Aim (goggles)
@@ -608,6 +598,13 @@
                         <span class="settings-value" id="setting-shadows-value">On</span>
                     </div>
                     <div class="settings-row">
+                        <label for="setting-shadow-quality">Shadow Quality</label>
+                        <select id="setting-shadow-quality">
+                            <option value="low">Low (1024)</option>
+                            <option value="high">High (2048)</option>
+                        </select>
+                    </div>
+                    <div class="settings-row">
                         <label for="setting-fps">FPS Counter</label>
                         <input type="checkbox" id="setting-fps" checked>
                         <span class="settings-value" id="setting-fps-value">On</span>
@@ -643,7 +640,7 @@
                 <span style="font-size: 15px; color: #555;">Your room code is:</span>
                 <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0;">
                     <span id="room-code-display"
-                        style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">....</span>
+                        style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">--------</span>
                     <button id="btn-copy-code" class="menu-btn" style="
                         padding: 6px 14px;
                         font-size: 14px;
@@ -654,6 +651,7 @@
                     " title="Copy room code">📋 Copy</button>
                 </div>
                 <span style="font-size: 14px; color: #777;" id="host-lobby-status">Creating room...</span><br />
+                <div id="turnstile-host-challenge" style="min-height: 65px; margin: 12px 0 2px;"></div>
 
                 <div style="display: flex; gap: 10px; margin-top: 15px;">
                     <button class="menu-btn" id="btn-host-start" style="display: none;">Start Game</button>
@@ -664,9 +662,10 @@
             <!-- Panel 4: Join Room Menu -->
             <div id="panel-join-room" class="menu-panel">
                 <strong style="color: #57606f; font-size: 20px;">Join Game</strong><br />
-                <input type="text" class="menu-input" id="input-room-code" placeholder="CODE" maxlength="4"
-                    style="text-transform: uppercase; font-size: 20px; width: 140px; letter-spacing: 2px;"><br />
+                <input type="text" class="menu-input" id="input-room-code" placeholder="8-CHAR CODE" maxlength="8"
+                    style="text-transform: uppercase; font-size: 20px; width: 210px; letter-spacing: 2px;"><br />
                 <span style="font-size: 14px; color: #ff4757; font-weight: bold;" id="join-error-log"></span><br />
+                <div id="turnstile-join-challenge" style="min-height: 65px; margin: 2px 0 12px;"></div>
 
                 <div style="display: flex; gap: 10px;">
                     <button class="menu-btn" id="btn-join-connect">Connect</button>
@@ -679,7 +678,7 @@
                 <strong style="color: #00aaee; font-size: 28px; letter-spacing: 1px;">PAUSE</strong><br />
                 <span id="pause-lobby-info" style="font-size: 15px; color: #555; margin-bottom: 15px; display: none;">
                     Lobby Code: <strong id="pause-room-code"
-                        style="color: #00aaee; font-size: 20px; letter-spacing: 1px;">----</strong>
+                        style="color: #00aaee; font-size: 20px; letter-spacing: 1px;">--------</strong>
                 </span>
 
                 <div style="display: flex; flex-direction: column; align-items: center; width: 100%;">
@@ -759,7 +758,6 @@
             Kills: <span id="kills">0</span> &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 4px;">
-            <span id="sprint-badge">SPRINT</span>
             <span id="hook-badge">HOOK ACTIVE</span>
             <span id="hover-badge">HOVER ACTIVE</span>
         </div>

@@ -17,6 +17,10 @@ export const SWITCH_DURATION = 0.15;
 export const PROJECTILE_SPEED = 350;
 export const PROJECTILE_LIFETIME = 2.0;
 export const MAX_PROJECTILES = 220;
+export const PROJECTILE_RADIUS = 0.07;
+// Cap a stalled animation frame so physics and projectiles cannot skip through
+// the world after a tab is backgrounded or the renderer hitches.
+export const MAX_FRAME_DELTA = 0.05;
 
 export interface EnemyClass {
     hp: number;
@@ -61,7 +65,9 @@ export const LAVA_POOL_HALF_SIZE = 12.8;
 
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
-export const ROOM_CODE_LENGTH = 4;
+// Eight unambiguous characters make active room discovery infeasible by brute force
+// before the Worker issues short-lived TURN credentials.
+export const ROOM_CODE_LENGTH = 8;
 export const PEER_Y_OFFSET = 0.35;
 export const HIT_FLASH_DURATION_MS = 150;
 

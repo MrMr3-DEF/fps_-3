@@ -1,12 +1,28 @@
-// Small indirection layer used by modules that need damage callbacks without
-// importing main.ts and creating circular runtime dependencies.
-export let processTargetHit: (targetIndex: number, damage: number) => void = () => {};
-export let takePlayerDamage: (damage: number, attackerName: string) => void = () => {};
+type TargetHitHandler = (targetIndex: number, damage: number) => void;
+type PlayerDamageHandler = (damage: number, attackerName: string) => void;
+
+let targetHitHandler: TargetHitHandler | null = null;
+let playerDamageHandler: PlayerDamageHandler | null = null;
+
+/**
+ * Explicit gameplay event boundary for modules that cannot import main.ts
+ * without creating a runtime cycle. Calling before initialization is a real
+ * lifecycle error, not a silently discarded hit.
+ */
+export function processTargetHit(targetIndex: number, damage: number): void {
+    if (!targetHitHandler) throw new Error('Damage handlers have not been initialized.');
+    targetHitHandler(targetIndex, damage);
+}
+
+export function takePlayerDamage(damage: number, attackerName: string): void {
+    if (!playerDamageHandler) throw new Error('Damage handlers have not been initialized.');
+    playerDamageHandler(damage, attackerName);
+}
 
 export function setDamageHandlers(
-    onTargetHit: typeof processTargetHit,
-    onPlayerDamage: typeof takePlayerDamage
+    onTargetHit: TargetHitHandler,
+    onPlayerDamage: PlayerDamageHandler,
 ): void {
-    processTargetHit = onTargetHit;
-    takePlayerDamage = onPlayerDamage;
+    targetHitHandler = onTargetHit;
+    playerDamageHandler = onPlayerDamage;
 }

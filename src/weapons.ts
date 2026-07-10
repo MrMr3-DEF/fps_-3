@@ -7,12 +7,13 @@ import {
     MINIGUN_SHOOT_DELAY,
     MINIGUN_MIN_RPM,
     MINIGUN_MAX_RPM,
-    MAX_PROJECTILES
+    MAX_PROJECTILES,
+    PROJECTILE_RADIUS
 } from './config.js';
-import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './multiplayer.js';
+import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './weaponNetworkPort.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
 import { processTargetHit } from './damage.js';
-import { queryTargetsNear } from './world.js';
+import { queryObstaclesAlongSegment, queryTargetsAlongSegment } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { projectileData, targetData } from './userDataTypes.js';
 
@@ -27,7 +28,7 @@ const INSPECT_PAUSE1_END   = 1.0;
 const INSPECT_PHASE2_END   = 3.2;
 const INSPECT_TOTAL        = 3.8;
 
-export const SHARED_PROJECTILE_GEO = new THREE.SphereGeometry(0.07, 8, 8);
+export const SHARED_PROJECTILE_GEO = new THREE.SphereGeometry(PROJECTILE_RADIUS, 8, 8);
 export const SHARED_BODY_MAT = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
 const SHARED_GUN_BODY_GEO = new THREE.BoxGeometry(0.07, 0.11, 0.38);
 const SHARED_GUN_GRIP_GEO = new THREE.BoxGeometry(0.05, 0.16, 0.07);
@@ -62,8 +63,10 @@ const _barrelPos = new THREE.Vector3();
 const _camDirection = new THREE.Vector3();
 const _spreadVec = new THREE.Vector3();
 const _hitPoint = new THREE.Vector3();
+const _rayEnd = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
 const _targetCandidates: THREE.Group[] = [];
+const _obstacleCandidates: THREE.Object3D[] = [];
 
 // Weapon names are stored as strings in state/network packets, so these maps are
 // the single place that translates names into scene objects and switch offsets.
@@ -457,7 +460,15 @@ export function fireProjectile(): void {
         _raycaster.far = 500;
         (_raycaster as any).camera = state.camera;
 
-        const obstacleHits = _raycaster.intersectObjects(state.obstacles);
+        _rayEnd.copy(state.camera.position).addScaledVector(camDirection, _raycaster.far);
+        const obstacleCandidates = queryObstaclesAlongSegment(
+            state.camera.position.x,
+            state.camera.position.z,
+            _rayEnd.x,
+            _rayEnd.z,
+            _obstacleCandidates
+        );
+        const obstacleHits = _raycaster.intersectObjects(obstacleCandidates);
         let closestObstacleDist = Infinity;
         if (obstacleHits.length > 0) {
             closestObstacleDist = obstacleHits[0].distance;
@@ -467,7 +478,13 @@ export function fireProjectile(): void {
         let closestTargetDist = Infinity;
         let hitTargetGroup: THREE.Object3D | null = null;
 
-        const targetCandidates = queryTargetsNear(state.camera.position.x, state.camera.position.z, 500, _targetCandidates);
+        const targetCandidates = queryTargetsAlongSegment(
+            state.camera.position.x,
+            state.camera.position.z,
+            _rayEnd.x,
+            _rayEnd.z,
+            _targetCandidates
+        );
         const targetsLen = targetCandidates.length;
         for (let j = 0; j < targetsLen; j++) {
             const targetGroup = targetCandidates[j];
@@ -510,6 +527,7 @@ export function fireProjectile(): void {
         _raycaster.far = Infinity;
 
         const hitPoint = _hitPoint.copy(state.camera.position).addScaledVector(camDirection, 300);
+        let sniperFireBroadcast = false;
 
         if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestObstacleDist);
@@ -518,6 +536,10 @@ export function fireProjectile(): void {
             hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestTargetDist);
             
             if (state.isMultiplayer) {
+                // Hitscan damage is resolved in this same call, so the host
+                // must see the fire intent before the target-hit packet.
+                broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
+                sniperFireBroadcast = true;
                 if (!state.isHost) {
                     const packet: HitTargetPacket = {
                         type: 'hit_target',
@@ -541,6 +563,9 @@ export function fireProjectile(): void {
                 flashPeerMesh(peerData, 0xff3333, 150);
             }
 
+            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
+            sniperFireBroadcast = true;
+
             if (!inputUsernameEl) inputUsernameEl = document.getElementById('input-username') as HTMLInputElement | null;
             const attackerName = inputUsernameEl ? inputUsernameEl.value.trim() || 'Guest' : 'Guest';
             const packet: PlayerHitPacket = {
@@ -556,9 +581,10 @@ export function fireProjectile(): void {
 
         createLaserBeam(barrelWorldPosition, hitPoint, stats.bulletColor);
 
-        if (state.isMultiplayer) {
+        if (state.isMultiplayer && !sniperFireBroadcast) {
             broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
         }
+
         return;
     } else if (state.activeWeaponName === 'SHOTGUN') {
         const pellets = stats.pellets || 5;

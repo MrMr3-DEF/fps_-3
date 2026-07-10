@@ -31,6 +31,7 @@ export interface PeerData {
     minigunMesh: THREE.Group;
     minigunRamp?: number;
     lastUpdateTime?: number;
+    lastRemoteExhaustTime?: number;
     hookLine: THREE.Mesh | null;
 }
 
@@ -64,7 +65,6 @@ export interface GameState {
 
     targets: THREE.Group[];
     obstacles: THREE.Object3D[];
-    grappleSurfaces: THREE.Object3D[];
     projectiles: THREE.Object3D[];
     projectilePool: THREE.Object3D[];
     activeParticles: Particle[];
@@ -148,7 +148,6 @@ export const state: GameState = {
     // Scene object registries used by update loops and collision checks.
     targets: [],
     obstacles: [],
-    grappleSurfaces: [],
     projectiles: [],
     projectilePool: [],
     activeParticles: [],
@@ -202,9 +201,7 @@ export const state: GameState = {
 
 export function resetPlayerState() {
     state.playerHp = state.playerMaxHp;
-    state.score = 0;
-    state.kills = 0;
-    state.deaths = 0;
+    state.canJump = false;
     state.velocity.set(0, 0, 0);
     state.hookState = 'IDLE';
     state.hookPosition.set(0, 0, 0);
@@ -213,7 +210,15 @@ export function resetPlayerState() {
     state.hookIsEnemy = false;
     state.hookTargetEnemy = null;
     state.hoverFuel = 1.0;
+    state.fireCooldown = 0;
     state.inspectState = 'IDLE';
     state.inspectTimer = 0;
     state.minigunRamp = 0;
+}
+
+/** Reset score and PvP counters only when starting a genuinely fresh match. */
+export function resetMatchStats() {
+    state.score = 0;
+    state.kills = 0;
+    state.deaths = 0;
 }

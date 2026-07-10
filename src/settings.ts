@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { DEFAULT_FOV, MAX_PARTICLES, MAX_RENDER_DISTANCE_CHUNKS, SCOPED_FOV } from './config.js';
 
 const STORAGE_KEY = 'testfps-settings-v1';
+export type ShadowQuality = 'low' | 'high';
 
 export interface UserSettings {
     sensitivity: number;
@@ -11,6 +12,7 @@ export interface UserSettings {
     particleAmount: number;
     renderDistanceChunks: number;
     shadows: boolean;
+    shadowQuality: ShadowQuality;
     showFps: boolean;
 }
 
@@ -22,6 +24,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     particleAmount: 1.0,
     renderDistanceChunks: 4,
     shadows: true,
+    shadowQuality: 'low',
     showFps: true,
 };
 
@@ -36,6 +39,10 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
     return typeof value === 'boolean' ? value : fallback;
 }
 
+function readShadowQuality(value: unknown): ShadowQuality {
+    return value === 'high' ? 'high' : 'low';
+}
+
 export function loadUserSettings(): UserSettings {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -48,6 +55,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.particleAmount = clamp(parsed.particleAmount ?? DEFAULT_USER_SETTINGS.particleAmount, 0.2, 1.0);
             userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
+            userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);
         }
     } catch (err) {
@@ -64,19 +72,18 @@ export function saveUserSettings(): void {
     }
 }
 
-export function resetUserSettings(): UserSettings {
-    Object.assign(userSettings, DEFAULT_USER_SETTINGS);
-    saveUserSettings();
-    return userSettings;
-}
-
 export function applyRendererSettings(renderer: THREE.WebGLRenderer): void {
     const pixelRatio = Math.min(window.devicePixelRatio * userSettings.renderScale, 2.0);
     renderer.setPixelRatio(pixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = userSettings.shadows;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.shadowMap.needsUpdate = true;
+    // Avoid shadow-map update bookkeeping entirely while the user has shadows
+    // disabled; re-enabling requests a fresh map on the next render.
+    renderer.shadowMap.autoUpdate = userSettings.shadows;
+    renderer.shadowMap.needsUpdate = userSettings.shadows;
+    if (userSettings.shadows) {
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
 }
 
 export function getParticleLimit(): number {

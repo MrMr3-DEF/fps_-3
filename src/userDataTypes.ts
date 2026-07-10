@@ -8,7 +8,6 @@ export interface TargetUserData {
     color: number;
     bodyMesh: THREE.Mesh;
     healthBarFg: THREE.Mesh;
-    healthBarBg: THREE.Mesh;
     healthBarGroup: THREE.Group;
 }
 
@@ -26,10 +25,6 @@ export interface ProjectileUserData {
     age: number;
     visualOnly: boolean;
     damage?: number;
-}
-
-export interface FlashableUserData {
-    originalColor?: number;
 }
 
 export function targetData(target: THREE.Group): TargetUserData {
