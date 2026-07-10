@@ -127,7 +127,7 @@ const UI = {
     get btnDeathRespawn() { return getUI<HTMLElement>('btn-death-respawn'); },
     get btnDeathLeave() { return getUI<HTMLElement>('btn-death-leave'); },
     get mpNameError() { return getUI<HTMLElement>('mp-name-error'); },
-    get btnCopyCode() { return getUI<HTMLElement>('btn-copy-code'); },
+    get btnCopyCode() { return getUI<HTMLButtonElement>('btn-copy-code'); },
     get hostLobbyStatus() { return getUI<HTMLElement>('host-lobby-status'); },
     get turnstileHostChallenge() { return getUI<HTMLElement>('turnstile-host-challenge'); },
     get turnstileJoinChallenge() { return getUI<HTMLElement>('turnstile-join-challenge'); },
@@ -143,6 +143,9 @@ let motionHudInitialized = false;
 let smoothedGRight = 0;
 let smoothedGUp = 0;
 let roomFlowGeneration = 0;
+let copyFeedbackTimeout: number | null = null;
+
+const COPY_BUTTON_DEFAULT_TEXT = '📋 Copy';
 
 const hostRoomChallenge = new RoomAccessChallenge('create-room');
 const joinRoomChallenge = new RoomAccessChallenge('join-room');
@@ -181,6 +184,14 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function resetHostLobbyUi(): void {
     if (UI.roomCodeDisplay) UI.roomCodeDisplay.innerText = '-'.repeat(ROOM_CODE_LENGTH);
+    if (copyFeedbackTimeout !== null) {
+        window.clearTimeout(copyFeedbackTimeout);
+        copyFeedbackTimeout = null;
+    }
+    if (UI.btnCopyCode) {
+        UI.btnCopyCode.disabled = true;
+        UI.btnCopyCode.textContent = COPY_BUTTON_DEFAULT_TEXT;
+    }
     if (UI.btnHostStart) UI.btnHostStart.style.display = 'none';
 }
 
@@ -204,6 +215,8 @@ async function beginHosting(username: string): Promise<void> {
         if (UI.roomCodeDisplay) UI.roomCodeDisplay.innerText = code;
         if (UI.hostLobbyStatus) UI.hostLobbyStatus.innerText = 'Creating secure room...';
         await hostGame(username, code, turnstileToken);
+        if (generation !== roomFlowGeneration || !state.isHost || state.roomCode !== code) return;
+        if (UI.btnCopyCode) UI.btnCopyCode.disabled = false;
     } catch (error) {
         if (generation !== roomFlowGeneration) return;
         const message = errorMessage(error, 'Unable to create a secure room. Please retry.');
@@ -510,15 +523,32 @@ function setupMenuListeners(): void {
     }
 
     if (UI.btnCopyCode) {
-        UI.btnCopyCode.addEventListener('click', (e) => {
+        UI.btnCopyCode.addEventListener('click', async (e) => {
             e.stopPropagation();
-            const code = state.roomCode || (UI.roomCodeDisplay ? UI.roomCodeDisplay.innerText : '');
-            if (code && code !== '-'.repeat(ROOM_CODE_LENGTH) && UI.btnCopyCode) {
-                navigator.clipboard.writeText(code);
-                UI.btnCopyCode.textContent = '✅ Kopiert';
-                setTimeout(() => {
-                    if (UI.btnCopyCode) UI.btnCopyCode.textContent = '📋 Kopieren';
+            const button = UI.btnCopyCode;
+            const code = state.isMultiplayer && state.isHost ? state.roomCode : null;
+
+            if (!button || !code || validateRoomCode(code)) {
+                if (button) button.disabled = true;
+                if (UI.hostLobbyStatus) UI.hostLobbyStatus.innerText = 'The room code is not ready to copy.';
+                return;
+            }
+
+            try {
+                if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+                await navigator.clipboard.writeText(code);
+                button.textContent = '✅ Copied';
+                if (copyFeedbackTimeout !== null) window.clearTimeout(copyFeedbackTimeout);
+                copyFeedbackTimeout = window.setTimeout(() => {
+                    const currentButton = UI.btnCopyCode;
+                    if (currentButton) currentButton.textContent = COPY_BUTTON_DEFAULT_TEXT;
+                    copyFeedbackTimeout = null;
                 }, 1500);
+            } catch {
+                button.textContent = COPY_BUTTON_DEFAULT_TEXT;
+                if (UI.hostLobbyStatus) {
+                    UI.hostLobbyStatus.innerText = 'Clipboard access was blocked. Select the room code and copy it manually.';
+                }
             }
         });
     }

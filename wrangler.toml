@@ -2,6 +2,12 @@ name = "fps3"
 compatibility_date = "2026-05-28"
 main = "src/worker.ts"
 
+
+[vars]
+# TURN_KEY_ID = "your-cloudflare-turn-key-id"
+TURNSTILE_SITE_KEY = "0x4AAAAAADzFDHXgSOCnjEAB"
+TURNSTILE_HOSTNAME = "luigismansion.de"
+
 [assets]
 directory = "./dist"
 

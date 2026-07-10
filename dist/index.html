@@ -404,6 +404,15 @@
             transform: translateY(0);
         }
 
+        .menu-btn:disabled,
+        .menu-btn:disabled:hover,
+        .menu-btn:disabled:active {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 2px 6px rgba(47, 53, 66, 0.2);
+        }
+
         .menu-btn.secondary {
             background: linear-gradient(135deg, #747d8c, #2f3542);
             box-shadow: 0 4px 10px rgba(47, 53, 66, 0.3);
@@ -532,7 +541,7 @@
         }
     </style>
 
-  <script type="module" crossorigin src="/assets/index--pkZRuSd.js"></script>
+  <script type="module" crossorigin src="/assets/index-BJ7i-l-Y.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-DDl6D2w7.js">
 </head>
 
@@ -641,7 +650,7 @@
                 <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin: 10px 0;">
                     <span id="room-code-display"
                         style="font-size: 36px; font-weight: bold; color: var(--accent-blue); letter-spacing: 2px;">--------</span>
-                    <button id="btn-copy-code" class="menu-btn" style="
+                    <button id="btn-copy-code" class="menu-btn" disabled style="
                         padding: 6px 14px;
                         font-size: 14px;
                         margin: 0;
