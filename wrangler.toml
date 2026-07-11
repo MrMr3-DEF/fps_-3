@@ -5,7 +5,7 @@ main = "src/worker.ts"
 
 [vars]
 TURNSTILE_SITE_KEY = "0x4AAAAAADzFDHXgSOCnjEAB"
-TURNSTILE_HOSTNAME = "luigismansion.de"
+TURNSTILE_HOSTNAME = "fps.luigismansion.de"
 
 [assets]
 directory = "./dist"
