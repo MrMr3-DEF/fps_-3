@@ -39,6 +39,7 @@ const SHARED_BOOSTER_CYLINDER_GEO = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16
 const SHARED_NOZZLE_GEO = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
 const SHARED_VISOR_GEO = new THREE.BoxGeometry(0.85, 0.25, 0.45);
 const SHARED_VISOR_STRIP_GEO = new THREE.BoxGeometry(0.5, 0.05, 0.47);
+const BEAN_DAMAGE_PULSE_MATERIALS = new WeakMap<THREE.Group, readonly THREE.MeshStandardMaterial[]>();
 const SHARED_GEOMETRIES = new Set<THREE.BufferGeometry>([
     SHARED_PROJECTILE_GEO,
     SHARED_GUN_BODY_GEO,
@@ -55,6 +56,11 @@ let inputUsernameEl: HTMLInputElement | null = null;
 
 export function isSharedGeometry(geometry: THREE.BufferGeometry): boolean {
     return SHARED_GEOMETRIES.has(geometry);
+}
+
+/** Materials belonging to the avatar itself, excluding held weapons and tags. */
+export function getBeanDamagePulseMaterials(bean: THREE.Group): readonly THREE.MeshStandardMaterial[] {
+    return BEAN_DAMAGE_PULSE_MATERIALS.get(bean) ?? [];
 }
 
 // Scratch values reused by firing, third-person alignment and hitscan checks.
@@ -883,6 +889,10 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
     const visorStrip = new THREE.Mesh(SHARED_VISOR_STRIP_GEO, visorStripMat);
     visorStrip.position.set(0, 0.5, -0.36);
     playerGroup.add(visorStrip);
+
+    // These materials are unique to this bean but shared by some of its body
+    // meshes. Keeping one material-level list prevents per-mesh restore races.
+    BEAN_DAMAGE_PULSE_MATERIALS.set(playerGroup, [bodyMat, boosterMat, visorMat]);
 
     return playerGroup;
 }

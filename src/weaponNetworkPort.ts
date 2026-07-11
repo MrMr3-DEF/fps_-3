@@ -1,10 +1,11 @@
 import type * as THREE from 'three';
 import type { NetworkPacket } from './networkTypes.js';
+import type { PeerData } from './state.js';
 
 export interface WeaponNetworkPort {
     broadcastLocalFire(barrelPos: THREE.Vector3, direction: THREE.Vector3, hitPoint?: THREE.Vector3 | null): void;
     broadcastToAll(packet: NetworkPacket): void;
-    flashPeerMesh(peerData: unknown, color?: number, durationMs?: number): void;
+    flashPeerMesh(peerData: PeerData, color?: number, durationMs?: number): void;
 }
 
 let activePort: WeaponNetworkPort | null = null;
@@ -28,6 +29,6 @@ export function broadcastToAll(packet: NetworkPacket): void {
     getPort().broadcastToAll(packet);
 }
 
-export function flashPeerMesh(peerData: unknown, color?: number, durationMs?: number): void {
+export function flashPeerMesh(peerData: PeerData, color?: number, durationMs?: number): void {
     getPort().flashPeerMesh(peerData, color, durationMs);
 }

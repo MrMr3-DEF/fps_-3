@@ -26,7 +26,7 @@ import {
     WEAPON_STATS,
     MAX_PROJECTILES
 } from './config.js';
-import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
+import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
 import {
     parseNetworkPacket,
     type FirePacket,
@@ -41,6 +41,7 @@ import {
 } from './networkTypes.js';
 import { obstacleData, projectileData, targetData, type TargetUserData } from './userDataTypes.js';
 import { segmentAabbHitT, segmentSphereHitT } from './gameplayMath.js';
+import { clearDamagePulse, pulseDamageMaterials } from './damagePulse.js';
 import { setWeaponNetworkPort } from './weaponNetworkPort.js';
 import {
     closeTurnRoom,
@@ -180,27 +181,8 @@ export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | nu
     }
 }
 
-export function flashPeerMesh(peerData: any, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
-    if (!peerData || !peerData.mesh) return;
-    peerData.mesh.traverse((child: any) => {
-        if (child.isMesh && child.material && child.material.color) {
-            if (child.material === SHARED_BODY_MAT) {
-                child.material = SHARED_BODY_MAT.clone();
-            }
-            if (child.userData.originalColor === undefined) {
-                child.userData.originalColor = child.material.color.getHex();
-            }
-            child.material.color.setHex(color);
-        }
-    });
-    setTimeout(() => {
-        if (!peerData || !peerData.mesh) return;
-        peerData.mesh.traverse((child: any) => {
-            if (child.isMesh && child.material && child.material.color && child.userData.originalColor !== undefined) {
-                child.material.color.setHex(child.userData.originalColor);
-            }
-        });
-    }, durationMs);
+export function flashPeerMesh(peerData: PeerData, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
+    pulseDamageMaterials(peerData, getBeanDamagePulseMaterials(peerData.mesh), color, durationMs);
 }
 
 let peerInstance: any = null;
@@ -1297,6 +1279,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
 function removePeer(peerId: string): void {
     const peerData = state.peers[peerId];
     if (peerData) {
+        clearDamagePulse(peerData);
         if (peerData.mesh) {
             state.scene!.remove(peerData.mesh);
             peerData.mesh.traverse((child: any) => {
