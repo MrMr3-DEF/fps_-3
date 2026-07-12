@@ -43,6 +43,7 @@ import { applyRendererSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUse
 import { targetData } from './userDataTypes.js';
 import type { PlayerDiedPacket } from './networkTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
+import { decodeMouseButtons } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
@@ -804,7 +805,7 @@ function preventLockedMouseDefault(e: Event): void {
     }
 }
 
-function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
+function handleGameMouseButtons(e: PointerEvent): void {
     preventLockedMouseDefault(e);
     if (!isGameInputLocked()) return;
 
@@ -882,39 +883,24 @@ function updateLocalAccelerometer(delta: number): void {
     updateAccelerometer(smoothedGRight, smoothedGUp);
 }
 
-function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
-    const isButtonEvent = e.type === 'mousedown' || e.type === 'mouseup' ||
-        e.type === 'pointerdown' || e.type === 'pointerup';
-    if (isButtonEvent) {
-        const isButtonDown = e.type === 'mousedown' || e.type === 'pointerdown';
+function updateMouseButtonStateFromChange(e: PointerEvent): void {
+    const previousPrimary = state.isMouseDown;
+    const previousSecondary = state.rightClickActive;
+    const buttons = decodeMouseButtons(e.type === 'pointercancel' ? 0 : e.buttons);
 
-        if (e.button === 0) {
-            state.isMouseDown = isButtonDown;
-        } else if (e.button === 2) {
-            state.rightClickActive = isButtonDown;
-        } else if (e.button === 1) {
-            if (isButtonDown && (state.isMouseDown || state.rightClickActive)) {
-                middleMouseChordActive = true;
-                state.isMouseDown = true;
-                state.rightClickActive = true;
-            } else if (!isButtonDown && middleMouseChordActive) {
-                middleMouseChordActive = false;
-                state.isMouseDown = false;
-                state.rightClickActive = false;
-            }
-        }
-    } else if (e.button === 0) {
-        state.isMouseDown = (e.buttons & 1) !== 0;
-    } else if (e.button === 2) {
-        state.rightClickActive = (e.buttons & 2) !== 0;
-    } else if ((e.buttons & 4) !== 0 && (middleMouseChordActive || state.isMouseDown || state.rightClickActive)) {
-        middleMouseChordActive = true;
+    // Some mouse drivers expose left+right emulation as a middle-button chord.
+    // Preserve that compatibility path, but derive normal left/right state from
+    // the complete bitmask on every event—including button-less pointermove.
+    middleMouseChordActive = buttons.middle && (
+        middleMouseChordActive || buttons.primary || buttons.secondary || previousPrimary || previousSecondary
+    );
+
+    if (middleMouseChordActive) {
         state.isMouseDown = true;
         state.rightClickActive = true;
-    } else if (e.buttons === 0) {
-        middleMouseChordActive = false;
-        state.isMouseDown = false;
-        state.rightClickActive = false;
+    } else {
+        state.isMouseDown = buttons.primary;
+        state.rightClickActive = buttons.secondary;
     }
 
     state.isScoped = state.rightClickActive || state.keyCActive;
