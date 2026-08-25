@@ -83,6 +83,81 @@
             line-height: 1.2;
         }
 
+        .settings-label-with-info {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .settings-info {
+            position: relative;
+            display: inline-flex;
+            flex: 0 0 auto;
+        }
+
+        .settings-info-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 17px;
+            height: 17px;
+            padding: 0;
+            border: 1.5px solid #77808f;
+            border-radius: 50%;
+            background: transparent;
+            color: #667080;
+            font: 700 12px/1 inherit;
+            cursor: help;
+        }
+
+        .settings-info-button:hover,
+        .settings-info-button:focus-visible {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+            outline: none;
+        }
+
+        .settings-tooltip {
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 9px);
+            z-index: 20;
+            width: 290px;
+            padding: 10px 12px;
+            border: 1px solid rgba(0, 170, 238, 0.35);
+            border-radius: 8px;
+            background: rgba(32, 38, 50, 0.97);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1.4;
+            text-align: left;
+            pointer-events: none;
+            opacity: 0;
+            visibility: hidden;
+            transform: translate(-50%, 4px);
+            transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+        }
+
+        .settings-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            border: 6px solid transparent;
+            border-top-color: rgba(32, 38, 50, 0.97);
+            transform: translateX(-50%);
+        }
+
+        .settings-info:hover .settings-tooltip,
+        .settings-info:focus-within .settings-tooltip {
+            opacity: 1;
+            visibility: visible;
+            transform: translate(-50%, 0);
+        }
+
         .settings-container input[type=range] {
             -webkit-appearance: none;
             appearance: none;
@@ -614,7 +689,19 @@
                         <span class="settings-value" id="setting-particles-value">100%</span>
                     </div>
                     <div class="settings-row">
-                        <label for="setting-render-distance">Render Distance</label>
+                        <div class="settings-label-with-info">
+                            <label for="setting-render-distance">Render Distance</label>
+                            <span class="settings-info">
+                                <button type="button" class="settings-info-button"
+                                    aria-label="What render distance includes"
+                                    aria-describedby="render-distance-tooltip">i</button>
+                                <span class="settings-tooltip" id="render-distance-tooltip" role="tooltip">
+                                    Visibility radius measured in 200&times;200-unit world chunks. Applies to pillars,
+                                    lava, bushes, distant vegetation, enemies, and decorative lava. Does not affect
+                                    collisions, player models, projectiles, particles, the floor, or fog.
+                                </span>
+                            </span>
+                        </div>
                         <input type="range" id="setting-render-distance" min="1" max="16" step="1" value="4">
                         <span class="settings-value" id="setting-render-distance-value">4</span>
                     </div>
