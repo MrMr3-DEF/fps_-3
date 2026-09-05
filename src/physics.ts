@@ -94,7 +94,19 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     return { colX, colZ, groundY };
 }
 
+/** Substeps bound travel to half a unit so grapple frames cannot skip pillars. */
 export function updatePlayerPhysics(delta: number): void {
+    if (!Number.isFinite(delta) || delta <= 0) return;
+    let remaining = Math.min(delta, 0.05);
+    while (remaining > 1e-8) {
+        const maxSpeed = state.velocity.length() + WALK_SPEED + BASE_GRAVITY * remaining;
+        const step = Math.min(remaining, 1 / 60, 0.5 / Math.max(1, maxSpeed));
+        stepPlayerPhysics(step);
+        remaining -= step;
+    }
+}
+
+function stepPlayerPhysics(delta: number): void {
     if (state.controls) {
         const isPaused = !state.controls.isLocked && state.isPlaying;
         

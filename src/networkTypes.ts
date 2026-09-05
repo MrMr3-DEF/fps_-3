@@ -1,3 +1,4 @@
+import { isUsername, isPeerId } from './roomIdentity.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
 export type WeaponName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
 
@@ -18,6 +19,7 @@ export interface HoverKeysPacket {
 
 export interface UpdatePacket {
     type: 'update';
+    lifeId: number;
     senderPeerId?: string;
     username: string;
     pos: Vec3Packet;
@@ -34,18 +36,21 @@ export interface UpdatePacket {
 
 export interface FirePacket {
     type: 'fire';
+    shotId: number;
     senderPeerId?: string;
     weapon: WeaponName;
     barrelPos: Vec3Packet;
     dir: Vec3Packet;
     hitPoint?: Vec3Packet;
     /** Makes multi-pellet visual replication identical on every remote peer. */
-    spreadSeed?: number;
+    spreadSeed: number;
     pelletCount?: number;
 }
 
 export interface HitTargetPacket {
     type: 'hit_target';
+    shotId: number;
+    pelletIndex: number;
     senderPeerId?: string;
     targetIndex: number;
     damage: number;
@@ -64,6 +69,8 @@ export interface KillTargetPacket {
 
 export interface PlayerHitPacket {
     type: 'player_hit';
+    shotId: number;
+    pelletIndex: number;
     senderPeerId?: string;
     targetPeerId: string;
     damage: number;
@@ -72,6 +79,9 @@ export interface PlayerHitPacket {
 
 export interface PlayerDiedPacket {
     type: 'player_died';
+    lifeId: number;
+    cause: 'player' | 'lava';
+    killerPeerId: string | null;
     senderPeerId?: string;
     victimName: string;
     killerName: string;
@@ -107,7 +117,10 @@ export interface WorldSnapshotPacket {
     targets: TargetState[];
 }
 
+export interface PeerLeftPacket { type: 'peer_left'; peerId: string; senderPeerId?: string; }
+
 export type NetworkPacket =
+    | PeerLeftPacket
     | UpdatePacket
     | FirePacket
     | HitTargetPacket
@@ -131,14 +144,6 @@ function isFiniteNumber(value: unknown, min = -Infinity, max = Infinity): value 
 
 function isInteger(value: unknown, min = -Infinity, max = Infinity): value is number {
     return Number.isInteger(value) && isFiniteNumber(value, min, max);
-}
-
-function isPeerId(value: unknown): value is string {
-    return typeof value === 'string' && value.length > 0 && value.length <= 128;
-}
-
-function isUsername(value: unknown): value is string {
-    return typeof value === 'string' && /^[A-Za-z]{1,10}$/.test(value);
 }
 
 function isWeaponName(value: unknown): value is WeaponName {
@@ -186,7 +191,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
 
     switch (value.type) {
         case 'update':
-            if (!isUsername(value.username) || !isVec3(value.pos) ||
+            if (!isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isUsername(value.username) || !isVec3(value.pos) ||
                 !isFiniteNumber(value.yaw, -Math.PI * 4, Math.PI * 4) ||
                 !isFiniteNumber(value.pitch, -Math.PI, Math.PI) ||
                 !isWeaponName(value.activeWeapon) || typeof value.isMouseDown !== 'boolean' ||
@@ -197,16 +202,16 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
             return value as unknown as UpdatePacket;
 
         case 'fire': {
-            if (!isWeaponName(value.weapon) || !isVec3(value.barrelPos) || !isVec3(value.dir) ||
+            if (!isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) || !isWeaponName(value.weapon) || !isVec3(value.barrelPos) || !isVec3(value.dir) ||
                 !(value.hitPoint === undefined || isVec3(value.hitPoint)) ||
-                !(value.spreadSeed === undefined || isInteger(value.spreadSeed, 0, 0xffffffff)) ||
+                !isInteger(value.spreadSeed, 0, 0xffffffff) ||
                 !(value.pelletCount === undefined || isInteger(value.pelletCount, 1, 16))) return null;
             const lengthSq = value.dir.x * value.dir.x + value.dir.y * value.dir.y + value.dir.z * value.dir.z;
             return lengthSq >= 0.25 && lengthSq <= 2.25 ? value as unknown as FirePacket : null;
         }
 
         case 'hit_target':
-            return isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
+            return isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, 4) && isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
                 isFiniteNumber(value.damage, 0.01, 100) ? value as unknown as HitTargetPacket : null;
 
         case 'kill_target':
@@ -217,14 +222,18 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 ? value as unknown as KillTargetPacket : null;
 
         case 'player_hit':
-            return isPeerId(value.targetPeerId) && isFiniteNumber(value.damage, 0.01, 100) &&
+            return isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, 4) && isPeerId(value.targetPeerId) && isFiniteNumber(value.damage, 0.01, 100) &&
                 isUsername(value.attackerName) ? value as unknown as PlayerHitPacket : null;
 
         case 'player_died':
-            return isUsername(value.victimName) &&
+            return isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) &&
+                ((value.cause === 'lava' && value.killerPeerId === null) || (value.cause === 'player' && isPeerId(value.killerPeerId))) && isUsername(value.victimName) &&
                 (value.killerName === 'Lava' || isUsername(value.killerName)) &&
                 (value.victimPeerId === undefined || isPeerId(value.victimPeerId))
                 ? value as unknown as PlayerDiedPacket : null;
+
+        case 'peer_left':
+            return isPeerId(value.peerId) ? value as unknown as PeerLeftPacket : null;
 
         case 'jump':
             return value as unknown as JumpPacket;

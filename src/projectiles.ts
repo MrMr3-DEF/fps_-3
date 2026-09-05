@@ -10,7 +10,7 @@ import {
     WEAPON_STATS
 } from './config.js';
 import { processTargetHit } from './damage.js';
-import { flashPeerMesh } from './multiplayer.js';
+import { flashPeerMesh, broadcastToAll } from './weaponNetworkPort.js';
 import { spawnParticles } from './particles.js';
 import { queryObstaclesAlongSegment, queryTargetsNear } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
@@ -26,39 +26,11 @@ const _impactPoint = new THREE.Vector3();
 const _aabbMin = new THREE.Vector3();
 const _aabbMax = new THREE.Vector3();
 
-function broadcastHitTarget(targetIndex: number, damage: number): void {
-    const packet: HitTargetPacket = {
-        type: 'hit_target',
-        targetIndex,
-        damage
-    };
-    state.connections.forEach((conn) => {
-        if (conn.open) {
-            try {
-                conn.send(packet);
-            } catch (err) {
-                console.error('Error broadcasting hit_target:', err);
-            }
-        }
-    });
+function broadcastHitTarget(targetIndex: number, damage: number, shotId: number, pelletIndex: number): void {
+    broadcastToAll({ type: 'hit_target', targetIndex, damage, shotId, pelletIndex } satisfies HitTargetPacket);
 }
-
-function broadcastPlayerHit(peerId: string, damage: number, attackerName: string): void {
-    const packet: PlayerHitPacket = {
-        type: 'player_hit',
-        targetPeerId: peerId,
-        damage,
-        attackerName
-    };
-    state.connections.forEach((conn) => {
-        if (conn.open) {
-            try {
-                conn.send(packet);
-            } catch (err) {
-                console.error('Error broadcasting player_hit:', err);
-            }
-        }
-    });
+function broadcastPlayerHit(peerId: string, damage: number, attackerName: string, shotId: number, pelletIndex: number): void {
+    broadcastToAll({ type: 'player_hit', targetPeerId: peerId, damage, attackerName, shotId, pelletIndex } satisfies PlayerHitPacket);
 }
 
 function retireProjectile(index: number, projectile: THREE.Object3D): void {
@@ -143,7 +115,6 @@ export function updateProjectiles(delta: number, attackerName: string): void {
             const targetsLen = targetCandidates.length;
             for (let j = 0; j < targetsLen; j++) {
                 const target = targetCandidates[j];
-                if (!target.visible) continue;
                 const targetInfo = targetData(target);
                 const hitRange = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0) + PROJECTILE_RADIUS;
                 const hitT = segmentSphereHitT(_segmentStart, _segmentEnd, target.position, hitRange);
@@ -185,7 +156,7 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                 const targetInfo = targetData(hitTarget);
                 if (state.isMultiplayer) {
                     if (!state.isHost) {
-                        broadcastHitTarget(targetInfo.index, damage);
+                        broadcastHitTarget(targetInfo.index, damage, data.shotId!, data.pelletIndex!);
                     } else {
                         processTargetHit(targetInfo.index, damage);
                     }
@@ -199,7 +170,7 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                 if (peerData) {
                     spawnParticles(_impactPoint, 0x8c7ae6, 8, 12, 0.15, 20.0);
                     flashPeerMesh(peerData, 0xff3333, 150);
-                    broadcastPlayerHit(hitPeerId, damage, attackerName);
+                    broadcastPlayerHit(hitPeerId, damage, attackerName, data.shotId!, data.pelletIndex!);
                     projectileHit = true;
                 }
             } else if (hitObstacle) {

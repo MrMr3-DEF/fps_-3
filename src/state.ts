@@ -11,6 +11,7 @@ export interface PeerLike {
 }
 
 export interface DataConnectionLike {
+    metadata?: unknown;
     open: boolean;
     peer: string;
     send(data: unknown): void;
@@ -45,6 +46,7 @@ export interface GameState {
     prevTime: number;
     velocity: THREE.Vector3;
 
+    lifeId: number;
     score: number;
     playerHp: number;
     playerMaxHp: number;
@@ -126,6 +128,7 @@ export const state: GameState = {
     velocity: new THREE.Vector3(),
 
     // Local player stats and lifecycle.
+    lifeId: 0,
     score: 0,
     playerHp: PLAYER_MAX_HP,
     playerMaxHp: PLAYER_MAX_HP,
@@ -200,6 +203,9 @@ export const state: GameState = {
 };
 
 export function resetPlayerState() {
+    state.lifeId++;
+    state.lastDamageTime = 0;
+    state.regenTimer = 0;
     state.playerHp = state.playerMaxHp;
     state.canJump = false;
     state.velocity.set(0, 0, 0);

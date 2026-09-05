@@ -25,6 +25,8 @@ export interface ProjectileUserData {
     age: number;
     visualOnly: boolean;
     damage?: number;
+    shotId?: number;
+    pelletIndex?: number;
 }
 
 export function targetData(target: THREE.Group): TargetUserData {

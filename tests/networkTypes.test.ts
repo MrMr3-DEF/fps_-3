@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parseNetworkPacket } from '../src/networkTypes.ts';
 
 const validUpdate = {
-    type: 'update',
+    type: 'update', lifeId: 0,
     username: 'Pilot',
     pos: { x: 0, y: 2, z: 0 },
     yaw: 0,

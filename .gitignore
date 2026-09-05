@@ -20,3 +20,11 @@ debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Local verification artifacts
+coverage/
+screenshots/
+analysis/
+*.tsbuildinfo
+.dev.vars
+.dev.vars.*

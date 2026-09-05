@@ -1,5 +1,5 @@
 type TargetHitHandler = (targetIndex: number, damage: number) => void;
-type PlayerDamageHandler = (damage: number, attackerName: string) => void;
+type PlayerDamageHandler = (damage: number, attackerName: string, attackerPeerId?: string) => void;
 
 let targetHitHandler: TargetHitHandler | null = null;
 let playerDamageHandler: PlayerDamageHandler | null = null;
@@ -14,9 +14,9 @@ export function processTargetHit(targetIndex: number, damage: number): void {
     targetHitHandler(targetIndex, damage);
 }
 
-export function takePlayerDamage(damage: number, attackerName: string): void {
+export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {
     if (!playerDamageHandler) throw new Error('Damage handlers have not been initialized.');
-    playerDamageHandler(damage, attackerName);
+    playerDamageHandler(damage, attackerName, attackerPeerId);
 }
 
 export function setDamageHandlers(

@@ -1,3 +1,4 @@
+import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 import { state, resetMatchStats, resetPlayerState } from './state.js';
@@ -320,6 +321,7 @@ function setupMenuListeners(): void {
     if (UI.btnPlaySp) {
         UI.btnPlaySp.addEventListener('click', (e) => {
             e.stopPropagation();
+            prepareFreshArena();
             state.isMultiplayer = false;
             state.isHost = false;
             state.pendingPlay = true;
@@ -763,23 +765,16 @@ function performPlayerReset(resetMatch = false): void {
     resetHook();
 }
 
-function broadcastPlayerDeath(victimName: string, killerName: string): void {
+function broadcastPlayerDeath(victimName: string, killerName: string, killerPeerId: string | null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     const packet: PlayerDiedPacket = {
         type: 'player_died',
+        lifeId: state.lifeId, cause: killerPeerId ? 'player' : 'lava', killerPeerId,
         victimName: victimName,
         killerName: killerName,
         victimPeerId: state.peer?.id
     };
-    state.connections.forEach((conn) => {
-        if (conn.open) {
-            try {
-                conn.send(packet);
-            } catch (err) {
-                console.error('Error broadcasting player_died:', err);
-            }
-        }
-    });
+    broadcastToAll(packet);
 }
 
 function formatPercent(value: number): string {
@@ -1285,7 +1280,7 @@ export function animate(): void {
     }
 }
 
-export function takePlayerDamage(damage: number, attackerName: string): void {
+export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {
     if (!state.isPlaying || state.playerHp <= 0) return;
 
     state.playerHp -= damage;
@@ -1307,7 +1302,7 @@ export function takePlayerDamage(damage: number, attackerName: string): void {
 
         const myName = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
         const victimName = myName || 'Guest';
-        broadcastPlayerDeath(victimName, attackerName);
+        broadcastPlayerDeath(victimName, attackerName, attackerPeerId ?? null);
     }
 }
 

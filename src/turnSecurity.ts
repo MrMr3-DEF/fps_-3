@@ -1,3 +1,7 @@
+async function timedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+    return fetch(input, { ...init, signal: AbortSignal.timeout(12_000) });
+}
+import { isCapability } from './roomIdentity.js';
 export interface SecurityConfig {
     multiplayerEnabled: boolean;
     turnstileSiteKey: string | null;
@@ -7,11 +11,15 @@ export interface SecurityConfig {
 export interface RegisteredHostRoom {
     closeToken: string;
     turnSessionToken: string;
+    admissionToken: string;
+    admissionProof: string;
     expiresAt: number;
 }
 
 export interface RegisteredTurnSession {
     turnSessionToken: string;
+    admissionToken: string;
+    admissionProof: string;
     expiresAt: number;
 }
 
@@ -65,7 +73,7 @@ function validateSecurityConfig(config: SecurityConfig): SecurityConfig {
 
 export function getSecurityConfig(): Promise<SecurityConfig> {
     if (!securityConfigPromise) {
-        const request = fetch('/api/security-config', { cache: 'no-store' })
+        const request = timedFetch('/api/security-config', { cache: 'no-store' })
             .then(readJson<SecurityConfig>)
             .then(validateSecurityConfig);
         securityConfigPromise = request;
@@ -86,10 +94,11 @@ function loadTurnstile(): Promise<TurnstileApi> {
         script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
         script.async = true;
         script.defer = true;
-        script.onload = () => window.turnstile
+        const timeout = setTimeout(() => { script?.remove(); reject(new Error('Human verification timed out. Please retry.')); }, 12_000);
+        script.onload = () => { clearTimeout(timeout); return window.turnstile
             ? resolve(window.turnstile)
-            : reject(new Error('Human-verification service did not initialize.'));
-        script.onerror = () => reject(new Error('Unable to load human verification. Check your connection and retry.'));
+            : reject(new Error('Human-verification service did not initialize.')); };
+        script.onerror = () => { clearTimeout(timeout); reject(new Error('Unable to load human verification. Check your connection and retry.')); };
         document.head.append(script);
     });
     turnstileScriptPromise = request;
@@ -109,7 +118,8 @@ export class RoomAccessChallenge {
     private container: HTMLElement | null = null;
     private pendingReject: ((reason: Error) => void) | null = null;
 
-    constructor(private readonly action: TurnstileAction) {}
+    private readonly action: TurnstileAction;
+    constructor(action: TurnstileAction) { this.action = action; }
 
     async requestToken(container: HTMLElement): Promise<string> {
         this.cancel();
@@ -175,28 +185,28 @@ export class RoomAccessChallenge {
     }
 }
 
-export async function registerTurnRoom(room: string, turnstileToken: string): Promise<RegisteredHostRoom> {
-    const response = await fetch('/api/rooms', {
+export async function registerTurnRoom(room: string, turnstileToken: string, username: string, peerId: string): Promise<RegisteredHostRoom> {
+    const response = await timedFetch('/api/rooms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room, turnstileToken }),
+        body: JSON.stringify({ room, turnstileToken, username, peerId }),
         cache: 'no-store',
     });
-    return readJson<RegisteredHostRoom>(response);
+    return validateRegistration(await readJson<RegisteredHostRoom>(response));
 }
 
-export async function registerTurnSession(room: string, turnstileToken: string): Promise<RegisteredTurnSession> {
-    const response = await fetch('/api/room-sessions', {
+export async function registerTurnSession(room: string, turnstileToken: string, username: string, peerId: string): Promise<RegisteredTurnSession> {
+    const response = await timedFetch('/api/room-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room, turnstileToken }),
+        body: JSON.stringify({ room, turnstileToken, username, peerId }),
         cache: 'no-store',
     });
-    return readJson<RegisteredTurnSession>(response);
+    return validateRegistration(await readJson<RegisteredTurnSession>(response));
 }
 
 export async function closeTurnRoom(room: string, closeToken: string): Promise<void> {
-    const response = await fetch(`/api/rooms/${encodeURIComponent(room)}`, {
+    const response = await timedFetch(`/api/rooms/${encodeURIComponent(room)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${closeToken}` },
         keepalive: true,
@@ -207,17 +217,18 @@ export async function closeTurnRoom(room: string, closeToken: string): Promise<v
     }
 }
 
-export async function heartbeatTurnRoom(room: string, closeToken: string): Promise<void> {
-    const response = await fetch(`/api/rooms/${encodeURIComponent(room)}`, {
+export async function heartbeatTurnRoom(room: string, closeToken: string, peerIds: string[]): Promise<void> {
+    const response = await timedFetch(`/api/rooms/${encodeURIComponent(room)}`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${closeToken}` },
+        headers: { Authorization: `Bearer ${closeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peerIds }),
         cache: 'no-store',
     });
     await readJson<unknown>(response);
 }
 
 export async function releaseTurnSession(room: string, turnSessionToken: string): Promise<void> {
-    const response = await fetch(`/api/room-sessions/${encodeURIComponent(room)}`, {
+    const response = await timedFetch(`/api/room-sessions/${encodeURIComponent(room)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${turnSessionToken}` },
         keepalive: true,
@@ -243,10 +254,29 @@ function isIceServer(value: unknown): value is RTCIceServer {
 
 export async function fetchTurnIceServers(room: string, turnSessionToken: string): Promise<RTCIceServer[]> {
     const params = new URLSearchParams({ room, session: turnSessionToken });
-    const response = await fetch(`/api/turn?${params}`, { cache: 'no-store' });
+    const response = await timedFetch(`/api/turn?${params}`, { cache: 'no-store' });
     const payload = await readJson<{ iceServers?: unknown }>(response);
     if (!Array.isArray(payload.iceServers) || payload.iceServers.length === 0 || !payload.iceServers.every(isIceServer)) {
         throw new Error('Secure multiplayer did not return valid relay credentials.');
     }
     return payload.iceServers;
+}
+
+function validateRegistration<T extends RegisteredTurnSession>(value: T): T {
+    if (!value || !isCapability(value.turnSessionToken) || !isCapability(value.admissionToken) || !isCapability(value.admissionProof) || !Number.isFinite(value.expiresAt) ||
+        ('closeToken' in value && !isCapability(value.closeToken))) throw new Error('Invalid room registration.');
+    return value;
+}
+export async function admitRoomPeer(room: string, closeToken: string, peerId: string, admissionToken: string): Promise<{ username: string; admissionProof: string }> {
+    return readJson(await timedFetch(`/api/room-admissions/${encodeURIComponent(room)}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${closeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peerId, admissionToken }),
+    }));
+}
+export async function departRoomPeer(room: string, closeToken: string, peerId: string): Promise<void> {
+    const response = await timedFetch(`/api/room-admissions/${encodeURIComponent(room)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${closeToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ peerId }), keepalive: true,
+    });
+    if (!response.ok && response.status !== 404) await readJson(response);
 }

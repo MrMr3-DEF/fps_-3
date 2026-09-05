@@ -1,3 +1,4 @@
+import { spreadDirection } from './shotAuthority.js';
 import * as THREE from 'three';
 import { state, type GameState } from './state.js';
 import {
@@ -67,7 +68,7 @@ export function getBeanDamagePulseMaterials(bean: THREE.Group): readonly THREE.M
 const _camEuler = new THREE.Euler();
 const _barrelPos = new THREE.Vector3();
 const _camDirection = new THREE.Vector3();
-const _spreadVec = new THREE.Vector3();
+
 const _hitPoint = new THREE.Vector3();
 const _rayEnd = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
@@ -391,6 +392,7 @@ export function createAkimboGuns(): void {
 
 // Normal weapons spawn simulated projectiles. The sniper is hitscan so it can
 // resolve occlusion immediately and draw a beam to the exact hit point.
+let nextShotId = 0;
 export function fireProjectile(): void {
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
 
@@ -401,9 +403,11 @@ export function fireProjectile(): void {
     const stats = WEAPON_STATS[state.activeWeaponName];
     if (!stats) return;
 
+    const shotId = ++nextShotId;
+    const spreadSeed = crypto.getRandomValues(new Uint32Array(1))[0];
     state.rightGunContainer.position.z += stats.recoil;
 
-    const fireSinglePellet = (spreadAmt: number) => {
+    const fireSinglePellet = (spreadAmt: number, pelletIndex = 0) => {
         if (state.projectiles.length >= MAX_PROJECTILES) return;
 
         let projectile: THREE.Mesh;
@@ -426,14 +430,7 @@ export function fireProjectile(): void {
         const camDirection = _camDirection;
         state.camera!.getWorldDirection(camDirection);
 
-        if (spreadAmt > 0) {
-            _spreadVec.set(
-                (Math.random() - 0.5) * spreadAmt,
-                (Math.random() - 0.5) * spreadAmt,
-                (Math.random() - 0.5) * spreadAmt
-            );
-            camDirection.add(_spreadVec).normalize();
-        }
+        spreadDirection(camDirection, spreadSeed, pelletIndex, spreadAmt, camDirection);
 
         projectile.position.copy(barrelWorldPosition).addScaledVector(camDirection, 0.1);
         const data = projectileData(projectile);
@@ -443,6 +440,8 @@ export function fireProjectile(): void {
         data.age = 0;
         data.visualOnly = false;
         data.damage = stats.damage;
+        data.shotId = shotId;
+        data.pelletIndex = pelletIndex;
 
         state.projectiles.push(projectile);
     };
@@ -462,14 +461,14 @@ export function fireProjectile(): void {
         const camDirection = _camDirection;
         state.camera.getWorldDirection(camDirection);
 
-        _raycaster.set(state.camera.position, camDirection);
+        _raycaster.set(barrelWorldPosition, camDirection);
         _raycaster.far = 500;
         (_raycaster as any).camera = state.camera;
 
-        _rayEnd.copy(state.camera.position).addScaledVector(camDirection, _raycaster.far);
+        _rayEnd.copy(barrelWorldPosition).addScaledVector(camDirection, _raycaster.far);
         const obstacleCandidates = queryObstaclesAlongSegment(
-            state.camera.position.x,
-            state.camera.position.z,
+            barrelWorldPosition.x,
+            barrelWorldPosition.z,
             _rayEnd.x,
             _rayEnd.z,
             _obstacleCandidates
@@ -485,8 +484,8 @@ export function fireProjectile(): void {
         let hitTargetGroup: THREE.Object3D | null = null;
 
         const targetCandidates = queryTargetsAlongSegment(
-            state.camera.position.x,
-            state.camera.position.z,
+            barrelWorldPosition.x,
+            barrelWorldPosition.z,
             _rayEnd.x,
             _rayEnd.z,
             _targetCandidates
@@ -494,7 +493,6 @@ export function fireProjectile(): void {
         const targetsLen = targetCandidates.length;
         for (let j = 0; j < targetsLen; j++) {
             const targetGroup = targetCandidates[j];
-            if (!targetGroup.visible) continue;
             const data = targetData(targetGroup);
             const bodyMesh = data.bodyMesh;
             if (bodyMesh) {
@@ -532,23 +530,23 @@ export function fireProjectile(): void {
         }
         _raycaster.far = Infinity;
 
-        const hitPoint = _hitPoint.copy(state.camera.position).addScaledVector(camDirection, 300);
+        const hitPoint = _hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, 300);
         let sniperFireBroadcast = false;
 
         if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
-            hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestObstacleDist);
+            hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestObstacleDist);
             spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
         } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist && hitTargetGroup) {
-            hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestTargetDist);
+            hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestTargetDist);
             
             if (state.isMultiplayer) {
                 // Hitscan damage is resolved in this same call, so the host
                 // must see the fire intent before the target-hit packet.
-                broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
+                broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed);
                 sniperFireBroadcast = true;
                 if (!state.isHost) {
                     const packet: HitTargetPacket = {
-                        type: 'hit_target',
+                        type: 'hit_target', shotId, pelletIndex: 0,
                         targetIndex: hitTargetIndex,
                         damage: stats.damage
                     };
@@ -562,20 +560,20 @@ export function fireProjectile(): void {
 
             spawnParticles(hitPoint, targetData(hitTargetGroup as THREE.Group).color || 0xffaa00, 15, 12, 0.15, 12.0);
         } else if (pvpPeerId !== null) {
-            hitPoint.copy(state.camera.position).addScaledVector(camDirection, closestPeerDist);
+            hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestPeerDist);
 
             const peerData = state.peers[pvpPeerId];
             if (peerData) {
                 flashPeerMesh(peerData, 0xff3333, 150);
             }
 
-            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
+            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed);
             sniperFireBroadcast = true;
 
             if (!inputUsernameEl) inputUsernameEl = document.getElementById('input-username') as HTMLInputElement | null;
             const attackerName = inputUsernameEl ? inputUsernameEl.value.trim() || 'Guest' : 'Guest';
             const packet: PlayerHitPacket = {
-                type: 'player_hit',
+                type: 'player_hit', shotId, pelletIndex: 0,
                 targetPeerId: pvpPeerId,
                 damage: stats.damage,
                 attackerName: attackerName
@@ -588,14 +586,14 @@ export function fireProjectile(): void {
         createLaserBeam(barrelWorldPosition, hitPoint, stats.bulletColor);
 
         if (state.isMultiplayer && !sniperFireBroadcast) {
-            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint);
+            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed);
         }
 
         return;
     } else if (state.activeWeaponName === 'SHOTGUN') {
         const pellets = stats.pellets || 5;
         for (let p = 0; p < pellets; p++) {
-            fireSinglePellet(stats.spread);
+            fireSinglePellet(stats.spread, p);
         }
     } else {
         fireSinglePellet(stats.spread);
@@ -606,7 +604,7 @@ export function fireProjectile(): void {
         state.rightGun.getWorldPosition(barrelWorldPosition);
         const camDirection = _camDirection;
         state.camera.getWorldDirection(camDirection);
-        broadcastLocalFire(barrelWorldPosition, camDirection);
+        broadcastLocalFire(barrelWorldPosition, camDirection, null, shotId, spreadSeed);
     }
 }
 
