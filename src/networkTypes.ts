@@ -19,6 +19,7 @@ export interface HoverKeysPacket {
 
 export interface UpdatePacket {
     type: 'update';
+    bodyColor?: number;
     lifeId: number;
     senderPeerId?: string;
     username: string;
@@ -191,7 +192,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
 
     switch (value.type) {
         case 'update':
-            if (!isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isUsername(value.username) || !isVec3(value.pos) ||
+            if (!(value.bodyColor === undefined || isInteger(value.bodyColor, 0, 0xffffff)) || !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isUsername(value.username) || !isVec3(value.pos) ||
                 !isFiniteNumber(value.yaw, -Math.PI * 4, Math.PI * 4) ||
                 !isFiniteNumber(value.pitch, -Math.PI, Math.PI) ||
                 !isWeaponName(value.activeWeapon) || typeof value.isMouseDown !== 'boolean' ||

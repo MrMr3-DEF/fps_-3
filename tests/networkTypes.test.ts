@@ -59,3 +59,10 @@ test('network parser requires a normalized fire direction', () => {
         dir: { x: 0, y: 0, z: 0 }
     }), null);
 });
+
+test('avatar colors accept only optional 24-bit integers', () => {
+    assert.equal(parseNetworkPacket({ ...validUpdate, bodyColor: 0xdf5b64 })?.type, 'update');
+    for (const bodyColor of [-1, 0x1000000, 1.5, '#df5b64', null]) {
+        assert.equal(parseNetworkPacket({ ...validUpdate, bodyColor }), null);
+    }
+});

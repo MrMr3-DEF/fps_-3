@@ -1,3 +1,4 @@
+import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setupMobileControls } from './mobileControls.js';
 import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
 import { broadcastToAll } from './multiplayer.js';
@@ -1154,6 +1155,7 @@ export function init(): void {
 
     setupInputListeners();
     setupGameSystems();
+    setupMainMenu();
     window.addEventListener('beforeunload', disposeGameRuntime, { once: true });
 
     animate();
@@ -1163,6 +1165,7 @@ export function init(): void {
 // collisions/damage, then remote sync and rendering.
 export function animate(): void {
     requestAnimationFrame(animate);
+    updateMenuPreview();
 
     const time = performance.now();
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);

@@ -1,3 +1,4 @@
+import { characterColor } from './appearance.js';
 import { isInputActive } from './inputSession.js';
 import { spreadDirection } from './shotAuthority.js';
 import * as THREE from 'three';
@@ -896,9 +897,14 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
     return playerGroup;
 }
 
+export function setBeanColor(bean: THREE.Group, color: number): void {
+    const material = getBeanDamagePulseMaterials(bean)[0];
+    material?.color.setHex(color);
+}
+
 export function createPlayerMesh(): void {
     if (!state.scene) return;
-    state.playerMesh = buildBeanModel(0x3b5998, 0x00ffcc);
+    state.playerMesh = buildBeanModel(Number.parseInt(characterColor.slice(1), 16), 0x00ffcc);
     state.playerMesh.scale.set(1.5, 1.5, 1.5);
     state.playerMesh.visible = false;
     state.scene.add(state.playerMesh);

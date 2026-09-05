@@ -1,0 +1,61 @@
+:root { --control-radius: 4px; }
+body button, #mobile-controls button, .touch-utility button, #mobile-controls [data-fire] { border-radius: var(--control-radius) !important; }
+#blocker { position: fixed; inset: 0; display: flex; align-items: stretch; justify-content: stretch; background: #ecf1f5; text-align: left; cursor: default; overflow: hidden; }
+#instructions, .touch-device #instructions { flex: 1 1 56%; min-width: 0; width: auto; max-width: none; max-height: none; border: 0; border-radius: 0; box-shadow: none; backdrop-filter: none; background: transparent; padding: clamp(24px, 5vw, 80px); padding-bottom: 50px; overflow-y: auto; box-sizing: border-box; }
+#title { color: #182d40 !important; font-size: clamp(30px, 4.8vw, 68px) !important; text-align: left !important; letter-spacing: -2px !important; margin-bottom: 32px !important; }
+.menu-eyebrow { color: #4088a4; font: 700 11px system-ui; letter-spacing: 3px; margin: 0 0 12px; }
+#panel-main { align-items: stretch !important; max-width: 460px; }
+.menu-btn { border: 1px solid transparent; box-shadow: none; background: #087da8; color: white; min-height: 46px; margin: 0 0 12px; padding: 13px 22px; font-size: 16px; text-align: left; transition: background 150ms; }
+.menu-btn:hover { background: #056a90; transform: none; }
+.menu-btn.secondary { color: #233c50; background: #dce5ec; border-color: #cedbe4; }
+.menu-btn.secondary:hover { background: #cbdce7; }
+body button:focus-visible, #character-color:focus-visible { outline: 3px solid #078ab7; outline-offset: 3px; }
+#desktop-control-help, #touch-control-help { text-align: left !important; color: #687d8c !important; font-size: 12px !important; margin-top: 20px !important; }
+.menu-panel { align-items: stretch; max-width: 580px; font-size: 16px; }
+.menu-panel h2 { margin: 0; color: #243e51; font-size: 27px; }
+.menu-caption { color: #687d8c; margin: 8px 0 22px; font-size: 14px; }
+.settings-container { margin-top: 10px; padding-top: 10px; }
+.menu-input { border-radius: var(--control-radius); max-width: 100%; box-sizing: border-box; }
+#character-panel { flex: 0 0 42%; min-width: 0; display: flex; flex-direction: column; padding: clamp(22px, 4vw, 60px); padding-bottom: 52px; box-sizing: border-box; background: radial-gradient(ellipse at 50% 48%, #fff 0%, #d8e6ef 57%, #cbdce8 100%); border-left: 1px solid #cbdce6; }
+.character-heading h2 { font-size: clamp(18px, 2.2vw, 30px); font-weight: 500; letter-spacing: -0.5px; color: #2c495d; margin: 10px 0 0; }
+#character-stage { flex: 1; min-height: 100px; min-width: 0; overflow: hidden; }
+#character-stage canvas { display: block; width: 100%; height: 100%; }
+.character-customize { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: #36556b; font-size: 13px; }
+.character-customize > label:first-child { flex-basis: 100%; font-size: 15px; font-weight: 600; }
+.color-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.color-options button { width: 32px; height: 32px; min-width: 32px; padding: 0; margin: 0; border: 2px solid #ffffff80; cursor: pointer; }
+.color-options button[aria-pressed="true"] { outline: 2px solid #254c65; outline-offset: 2px; }
+.custom-color { display: flex; align-items: center; gap: 8px; }
+#character-color { width: 34px; height: 32px; padding: 0; background: none; border: 0; cursor: pointer; }
+#color-value { font: 11px monospace; color: #60798a; }
+#legal-links { left: clamp(24px, 5vw, 80px); right: auto; bottom: max(12px, env(safe-area-inset-bottom)); font-size: 11px; }
+.weapon-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+.weapon-tabs button { background: #dce5ec; border: 1px solid #c5d5e0; color: #34546b; padding: 10px 12px; cursor: pointer; font-size: 12px; }
+.weapon-tabs button[aria-pressed="true"] { background: #087da8; color: white; border-color: #087da8; }
+#weapon-specs { background: #ffffffa8; border: 1px solid #d1dfe8; padding: 20px; margin-bottom: 18px; border-radius: 4px; }
+#weapon-specs h3 { font-size: 25px; margin: 0 0 8px; color: #254256; }
+#weapon-specs p { font-size: 13px; color: #647d8e; line-height: 1.5; }
+#weapon-specs dl { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 22px 0; }
+#weapon-specs dt { font-size: 11px; color: #688294; }
+#weapon-specs dd { margin: 4px 0 0; font-size: 22px; font-weight: 600; color: #274b62; }
+@media (max-height: 550px) {
+    #instructions, .touch-device #instructions { padding: 18px 24px 40px; }
+    #title { font-size: 30px !important; margin-bottom: 16px !important; }
+    .menu-eyebrow { font-size: 9px; margin-bottom: 6px; }
+    .menu-btn { min-height: 40px; padding: 10px 16px; font-size: 14px; margin-bottom: 8px; }
+    #character-panel { padding: 18px 24px 28px; }
+    .character-heading h2 { font-size: 18px; }
+    .character-customize { gap: 8px; }
+    #desktop-control-help, #touch-control-help { margin-top: 8px !important; font-size: 10px !important; }
+    .settings-row { grid-template-columns: minmax(90px, 1fr) minmax(80px, 1fr) 40px; gap: 8px; }
+    #legal-links { left: 24px; }
+}
+@media (max-width: 700px) {
+    #character-panel { flex-basis: 38%; padding-left: 16px; padding-right: 16px; }
+    .color-options { gap: 6px; }
+    .color-options button { width: 28px; min-width: 28px; height: 28px; }
+    #color-value { display: none; }
+}
+
+#blocker .menu-btn { box-shadow: none; }
+#blocker .menu-btn:hover { transform: none; }

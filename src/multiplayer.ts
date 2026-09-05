@@ -1,3 +1,4 @@
+import { characterColor } from './appearance.js';
 import { endInput } from './inputSession.js';
 import { resetProjectiles } from './projectiles.js';
 import type { Peer } from 'peerjs';
@@ -29,7 +30,7 @@ import {
     WEAPON_STATS,
     MAX_PROJECTILES
 } from './config.js';
-import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
+import { setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
 import {
     parseNetworkPacket,
     type FirePacket,
@@ -1045,6 +1046,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             justJoined = true;
         }
 
+        if (msg.bodyColor !== undefined) setBeanColor(peerData.mesh, msg.bodyColor);
         _targetPos.set(msg.pos.x, msg.pos.y - PEER_Y_OFFSET, msg.pos.z);
         peerData.targetPosition.copy(_targetPos);
         peerData.targetYaw = msg.yaw;
@@ -1330,6 +1332,7 @@ export function sendLocalState(force = false): void {
 
     const packet: UpdatePacket = {
         type: 'update',
+        bodyColor: Number.parseInt(characterColor.slice(1), 16),
         lifeId: state.lifeId,
         username: username,
         pos: { x: snapshot.x, y: snapshot.y, z: snapshot.z },
