@@ -413,7 +413,6 @@ function setupMenuListeners(): void {
         UI.btnHostStart.addEventListener('click', (e) => {
             e.stopPropagation();
             state.pendingPlay = true;
-            if (UI.blocker) UI.blocker.style.display = 'none';
             if (state.controls) state.controls.lock();
         });
     }
@@ -456,7 +455,6 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             if (UI.btnJoinConnect && UI.btnJoinConnect.dataset.connected === 'true') {
                 state.pendingPlay = true;
-                if (UI.blocker) UI.blocker.style.display = 'none';
                 if (state.controls) state.controls.lock();
                 return;
             }

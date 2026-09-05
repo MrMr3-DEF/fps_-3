@@ -42,7 +42,7 @@ A duplicate is rejected with “That username is already in this lobby. Choose a
 
 Integration tests execute real Worker routes and the room state machine with isolated in-memory storage, simulated PeerJS connections, and simulated Cloudflare upstream responses. The gameplay collision regression uses a broad-phase fixture query. A simulated clock verifies session renewal, name retention and credential claims beyond the initial five-minute lease.
 
-Real Turnstile, TURN-dependent networking, ICE recovery after a network change, and deployed Durable Object behavior still require a staging/production smoke test. Unit and simulated integration tests do not establish those external-service results.
+The subsequent [deployed multiplayer smoke test](multiplayer-live-test.md) exercised real Turnstile, deployed room admission, duplicate names, late rejoining, bidirectional kills, respawns and explicit host departure in foreground Chrome. Forced TURN, ICE recovery after a network change and several remaining lifecycle checks still require testing; see the report for limits and the local pointer-lock menu correction discovered during testing.
 
 ## Rollout
 
