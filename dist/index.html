@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description"
         content="A fast-paced 3D browser FPS with multiplayer support, grappling hooks, and multiple weapon classes.">
     <meta name="theme-color" content="#0a0a12">
@@ -635,8 +635,9 @@
         }
     </style>
 
-  <script type="module" crossorigin src="/assets/index-BMUYs7Pm.js"></script>
+  <script type="module" crossorigin src="/assets/index-DY6SQmCi.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-DDl6D2w7.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-DZaAUzIV.css">
 </head>
 
 <body>
@@ -653,12 +654,13 @@
                 <button class="menu-btn secondary" id="btn-menu-mp">Online Multiplayer</button>
                 <button class="menu-btn secondary" id="btn-menu-settings">Settings</button>
 
-                <span style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
+                <span id="desktop-control-help" style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
                     WASD to Move | Shift in Air to Hover | Space to Jump<br />
                     R for Grappling Hook | Left-Click to Shoot<br />
                     E / 1, 2, 3, 4, 5 to Switch Weapons | P for Third Person<br />
                     Right-Click / Hold C to Aim (goggles)
                 </span>
+                <p id="touch-control-help">Left stick to move · Drag open space to look<br>Hold Fire, Aim or Hover · Tap Jump and Grapple</p>
 
             </div>
 

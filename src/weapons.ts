@@ -1,3 +1,4 @@
+import { isInputActive } from './inputSession.js';
 import { spreadDirection } from './shotAuthority.js';
 import * as THREE from 'three';
 import { state, type GameState } from './state.js';
@@ -624,14 +625,14 @@ export function updateWeapons(delta: number): void {
     }
 
     if (state.activeWeaponName === 'MINIGUN') {
-        if (state.controls && state.controls.isLocked && state.isMouseDown && state.switchState === 'IDLE') {
+        if (state.controls && isInputActive() && state.isMouseDown && state.switchState === 'IDLE') {
             state.minigunRamp = Math.min(MINIGUN_RAMP_TIME, state.minigunRamp + delta);
         } else {
             state.minigunRamp = Math.max(0.0, state.minigunRamp - delta * 2.0);
         }
         
         if (state.minigunMesh && state.minigunMesh.userData.barrels) {
-            const isLocked = state.controls ? state.controls.isLocked : false;
+            const isLocked = state.controls ? isInputActive() : false;
             const spinSpeed = (state.minigunRamp / MINIGUN_RAMP_TIME) * 40.0 + (state.isMouseDown && isLocked && state.switchState === 'IDLE' ? 5.0 : 0.0);
             state.minigunMesh.userData.barrels.rotation.z += spinSpeed * delta;
         }

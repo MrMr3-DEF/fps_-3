@@ -1,3 +1,4 @@
+import { isInputActive, touchMove } from './inputSession.js';
 import * as THREE from 'three';
 import { state } from './state.js';
 import { spawnRocketFlame, spawnManeuveringBeam } from './particles.js';
@@ -108,9 +109,9 @@ export function updatePlayerPhysics(delta: number): void {
 
 function stepPlayerPhysics(delta: number): void {
     if (state.controls) {
-        const isPaused = !state.controls.isLocked && state.isPlaying;
+        const isPaused = !isInputActive() && state.isPlaying;
         
-        if (state.controls.isLocked || isPaused) {
+        if (isInputActive() || isPaused) {
             const playerObj = state.controls.getObject();
             
             // Keep gravity/collisions alive while paused, but ignore movement input.
@@ -118,7 +119,9 @@ function stepPlayerPhysics(delta: number): void {
             const moveBackward = isPaused ? false : state.moveBackward;
             const moveLeft = isPaused ? false : state.moveLeft;
             const moveRight = isPaused ? false : state.moveRight;
-            const isMoving = moveForward || moveBackward || moveLeft || moveRight;
+            const analogX = isPaused ? 0 : touchMove.x;
+            const analogY = isPaused ? 0 : touchMove.y;
+            const isMoving = moveForward || moveBackward || moveLeft || moveRight || analogX !== 0 || analogY !== 0;
 
             // Convert camera-relative WASD into horizontal world-space directions.
             _camForward.set(0, 0, -1).applyQuaternion(state.camera!.quaternion);
@@ -218,6 +221,8 @@ function stepPlayerPhysics(delta: number): void {
             if (moveRight) _moveDir.add(_camRight);
             if (moveLeft) _moveDir.sub(_camRight);
             if (_moveDir.lengthSq() > 0) _moveDir.normalize();
+            _moveDir.addScaledVector(_camRight, analogX).addScaledVector(_camForward, -analogY);
+            if (_moveDir.lengthSq() > 1) _moveDir.normalize();
 
             const currentSpeed = WALK_SPEED;
 
@@ -234,16 +239,16 @@ function stepPlayerPhysics(delta: number): void {
                     state.velocity.z -= state.velocity.z * AIR_DRAG * delta;
 
                     if (state.isHovering) {
-                        if (moveForward || moveLeft || moveRight || moveBackward) {
+                        if (isMoving) {
                             state.velocity.x += _moveDir.x * AIR_STEER_FORCE * delta;
                             state.velocity.z += _moveDir.z * AIR_STEER_FORCE * delta;
                         }
                     } else {
-                        if (moveForward || moveLeft || moveRight) {
+                        if (moveForward || moveLeft || moveRight || analogY < 0 || analogX !== 0) {
                             state.velocity.x += _moveDir.x * AIR_STEER_FORCE * delta;
                             state.velocity.z += _moveDir.z * AIR_STEER_FORCE * delta;
                         }
-                        if (moveBackward) {
+                        if (moveBackward || analogY > 0) {
                             state.velocity.x -= state.velocity.x * AIR_BACK_BRAKE_COEFF * delta;
                             state.velocity.z -= state.velocity.z * AIR_BACK_BRAKE_COEFF * delta;
                         }

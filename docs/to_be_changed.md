@@ -9,4 +9,4 @@ The September audit fixes are implemented; see [audit resolution](audit-resoluti
 
 Real Turnstile, a host plus two client admissions, a rejoin after ten minutes, foreground pointer-lock combat in both directions, respawns and explicit host departure passed the [deployed smoke test](multiplayer-live-test.md).
 
-No additional feature requests are currently recorded.
+Mobile controls are implemented locally; validate on physical iOS and Android devices after deployment, including simultaneous movement/aim/fire, rotation, app switching, death/respawn and mobile-to-desktop multiplayer. See [mobile controls](mobile-controls.md).

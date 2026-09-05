@@ -1,3 +1,5 @@
+import { setupMobileControls } from './mobileControls.js';
+import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
@@ -325,7 +327,7 @@ function setupMenuListeners(): void {
             state.isMultiplayer = false;
             state.isHost = false;
             state.pendingPlay = true;
-            if (state.controls) state.controls.lock();
+            if (state.controls) beginInput();
         });
     }
 
@@ -413,7 +415,7 @@ function setupMenuListeners(): void {
         UI.btnHostStart.addEventListener('click', (e) => {
             e.stopPropagation();
             state.pendingPlay = true;
-            if (state.controls) state.controls.lock();
+            if (state.controls) beginInput();
         });
     }
 
@@ -455,7 +457,7 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             if (UI.btnJoinConnect && UI.btnJoinConnect.dataset.connected === 'true') {
                 state.pendingPlay = true;
-                if (state.controls) state.controls.lock();
+                if (state.controls) beginInput();
                 return;
             }
 
@@ -474,7 +476,7 @@ function setupMenuListeners(): void {
     if (UI.btnPauseResume) {
         UI.btnPauseResume.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (state.controls) state.controls.lock();
+            if (state.controls) beginInput();
         });
     }
 
@@ -502,7 +504,7 @@ function setupMenuListeners(): void {
             }
 
             if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
-            if (state.controls) state.controls.lock();
+            if (state.controls) beginInput();
         });
     }
 
@@ -558,7 +560,7 @@ function setupMenuListeners(): void {
 // Pointer lock means keyboard and mouse state must be tracked globally, then
 // consumed by the physics/weapons systems during the frame update.
 function setupInputListeners(): void {
-    const onKeyDown = (e: KeyboardEvent) => {
+    const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'>) => {
         // Movement state is already held between key events; repeated keydown
         // events must not toggle hook/view/weapon actions multiple times.
         if (e.repeat) return;
@@ -570,13 +572,13 @@ function setupInputListeners(): void {
             case 'KeyD': state.moveRight = true; break;
             case 'ShiftLeft':
             case 'ShiftRight':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     state.isShiftDown = true;
                 }
                 break;
             case 'Space':
                 if (!state.controls) break;
-                if (!state.controls.isLocked) break;
+                if (!isInputActive()) break;
                 if (state.hookState === 'PULLING') {
                     resetHook();
                     state.velocity.y = JUMP_FORCE * 0.8; 
@@ -598,68 +600,68 @@ function setupInputListeners(): void {
                 cancelInspect();
                 break;
             case 'KeyR':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     cancelInspect();
                     toggleGrapplingHook();
                 }
                 break;
             case 'KeyE':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     cycleWeapon(1);
                 }
                 break;
             case 'Digit1':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     state.desiredWeaponName = 'PISTOL';
                     cancelInspect();
                 }
                 break;
             case 'Digit2':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     state.desiredWeaponName = 'SHOTGUN';
                     cancelInspect();
                 }
                 break;
             case 'Digit3':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     state.desiredWeaponName = 'AR';
                     cancelInspect();
                 }
                 break;
             case 'Digit4':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     state.desiredWeaponName = 'SNIPER';
                     cancelInspect();
                 }
                 break;
             case 'Digit5':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     state.desiredWeaponName = 'MINIGUN';
                     cancelInspect();
                 }
                 break;
             case 'KeyX':
-                if (state.controls && state.controls.isLocked && state.switchState === 'IDLE') {
+                if (state.controls && isInputActive() && state.switchState === 'IDLE') {
                     state.inspectState = 'INSPECTING';
                     state.inspectTimer = 0.0;
                 }
                 break;
             case 'KeyC':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     state.keyCActive = true;
                     state.isScoped = state.rightClickActive || state.keyCActive;
                     cancelInspect();
                 }
                 break;
             case 'KeyP':
-                if (state.controls && state.controls.isLocked) {
+                if (state.controls && isInputActive()) {
                     setThirdPerson(!state.isThirdPerson);
                 }
                 break;
         }
     };
 
-    const onKeyUp = (e: KeyboardEvent) => {
+    const onKeyUp = (e: Pick<KeyboardEvent, 'code'>) => {
         switch (e.code) {
             case 'KeyW': state.moveForward = false; break;
             case 'KeyA': state.moveLeft = false; break;
@@ -676,6 +678,14 @@ function setupInputListeners(): void {
         }
     };
 
+    setupMobileControls({
+        keyDown: code => onKeyDown({ code, repeat: false }),
+        keyUp: code => onKeyUp({ code }),
+        fire: held => {
+            state.isMouseDown = held;
+            if (held && isInputActive() && state.fireCooldown <= 0 && state.switchState === 'IDLE') { cancelInspect(); fireProjectile(); }
+        },
+    });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
@@ -789,7 +799,7 @@ function setCheckboxLabel(el: HTMLElement | null, enabled: boolean): void {
 }
 
 function isGameInputLocked(): boolean {
-    return Boolean(state.controls?.isLocked);
+    return isInputActive();
 }
 
 function preventLockedMouseDefault(e: Event): void {
@@ -799,6 +809,7 @@ function preventLockedMouseDefault(e: Event): void {
 }
 
 function handleGameMouseButtons(e: PointerEvent): void {
+    if (e.pointerType === 'touch' || touchMode) return;
     preventLockedMouseDefault(e);
     if (!isGameInputLocked()) return;
 
@@ -838,7 +849,7 @@ function cycleWeapon(direction: number): void {
 }
 
 function updateLocalAccelerometer(delta: number): void {
-    const isVisible = Boolean(state.controls?.isLocked && !state.isScoped && state.playerHp > 0);
+    const isVisible = Boolean(isInputActive() && !state.isScoped && state.playerHp > 0);
 
     if (!isVisible || delta <= 0 || !state.camera) {
         setAccelerometerVisible(false);
@@ -980,7 +991,7 @@ function applyLiveSettings(): void {
         applyRendererSettings(state.renderer);
     }
 
-    setFpsVisible(userSettings.showFps && Boolean(state.controls?.isLocked) && !state.isScoped);
+    setFpsVisible(userSettings.showFps && isInputActive() && !state.isScoped);
 
     lastFov = -1;
 }
@@ -1058,9 +1069,9 @@ export function init(): void {
 
     setupMenuListeners();
 
-    // Lock/unlock events are the main UI state machine for playing, pausing and death menus.
+    // Desktop pointer lock and touch sessions share the play/pause/death UI lifecycle.
     if (state.controls) {
-        state.controls.addEventListener('lock', () => {
+        onInputStarted(() => {
             if (state.pendingPlay) {
                 state.isPlaying = true;
                 state.pendingPlay = false;
@@ -1087,7 +1098,7 @@ export function init(): void {
             }
         });
 
-        state.controls.addEventListener('unlock', () => {
+        onInputEnded(() => {
             if (UI.blocker) UI.blocker.style.display = 'flex';
             state.moveForward = false;
             state.moveBackward = false;
@@ -1162,7 +1173,7 @@ export function animate(): void {
     const maxCooldown = stats ? stats.fireRate : 0.1;
     updateReloadBar(Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown))));
 
-    if (state.controls && state.controls.isLocked && state.isMouseDown && (state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
+    if (state.controls && isInputActive() && state.isMouseDown && (touchMode || state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
         if (state.inspectState === 'INSPECTING') {
             cancelInspect();
         }
@@ -1175,7 +1186,7 @@ export function animate(): void {
     }
     updateHoverBar(state.hoverFuel);
     updateLocalAccelerometer(delta);
-    updateSpeedlines(state.velocity.length(), Boolean(state.controls?.isLocked && !state.isScoped && state.playerHp > 0));
+    updateSpeedlines(state.velocity.length(), Boolean(isInputActive() && !state.isScoped && state.playerHp > 0));
 
     checkLavaDamage();
 
@@ -1242,13 +1253,13 @@ export function animate(): void {
                     if (UI.ui) UI.ui.style.display = 'flex';
                     setFpsVisible(userSettings.showFps);
                     if (UI.healthContainer) {
-                        UI.healthContainer.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
+                        UI.healthContainer.style.display = (state.controls && isInputActive()) ? 'block' : 'none';
                     }
                     if (UI.reloadContainer) {
-                        UI.reloadContainer.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
+                        UI.reloadContainer.style.display = (state.controls && isInputActive()) ? 'block' : 'none';
                     }
                     if (UI.hoverContainer) {
-                        UI.hoverContainer.style.display = (state.controls && state.controls.isLocked) ? 'block' : 'none';
+                        UI.hoverContainer.style.display = (state.controls && isInputActive()) ? 'block' : 'none';
                     }
                 }
                 lastScopedState = state.isScoped;
@@ -1321,7 +1332,7 @@ export function triggerDeath(): void {
     }
 
     if (state.controls) {
-        state.controls.unlock();
+        endInput();
         const playerObj = state.controls.getObject();
         spawnParticles(playerObj.position, 0x3b5998, 40, 16.0, 0.45, 6.0);
     }
@@ -1371,7 +1382,7 @@ export function processTargetHit(targetIndex: number, damage: number): void {
 export function checkLavaDamage(): void {
     // Damage is gameplay-only. Keeping this path active while a multiplayer
     // player is paused or dead caused repeated deaths and broadcasts on lava.
-    if (!state.isPlaying || state.playerHp <= 0 || !state.controls?.isLocked) return;
+    if (!state.isPlaying || state.playerHp <= 0 || !state.controls || !isInputActive()) return;
 
     const playerObj = state.controls.getObject();
     const feetY = playerObj.position.y - PLAYER_HEIGHT;

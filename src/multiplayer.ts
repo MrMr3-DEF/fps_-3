@@ -1,3 +1,4 @@
+import { endInput } from './inputSession.js';
 import { resetProjectiles } from './projectiles.js';
 import type { Peer } from 'peerjs';
 import { ShotLedger, spreadDirection, acceptLifeUpdate, acceptDeath } from './shotAuthority.js';
@@ -813,7 +814,7 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
         } else {
             showJoinError('Connection to the host was closed.');
             disconnectMultiplayer({ preserveJoinError: true });
-            state.controls?.unlock();
+            endInput();
             const blocker = DOM.blocker(); if (blocker) blocker.style.display = 'flex';
             for (const id of ['panel-mp', 'panel-host-waiting', 'panel-join-room', 'panel-pause', 'death-overlay']) {
                 const el = document.getElementById(id); if (el) el.style.display = 'none';

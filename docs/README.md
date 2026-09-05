@@ -7,6 +7,7 @@ This directory is the starting point for humans and AI agents working on FPS Are
 Each document owns a distinct subject so information has one canonical location:
 
 - [Architecture](architecture.md) explains the runtime, module boundaries, frame loop, world generation, gameplay, and multiplayer data flow.
+- [Mobile controls](mobile-controls.md) covers touch input, landscape behavior and device validation.
 - [Development](development.md) covers prerequisites, local workflows, scripts, tests, CI, generated output, and change validation.
 - [Cloudflare operations](operations.md) covers deployment, bindings, TURN and Turnstile configuration, API routes, quotas, security properties, and troubleshooting.
 - [Audit resolution](audit-resolution.md) records fixes and validation for the September audit.
