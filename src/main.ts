@@ -1188,7 +1188,7 @@ export function animate(): void {
     if (state.controls) {
         updateEnvironmentVisibility(state.controls.getObject().position, userSettings.renderDistanceChunks);
     }
-    updateHoverBar(state.hoverFuel);
+    updateHoverBar(state.hoverFuel, state.isHovering && isInputActive());
     updateLocalAccelerometer(delta);
     updateSpeedlines(state.velocity.length(), Boolean(isInputActive() && !state.isScoped && state.playerHp > 0));
 

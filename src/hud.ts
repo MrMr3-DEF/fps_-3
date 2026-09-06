@@ -34,7 +34,8 @@ export function updateHealthBar(hpRatio: number, flashColor: string | null = nul
     }
 }
 
-export function updateHoverBar(fuelRatio: number): void {
+export function updateHoverBar(fuelRatio: number, active: boolean): void {
+    getUI<HTMLElement>('hover-container')?.classList.toggle('hover-active', active);
     const hoverBar = getUI<HTMLElement>('hover-bar');
     if (!hoverBar) return;
     if (fuelRatio !== lastHoverFuel) {
