@@ -12,8 +12,6 @@ export function setupMainMenu(): void {
     const blocker = document.getElementById('blocker')!;
     const instructions = document.getElementById('instructions')!;
     const main = document.getElementById('panel-main')!;
-    const title = document.getElementById('title')!;
-    title.textContent = 'FPS ARENA';
     const weaponsButton = document.createElement('button');
     weaponsButton.className = 'menu-btn secondary'; weaponsButton.textContent = 'Weapons';
     main.insertBefore(weaponsButton, document.getElementById('btn-menu-settings'));
@@ -36,7 +34,7 @@ export function setupMainMenu(): void {
     }
     (tabs.firstElementChild as HTMLButtonElement).click();
     const preview = document.createElement('aside'); preview.id = 'character-panel';
-    preview.innerHTML = '<div class="character-heading"><h2>Character</h2></div><div id="character-stage" role="img" aria-label="Preview of your playable character"></div><div class="character-customize"><label for="character-color">Suit color</label><div class="color-options"></div><label class="custom-color">Custom <input id="character-color" type="color"></label><span id="color-value"></span></div>';
+    preview.innerHTML = '<div class="character-heading"><h2>Character</h2></div><div id="character-stage" role="img" aria-label="Preview of your playable character"></div><fieldset class="character-customize" aria-label="Suit customization"><label for="character-color">Suit color</label><div class="color-options"></div><label class="custom-color">Custom <input id="character-color" type="color"></label><span id="color-value"></span></fieldset>';
     blocker.insertBefore(preview, document.getElementById('legal-links'));
     const stage = preview.querySelector<HTMLElement>('#character-stage')!;
     const scene = new THREE.Scene();
@@ -47,7 +45,9 @@ export function setupMainMenu(): void {
     const bean = buildBeanModel(Number.parseInt(characterColor.slice(1), 16), 0x00ffcc); bean.rotation.y = Math.PI + 0.35; scene.add(bean);
     const colorInput = preview.querySelector<HTMLInputElement>('input')!;
     const swatches = preview.querySelector('.color-options')!;
+    const customization = preview.querySelector<HTMLFieldSetElement>('.character-customize')!;
     const setColor = (color: string) => {
+        if (state.isPlaying) { colorInput.value = characterColor; return; }
         saveCharacterColor(color); colorInput.value = characterColor;
         preview.querySelector('#color-value')!.textContent = characterColor.toUpperCase();
         const hex = Number.parseInt(characterColor.slice(1), 16); setBeanColor(bean, hex);
@@ -60,6 +60,7 @@ export function setupMainMenu(): void {
     colorInput.addEventListener('input', () => setColor(colorInput.value)); setColor(characterColor);
     let width = 0, height = 0, last = 0;
     renderPreview = () => {
+        customization.disabled = state.isPlaying;
         if (blocker.style.display === 'none' || document.hidden || performance.now() - last < 33) return;
         last = performance.now();
         const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;

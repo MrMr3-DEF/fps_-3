@@ -59,3 +59,7 @@ body button:focus-visible, #character-color:focus-visible { outline: 3px solid #
 
 #blocker .menu-btn { box-shadow: none; }
 #blocker .menu-btn:hover { transform: none; }
+
+fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
+.character-customize:disabled { opacity: 0.45; }
+.character-customize:disabled button, .character-customize:disabled input { cursor: not-allowed; }
