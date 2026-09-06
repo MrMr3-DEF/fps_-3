@@ -3,7 +3,7 @@ import { setupMobileControls } from './mobileControls.js';
 import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
-import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import { PointerLockControls } from './pointerLockControls.js';
 import { state, resetMatchStats, resetPlayerState } from './state.js';
 import {
     JUMP_FORCE,
@@ -744,6 +744,7 @@ function disposeHookMesh(): void {
 }
 
 function disposeGameRuntime(): void {
+    state.controls?.dispose();
     disconnectMultiplayer();
     resetHook();
     disposeProjectiles();

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PLAYER_MAX_HP } from './config.js';
-import type { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import type { PointerLockControls } from './pointerLockControls.js';
 import type { Particle } from './particles.js';
 
 export interface PeerLike {
