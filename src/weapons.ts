@@ -41,7 +41,7 @@ const SHARED_BEAN_SPHERE_GEO = new THREE.SphereGeometry(0.6, 16, 16);
 const SHARED_BOOSTER_CYLINDER_GEO = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
 const SHARED_NOZZLE_GEO = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
 const SHARED_VISOR_GEO = new THREE.BoxGeometry(0.85, 0.25, 0.45);
-const SHARED_VISOR_STRIP_GEO = new THREE.BoxGeometry(0.5, 0.05, 0.47);
+const SHARED_VISOR_STRIP_GEO = new THREE.BoxGeometry(0.5, 0.05, 0.012);
 const BEAN_DAMAGE_PULSE_MATERIALS = new WeakMap<THREE.Group, readonly THREE.MeshStandardMaterial[]>();
 const SHARED_GEOMETRIES = new Set<THREE.BufferGeometry>([
     SHARED_PROJECTILE_GEO,
@@ -880,14 +880,16 @@ export function buildBeanModel(bodyColor: number, visorStripColor: number): THRE
         metalness: 0.9
     });
     const visor = new THREE.Mesh(SHARED_VISOR_GEO, visorMat);
-    visor.position.set(0, 0.5, -0.35);
+    // Keep the front face (-0.725) clear of the head radius (0.6).
+    visor.position.set(0, 0.5, -0.5);
     visor.castShadow = true;
     visor.receiveShadow = true;
     playerGroup.add(visor);
 
     const visorStripMat = new THREE.MeshBasicMaterial({ color: visorStripColor });
     const visorStrip = new THREE.Mesh(SHARED_VISOR_STRIP_GEO, visorStripMat);
-    visorStrip.position.set(0, 0.5, -0.36);
+    // Thin front-mounted lens, separated from the frame to avoid depth overlap.
+    visorStrip.position.set(0, 0.5, -0.732);
     playerGroup.add(visorStrip);
 
     // These materials are unique to this bean but shared by some of its body
