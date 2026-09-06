@@ -9,3 +9,5 @@ Suit color offers six presets and a custom color picker. `src/appearance.ts` val
 The weapons screen derives damage, pellets, maximum damage per shot, rate, spread, recoil and cooldown from `WEAPON_STATS`. Minigun ramp and rate values use the minigun constants. No duplicate editable stat table is maintained.
 
 Validation: 45 tests, both TypeScript checks, production build and diff whitespace checks pass. Browser checks covered desktop and 821×400 touch layout, preset selection and persistence, and weapon-tab navigation including minigun values. Physical-phone usability and live multiplayer color replication remain deployment checks.
+
+Suit customization is hidden throughout a match, including pause. The weapons screen replaces the character preview with the selected gameplay gun model. Drag with mouse or touch, or focus the preview and use arrow keys to rotate. Models are cached per weapon, centered and scaled to fit; rotations persist when revisiting a weapon. Preview-owned resources are disposed without disposing shared gameplay geometry/materials. Browser checks verified pistol rotation and minigun selection.

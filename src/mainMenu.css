@@ -63,3 +63,9 @@ body button:focus-visible, #character-color:focus-visible { outline: 3px solid #
 fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .character-customize:disabled { opacity: 0.45; }
 .character-customize:disabled button, .character-customize:disabled input { cursor: not-allowed; }
+
+.character-customize[hidden], .weapon-rotate-hint[hidden] { display: none; }
+#character-stage.weapon-stage { cursor: grab; touch-action: none; }
+#character-stage.dragging { cursor: grabbing; }
+#character-stage:focus-visible { outline: 2px solid #087da8; outline-offset: -2px; }
+.weapon-rotate-hint { margin: 12px 0 0; text-align: center; color: #60798a; font-size: 12px; }
