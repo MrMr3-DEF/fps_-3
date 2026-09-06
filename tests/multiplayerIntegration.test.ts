@@ -76,7 +76,11 @@ test('client rejects host without proof and applies kills while waiting to play'
         conn.emit('data',{type:'world_snapshot',seed:1,score:0,targets:[]});
         assert.equal(state.isPlaying,false);
         const target=new THREE.Group();target.userData={scale:1,index:0,bodyMesh:new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial()),healthBarFg:new THREE.Mesh(),healthBarGroup:new THREE.Group()};state.targets=[target];
+        state.hookState='FIRING';state.hookIsEnemy=true;state.hookWillHit=true;state.hookTargetEnemy=target;
+        conn.emit('data',{type:'target_state',targetIndex:0,position:{x:0,y:0,z:0},maxHp:3,hp:2,scale:1,color:123});
+        assert.equal(state.hookState,'FIRING','nonlethal damage must retain the grapple');
         conn.emit('data',{type:'kill_target',targetIndex:0,score:7,newPosition:{x:50,y:20,z:0},scale:3,hp:3,color:123});
+        assert.equal(state.hookState,'IDLE');assert.equal(state.hookTargetEnemy,null);
         assert.equal(state.score,7);assert.equal(target.position.x,50);assert.equal(target.userData.hp,3);
         state.targets=[];
     }finally{disconnectMultiplayer();}

@@ -1,3 +1,4 @@
+import { cancelHookForTarget } from './hookLifecycle.js';
 import { characterColor } from './appearance.js';
 import { endInput } from './inputSession.js';
 import { resetProjectiles } from './projectiles.js';
@@ -333,6 +334,10 @@ function applyTargetState(targetState: TargetState): boolean {
     const target = state.targets[targetState.targetIndex];
     if (!target) return false;
     const data = targetData(target);
+    if (targetState.hp <= 0 || target.position.x !== targetState.position.x ||
+        target.position.y !== targetState.position.y || target.position.z !== targetState.position.z) {
+        cancelHookForTarget(target);
+    }
     target.position.set(targetState.position.x, targetState.position.y, targetState.position.z);
     data.maxHp = targetState.maxHp;
     data.hp = targetState.hp;
@@ -1180,6 +1185,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         // Host broadcast: all clients apply the same target respawn and score.
         const target = state.targets[msg.targetIndex];
         if (target) {
+            cancelHookForTarget(target);
             const enemyColor = msg.color || 0xff4500;
             spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
 

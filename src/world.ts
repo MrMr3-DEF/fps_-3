@@ -1,3 +1,4 @@
+import { cancelHookForTarget } from './hookLifecycle.js';
 import * as THREE from 'three';
 import { state } from './state.js';
 import {
@@ -298,6 +299,7 @@ export function rebuildTargetHash(): void {
 }
 
 export function respawnTarget(targetGroup: THREE.Group): void {
+    cancelHookForTarget(targetGroup);
     targetGroup.position.x = (worldRandom() - 0.5) * (MAP_SIZE - 40);
     targetGroup.position.y = 3.0 + worldRandom() * (MAX_ENEMY_HEIGHT - 5.0);
     targetGroup.position.z = (worldRandom() - 0.5) * (MAP_SIZE - 40);

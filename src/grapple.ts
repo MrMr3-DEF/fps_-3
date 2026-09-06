@@ -1,3 +1,5 @@
+import { resetHook } from './hookLifecycle.js';
+export { resetHook } from './hookLifecycle.js';
 import * as THREE from 'three';
 import { state } from './state.js';
 import {
@@ -30,18 +32,6 @@ const _centerScreen = new THREE.Vector2(0, 0);
 export const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, -0.19);
 
 let hookBadgeEl: HTMLElement | null = null;
-
-export function resetHook(): void {
-    state.hookState = 'IDLE';
-    state.hookWillHit = false;
-    state.hookIsEnemy = false;
-    state.hookTargetEnemy = null;
-    if (state.scene && state.hookMesh) {
-        state.scene.remove(state.hookMesh);
-    }
-    if (!hookBadgeEl) hookBadgeEl = document.getElementById('hook-badge');
-    if (hookBadgeEl) hookBadgeEl.style.display = 'none';
-}
 
 // Fire from screen center. Enemy targets get a small aim-assist radius; surfaces
 // use exact ray hits so pillars and floor still feel precise.

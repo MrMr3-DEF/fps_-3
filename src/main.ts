@@ -1367,10 +1367,6 @@ export function processTargetHit(targetIndex: number, damage: number): void {
         
         createShockwave(target.position, 8.0 * (data.scale || 1.0), 0xffaa00);
         
-        if (state.hookState === 'PULLING' && state.hookIsEnemy && state.hookTargetEnemy === target) {
-            resetHook();
-        }
-        
         respawnTarget(target);
         rebuildTargetHash();
         state.score++;
