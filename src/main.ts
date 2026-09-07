@@ -8,6 +8,7 @@ import { state, resetMatchStats } from './state.js';
 import { resetPlayerAtTownSpawn } from './playerSpawn.js';
 import {
     JUMP_FORCE,
+    NORMAL_JUMP_FORCE,
     PLAYER_HEIGHT,
     LAVA_DAMAGE_TICK_MS,
     LAVA_DAMAGE_PER_TICK,
@@ -578,26 +579,28 @@ function setupInputListeners(): void {
                     state.isShiftDown = true;
                 }
                 break;
+            case 'ControlLeft':
+            case 'ControlRight':
+                if (isInputActive()) state.powerJumpEnabled = !state.powerJumpEnabled;
+                break;
             case 'Space':
                 if (!state.controls) break;
                 if (!isInputActive()) break;
-                if (state.hookState === 'PULLING') {
-                    resetHook();
-                    state.velocity.y = JUMP_FORCE * 0.8; 
+                if (state.canJump || state.hookState === 'PULLING') {
+                    const fromHook = state.hookState === 'PULLING';
+                    if (fromHook) resetHook();
+                    state.normalJumpActive = !state.powerJumpEnabled;
+                    state.velocity.y = state.powerJumpEnabled
+                        ? (fromHook ? JUMP_FORCE * 0.8 : state.velocity.y + JUMP_FORCE)
+                        : NORMAL_JUMP_FORCE;
                     state.canJump = false;
-                    _jumpBoosterPos.copy(state.controls.getObject().position);
-                    _jumpBoosterPos.y -= 1.8;
-                    spawnRocketFlame(_jumpBoosterPos, 50, true);
-                    createShockwave(_jumpBoosterPos, 15.0);
-                    broadcastLocalJump();
-                } else if (state.canJump) {
-                    state.velocity.y += JUMP_FORCE;
-                    state.canJump = false;
-                    _jumpBoosterPos.copy(state.controls.getObject().position);
-                    _jumpBoosterPos.y -= 1.8;
-                    spawnRocketFlame(_jumpBoosterPos, 50, true);
-                    createShockwave(_jumpBoosterPos, 15.0);
-                    broadcastLocalJump();
+                    if (state.powerJumpEnabled) {
+                        _jumpBoosterPos.copy(state.controls.getObject().position);
+                        _jumpBoosterPos.y -= 1.8;
+                        spawnRocketFlame(_jumpBoosterPos, 50, true);
+                        createShockwave(_jumpBoosterPos, 15.0);
+                        broadcastLocalJump();
+                    }
                 }
                 cancelInspect();
                 break;
@@ -687,6 +690,9 @@ function setupInputListeners(): void {
             state.isMouseDown = held;
             if (held && isInputActive() && state.fireCooldown <= 0 && state.switchState === 'IDLE') { cancelInspect(); fireProjectile(); }
         },
+    });
+    document.getElementById('powerjump-toggle')?.addEventListener('click', () => {
+        if (isInputActive()) state.powerJumpEnabled = !state.powerJumpEnabled;
     });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -1187,6 +1193,12 @@ export function animate(): void {
         updateEnvironmentVisibility(state.controls.getObject().position, userSettings.renderDistanceChunks);
     }
     updateHoverBar(state.hoverFuel, state.isHovering && isInputActive());
+    const jumpToggle = document.getElementById('powerjump-toggle');
+    if (jumpToggle) {
+        jumpToggle.hidden = !isInputActive() || state.playerHp <= 0;
+        jumpToggle.setAttribute('aria-pressed', String(state.powerJumpEnabled));
+        jumpToggle.textContent = state.powerJumpEnabled ? 'POWER JUMP ON' : 'POWER JUMP OFF';
+    }
     updateLocalAccelerometer(delta);
     updateSpeedlines(state.velocity.length(), Boolean(isInputActive() && !state.isScoped && state.playerHp > 0));
 

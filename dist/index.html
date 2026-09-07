@@ -352,6 +352,27 @@
             font-family: monospace;
         }
 
+        #powerjump-toggle[hidden] { display: none; }
+        #powerjump-toggle {
+            position: fixed;
+            right: calc(50% + 260px);
+            bottom: 30px;
+            width: 90px;
+            height: 70px;
+            padding: 8px;
+            border: 2px solid #ffffffb0;
+            border-radius: 4px;
+            background: #17283b88;
+            color: #d0d9e2;
+            font: 700 11px system-ui;
+            z-index: 9;
+            touch-action: manipulation;
+        }
+        #powerjump-toggle[aria-pressed="true"] {
+            color: #8be2ff;
+            border-color: #40c8ff;
+            box-shadow: 0 0 12px #00aaff55;
+        }
         #health-container {
             position: absolute;
             bottom: 30px;
@@ -644,9 +665,9 @@
         }
     </style>
 
-  <script type="module" crossorigin src="/assets/index-DUttUYVy.js"></script>
+  <script type="module" crossorigin src="/assets/index-DDkYG4uW.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-BgQTGj54.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-BCN3PzRb.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-D1985jnp.css">
 </head>
 
 <body>
@@ -664,7 +685,7 @@
                 <button class="menu-btn secondary" id="btn-menu-settings">Settings</button>
 
                 <span id="desktop-control-help" style="font-size: 14px; color: #777; margin-top: 15px; text-align: center; line-height: 1.5;">
-                    WASD to Move | Shift in Air to Hover | Space to Jump<br />
+                    WASD to Move | Shift in Air to Hover | Space to Jump | Ctrl to Toggle Power Jump<br />
                     R for Grappling Hook | Left-Click to Shoot<br />
                     E / 1, 2, 3, 4, 5 to Switch Weapons | P for Third Person<br />
                     Right-Click / Hold C to Aim (goggles)
@@ -885,6 +906,7 @@
     </div>
     <div id="fps-counter">FPS: 0</div>
 
+    <button id="powerjump-toggle" hidden aria-label="Toggle power jump (Ctrl)" aria-pressed="true" title="Ctrl: toggle power jump">POWER JUMP ON</button>
     <div id="reload-container">
         <div id="reload-bar"></div>
     </div>

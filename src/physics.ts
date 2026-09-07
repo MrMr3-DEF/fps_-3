@@ -207,6 +207,8 @@ function stepPlayerPhysics(delta: number): void {
                 dynamicGravity = BASE_GRAVITY * GRAPPLE_GRAVITY_SCALE;
             } else if (state.isHovering && state.velocity.y <= 0) {
                 dynamicGravity = BASE_GRAVITY * HOVER_GRAVITY_SCALE;
+            } else if (state.normalJumpActive) {
+                dynamicGravity = BASE_GRAVITY;
             } else if (state.velocity.y > 0) {
                 if (state.velocity.y > APEX_VELOCITY_THRESHOLD) {
                     dynamicGravity = BASE_GRAVITY * 1.0;
@@ -220,6 +222,8 @@ function stepPlayerPhysics(delta: number): void {
                 const fallRatio = Math.min(1.0, fallSpeed / DESCENT_FALL_RATIO_CAP);
                 dynamicGravity = BASE_GRAVITY * (0.2 + 1.1 * fallRatio);
             }
+            const normalBallistic = state.normalJumpActive && state.hookState !== 'PULLING' && !state.isHovering;
+            const initialVerticalVelocity = state.velocity.y;
             state.velocity.y -= dynamicGravity * delta;
 
             if (state.isHovering) {
@@ -300,7 +304,9 @@ function stepPlayerPhysics(delta: number): void {
                 }
             }
 
-            playerObj.position.y += state.velocity.y * delta;
+            playerObj.position.y += normalBallistic
+                ? (initialVerticalVelocity + state.velocity.y) * 0.5 * delta
+                : state.velocity.y * delta;
             if (state.velocity.y > 0 && playerObj.position.y >= ceilingY) {
                 playerObj.position.y = ceilingY - 0.002;
                 state.velocity.y = 0;
@@ -311,6 +317,7 @@ function stepPlayerPhysics(delta: number): void {
 
             const isGrounded = playerObj.position.y <= minCameraY && state.velocity.y <= 0;
             if (isGrounded) {
+                state.normalJumpActive = false;
                 state.velocity.y = 0;
                 playerObj.position.y = minCameraY;
             }

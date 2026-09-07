@@ -54,6 +54,8 @@ export const ENEMY_CLASSES: EnemyClass[] = [
 ];
 
 export const PLAYER_HEIGHT = 2.0;
+export const NORMAL_JUMP_HEIGHT = PLAYER_HEIGHT * 0.75;
+export const NORMAL_JUMP_FORCE = Math.sqrt(2 * BASE_GRAVITY * NORMAL_JUMP_HEIGHT);
 export const PLAYER_MAX_HP = 10;
 export const PLAYER_HIT_RANGE = 0.8;
 export const DEFAULT_FOV = 75;

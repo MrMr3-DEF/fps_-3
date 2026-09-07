@@ -29,3 +29,5 @@
 .touch-device #fps-counter { top: 78px; right: max(16px, env(safe-area-inset-right)); font-size: 12px; }
 
 .touch-device #accelerometer { display: none !important; }
+
+.touch-device #powerjump-toggle { right: calc(50% + 80px); bottom: max(10px, env(safe-area-inset-bottom)); width: 62px; height: 44px; padding: 4px; font-size: 9px; }

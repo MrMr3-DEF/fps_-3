@@ -49,3 +49,31 @@ test('analog movement preserves partial speed, caps diagonals and is ignored whi
     assert.equal(run(1, 0, false), 0);
     touchMove.x = touchMove.y = 0;
 });
+
+test('normal jumps reach 75% of player height across frame rates and reset on landing', async () => {
+    const { NORMAL_JUMP_FORCE, NORMAL_JUMP_HEIGHT, PLAYER_HEIGHT } = await import('../src/config.ts');
+    for (const fps of [30, 60, 120, 240]) {
+        state.camera = new THREE.PerspectiveCamera();
+        state.camera.position.set(30, PLAYER_HEIGHT, 30);
+        state.controls = { isLocked: true, getObject: () => state.camera } as any;
+        state.isPlaying = true;
+        state.canJump = false;
+        state.normalJumpActive = true;
+        state.powerJumpEnabled = true; // Toggling mid-flight must not change this jump.
+        state.isShiftDown = state.isHovering = false;
+        state.hookState = 'IDLE';
+        state.moveForward = state.moveBackward = state.moveLeft = state.moveRight = false;
+        state.obstacles = [];
+        state.velocity.set(0, NORMAL_JUMP_FORCE, 0);
+        let peak = 0;
+        for (let frame = 0; frame < fps; frame++) {
+            updatePlayerPhysics(1 / fps);
+            peak = Math.max(peak, state.camera.position.y - PLAYER_HEIGHT);
+            if (state.canJump) break;
+        }
+        assert.ok(Math.abs(peak - NORMAL_JUMP_HEIGHT) < 0.06, `${fps} FPS: peak ${peak}`);
+        assert.equal(state.canJump, true);
+        assert.equal(state.normalJumpActive, false);
+        assert.equal(state.camera.position.y, PLAYER_HEIGHT);
+    }
+});
