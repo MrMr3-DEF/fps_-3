@@ -30,6 +30,7 @@ test('network parser rejects malformed vectors and unsupported weapons', () => {
 test('network parser bounds target snapshots and validates target state', () => {
     const snapshot = parseNetworkPacket({
         type: 'world_snapshot',
+        spawnHouseSlot: 1,
         seed: 42,
         score: 3,
         targets: [{
@@ -45,6 +46,7 @@ test('network parser bounds target snapshots and validates target state', () => 
 
     assert.equal(parseNetworkPacket({
         type: 'world_snapshot',
+        spawnHouseSlot: 1,
         seed: -1,
         score: 0,
         targets: []
@@ -64,5 +66,15 @@ test('avatar colors accept only optional 24-bit integers', () => {
     assert.equal(parseNetworkPacket({ ...validUpdate, bodyColor: 0xdf5b64 })?.type, 'update');
     for (const bodyColor of [-1, 0x1000000, 1.5, '#df5b64', null]) {
         assert.equal(parseNetworkPacket({ ...validUpdate, bodyColor }), null);
+    }
+});
+
+test('world snapshots require a valid client house assignment', () => {
+    const snapshot = { type: 'world_snapshot', seed: 42, score: 0, targets: [] };
+    for (const spawnHouseSlot of [undefined, null, -1, 0, 1.5, 5, '2']) {
+        assert.equal(parseNetworkPacket({ ...snapshot, spawnHouseSlot }), null);
+    }
+    for (const spawnHouseSlot of [1, 2, 3, 4]) {
+        assert.equal(parseNetworkPacket({ ...snapshot, spawnHouseSlot })?.type, 'world_snapshot');
     }
 });

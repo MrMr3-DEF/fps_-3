@@ -2,6 +2,24 @@ export const MAP_SIZE = 2000;
 export const PILLAR_COUNT = 900;
 export const PILLAR_WIDTH = 6.0;
 
+export const TOWN_HALF_SIZE = 90;
+export const TOWN_WALL_HEIGHT = 70;
+export const TOWN_WALL_THICKNESS = 10;
+export const TOWN_GATE_WIDTH = 16;
+export const TOWN_GATE_HEIGHT = 20;
+export const TOWN_ROAD_WIDTH = 12;
+export const TOWN_APPROACH_LENGTH = 18;
+export const CHURCH_TOWER_HEIGHT = TOWN_WALL_HEIGHT * 0.8;
+export const TOWN_STAIR_WIDTH = 6;
+export const PLAYER_STEP_HEIGHT = 0.3;
+export const TOWN_STAIR_STEPS = Math.ceil(TOWN_WALL_HEIGHT / (PLAYER_STEP_HEIGHT - 0.0001));
+// Just above the largest normal walking substep (~1/6 unit), so the near-limit
+// risers do not catch the player across low/high or fluctuating frame rates.
+export const TOWN_STAIR_TREAD = 0.17;
+export const TOWN_STAIR_START_Z = 60;
+export const TOWN_STAIR_LANDING_Z = TOWN_STAIR_START_Z - TOWN_STAIR_STEPS * TOWN_STAIR_TREAD - TOWN_STAIR_WIDTH / 2;
+export const TOWN_CLEARANCE = 18;
+
 export const WALK_SPEED = 35.0;
 export const PLAYER_RADIUS = 0.8;
 

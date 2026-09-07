@@ -25,6 +25,7 @@ import {
 } from './config.js';
 import { SpatialHash } from './spatialHash.js';
 import { obstacleData, targetData } from './userDataTypes.js';
+import { createTownBoxes, generateTownLayout, getTownPavingOutline, overlapsTown, type TownMaterial } from './town.js';
 
 const obstacleHash = new SpatialHash<THREE.Object3D>(32);
 const lavaHash = new SpatialHash<THREE.Object3D>(32);
@@ -77,7 +78,7 @@ export function rebuildEnvironmentWithSeed(seed: number): void {
     if (!state.scene) return;
     setWorldSeed(seed);
     disposeWorld();
-    createEnvironment();
+    createEnvironment(true);
 }
 
 function resetWorldRandom(): void {
@@ -300,9 +301,27 @@ export function rebuildTargetHash(): void {
 
 export function respawnTarget(targetGroup: THREE.Group): void {
     cancelHookForTarget(targetGroup);
-    targetGroup.position.x = (worldRandom() - 0.5) * (MAP_SIZE - 40);
-    targetGroup.position.y = 3.0 + worldRandom() * (MAX_ENEMY_HEIGHT - 5.0);
-    targetGroup.position.z = (worldRandom() - 0.5) * (MAP_SIZE - 40);
+    // A rotating cube fits within sqrt(3) * scale. Reserve the largest class
+    // before choosing one so targets never spawn inside architecture or pillars.
+    const radius = Math.sqrt(3) * Math.max(...ENEMY_CLASSES.map(enemy => enemy.scale));
+    let placed = false;
+    for (let attempt = 0; attempt < 100; attempt++) {
+        const x = (worldRandom() - 0.5) * (MAP_SIZE - 40);
+        const y = radius + worldRandom() * (MAX_ENEMY_HEIGHT - radius);
+        const z = (worldRandom() - 0.5) * (MAP_SIZE - 40);
+        const candidates = obstacleHash.query(x, z, radius, _placementObstacleCandidates);
+        if (candidates.some(obstacle => {
+            const data = obstacleData(obstacle);
+            return Math.abs(x - obstacle.position.x) < data.halfW + radius &&
+                Math.abs(z - obstacle.position.z) < data.halfD + radius &&
+                Math.abs(y - obstacle.position.y) < data.halfH + radius;
+        })) continue;
+        targetGroup.position.set(x, y, z);
+        placed = true;
+        break;
+    }
+    // Bounded fallback over the permanently clear spawn plaza.
+    if (!placed) targetGroup.position.set(0, MAX_ENEMY_HEIGHT, 0);
     refreshChunkedRenderObject(targetGroup);
 
     const randClass = ENEMY_CLASSES[Math.floor(worldRandom() * ENEMY_CLASSES.length)];
@@ -670,6 +689,7 @@ function create2DLowPolyBushTexture(baseColorHex: number | string): THREE.Canvas
 }
 
 function overlapsWithPillarsOrLava(x: number, z: number, checkRadius: number): boolean {
+    if (overlapsTown(x, z, checkRadius)) return true;
     const obstacleCandidates = obstacleHash.query(
         x,
         z,
@@ -695,14 +715,32 @@ function overlapsWithFakePillars(x: number, z: number, checkRadius: number): boo
 }
 
 function createFloor(): void {
-    const floorGeo = new THREE.PlaneGeometry(GROUND_VISUAL_SIZE, GROUND_VISUAL_SIZE);
+    // Grass and town paving meet at y=0 without competing depth-buffer layers.
+    const half = GROUND_VISUAL_SIZE / 2;
+    const shape = new THREE.Shape([
+        new THREE.Vector2(-half, -half), new THREE.Vector2(half, -half),
+        new THREE.Vector2(half, half), new THREE.Vector2(-half, half),
+    ]);
+    shape.holes.push(new THREE.Path(getTownPavingOutline().map(([x, z]) => new THREE.Vector2(x, -z))));
+    const floorGeo = new THREE.ShapeGeometry(shape);
+    const positions = floorGeo.getAttribute('position');
+    const uv = floorGeo.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) {
+        uv.setXY(i, positions.getX(i) / GROUND_VISUAL_SIZE + 0.5, positions.getY(i) / GROUND_VISUAL_SIZE + 0.5);
+    }
     const grassTex = createGrassTexture();
     const floorMat = new THREE.MeshLambertMaterial({ map: grassTex, color: 0xffffff });
     const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.name = 'grass-floor';
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true; 
     addWorldObject(floor);
-    grappleFloor = floor;
+    // The gameplay floor remains continuous, including beneath culled objects.
+    const collider = new THREE.Mesh(new THREE.PlaneGeometry(GROUND_VISUAL_SIZE, GROUND_VISUAL_SIZE), new THREE.MeshBasicMaterial());
+    collider.rotation.x = -Math.PI / 2;
+    collider.visible = false;
+    collider.name = 'ground-collider';
+    grappleFloor = addWorldObject(collider);
 }
 
 function createFakeBillboards(): void {
@@ -779,6 +817,12 @@ function createPillars(): void {
             height / 2,
             (worldRandom() - 0.5) * (MAP_SIZE - 40)
         );
+        let attempts = 0;
+        while (overlapsTown(dummy.position.x, dummy.position.z, PILLAR_WIDTH / 2) && attempts++ < 100) {
+            dummy.position.x = (worldRandom() - 0.5) * (MAP_SIZE - 40);
+            dummy.position.z = (worldRandom() - 0.5) * (MAP_SIZE - 40);
+        }
+        if (overlapsTown(dummy.position.x, dummy.position.z, PILLAR_WIDTH / 2)) continue;
         dummy.updateMatrix();
         addChunkedInstance(pillarInstances, dummy.position.x, dummy.position.z, dummy.matrix);
 
@@ -828,7 +872,7 @@ function createLavaPools(): void {
                 startZ = (worldRandom() - 0.5) * (MAP_SIZE - 80);
                 posAttempts++;
             } while (
-                (Math.sqrt(startX * startX + startZ * startZ) < 30 || overlapsWithPillars(startX, startZ)) && 
+                (overlapsTown(startX, startZ, LAVA_POOL_HALF_SIZE) || overlapsWithPillars(startX, startZ)) &&
                 posAttempts < 50
             );
             
@@ -864,7 +908,7 @@ function createLavaPools(): void {
                         continue;
                     }
                     
-                    if (Math.sqrt(nextX * nextX + nextZ * nextZ) < 30) {
+                    if (overlapsTown(nextX, nextZ, LAVA_POOL_HALF_SIZE)) {
                         continue;
                     }
                     
@@ -1026,12 +1070,57 @@ function createEnemies(): void {
     rebuildTargetHash();
 }
 
-export function createEnvironment(): void {
+function createTown(): void {
+    const boxes = createTownBoxes(generateTownLayout(worldSeed));
+    const colors: Record<TownMaterial, number> = {
+        stone: 0x727a80, trim: 0xc6bca5, roof: 0x995940, door: 0x654531,
+        window: 0x273c46, road: 0xb9ac8e, plaza: 0x8e9076,
+        plaster0: 0xd5bd93, plaster1: 0xb9c2b2, plaster2: 0xc6997c, water: 0x2a9ab5,
+    };
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const colliderMaterial = new THREE.MeshBasicMaterial();
+    const dummy = new THREE.Object3D();
+    for (const materialName of Object.keys(colors) as TownMaterial[]) {
+        const parts = boxes.filter(box => box.material === materialName);
+        const material = new THREE.MeshStandardMaterial({ color: colors[materialName], roughness: materialName === 'water' ? 0.2 : 0.95 });
+        // Ground must remain present like the grass floor, even when distant
+        // buildings are hidden. Culling these tiles would expose the grass hole.
+        const ground = materialName === 'road' || materialName === 'plaza';
+        const instances = ground ? null : createChunkedInstanceSet(geometry, material, parts.length, true, true);
+        const mesh = instances?.mesh ?? addWorldObject(new THREE.InstancedMesh(geometry, material, parts.length));
+        mesh.name = ground ? `town-ground-${materialName}` : `town-${materialName}`;
+        mesh.receiveShadow = true;
+        for (let index = 0; index < parts.length; index++) {
+            const part = parts[index];
+            dummy.position.set(part.x, part.y, part.z);
+            dummy.scale.set(part.width, part.height, part.depth);
+            dummy.updateMatrix();
+            if (instances) addChunkedInstance(instances, part.x, part.z, dummy.matrix);
+            else mesh.setMatrixAt(index, dummy.matrix);
+            if (!part.solid) continue;
+            const collider = new THREE.Mesh(geometry, colliderMaterial);
+            collider.name = `town-${part.kind}`;
+            collider.position.copy(dummy.position);
+            collider.scale.copy(dummy.scale);
+            Object.assign(obstacleData(collider), {
+                height: part.height, halfW: part.width / 2,
+                halfD: part.depth / 2, halfH: part.height / 2,
+            });
+            collider.visible = false;
+            addWorldObject(collider);
+            state.obstacles.push(collider);
+            obstacleHash.insert(part.x, part.z, Math.max(part.width, part.depth) / 2, collider);
+        }
+        if (ground) mesh.instanceMatrix.needsUpdate = true;
+    }
+}
+
+export function createEnvironment(preserveSeed = false): void {
     if (!state.scene) return;
 
     // Standalone arenas should remain fresh between matches. Multiplayer sets
     // its seed explicitly before rebuilding, so every peer keeps the same map.
-    if (!state.isMultiplayer) setWorldSeed(generateWorldSeed());
+    if (!state.isMultiplayer && !preserveSeed) setWorldSeed(generateWorldSeed());
     resetWorldRandom();
 
     createFloor();
@@ -1039,6 +1128,7 @@ export function createEnvironment(): void {
     createPillars();
     createLavaPools();
     createBushes();
+    createTown();
     createEnemies();
 }
 

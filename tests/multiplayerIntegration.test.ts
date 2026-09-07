@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
+import { getTownSpawn } from '../src/town.ts';
+import { getWorldSeed } from '../src/world.ts';
 import { state } from '../src/state.ts';
 import { hostGame, joinGame, disconnectMultiplayer, broadcastToAll, authorizeClientPacket } from '../src/multiplayer.ts';
 import { Peer, Connection } from './fakePeer.ts';
@@ -37,8 +39,11 @@ function update(name:string,lifeId=0){return {type:'update' as const,lifeId,user
 
 test('Worker-backed host admission, fixed names, host kill credit, departure and stale events',async()=>{
     backend();state.scene=null;
+    state.camera=new THREE.PerspectiveCamera();state.controls={getObject:()=>state.camera,unlock:()=>{}} as any;
     try {
         await hostGame('Host','ABCDEFGH','create-room');const host=Peer.latest;
+        const hostSpawn=getTownSpawn(getWorldSeed(),'house');
+        assert.deepEqual(state.camera!.position.toArray(),[hostSpawn.x,2,hostSpawn.z]);
         const denied=new Connection('intruder');host.emit('connection',denied);await tick();assert.equal(denied.open,false);assert.equal(denied.sent.length,0);
         await assert.rejects(registerTurnSession('ABCDEFGH','join-room','host','duplicate'),/username/);
         const a=await registerTurnSession('ABCDEFGH','join-room','Pilot','peer-a');
@@ -46,6 +51,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         const ca=new Connection('peer-a',{admissionToken:a.admissionToken});const cb=new Connection('peer-b',{admissionToken:b.admissionToken});
         host.emit('connection',ca);host.emit('connection',cb);await tick();await tick();
         assert.equal(state.connections.length,2);assert.equal(ca.sent[0].proof,a.admissionProof);assert.equal(ca.sent[1].type,'world_snapshot');
+        assert.equal(ca.sent[1].spawnHouseSlot,1);assert.equal(cb.sent[1].spawnHouseSlot,2);
         state.scene=new THREE.Scene();state.isPlaying=true;
         ca.emit('data',update('Forged'));cb.emit('data',update('Other'));
         assert.equal(cb.sent.find(p=>p.type==='update').username,'Pilot');
@@ -54,7 +60,11 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         ca.emit('data',death);assert.equal(state.kills,1);ca.emit('data',death);assert.equal(state.kills,1);
         assert.equal(authorizeClientPacket('peer-a',{type:'fire',weapon:'SNIPER',shotId:2,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}}),null);
         ca.close();await tick();assert.ok(cb.sent.some(p=>p.type==='peer_left'&&p.peerId==='peer-a'));
-        assert.ok(await registerTurnSession('ABCDEFGH','join-room','pilot','peer-new'));
+        const replacement=await registerTurnSession('ABCDEFGH','join-room','pilot','peer-new');
+        const cc=new Connection('peer-new',{admissionToken:replacement.admissionToken});
+        host.emit('connection',cc);await tick();await tick();
+        assert.equal(cc.sent[1].spawnHouseSlot,1,'reuse the departed house without shifting the remaining player');
+        assert.equal(cb.sent.filter(p=>p.type==='world_snapshot').length,1);
         disconnectMultiplayer();state.scene=null;
         await hostGame('NewHost','JKLMNPQR','create-room');
         cb.emit('error',new Error('old'));cb.emit('close');cb.emit('data',update('Old'));
@@ -64,17 +74,23 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
 
 test('client rejects host without proof and applies kills while waiting to play',async()=>{
     backend();state.scene=null;
+    state.camera=new THREE.PerspectiveCamera();state.controls={getObject:()=>state.camera,unlock:()=>{}} as any;
     // Register a host directly; this test owns the client singleton.
     const response=await fetch('/api/rooms',{method:'POST',body:JSON.stringify({room:'ABCDEFGH',turnstileToken:'create-room',username:'Host',peerId:'testfps-room-ABCDEFGH'})});
     const host=await response.json() as any;
     try{
         await joinGame('Pilot','ABCDEFGH','join-room');let peer=Peer.latest;peer.emit('open',peer.id);let conn=peer.connections['testfps-room-ABCDEFGH'][0];
-        conn.emit('data',{type:'world_snapshot',seed:1,score:0,targets:[]});assert.equal(state.isMultiplayer,false);
+        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,targets:[]});assert.equal(state.isMultiplayer,false);
         await joinGame('Pilot','ABCDEFGH','join-room');peer=Peer.latest;peer.emit('open',peer.id);conn=peer.connections['testfps-room-ABCDEFGH'][0];
         const admitted=await fetch('/api/room-admissions/ABCDEFGH',{method:'POST',headers:{Authorization:`Bearer ${host.closeToken}`},body:JSON.stringify({peerId:peer.id,admissionToken:(conn.metadata as any).admissionToken})});
         const admission=await admitted.json() as any;conn.emit('data',{type:'admission',proof:admission.admissionProof});
-        conn.emit('data',{type:'world_snapshot',seed:1,score:0,targets:[]});
+        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,targets:[]});
         assert.equal(state.isPlaying,false);
+        const spawn=getTownSpawn(1,'house',2);
+        assert.deepEqual(state.camera!.position.toArray(),[spawn.x,2,spawn.z]);
+        state.camera!.position.x+=3;
+        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:1,seed:99,score:0,targets:[]});
+        assert.equal(state.camera!.position.x,spawn.x+3,'duplicate snapshots cannot teleport an existing player');
         const target=new THREE.Group();target.userData={scale:1,index:0,bodyMesh:new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial()),healthBarFg:new THREE.Mesh(),healthBarGroup:new THREE.Group()};state.targets=[target];
         state.hookState='FIRING';state.hookIsEnemy=true;state.hookWillHit=true;state.hookTargetEnemy=target;
         conn.emit('data',{type:'target_state',targetIndex:0,position:{x:0,y:0,z:0},maxHp:3,hp:2,scale:1,color:123});
@@ -97,4 +113,32 @@ test('unopened PeerJS channel timeout frees host lobby capacity even without a c
             assert.ok(replacement.handlers.has('open'),'each of the four available slots can be reserved');
         }
     }finally{disconnectMultiplayer();}
+});
+
+test('full five-player rooms assign distinct houses and reset assignments for a new room', async () => {
+    state.scene = null;
+    try {
+        for (const room of ['ABCDEFGH', 'JKLMNPQR']) {
+            // Reset the simulated backend's per-IP join quota between rooms.
+            backend();
+            await hostGame('Host', room, 'create-room');
+            const host = Peer.latest;
+            const clients: Connection[] = [];
+            for (let index = 1; index < 5; index++) {
+                const peerId = `peer-${index}`;
+                const admission = await registerTurnSession(room, 'join-room', `Pilot${String.fromCharCode(64 + index)}`, peerId);
+                const conn = new Connection(peerId, { admissionToken: admission.admissionToken });
+                clients.push(conn);
+                host.emit('connection', conn);
+            }
+            await tick(); await tick();
+            assert.equal(state.connections.length, 4);
+            const slots = clients.map(conn => conn.sent.find(packet => packet.type === 'world_snapshot').spawnHouseSlot);
+            assert.deepEqual([...slots].sort(), [1, 2, 3, 4]);
+            const seed = getWorldSeed();
+            const spawns = [0, ...slots].map(slot => getTownSpawn(seed, 'house', slot));
+            assert.equal(new Set(spawns.map(p => `${p.x},${p.z}`)).size, 5);
+            disconnectMultiplayer();
+        }
+    } finally { disconnectMultiplayer(); }
 });

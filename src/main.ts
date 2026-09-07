@@ -4,7 +4,8 @@ import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touc
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
 import { PointerLockControls } from './pointerLockControls.js';
-import { state, resetMatchStats, resetPlayerState } from './state.js';
+import { state, resetMatchStats } from './state.js';
+import { resetPlayerAtTownSpawn } from './playerSpawn.js';
 import {
     JUMP_FORCE,
     PLAYER_HEIGHT,
@@ -31,7 +32,7 @@ import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { createEnvironment, disposeWorld, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets } from './world.js';
+import { createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -498,7 +499,7 @@ function setupMenuListeners(): void {
         UI.btnDeathRespawn.addEventListener('click', (e) => {
             e.stopPropagation();
             performPlayerReset();
-            spawnLightBeam(new THREE.Vector3(0, 2, 0));
+            if (state.controls) spawnLightBeam(state.controls.getObject().position);
 
             if (state.isThirdPerson && state.playerMesh) {
                 state.playerMesh.visible = true;
@@ -765,13 +766,10 @@ function prepareFreshArena(): void {
 }
 
 function performPlayerReset(resetMatch = false): void {
-    resetPlayerState();
+    resetPlayerAtTownSpawn(getWorldSeed(), resetMatch ? 'house' : 'church');
     if (resetMatch) resetMatchStats();
     syncHudCounters();
     updateHealthBar(100);
-    if (state.controls) {
-        state.controls.getObject().position.set(0, 2, 0);
-    }
     resetHook();
 }
 
@@ -1077,7 +1075,7 @@ export function init(): void {
             if (state.pendingPlay) {
                 state.isPlaying = true;
                 state.pendingPlay = false;
-                spawnLightBeam(new THREE.Vector3(0, 2, 0));
+                if (state.controls) spawnLightBeam(state.controls.getObject().position);
             }
             if (UI.blocker) UI.blocker.style.display = 'none';
             if (UI.panelPause) UI.panelPause.style.display = 'none';

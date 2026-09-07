@@ -81,6 +81,7 @@ The test suite focuses on deterministic logic and security boundaries that can r
 | `mouseButtons.test.ts` | Simultaneous pointer buttons and safe bitmask decoding |
 | `multiplayerVisuals.test.ts` | Overlapping remote damage pulses and material restoration |
 | `networkTypes.test.ts` | Accepted packets and rejection of malformed or excessive network data |
+| `town.test.ts` | 1,000 seeded layouts, street/door clearance, real world rebuilds/disposal, hazard exclusion, collision, ceilings, rooftop edges, projectile/grapple geometry, culling and enemy placement |
 | `spatialHash.test.ts` | Radius queries, reusable outputs, clearing, segment traversal, deduplication, negative cells, grid corners |
 | `turnRoom.test.ts` | Room capacity, capability checks, credential quotas, and cleanup |
 
@@ -124,3 +125,19 @@ For manual multiplayer testing, use separate browser profiles or a private windo
 - If a bug appears only after leaving and starting again, inspect reset functions, interval/timeout cancellation, event listeners, object pools, and Three.js disposal.
 
 Use the ownership table and data-flow notes in [Architecture](architecture.md) before moving responsibilities between files.
+
+## Town visual checks
+
+With `npm run dev` running, open `/tests/town-preview.html` to inspect the real world generator with a chosen seed. The Aerial, Street, Doorway, Interior, Rooftop, Church, Church interior, Rampart, Stairs and Lookout buttons expose repeatable camera views and renderer draw/triangle counts. This development-only HTML fixture is outside the production Vite entry and is not included in `dist/`. Test actual match startup and HUD separately in the main game and production preview.
+
+Central-town validation (September 7, 2026): `npm run check` passes all 64 tests, including 1,000 layout seeds; `npm run build` succeeds. Browser visual checks cover aerial, doorway and interior views on seeds 0 and 42. The production bundle was smoke-tested in Safari for offline startup, pointer lock, movement, jumping and grapple input. The embedded Chromium browser renders the visual fixture but cannot acquire pointer lock in this environment. Multiplayer admission/authority remains covered by simulated integration tests; a live relay-network session was not exercised for this change.
+
+The taller-wall/church follow-up adds regression coverage for exactly one church per seed, the configured church tower height, all four covered gate lintels, and the church ceiling and grapple surfaces. The 1,000-seed sweep includes church plot variation and unobstructed approaches.
+
+Rampart/roof polish validation: the suite now covers walking the full ascent, a complete rampart loop through all four open lookouts, descent without jumping, and roof/shell separation. The viewer also offers a Roof motion button to orbit a house at roof height while checking for flicker. The church tower is now 80% of wall height.
+
+Ground-paving regression checks cover non-overlapping tiles and exact paved area across 100 seeds, the grass cutout, floor grappling, distant ground visibility, and coplanar rampart/landing/bridge joins. The Ground motion viewer button checks streets and footpaths at changing camera angles and heights.
+
+Straight-ascent/well validation adds actual walking-input tests at 20–240 FPS plus variable frame times, near-limit step heights, gate clearance, deterministic well geometry, and safe spawn/detour checks. The Well viewer button shows the fixed central prop.
+
+Town spawn regression checks cover distinct houses and doorway orientation across 1,000 seeds, walking out after initial spawn and repeated church respawns, host-assigned house slots, departure/replacement, and rejection of invalid or duplicate snapshots. The development town viewer includes House spawn and Death respawn views using the real spawn placement helper.

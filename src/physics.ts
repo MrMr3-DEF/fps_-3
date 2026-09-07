@@ -8,6 +8,7 @@ import { obstacleData } from './userDataTypes.js';
 import {
     PILLAR_WIDTH,
     PLAYER_RADIUS,
+    PLAYER_STEP_HEIGHT,
     MAP_SIZE,
     BASE_GRAVITY,
     JUMP_FORCE,
@@ -49,12 +50,14 @@ interface ScanResult {
     colX: boolean;
     colZ: boolean;
     groundY: number;
+    ceilingY: number;
 }
 
-// Single obstacle pass used by the frame loop: independent X/Z collision checks
-// prevent snagging on corners while also finding the floor height under the player.
+// Independent X/Z collision checks prevent snagging on corners, followed by
+// floor and ceiling checks at the accepted horizontal position.
 function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPosZ: THREE.Vector3, feetY: number): ScanResult {
     let groundY = 0;
+    let ceilingY = Infinity;
     let colX = false;
     let colZ = false;
 
@@ -66,7 +69,10 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     for (let i = 0; i < len; i++) {
         const box = candidates[i];
         const data = obstacleData(box);
-        const ph  = data.height;
+        const halfH = data.halfH || data.height / 2;
+        const top = box.position.y + halfH;
+        const bottom = box.position.y - halfH;
+        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y > bottom + 0.001;
         const halfW = data.halfW || (PILLAR_WIDTH / 2);
         const halfD = data.halfD || (PILLAR_WIDTH / 2);
         const ex = halfW + PLAYER_RADIUS;
@@ -77,22 +83,33 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
         if (!colX &&
             testPosX.x > bx - ex && testPosX.x < bx + ex &&
             testPosX.z > bz - ez && testPosX.z < bz + ez) {
-            if (feetY < ph - 0.3) colX = true;
+            if (blocksHeight) colX = true;
         }
 
         if (!colZ &&
             testPosZ.x > bx - ex && testPosZ.x < bx + ex &&
             testPosZ.z > bz - ez && testPosZ.z < bz + ez) {
-            if (feetY < ph - 0.3) colZ = true;
-        }
-
-        if (actualPos.x > bx - ex && actualPos.x < bx + ex &&
-            actualPos.z > bz - ez && actualPos.z < bz + ez) {
-            if (ph > groundY) groundY = ph;
+            if (blocksHeight) colZ = true;
         }
     }
 
-    return { colX, colZ, groundY };
+    // Resolve support at the accepted horizontal position. Sampling the old
+    // position can miss a roof edge during a fast falling/grappling frame.
+    const finalX = colX ? actualPos.x : testPosX.x;
+    const finalZ = colZ ? actualPos.z : testPosZ.z;
+    for (const box of candidates) {
+        const data = obstacleData(box);
+        const ex = (data.halfW || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
+        const ez = (data.halfD || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
+        if (Math.abs(finalX - box.position.x) >= ex || Math.abs(finalZ - box.position.z) >= ez) continue;
+        const halfH = data.halfH || data.height / 2;
+        const top = box.position.y + halfH;
+        const bottom = box.position.y - halfH;
+        if (top <= feetY + PLAYER_STEP_HEIGHT && top > groundY) groundY = top;
+        if (bottom >= actualPos.y - 0.001 && bottom < ceilingY) ceilingY = bottom;
+    }
+
+    return { colX, colZ, groundY, ceilingY };
 }
 
 /** Substeps bound travel to half a unit so grapple frames cannot skip pillars. */
@@ -262,7 +279,7 @@ function stepPlayerPhysics(delta: number): void {
 
             const testPosX = _tempPos.set(nextX, playerObj.position.y, playerObj.position.z);
             const testPosZ = _tempZ.set(playerObj.position.x, playerObj.position.y, nextZ);
-            const { colX: collisionX, colZ: collisionZ, groundY: currentGroundY } =
+            const { colX: collisionX, colZ: collisionZ, groundY: currentGroundY, ceilingY } =
                 scanObstacles(playerObj.position, testPosX, testPosZ, feetY);
 
             if (!collisionX) {
@@ -284,6 +301,11 @@ function stepPlayerPhysics(delta: number): void {
             }
 
             playerObj.position.y += state.velocity.y * delta;
+            if (state.velocity.y > 0 && playerObj.position.y >= ceilingY) {
+                playerObj.position.y = ceilingY - 0.002;
+                state.velocity.y = 0;
+                if (state.hookState === 'PULLING') resetHook();
+            }
 
             const minCameraY = currentGroundY + PLAYER_HEIGHT; 
 

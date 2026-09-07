@@ -1,4 +1,5 @@
 import { isUsername, isPeerId } from './roomIdentity.js';
+import { MAX_PLAYERS } from './config.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
 export type WeaponName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
 
@@ -114,6 +115,7 @@ export interface WorldSnapshotPacket {
     type: 'world_snapshot';
     senderPeerId?: string;
     seed: number;
+    spawnHouseSlot: number;
     score: number;
     targets: TargetState[];
 }
@@ -244,6 +246,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
 
         case 'world_snapshot':
             if (!isInteger(value.seed, 0, 0xffffffff) || !isInteger(value.score, 0, Number.MAX_SAFE_INTEGER) ||
+                !isInteger(value.spawnHouseSlot, 1, MAX_PLAYERS - 1) ||
                 !Array.isArray(value.targets) || value.targets.length > MAX_TARGETS_IN_SNAPSHOT ||
                 !value.targets.every(isTargetState)) return null;
             return value as unknown as WorldSnapshotPacket;

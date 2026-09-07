@@ -7,6 +7,7 @@ import { ShotLedger, spreadDirection, acceptLifeUpdate, acceptDeath } from './sh
 import { isCapability, isUsername } from './roomIdentity.js';
 import * as THREE from 'three';
 import { state, resetPlayerState, resetMatchStats, type DataConnectionLike, type PeerData } from './state.js';
+import { placePlayerAtTownSpawn } from './playerSpawn.js';
 import { disposeParticles, spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
 import {
     generateWorldSeed,
@@ -124,6 +125,9 @@ const DOM = {
 };
 
 let cachedUsername = 'Guest';
+
+// Slot zero belongs to the host. Keep assignments stable when other peers leave.
+const spawnHouseSlots = new Map<string, number>();
 
 function setCachedUsername(username: string): void {
     cachedUsername = username.trim() || 'Guest';
@@ -357,7 +361,7 @@ function setScore(score: number): void {
     if (scoreEl) scoreEl.innerText = score.toString();
 }
 
-function sendWorldSnapshot(conn: DataConnectionLike): void {
+function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): void {
     if (!state.isHost || !conn.open) return;
     const targets: TargetState[] = [];
     for (let i = 0; i < state.targets.length; i++) {
@@ -371,6 +375,7 @@ function sendWorldSnapshot(conn: DataConnectionLike): void {
         type: 'world_snapshot',
         senderPeerId: state.peer?.id,
         seed: getWorldSeed(),
+        spawnHouseSlot,
         score: state.score,
         targets
     };
@@ -398,6 +403,7 @@ function syncHostTargetStates(): void {
 
 function applyWorldSnapshot(packet: WorldSnapshotPacket): void {
     rebuildEnvironmentWithSeed(packet.seed);
+    placePlayerAtTownSpawn(packet.seed, 'house', packet.spawnHouseSlot);
     for (const target of packet.targets) {
         applyTargetState(target);
     }
@@ -435,7 +441,6 @@ function resetLocalMatch(): void {
     disposeParticles();
     resetPlayerState();
     resetMatchStats();
-    state.controls?.getObject().position.set(0, 2, 0);
 }
 
 // The host owns the stable room peer ID. Clients connect to that ID, and the
@@ -468,6 +473,7 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
         turnSessionToken = registration.turnSessionToken;
         startRoomHeartbeat(normalizedRoomCode, registration.closeToken, generation);
         rebuildEnvironmentWithSeed(generateWorldSeed());
+        placePlayerAtTownSpawn(getWorldSeed(), 'house');
         setScore(0);
 
         const { Peer } = await import('peerjs');
@@ -630,6 +636,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean } =
     for (const cleanup of [...connectionCleanup.values()]) cleanup();
     connectionCleanup.clear();
     admittedNames.clear();
+    spawnHouseSlots.clear();
     clearWorldSyncTimeout();
     state.isMultiplayer = false;
     state.isHost = false;
@@ -769,13 +776,18 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
             const result = await admitRoomPeer(room, closeToken, conn.peer, metadata.admissionToken);
             if (!current()) { void departRoomPeer(room, closeToken, conn.peer).catch(() => {}); return; }
             if (!isUsername(result.username) || !isCapability(result.admissionProof)) throw new Error('Invalid admission response.');
+            const usedSlots = new Set(spawnHouseSlots.values());
+            let slot = 1;
+            while (usedSlots.has(slot)) slot++;
+            if (slot >= MAX_PLAYERS) throw new Error('No spawn house available.');
+            spawnHouseSlots.set(conn.peer, slot);
             admittedNames.set(conn.peer, result.username);
             admitted = true;
             clearTimeout(timeoutId);
             pendingConnectionPeers.delete(conn.peer);
             state.connections.push(conn);
             conn.send({ type: 'admission', proof: result.admissionProof });
-            sendWorldSnapshot(conn);
+            sendWorldSnapshot(conn, slot);
             const status = DOM.hostLobbyStatus();
             if (status) status.innerText = `Waiting for players (${state.connections.length + 1}/${MAX_PLAYERS})...`;
         } catch { if (current()) conn.close(); }
@@ -808,6 +820,7 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
         if (index >= 0) state.connections.splice(index, 1);
         peerRuntime.delete(conn.peer);
         admittedNames.delete(conn.peer);
+        spawnHouseSlots.delete(conn.peer);
         lastDamageByVictim.delete(conn.peer);
         removePeer(conn.peer);
         if (state.isHost) {
