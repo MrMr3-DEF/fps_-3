@@ -43,6 +43,7 @@ export interface GameState {
     moveRight: boolean;
     canJump: boolean;
     powerJumpEnabled: boolean;
+    powerJumpAutoActivated: boolean;
     normalJumpActive: boolean;
 
     prevTime: number;
@@ -124,7 +125,8 @@ export const state: GameState = {
     moveLeft: false,
     moveRight: false,
     canJump: false,
-    powerJumpEnabled: true,
+    powerJumpEnabled: false,
+    powerJumpAutoActivated: false,
     normalJumpActive: false,
 
     // Runtime physics state.
@@ -212,6 +214,8 @@ export function resetPlayerState() {
     state.regenTimer = 0;
     state.playerHp = state.playerMaxHp;
     state.canJump = false;
+    state.powerJumpEnabled = false;
+    state.powerJumpAutoActivated = false;
     state.normalJumpActive = false;
     state.velocity.set(0, 0, 0);
     state.hookState = 'IDLE';

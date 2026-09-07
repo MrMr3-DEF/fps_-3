@@ -3,22 +3,17 @@ import { buildBeanModel, setBeanColor, buildGun, buildShotgun, buildAR, buildSni
 import { characterColor, saveCharacterColor } from './appearance.js';
 import { state } from './state.js';
 import { WEAPON_STATS, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY } from './config.js';
-import './mainMenu.css';
 
 let renderPreview: (() => void) | undefined;
 export function updateMenuPreview(): void { renderPreview?.(); }
 
 export function setupMainMenu(): void {
     const blocker = document.getElementById('blocker')!;
-    const instructions = document.getElementById('instructions')!;
+    if (blocker.dataset.menuInitialized === 'true') return;
+    blocker.dataset.menuInitialized = 'true';
     const main = document.getElementById('panel-main')!;
-    const weaponsButton = document.createElement('button');
-    weaponsButton.className = 'menu-btn secondary'; weaponsButton.textContent = 'Weapons';
-    main.insertBefore(weaponsButton, document.getElementById('btn-menu-settings'));
-    const arsenal = document.createElement('div');
-    arsenal.className = 'menu-panel'; arsenal.id = 'panel-weapons';
-    arsenal.innerHTML = '<h2>Weapons</h2><div class="weapon-tabs" aria-label="Choose a weapon"></div><article id="weapon-specs"></article><button class="menu-btn secondary">Back to Main Menu</button>';
-    instructions.append(arsenal);
+    const weaponsButton = document.getElementById('btn-menu-weapons')!;
+    const arsenal = document.getElementById('panel-weapons')!;
     weaponsButton.onclick = () => { main.style.display = 'none'; arsenal.style.display = 'flex'; };
     arsenal.querySelector<HTMLButtonElement>('.menu-btn')!.onclick = () => { arsenal.style.display = 'none'; main.style.display = 'flex'; };
     const labels: Record<string, string> = { PISTOL: 'Pistol', SHOTGUN: 'Shotgun', AR: 'Assault rifle', SNIPER: 'Sniper', MINIGUN: 'Minigun' };
@@ -35,9 +30,7 @@ export function setupMainMenu(): void {
         };
     }
     (tabs.firstElementChild as HTMLButtonElement).click();
-    const preview = document.createElement('aside'); preview.id = 'character-panel';
-    preview.innerHTML = '<div class="character-heading"><h2>Character</h2></div><div id="character-stage" role="img" aria-label="Preview of your playable character"></div><fieldset class="character-customize" aria-label="Suit customization"><label for="character-color">Suit color</label><div class="color-options"></div><label class="custom-color">Custom <input id="character-color" type="color"></label><span id="color-value"></span></fieldset>';
-    blocker.insertBefore(preview, document.getElementById('legal-links'));
+    const preview = document.getElementById('character-panel')!;
     const stage = preview.querySelector<HTMLElement>('#character-stage')!;
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 30); camera.position.set(0, 0.4, 6); camera.lookAt(0, -0.1, 0);
@@ -46,9 +39,7 @@ export function setupMainMenu(): void {
     const light = new THREE.DirectionalLight(0xffffff, 4); light.position.set(-3, 4, 5); scene.add(light);
     const bean = buildBeanModel(Number.parseInt(characterColor.slice(1), 16), 0x00ffcc); bean.rotation.y = Math.PI + 0.35; scene.add(bean);
     const heading = preview.querySelector('h2')!;
-    const rotateHint = document.createElement('p');
-    rotateHint.className = 'weapon-rotate-hint'; rotateHint.textContent = 'Drag to rotate'; rotateHint.hidden = true;
-    stage.after(rotateHint);
+    const rotateHint = preview.querySelector<HTMLElement>('.weapon-rotate-hint')!;
     stage.tabIndex = 0;
     const weaponModels = new Map<string, THREE.Group>();
     const factories: Record<string, () => THREE.Group> = {

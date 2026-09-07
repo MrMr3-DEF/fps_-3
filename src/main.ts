@@ -1,3 +1,6 @@
+import { GothChat } from './gothChat.js';
+import { ConversationCamera } from './conversationCamera.js';
+import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setupMobileControls } from './mobileControls.js';
 import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
@@ -6,6 +9,7 @@ import * as THREE from 'three';
 import { PointerLockControls } from './pointerLockControls.js';
 import { state, resetMatchStats } from './state.js';
 import { resetPlayerAtTownSpawn } from './playerSpawn.js';
+import { updatePowerJumpOnCastleExit } from './powerJump.js';
 import {
     JUMP_FORCE,
     NORMAL_JUMP_FORCE,
@@ -33,7 +37,7 @@ import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets } from './world.js';
+import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -51,6 +55,10 @@ import type { PlayerDiedPacket } from './networkTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
+
+let gothChat: GothChat | null = null;
+let chatCharacter: typeof gothGirlfriend = null;
+const conversationCamera = new ConversationCamera();
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
 const _logicalCameraPos = new THREE.Vector3();
@@ -523,6 +531,7 @@ function setupMenuListeners(): void {
 
             prepareFreshArena();
             if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
+            if (UI.blocker) UI.blocker.style.display = 'flex';
             if (UI.panelPause) UI.panelPause.style.display = 'none';
             if (UI.panelMain) UI.panelMain.style.display = 'flex';
         });
@@ -566,7 +575,7 @@ function setupInputListeners(): void {
     const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'>) => {
         // Movement state is already held between key events; repeated keydown
         // events must not toggle hook/view/weapon actions multiple times.
-        if (e.repeat) return;
+        if (e.repeat || gothChat?.isOpen) return;
 
         switch (e.code) {
             case 'KeyW': state.moveForward = true; break;
@@ -603,6 +612,14 @@ function setupInputListeners(): void {
                     }
                 }
                 cancelInspect();
+                break;
+            case 'KeyF':
+                if (state.camera && state.isPlaying && state.playerHp > 0 && isInputActive()) {
+                    if (gothGirlfriend?.interact(state.camera, state.obstacles)) {
+                        chatCharacter = gothGirlfriend;
+                        gothChat?.open();
+                    }
+                }
                 break;
             case 'KeyR':
                 if (state.controls && isInputActive()) {
@@ -751,6 +768,7 @@ function disposeHookMesh(): void {
 }
 
 function disposeGameRuntime(): void {
+    gothChat?.reset();
     state.controls?.dispose();
     disconnectMultiplayer();
     resetHook();
@@ -762,6 +780,8 @@ function disposeGameRuntime(): void {
 }
 
 function prepareFreshArena(): void {
+    gothChat?.reset();
+    chatCharacter = null;
     resetHook();
     resetProjectiles();
     disposeParticles();
@@ -805,7 +825,7 @@ function setCheckboxLabel(el: HTMLElement | null, enabled: boolean): void {
 }
 
 function isGameInputLocked(): boolean {
-    return isInputActive();
+    return !gothChat?.isOpen && isInputActive();
 }
 
 function preventLockedMouseDefault(e: Event): void {
@@ -1074,6 +1094,30 @@ export function init(): void {
     applyLiveSettings();
 
     setupMenuListeners();
+    gothChat = new GothChat({
+        onOpen: () => {
+            resetHook();
+            state.velocity.set(0, 0, 0);
+            state.normalJumpActive = false;
+            cancelInspect();
+            if (state.camera && chatCharacter) {
+                const pose = getGothConversationPose(chatCharacter.group);
+                conversationCamera.start(state.camera, pose.position, pose.lookAt);
+            }
+            endInput();
+            if (UI.crosshair) UI.crosshair.style.display = 'none';
+        },
+        onClose: resume => {
+            conversationCamera.cancel();
+            state.velocity.set(0, 0, 0);
+            if (state.isPlaying && state.playerHp > 0) {
+                if (UI.blocker) UI.blocker.style.display = resume ? 'none' : 'flex';
+                if (UI.panelPause) UI.panelPause.style.display = resume ? 'none' : 'flex';
+            }
+            if (resume && state.isPlaying && state.playerHp > 0) beginInput();
+        },
+        onReplyStart: () => chatCharacter?.startTalking(),
+    });
 
     // Desktop pointer lock and touch sessions share the play/pause/death UI lifecycle.
     if (state.controls) {
@@ -1105,7 +1149,8 @@ export function init(): void {
         });
 
         onInputEnded(() => {
-            if (UI.blocker) UI.blocker.style.display = 'flex';
+            const isDead = UI.deathOverlay?.style.display === 'flex';
+            if (UI.blocker) UI.blocker.style.display = gothChat?.isOpen || isDead ? 'none' : 'flex';
             state.moveForward = false;
             state.moveBackward = false;
             state.moveLeft = false;
@@ -1130,9 +1175,13 @@ export function init(): void {
             if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'none';
             if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'none';
 
+            if (gothChat?.isOpen) {
+                if (UI.panelPause) UI.panelPause.style.display = 'none';
+                if (UI.crosshair) UI.crosshair.style.display = 'none';
+                gothChat.focus();
+                return;
+            }
             if (state.isPlaying) {
-                const isDead = (UI.deathOverlay && UI.deathOverlay.style.display === 'flex');
-                
                 if (UI.panelPause) {
                     UI.panelPause.style.display = isDead ? 'none' : 'flex';
                 }
@@ -1188,8 +1237,15 @@ export function animate(): void {
         fireProjectile();
     }
 
-    updatePlayerPhysics(delta);
+    if (gothChat?.isOpen) {
+        // The conversation owns the player pose; gravity must not fight the eased move.
+        conversationCamera.update(delta);
+        state.velocity.set(0, 0, 0);
+    } else {
+        updatePlayerPhysics(delta);
+    }
     if (state.controls) {
+        updatePowerJumpOnCastleExit(state.controls.getObject().position);
         updateEnvironmentVisibility(state.controls.getObject().position, userSettings.renderDistanceChunks);
     }
     updateHoverBar(state.hoverFuel, state.isHovering && isInputActive());
@@ -1213,6 +1269,20 @@ export function animate(): void {
     updateProjectiles(delta, attackerName);
 
     updateTargets(delta);
+    if (chatCharacter && (chatCharacter !== gothGirlfriend || !canUseGothChat(state))) {
+        gothChat?.reset();
+        chatCharacter = null;
+    }
+    const npcInputActive = state.isPlaying && state.playerHp > 0 && isInputActive();
+    gothGirlfriend?.update(npcInputActive || gothChat?.isOpen ? delta : 0);
+    const interactionPrompt = getUI<HTMLElement>('npc-interaction');
+    if (interactionPrompt) {
+        const nearby = npcInputActive && state.camera && gothGirlfriend?.canInteract(state.camera, state.obstacles);
+        interactionPrompt.hidden = !nearby;
+        if (nearby) interactionPrompt.textContent = gothGirlfriend?.animator?.gesture
+            ? 'Goth girlfriend · ' + gothGirlfriend.animator.gesture
+            : '[F] Talk to goth girlfriend';
+    }
 
     updateParticles(delta);
 
@@ -1283,8 +1353,17 @@ export function animate(): void {
 
     if (state.renderer && state.scene && state.camera) {
         let logicalCameraPos = null;
+        const playerVisible = state.playerMesh?.visible;
+        const leftGunVisible = state.leftGun?.visible;
+        const rightGunVisible = state.rightGunContainer?.visible;
         try {
-            if (state.isThirdPerson) {
+            // Keep first-person viewmodels out of the conversation, restoring them after drawing.
+            if (gothChat?.isOpen) {
+                if (state.playerMesh) state.playerMesh.visible = false;
+                if (state.leftGun) state.leftGun.visible = false;
+                if (state.rightGunContainer) state.rightGunContainer.visible = false;
+            }
+            if (state.isThirdPerson && !gothChat?.isOpen) {
                 logicalCameraPos = _logicalCameraPos.copy(state.camera.position);
                 
                 _tpCamDir.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
@@ -1296,6 +1375,9 @@ export function animate(): void {
 
             state.renderer.render(state.scene, state.camera);
         } finally {
+            if (state.playerMesh && playerVisible !== undefined) state.playerMesh.visible = playerVisible;
+            if (state.leftGun && leftGunVisible !== undefined) state.leftGun.visible = leftGunVisible;
+            if (state.rightGunContainer && rightGunVisible !== undefined) state.rightGunContainer.visible = rightGunVisible;
             if (state.isThirdPerson && logicalCameraPos) {
                 state.camera.position.copy(logicalCameraPos);
             }
@@ -1330,6 +1412,9 @@ export function takePlayerDamage(damage: number, attackerName: string, attackerP
 }
 
 export function triggerDeath(): void {
+    gothChat?.close(false);
+    // The death overlay sits directly over the world, including when already paused.
+    if (UI.blocker) UI.blocker.style.display = 'none';
     if (UI.panelPause) {
         UI.panelPause.style.display = 'none';
     }

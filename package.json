@@ -18,6 +18,7 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.84",
     "peerjs": "^1.5.4",
     "three": "^0.160.0"
   },

@@ -11,6 +11,7 @@ import {
     PLAYER_STEP_HEIGHT,
     MAP_SIZE,
     BASE_GRAVITY,
+    NORMAL_JUMP_GRAVITY,
     JUMP_FORCE,
     WALK_SPEED,
     PLAYER_HEIGHT,
@@ -208,7 +209,7 @@ function stepPlayerPhysics(delta: number): void {
             } else if (state.isHovering && state.velocity.y <= 0) {
                 dynamicGravity = BASE_GRAVITY * HOVER_GRAVITY_SCALE;
             } else if (state.normalJumpActive) {
-                dynamicGravity = BASE_GRAVITY;
+                dynamicGravity = NORMAL_JUMP_GRAVITY;
             } else if (state.velocity.y > 0) {
                 if (state.velocity.y > APEX_VELOCITY_THRESHOLD) {
                     dynamicGravity = BASE_GRAVITY * 1.0;

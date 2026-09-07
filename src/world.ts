@@ -25,12 +25,15 @@ import {
 } from './config.js';
 import { SpatialHash } from './spatialHash.js';
 import { obstacleData, targetData } from './userDataTypes.js';
+import { GothGirlfriend } from './gothGirlfriend.js';
 import { createGothHouseDecor } from './gothHouse.js';
 import { createTownBoxes, generateTownLayout, getTownPavingOutline, overlapsTown, type TownMaterial } from './town.js';
 
 const obstacleHash = new SpatialHash<THREE.Object3D>(32);
 const lavaHash = new SpatialHash<THREE.Object3D>(32);
 const targetHash = new SpatialHash<THREE.Group>(48);
+export let gothGirlfriend: GothGirlfriend | null = null;
+
 const worldObjects: THREE.Object3D[] = [];
 const renderChunks = new Map<string, THREE.Object3D[]>();
 const activeRenderChunks = new Set<string>();
@@ -1075,6 +1078,12 @@ function createTown(): void {
     const buildings = generateTownLayout(worldSeed);
     const boxes = createTownBoxes(buildings);
     for (const building of buildings.filter(b => b.name === 'goth house')) {
+        // Browser asset loading stays outside the synchronous procedural/test path.
+        if (typeof window !== 'undefined') {
+            gothGirlfriend = new GothGirlfriend(building);
+            state.scene!.add(gothGirlfriend.group);
+            void gothGirlfriend.load();
+        }
         const decor = createGothHouseDecor(building);
         addWorldObject(decor);
         addChunkedRenderObject(decor);
@@ -1141,6 +1150,8 @@ export function createEnvironment(preserveSeed = false): void {
 }
 
 export function disposeWorld(): void {
+    gothGirlfriend?.dispose();
+    gothGirlfriend = null;
     if (!state.scene) return;
     const disposedGeometries = new Set<THREE.BufferGeometry>();
     const disposedMaterials = new Set<THREE.Material>();

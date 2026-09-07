@@ -1,7 +1,6 @@
 import { Euler } from 'three';
 import { state } from './state.js';
 import { onInputStarted, onInputEnded, enableTouchMode, endInput, isInputActive, touchMove } from './inputSession.js';
-import './mobile.css';
 
 interface Actions {
     keyDown(code: string): void;
