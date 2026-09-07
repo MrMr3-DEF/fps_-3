@@ -9,7 +9,7 @@ export interface CharacterConfig {
     styleExamples: { user: string; assistant: string }[];
 }
 export interface LoreChunk { source: string; title: string; text: string }
-export interface CharacterKnowledge { config: CharacterConfig; identity: string; behavior: string; chunks: LoreChunk[] }
+export interface CharacterKnowledge { config: CharacterConfig; systemPrompt: string; chunks: LoreChunk[] }
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
 export const PROMPT_BYTE_BUDGET = 3400;
 const encoder = new TextEncoder();
@@ -55,13 +55,11 @@ export function parseLore(source: string, markdown: string): LoreChunk[] {
     return chunks;
 }
 
-export function retrieveLore(chunks: LoreChunk[], query: string, recentUserMessage = ''): LoreChunk[] {
+export function retrieveLore(chunks: LoreChunk[], query: string): LoreChunk[] {
     const queryTerms = [...new Set(terms(query))];
-    // Follow-ups such as "why is that?" can inherit the previous question's topic.
-    const previousTerms = new Set(terms(recentUserMessage));
     const tokens = chunks.map(chunk => terms(`${chunk.title} ${chunk.title} ${chunk.text}`));
     const averageLength = tokens.reduce((sum, words) => sum + words.length, 0) / Math.max(1, chunks.length);
-    const allQueryTerms = new Set([...queryTerms, ...previousTerms]);
+    const allQueryTerms = new Set(queryTerms);
     const documentFrequency = new Map<string, number>();
     for (const words of tokens) for (const term of new Set(words)) {
         if (allQueryTerms.has(term)) documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1);
@@ -73,19 +71,17 @@ export function retrieveLore(chunks: LoreChunk[], query: string, recentUserMessa
             if (!frequency) continue;
             const documents = documentFrequency.get(term) ?? 0;
             const idf = Math.log(1 + (chunks.length - documents + 0.5) / (documents + 0.5));
-            const relevance = queryTerms.includes(term) ? 1 : 0.2;
-            score += relevance * idf * frequency * 2.2 / (frequency + 1.2 * (0.25 + 0.75 * words.length / Math.max(1, averageLength)));
+            score += idf * frequency * 2.2 / (frequency + 1.2 * (0.25 + 0.75 * words.length / Math.max(1, averageLength)));
         }
         return { index, score };
     });
     return scores.filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 3).map(item => chunks[item.index]);
 }
 
-export function buildCharacterPrompt(knowledge: CharacterKnowledge, history: ChatMessage[], userText: string): { messages: ChatMessage[]; sources: string[] } {
+export function buildCharacterPrompt(knowledge: CharacterKnowledge, userText: string): { messages: ChatMessage[]; sources: string[] } {
     const question = clipBytes(userText.trim(), 600);
-    const previousQuestion = history.filter(message => message.role === 'user').at(-1)?.content ?? '';
-    const retrieved = retrieveLore(knowledge.chunks, question, previousQuestion);
-    const system = `${knowledge.identity.trim()}\n\n${knowledge.behavior.trim()}`;
+    const retrieved = retrieveLore(knowledge.chunks, question);
+    const system = knowledge.systemPrompt.trim();
     const examples: ChatMessage[] = knowledge.config.styleExamples.flatMap(example => [
         { role: 'user' as const, content: example.user }, { role: 'assistant' as const, content: example.assistant },
     ]);
@@ -101,18 +97,7 @@ export function buildCharacterPrompt(knowledge: CharacterKnowledge, history: Cha
         factBudget -= byteLength(passage);
     }
     const current = `${facts ? `Facts from our world:${facts}\n\n` : ''}My message: ${question}`;
-    let remaining = PROMPT_BYTE_BUDGET - byteLength(system) - exampleBytes - byteLength(current);
-    const recent: ChatMessage[] = [];
-    // Keep complete turns in chronological order; never begin with an orphan assistant reply.
-    for (let i = history.length - 2; i >= 0; i -= 2) {
-        const pair = history.slice(i, i + 2);
-        if (pair[0]?.role !== 'user' || pair[1]?.role !== 'assistant') continue;
-        const cost = pair.reduce((sum, message) => sum + byteLength(message.content), 0);
-        if (cost > remaining || recent.length >= 6) break;
-        recent.unshift(...pair);
-        remaining -= cost;
-    }
-    return { messages: [{ role: 'system', content: system }, ...examples, ...recent, { role: 'user', content: current }], sources };
+    return { messages: [{ role: 'system', content: system }, ...examples, { role: 'user', content: current }], sources };
 }
 
 export function validateCharacterConfig(value: unknown): CharacterConfig {
@@ -139,11 +124,11 @@ export async function loadCharacterKnowledge(signal?: AbortSignal): Promise<Char
         if (byteLength(text) > 65536 || /^\s*<!doctype html/i.test(text)) throw new Error(`Check npc/goth/${file}: missing or larger than 64 KB.`);
         return text;
     };
-    const [configText, identity, behavior] = await Promise.all([read('character.json'), read('identity.md'), read('behavior.md')]);
+    const [configText, systemPrompt] = await Promise.all([read('character.json'), read('system.md')]);
     const config = validateCharacterConfig(JSON.parse(configText));
-    if (!identity.trim() || !behavior.trim() || byteLength(identity) > 1000 || byteLength(behavior) > 1100) {
-        throw new Error('Keep identity.md under 1,000 UTF-8 bytes and behavior.md under 1,100 bytes, and do not leave them empty. Short instructions help this small model.');
+    if (!systemPrompt.trim() || byteLength(systemPrompt) > 2100) {
+        throw new Error('Keep system.md under 2,100 UTF-8 bytes and do not leave it empty. Short instructions help this small model.');
     }
     const files = await Promise.all(config.knowledgeFiles.map(async file => parseLore(file, await read(file))));
-    return { config, identity, behavior, chunks: files.flat() };
+    return { config, systemPrompt, chunks: files.flat() };
 }

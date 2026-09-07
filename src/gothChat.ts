@@ -1,7 +1,7 @@
 import './gothChat.css';
 import { ChatConsent } from './gothChatConsent.js';
 import { ChatEscape } from './chatEscape.js';
-import { buildCharacterPrompt, byteLength, clipBytes, loadCharacterKnowledge, type CharacterKnowledge, type ChatMessage } from './gothKnowledge.js';
+import { buildCharacterPrompt, byteLength, loadCharacterKnowledge, type CharacterKnowledge } from './gothKnowledge.js';
 import type { GothChatEngine } from './gothChatEngine.js';
 
 interface ChatHooks {
@@ -10,7 +10,7 @@ interface ChatHooks {
     onReplyStart(): void;
 }
 
-/** Owns the conversation UI, consent gate, history and async request lifetime. */
+/** Owns the conversation UI, consent gate, transcript and async request lifetime. */
 export class GothChat {
     private panel: HTMLElement;
     private transcript: HTMLElement;
@@ -24,7 +24,6 @@ export class GothChat {
     private hooks: ChatHooks;
     private knowledge: CharacterKnowledge | null = null;
     private engine: GothChatEngine | null = null;
-    private history: ChatMessage[] = [];
     private epoch = 0;
     private fetchController: AbortController | null = null;
     private pending = false;
@@ -179,7 +178,6 @@ export class GothChat {
     reset(): void {
         this.close(false);
         this.cancelPending();
-        this.history = [];
         this.transcript.replaceChildren();
         this.greetingShown = false;
         this.input.value = '';
@@ -258,7 +256,7 @@ export class GothChat {
         if (!text) return;
         if (byteLength(text) > 600) { this.status.textContent = 'Please shorten your message a little so she can follow it.'; return; }
         const epoch = ++this.epoch;
-        const { messages } = buildCharacterPrompt(this.knowledge, this.history, text);
+        const { messages } = buildCharacterPrompt(this.knowledge, text);
         this.pending = true;
         this.input.value = '';
         this.message('user', text);
@@ -278,8 +276,6 @@ export class GothChat {
             if (epoch !== this.epoch) return;
             this.activeAnswer = null;
             answer.textContent = reply;
-            this.history.push({ role: 'user', content: clipBytes(text, 600) }, { role: 'assistant', content: reply });
-            this.history = this.history.slice(-12);
             this.setReady();
         } catch (error) {
             if (epoch !== this.epoch) return;

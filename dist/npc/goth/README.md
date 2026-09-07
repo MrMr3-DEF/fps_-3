@@ -4,14 +4,13 @@ These files define her character. You can edit them with any text editor. During
 
 | File | What to change |
 | --- | --- |
-| `identity.md` | Who she is, her relationship with the player, and her personality. Always included in every prompt. |
-| `behavior.md` | How she talks: tone, brevity, commanding manner, and how to handle unknown facts. Always included. |
+| `system.md` | The complete system prompt: who she is, her personality, and how she talks. Always included in every reply. |
 | `character.json` | UI name, opening line, example replies, model, temperature, reply length and the list of lore files. |
 | `lore/girlfriend.md` | Her home, interests and established relationship details. |
 | `lore/town.md` | Buildings, world background and places she knows. |
 | `lore/gameplay.md` | Controls and game mechanics she can explain. |
 
-She is currently unnamed: “Your girlfriend” is a UI label, not a personal name. You and she are already an adult couple. Her default tone is dry, goth, commanding and dominant. Change `identity.md` and `behavior.md` together when you want to change this.
+She is currently unnamed: “Your girlfriend” is a UI label, not a personal name. You and she are already an adult couple. Her default tone is dry, goth, commanding and dominant. Change `system.md` when you want to change this.
 
 ## Adding knowledge
 
@@ -26,13 +25,13 @@ The bell tower was sealed after the old bell cracked. Your girlfriend has heard 
 
 The above is an example of lore you could invent; it is not part of the current game. Write established facts clearly and distinguish rumors from facts. Files listed in the JSON manifest are the only lore files loaded. Names may contain letters, digits, underscores and hyphens.
 
-The retriever ranks passages by words shared with the current question, with a smaller contribution from the previous question for follow-ups. It adds up to three passages that fit the prompt budget. This is lexical RAG, not embedding search. Descriptive headings, recognizable place names and explicit facts help it find the right passages. Keep one game mechanic per section: listing five different keys in one passage made the tiny model confuse the controls during testing. Expand **Conversation notes** after a reply to see what was selected.
+The retriever ranks passages by words shared with the current question only. It adds up to three passages that fit the prompt budget. This is lexical RAG, not embedding search. Descriptive headings, recognizable place names and explicit facts help it find the right passages. Keep one game mechanic per section: listing five different keys in one passage made the tiny model confuse the controls during testing. Expand **Conversation notes** after a reply to see what was selected.
 
 ## Keeping a tiny model focused
 
-Identity is limited to 1,000 UTF-8 bytes, behavior to 1,100 bytes. Lore files can each be up to 64 KB; up to 32 files can be listed. Keep individual topics short. Long lore sections are split into passages automatically.
+The system prompt is limited to 2,100 UTF-8 bytes. Lore files can each be up to 64 KB; up to 32 files can be listed. Keep individual topics short. Long lore sections are split into passages automatically.
 
-A prompt contains identity + behavior + up to two example conversations + recent complete conversation turns + your latest message with retrieved facts beside it. Optional example replies in `styleExamples` can establish her voice. The default is an empty list: in testing, this 360M model sometimes copied an example instead of answering the new question. Add examples cautiously. Each example allows up to 100 UTF-8 bytes for the user line and 160 bytes for her reply. Prompt content is bounded to 3,400 UTF-8 bytes, leaving room for ChatML framing and the reply in a 4,096-token context. User input sent to the model is limited to 600 UTF-8 bytes (the input field also has a 400-character limit). Recent turns are dropped when they do not fit. This is short-term conversation context, not permanent memory.
+A prompt contains the system prompt + up to two example conversations + your latest message with retrieved facts beside it. Optional example replies in `styleExamples` can establish her voice. The default is an empty list: in testing, this 360M model sometimes copied an example instead of answering the new question. Add examples cautiously. Each example allows up to 100 UTF-8 bytes for the user line and 160 bytes for her reply. Prompt content is bounded to 3,400 UTF-8 bytes, leaving room for ChatML framing and the reply in a 4,096-token context. User input sent to the model is limited to 600 UTF-8 bytes (the input field also has a 400-character limit). Each message is independent: no previous user messages or replies are sent to the model, and lore retrieval uses only the current message. The engine resets its chat before each reply. Visible bubbles remain for the player to read.
 
 `temperature` controls variation: a lower value is usually more consistent, a higher value more varied. It cannot fix reasoning errors. `maxReplyTokens` controls the maximum generated length; the default is 160 and supported values are 32–192. She is prompted to use one or two sentences.
 
@@ -42,7 +41,7 @@ The 360M model can still misunderstand questions, forget instructions, invent de
 
 The default model is `SmolLM2-360M-Instruct-q0f16-MLC` from WebLLM's built-in catalog. `q0` means unquantized weights; `f16` means 16-bit floating point. It runs in a browser worker using WebGPU. After approval, the browser downloads model assets from Hugging Face and MLC's model-library host and caches them for later use. The model repository totals about 727 MB; the notice rounds this to roughly 730 MB. GPU memory use is separate: WebLLM estimates about 872 MB for this model, before the game and other browser work.
 
-Chat messages are not sent to an AI server. They and the recent conversation stay in this page's memory. Refreshing, resetting the conversation, or leaving/rebuilding the world clears the conversation. Closing the panel keeps completed turns for reopening during the same world. Model files can remain in the browser cache. These character files are public website assets: visitors can read them.
+Chat messages are not sent to an AI server. The visible transcript stays in this page's memory but is never included in subsequent model requests. Refreshing, resetting the conversation, or leaving/rebuilding the world clears the conversation. Closing the panel keeps completed turns for reopening during the same world. Model files can remain in the browser cache. These character files are public website assets: visitors can read them.
 
 Use HTTPS or `localhost`, and a WebGPU-capable browser/GPU. Both f16 builds require `shader-f16`. If the UI reports that it is missing, change `modelId` to `SmolLM2-360M-Instruct-q4f32_1-MLC` and refresh the page. That fallback uses 4-bit weights and 32-bit computation, with an estimated 580 MB of GPU memory. There is no automatic model switch or cloud fallback.
 
@@ -56,7 +55,7 @@ Use HTTPS or `localhost`, and a WebGPU-capable browser/GPU. Both f16 builds requ
 
 F opens the panel and plays a wave. On the first generated text of each reply, a talking gesture is queued; if the wave is still playing, it finishes first. Talking gestures are Explain, Shrug or Agree, with no consecutive repeat. The opening line is editable scripted text; subsequent answers come from WebLLM. This first version is typed dialogue and does not synthesize audio.
 
-Closing while loading or generating terminates that worker and discards the unfinished turn from model history. An idle loaded engine is kept for reopening. A new reply is never run concurrently with an existing reply. All model output is rendered as plain text, not executable HTML.
+Closing while loading or generating terminates that worker and interrupts the unfinished reply. An idle loaded engine is kept for reopening. A new reply is never run concurrently with an existing reply. All model output is rendered as plain text, not executable HTML.
 
 For direct testing, open `/tests/goth-chat-preview.html` on the Vite server. It uses the actual character, town, chat UI, retriever and WebLLM model. It avoids requiring pointer lock to reach the character and is excluded from the production build.
 
