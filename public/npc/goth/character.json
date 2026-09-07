@@ -2,8 +2,8 @@
   "name": "Your girlfriend",
   "greeting": "There you are. Come closer. You can spare your girlfriend a minute.",
   "modelId": "SmolLM2-360M-Instruct-q0f16-MLC",
-  "temperature": 0.45,
-  "maxReplyTokens": 96,
+  "temperature": 0.25,
+  "maxReplyTokens": 160,
   "knowledgeFiles": [
     "lore/girlfriend.md",
     "lore/town.md",

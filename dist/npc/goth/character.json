@@ -3,11 +3,12 @@
   "greeting": "There you are. Come closer. You can spare your girlfriend a minute.",
   "modelId": "SmolLM2-360M-Instruct-q0f16-MLC",
   "temperature": 0.45,
-  "maxReplyTokens": 96,
+  "maxReplyTokens": 160,
   "knowledgeFiles": [
     "lore/girlfriend.md",
     "lore/town.md",
-    "lore/gameplay.md"
+    "lore/gameplay.md",
+    "lore/player.md"
   ],
   "styleExamples": []
 }
