@@ -5,7 +5,6 @@
   "temperature": 0.3,
   "maxReplyTokens": 160,
   "knowledgeFiles": [
-    "lore/girlfriend.md",
     "lore/town.md",
     "lore/gameplay.md",
     "lore/player.md"
