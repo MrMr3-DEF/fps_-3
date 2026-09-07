@@ -25,6 +25,7 @@ import {
 } from './config.js';
 import { SpatialHash } from './spatialHash.js';
 import { obstacleData, targetData } from './userDataTypes.js';
+import { createGothHouseDecor } from './gothHouse.js';
 import { createTownBoxes, generateTownLayout, getTownPavingOutline, overlapsTown, type TownMaterial } from './town.js';
 
 const obstacleHash = new SpatialHash<THREE.Object3D>(32);
@@ -1071,11 +1072,18 @@ function createEnemies(): void {
 }
 
 function createTown(): void {
-    const boxes = createTownBoxes(generateTownLayout(worldSeed));
+    const buildings = generateTownLayout(worldSeed);
+    const boxes = createTownBoxes(buildings);
+    for (const building of buildings.filter(b => b.name === 'goth house')) {
+        const decor = createGothHouseDecor(building);
+        addWorldObject(decor);
+        addChunkedRenderObject(decor);
+    }
     const colors: Record<TownMaterial, number> = {
         stone: 0x727a80, trim: 0xc6bca5, roof: 0x995940, door: 0x654531,
         window: 0x273c46, road: 0xb9ac8e, plaza: 0x8e9076,
         plaster0: 0xd5bd93, plaster1: 0xb9c2b2, plaster2: 0xc6997c, water: 0x2a9ab5,
+        gothStone: 0x36313f, gothTrim: 0x797180, gothRoof: 0x34243f,
     };
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const colliderMaterial = new THREE.MeshBasicMaterial();

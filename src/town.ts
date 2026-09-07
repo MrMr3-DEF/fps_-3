@@ -2,6 +2,7 @@ import { TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS, TOWN_GATE_WIDTH,
 
 export interface TownBuilding {
     kind: 'house' | 'church';
+    name?: 'goth house';
     x: number;
     z: number;
     width: number;
@@ -14,7 +15,7 @@ export interface TownBuilding {
 
 /** Building centers are clear of furniture; face the open doorway on arrival. */
 export function getTownSpawn(seed: number, kind: 'house' | 'church', houseSlot = 0) {
-    const buildings = generateTownLayout(seed).filter(building => building.kind === kind);
+    const buildings = generateTownLayout(seed).filter(building => building.kind === kind && (kind !== 'house' || !building.name));
     const building = buildings[kind === 'church' ? 0 : houseSlot];
     if (!building) throw new RangeError('Invalid town spawn house slot');
     const yaw = building.doorAxis === 'x'
@@ -61,6 +62,10 @@ export function generateTownLayout(seed: number): TownBuilding[] {
     church.kind = 'church';
     church.height = 18;
     church.palette = 0;
+    const houses = buildings.filter(b => b.kind === 'house');
+    const goth = houses[Math.floor(random() * houses.length)];
+    goth.name = 'goth house';
+    goth.height = 16;
     return buildings;
 }
 
@@ -70,7 +75,7 @@ export function overlapsTown(x: number, z: number, radius: number): boolean {
     return Math.abs(x) < edge + radius && Math.abs(z) < edge + radius;
 }
 
-export type TownMaterial = 'stone' | 'trim' | 'roof' | 'door' | 'window' | 'road' | 'plaza' | 'plaster0' | 'plaster1' | 'plaster2' | 'water';
+export type TownMaterial = 'stone' | 'trim' | 'roof' | 'door' | 'window' | 'road' | 'plaza' | 'plaster0' | 'plaster1' | 'plaster2' | 'water' | 'gothStone' | 'gothTrim' | 'gothRoof';
 export interface TownBox {
     x: number; y: number; z: number;
     width: number; height: number; depth: number;
@@ -251,7 +256,8 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
                 doorAxis === 'x' ? pd : pw, ph, doorAxis === 'x' ? pw : pd, material, collides, kind);
         };
         const isChurch = building.kind === 'church';
-        const plaster: TownMaterial = isChurch ? 'trim' : `plaster${building.palette}` as TownMaterial;
+        const isGoth = building.name === 'goth house';
+        const plaster: TownMaterial = isGoth ? 'gothStone' : isChurch ? 'trim' : `plaster${building.palette}` as TownMaterial;
         const thickness = 0.7;
         const doorway = 4.8;
         const doorHeight = 4.8;
@@ -268,9 +274,24 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
             part(side * (insideWidth + doorway) / 4, wallTop / 2, front, (insideWidth - doorway) / 2, wallTop, thickness, plaster, true, 'building');
         }
         part(0, (wallTop + doorHeight) / 2, front, doorway, wallTop - doorHeight, thickness, plaster, true, 'building');
-        part(0, h - 0.35, 0, w + 0.5, 0.7, d + 0.5, 'roof', true, 'building');
+        part(0, h - 0.35, 0, w + 0.5, 0.7, d + 0.5, isGoth ? 'gothRoof' : 'roof', true, 'building');
+        if (isGoth) {
+            // Solid layered gable: every visible roof tier has matching collision.
+            for (let tier = 0; tier < 12; tier++) {
+                part(0, h + tier * 0.55 + 0.275, 0, w * (1 - tier / 12), 0.55, d, 'gothRoof', true, 'building');
+            }
+            // Corner buttresses and tall square pinnacles stay inside the plot.
+            for (const side of [-1, 1]) for (const end of [-1, 1]) {
+                part(side * (w / 2 - 0.7), (h + 2) / 2, end * (d / 2 - 0.7), 1.7, h + 2, 1.7, 'gothTrim', true, 'building');
+            }
+            // A long runner, writing desk, coffin-shaped bed base and fireplace.
+            part(0, 0.015, 0, 2.8, 0.03, d - 5, 'gothRoof');
+            part(-w / 2 + 2.4, 0.7, doorSide * (d / 2 - 3.4), 2.7, 1.4, 4, 'gothRoof', true);
+            part(w / 2 - 2.4, 0.85, doorSide * (d / 2 - 3), 2.5, 1.7, 3, 'door', true);
+            part(0, 1.8, doorSide * (d / 2 - 1.1), 4.5, 3.6, 0.8, 'gothTrim', true);
+        }
         // Frames on side/back walls read as shuttered windows inside and outside.
-        for (const side of [-1, 1]) {
+        if (!isGoth) for (const side of [-1, 1]) {
             for (const offset of [-d * 0.28, d * 0.28]) {
                 part(side * (w / 2 + 0.025), h * 0.64, offset, 0.05, 3, 2.5, 'trim');
                 part(side * (w / 2 + 0.055), h * 0.64, offset, 0.03, 2.4, 1.8, 'window');
@@ -319,7 +340,7 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
             const altarWall = doorSide * (d / 2 - thickness - 0.04);
             part(0, 6, altarWall, 0.6, 4, 0.08, 'door');
             part(0, 7, altarWall, 2.6, 0.6, 0.08, 'door');
-        } else {
+        } else if (!isGoth) {
             part(-w / 2 + 2.5, 0.9, doorSide * (d / 2 - 2.5), 2.5, 1.8, 2.5, 'door', true);
             part(w / 2 - 2, 0.55, doorSide * (d / 2 - 3.5), 1.5, 1.1, 4, 'door', true);
         }

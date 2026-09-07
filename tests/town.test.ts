@@ -125,7 +125,7 @@ test('walls, roofs and doorways share real grapple and projectile broad-phase ge
     assert.equal(doorRay.intersectObjects(queryGrappleSurfacesAlongSegment(0, 80, 0, 110), false).length, 0);
     updateEnvironmentVisibility(new THREE.Vector3(0, 0, 0), 1);
     const townMeshes = state.scene!.children.filter(o => o.name.startsWith('town-') && (o as THREE.InstancedMesh).isInstancedMesh) as THREE.InstancedMesh[];
-    assert.equal(townMeshes.length, 11);
+    assert.equal(townMeshes.length, 14);
     assert.ok(townMeshes.every(mesh => mesh.count > 0));
     updateEnvironmentVisibility(new THREE.Vector3(900, 0, 900), 1);
     assert.ok(townMeshes.filter(mesh => !mesh.name.startsWith('town-ground-')).every(mesh => mesh.count === 0));
@@ -170,7 +170,7 @@ test('players enter and exit every doorway without teleporting onto the roof', (
 
 test('ceilings and lintels stop upward motion, rooftops support landings and walls stop fast grapples', () => {
     setup();
-    const b = generateTownLayout(42).find(b => b.kind === 'house')!;
+    const b = generateTownLayout(42).find(b => b.kind === 'house' && !b.name)!;
     player(b.x, 2, b.z, 0, 164);
     let highest = 2;
     for (let i = 0; i < 40; i++) {
@@ -205,7 +205,7 @@ test('ceilings and lintels stop upward motion, rooftops support landings and wal
 
 test('roof edges catch diagonal falls and release support immediately on walking off', () => {
     setup();
-    const b = generateTownLayout(42).find(b => b.kind === 'house')!;
+    const b = generateTownLayout(42).find(b => b.kind === 'house' && !b.name)!;
     const edge = b.x + b.width / 2 + 0.25 + PLAYER_RADIUS;
     player(edge + 0.05, b.height + PLAYER_HEIGHT + 0.1, b.z, -50, -50);
     updatePlayerPhysics(0.01);
@@ -230,7 +230,7 @@ test('swept bullets stop at town walls and ceilings, but travel through open gat
     };
     assert.equal(shoot(new THREE.Vector3(30, 2, 82), new THREE.Vector3(0, 0, 1), .05), 0);
     assert.equal(shoot(new THREE.Vector3(0, 2, 82), new THREE.Vector3(0, 0, 1), .05), 1);
-    const b = generateTownLayout(42).find(b => b.kind === 'house')!;
+    const b = generateTownLayout(42).find(b => b.kind === 'house' && !b.name)!;
     assert.equal(shoot(new THREE.Vector3(b.x, 2, b.z), new THREE.Vector3(0, 1, 0), .05), 0);
     const start = new THREE.Vector3(b.x, 2, b.z);
     start[b.doorAxis] -= b.doorSide * ((b.doorAxis === 'x' ? b.width : b.depth) / 2 + 3);
@@ -372,8 +372,8 @@ test('players can walk the entire stair ascent to the rampart and back down with
 test('roof slabs have eaves and sit above the shell without coplanar exterior faces', () => {
     for (const seed of [0, 1, 42, 0xffffffff]) for (const building of generateTownLayout(seed)) {
         const boxes = createTownBoxes([building]);
-        const shell = boxes.filter(b => b.kind === 'building' && b.material !== 'roof');
-        const roof = boxes.find(b => b.kind === 'building' && b.material === 'roof')!;
+        const shell = boxes.filter(b => b.kind === 'building' && !['roof', 'gothRoof', 'gothTrim'].includes(b.material));
+        const roof = boxes.find(b => b.kind === 'building' && (b.material === 'roof' || b.material === 'gothRoof'))!;
         assert.ok(roof.width > building.width && roof.depth > building.depth);
         for (const wall of shell) assert.ok(wall.y + wall.height / 2 <= roof.y - roof.height / 2 + 1e-8);
         // Different outward materials must never share overlapping face area.
@@ -495,7 +495,7 @@ test('the central well is identical across seeds and leaves plaza detours clear'
 test('house spawns are distinct and every house/church spawn faces a clear exit across 1,000 seeds', () => {
     for (let seed = 0; seed < 1000; seed++) {
         const buildings = generateTownLayout(seed);
-        const houses = buildings.filter(b => b.kind === 'house');
+        const houses = buildings.filter(b => b.kind === 'house' && !b.name);
         assert.ok(houses.length >= MAX_PLAYERS);
         const positions = new Set<string>();
         for (let slot = 0; slot < MAX_PLAYERS; slot++) {
@@ -506,7 +506,7 @@ test('house spawns are distinct and every house/church spawn faces a clear exit 
         }
         assert.equal(positions.size, MAX_PLAYERS);
         // Existing geometry tests verify that the center-to-door path is clear.
-        for (const b of buildings) {
+        for (const b of buildings.filter(b => !b.name)) {
             const spawn = getTownSpawn(seed, b.kind, houses.indexOf(b));
             assert.equal(spawn.x, b.x);
             assert.equal(spawn.z, b.z);
@@ -549,5 +549,47 @@ test('fresh house spawns and repeated church respawns restore the player and all
             assert.ok(distance > (b.doorAxis === 'x' ? b.width : b.depth) / 2 + 1, 'walked outside the doorway');
         }
         disposeWorld();
+    }
+});
+
+test('each seed has one named goth house, clear access and five distinct ordinary spawn houses', () => {
+    const locations = new Set<string>();
+    for (let seed = 0; seed < 1000; seed++) {
+        const buildings = generateTownLayout(seed);
+        const gothic = buildings.filter(b => b.name === 'goth house');
+        assert.equal(gothic.length, 1);
+        const goth = gothic[0];
+        assert.equal(goth.kind, 'house');
+        assert.equal(buildings.filter(b => b.kind === 'house' && !b.name).length, 6);
+        locations.add(`${goth.x},${goth.z}`);
+        for (let slot = 0; slot < MAX_PLAYERS; slot++) {
+            const spawn = getTownSpawn(seed, 'house', slot);
+            assert.ok(spawn.x !== goth.x || spawn.z !== goth.z, 'special house is excluded from MP spawns');
+        }
+    }
+    assert.ok(locations.size > 900);
+    for (const seed of [0, 1, 42, 0xffffffff]) {
+        setup(seed);
+        const goth = generateTownLayout(seed).find(b => b.name === 'goth house')!;
+        const decor = state.scene!.getObjectByName('goth house')!;
+        assert.ok(decor);
+        assert.ok(decor.children.length <= 7, 'ornaments are batched by material');
+        const axes = new THREE.Vector3(0, 0, 0);
+        const localGeometries: THREE.BufferGeometry[] = [];
+        decor.traverse(o => {
+            if (!(o instanceof THREE.Mesh)) return;
+            o.geometry.computeBoundingBox();
+            assert.ok(o.geometry.boundingBox!.getSize(axes).length() > 0);
+            localGeometries.push(o.geometry);
+        });
+        let disposed = 0;
+        localGeometries.forEach(geometry => geometry.addEventListener('dispose', () => disposed++));
+        player(goth.x, PLAYER_HEIGHT, goth.z);
+        for (let frame = 0; frame < 30; frame++) updatePlayerPhysics(1 / 60);
+        assert.equal(state.camera!.position.y, PLAYER_HEIGHT);
+        const roof = state.obstacles.filter(o => o.name === 'town-building' && Math.abs(o.position.x - goth.x) < .01 && Math.abs(o.position.z - goth.z) < .01);
+        assert.ok(roof.some(o => o.userData.height === 0.55), 'tiered roof has physical geometry');
+        disposeWorld();
+        assert.equal(disposed, localGeometries.length);
     }
 });

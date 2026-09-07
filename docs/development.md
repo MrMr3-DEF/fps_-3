@@ -141,3 +141,5 @@ Ground-paving regression checks cover non-overlapping tiles and exact paved area
 Straight-ascent/well validation adds actual walking-input tests at 20–240 FPS plus variable frame times, near-limit step heights, gate clearance, deterministic well geometry, and safe spawn/detour checks. The Well viewer button shows the fixed central prop.
 
 Town spawn regression checks cover distinct houses and doorway orientation across 1,000 seeds, walking out after initial spawn and repeated church respawns, host-assigned house slots, departure/replacement, and rejection of invalid or duplicate snapshots. The development town viewer includes House spawn and Death respawn views using the real spawn placement helper.
+
+The town viewer has Goth house and Goth interior views. Regression checks verify one goth house across 1,000 seeds, exclusion from player house assignments, clear interiors, roof collision and disposal of merged ornament geometry.

@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><title>Town visual regression viewer</title>
 <style>body{margin:0;background:#d0dbf0;font:14px system-ui}canvas{display:block}nav{position:fixed;top:12px;left:12px;background:#18222ee8;color:white;padding:12px;border-radius:8px}button,input{padding:7px;margin:3px}#info{margin-top:8px}</style>
-<nav><label>Seed <input id="seed" type="number" value="42" style="width:100px"></label><button id="rebuild">Rebuild</button><button id="aerial">Aerial</button><button id="street">Street</button><button id="door">Doorway</button><button id="interior">Interior</button><button id="roof">Rooftop</button><button id="church">Church</button><button id="nave">Church interior</button><button id="rampart">Rampart</button><button id="stairs">Stairs</button><button id="lookout">Lookout</button><button id="motion">Roof motion</button><button id="ground-motion">Ground motion</button><button id="well">Well</button><button id="house-spawn">House spawn</button><button id="death-spawn">Death respawn</button><div id="info"></div></nav>
+<nav><label>Seed <input id="seed" type="number" value="42" style="width:100px"></label><button id="rebuild">Rebuild</button><button id="aerial">Aerial</button><button id="street">Street</button><button id="door">Doorway</button><button id="interior">Interior</button><button id="roof">Rooftop</button><button id="church">Church</button><button id="nave">Church interior</button><button id="rampart">Rampart</button><button id="stairs">Stairs</button><button id="lookout">Lookout</button><button id="motion">Roof motion</button><button id="ground-motion">Ground motion</button><button id="goth">Goth house</button><button id="goth-interior">Goth interior</button><button id="well">Well</button><button id="house-spawn">House spawn</button><button id="death-spawn">Death respawn</button><div id="info"></div></nav>
 <script type="module">
 import * as THREE from 'three';
 import {state} from '/src/state.ts';
@@ -14,6 +14,7 @@ state.camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,1500);stat
 const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(devicePixelRatio);renderer.setSize(innerWidth,innerHeight);document.body.append(renderer.domElement);
 let buildings;let moving=false;let motionMode='roof';function view(name){moving=false;const b=buildings[0],side=b.doorSide,axis=b.doorAxis;
 if(name==='house-spawn'||name==='death-spawn')placePlayerAtTownSpawn(Number(document.querySelector('#seed').value),name==='house-spawn'?'house':'church');
+if(name==='goth'||name==='goth-interior'){const g=buildings.find(b=>b.name==='goth house');state.camera.position.set(g.x, name==='goth'?12:2, g.z);state.camera.position[g.doorAxis]-=g.doorSide*(name==='goth'?38:8);state.camera.lookAt(g.x,name==='goth'?11:3.5,g.z);}
 if(name==='aerial'){state.camera.position.set(160,165,195);state.camera.lookAt(0,0,0);}
 if(name==='rampart'){state.camera.position.set(90,72,35);state.camera.lookAt(90,73,-90);}
 if(name==='stairs'){state.camera.position.set(-48,35,82);state.camera.lookAt(-80,35,40);}
@@ -27,7 +28,7 @@ if(name==='nave'){const c=buildings.find(b=>b.kind==='church');state.camera.posi
 if(name==='roof'){state.camera.position.set(b.x,b.height+2,b.z);state.camera.lookAt(0,18,0);}
 updateEnvironmentVisibility(state.camera.position,2);renderer.render(state.scene,state.camera);document.querySelector('#info').textContent=`${name} · ${buildings.length} buildings · ${renderer.info.render.calls} draw calls · ${renderer.info.render.triangles.toLocaleString()} triangles`;}
 function rebuild(){rebuildEnvironmentWithSeed(Number(document.querySelector('#seed').value));buildings=generateTownLayout(Number(document.querySelector('#seed').value));view('aerial');}
-for(const name of ['aerial','street','door','interior','roof','church','nave','rampart','stairs','lookout','well','house-spawn','death-spawn'])document.getElementById(name).onclick=()=>view(name);document.getElementById('rebuild').onclick=rebuild;
+for(const name of ['aerial','street','door','interior','roof','church','nave','rampart','stairs','lookout','goth','goth-interior','well','house-spawn','death-spawn'])document.getElementById(name).onclick=()=>view(name);document.getElementById('rebuild').onclick=rebuild;
 document.getElementById('motion').onclick=()=>{moving=true;motionMode='roof';};
 document.getElementById('ground-motion').onclick=()=>{moving=true;motionMode='ground';};
 function animate(time){requestAnimationFrame(animate);if(!moving)return;const b=buildings.find(b=>b.kind==='house');const angle=time*.0003;if(motionMode==='ground'){state.camera.position.set(Math.cos(angle)*60,2+Math.sin(angle*.5)**2*75,Math.sin(angle)*60);state.camera.lookAt(0,0,0);}else{state.camera.position.set(b.x+Math.cos(angle)*22,b.height+1+Math.sin(angle*2)*2,b.z+Math.sin(angle)*22);state.camera.lookAt(b.x,b.height-.5,b.z);}updateEnvironmentVisibility(state.camera.position,2);renderer.render(state.scene,state.camera);document.querySelector('#info').textContent=`Moving ${motionMode} inspection · select another view to stop`;}requestAnimationFrame(animate);
