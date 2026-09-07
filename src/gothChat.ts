@@ -12,6 +12,7 @@ interface ChatHooks {
 
 /** Owns the conversation UI, consent gate, transcript and async request lifetime. */
 export class GothChat {
+    private openingKey: string | null = null;
     private panel: HTMLElement;
     private transcript: HTMLElement;
     private input: HTMLInputElement;
@@ -46,8 +47,8 @@ export class GothChat {
                 <h2 id="goth-chat-notice-title">A little about the AI</h2>
                 <p>You’re talking to a fictional character powered by AI. Her replies are generated, can be inaccurate or inappropriate, and are not professional advice.</p>
                 <ul>
-                    <li><strong>Runs on your device.</strong> Chat text is processed locally with <a href="https://webllm.mlc.ai/" target="_blank" rel="noopener noreferrer">WebLLM</a> and SmolLM2. This chat does not send your messages to an AI service.</li>
-                    <li><strong>A download on first use.</strong> Enabling chat downloads model files (roughly 730 MB with the default model) from Hugging Face and MLC’s hosting. These hosts receive normal connection information, such as your IP address. Running the model uses your device’s GPU and memory.</li>
+                    <li><strong>Runs on your device.</strong> Chat text is processed locally with <a href="https://webllm.mlc.ai/" target="_blank" rel="noopener noreferrer">WebLLM</a> and a local language model. This chat does not send your messages to an AI service.</li>
+                    <li><strong>A download on first use.</strong> Enabling chat downloads model files (roughly 1.1 GB with the default Qwen3.5 2B model) from Hugging Face and MLC’s hosting. These hosts receive normal connection information, such as your IP address. Running the model uses your device’s GPU and memory.</li>
                     <li><strong>You control when it starts.</strong> Messages stay in this page’s memory and clear when you refresh or leave the world. Model files may remain cached. Approval is saved in this browser; clearing site data removes it.</li>
                 </ul>
                 <p class="goth-chat-legal">Site information: <a href="https://luigismansion.de/impressum" target="_blank" rel="noopener noreferrer">Impressum</a> · <a href="https://luigismansion.de/datenschutz" target="_blank" rel="noopener noreferrer">Datenschutz</a></p>
@@ -78,6 +79,12 @@ export class GothChat {
         // Capture before the game's document/window handlers, including when the log has focus.
         window.addEventListener('keydown', event => this.handleKey(event), true);
         window.addEventListener('keyup', event => {
+            if (event.code === this.openingKey) {
+                this.openingKey = null;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                return;
+            }
             if (this.escape.handle(event, this.opened, () => this.close(true))) return;
             if (this.opened) event.stopImmediatePropagation();
         }, true);
@@ -98,6 +105,7 @@ export class GothChat {
         if (this.escape.handle(event, this.opened, () => this.close(true))) return;
         if (!this.opened) return;
         event.stopImmediatePropagation();
+        if (event.code === this.openingKey) { event.preventDefault(); return; }
         if (event.isComposing || event.keyCode === 229) return;
         if (!this.consent.approved) {
             if (event.key === 'Tab') this.trapFocus(event, this.notice);
@@ -128,8 +136,11 @@ export class GothChat {
         focusable[next]?.focus();
     }
 
-    open(): void {
+    open(trigger?: { code: string; preventDefault?: () => void }): void {
         if (this.opened) return;
+        // Focus changes during keydown must not insert the interaction key.
+        trigger?.preventDefault?.();
+        this.openingKey = trigger?.code ?? null;
         this.opened = true;
         this.panel.hidden = false;
         document.body.classList.add('goth-chat-open');

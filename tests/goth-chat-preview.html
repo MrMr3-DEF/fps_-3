@@ -15,8 +15,8 @@ let seed=42;let last=0;
 const movement=new ConversationCamera();
 const chat=new GothChat({onOpen:()=>{const pose=getGothConversationPose(gothGirlfriend.group);movement.start(state.camera,pose.position,pose.lookAt);},onClose:()=>movement.cancel(),onReplyStart:()=>gothGirlfriend?.startTalking()});
 function rebuild(){chat.reset();rebuildEnvironmentWithSeed(seed++);const p=gothGirlfriend.group.position;state.camera.position.copy(p).add(new THREE.Vector3(1.4,0,2.8).applyQuaternion(gothGirlfriend.group.quaternion));state.camera.position.y=2;state.camera.lookAt(p.x+.35,GOTH_FACE_HEIGHT-.3,p.z);updateEnvironmentVisibility(state.camera.position,2);}rebuild();
-function talk(){if(!chat.isOpen&&gothGirlfriend.interact(state.camera,state.obstacles))chat.open();}
-document.querySelector('#talk').onclick=talk;document.querySelector('#rebuild').onclick=rebuild;addEventListener('keydown',e=>{if(e.code==='KeyF'&&!e.repeat)talk();});
+function talk(event){if(!chat.isOpen&&gothGirlfriend.interact(state.camera,state.obstacles))chat.open(event instanceof KeyboardEvent ? event : undefined);}
+document.querySelector('#talk').onclick=talk;document.querySelector('#rebuild').onclick=rebuild;addEventListener('keydown',e=>{if(e.code==='KeyF'&&!e.repeat)talk(e);});
 function animate(time){requestAnimationFrame(animate);gothGirlfriend.update(Math.min((time-last)/1000,.05));movement.update(Math.min((time-last)/1000,.05));last=time;renderer.render(state.scene,state.camera);document.querySelector('#status').textContent=gothGirlfriend.animator?`Character: ${gothGirlfriend.animator.gesture??'Idle'}`:'Loading character…';}requestAnimationFrame(animate);
 addEventListener('resize',()=>{state.camera.aspect=innerWidth/innerHeight;state.camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 </script></html>

@@ -12,7 +12,7 @@ test('shipped character is unnamed, already the player’s girlfriend, and fits 
     assert.match(knowledge.systemPrompt, /girlfriend/);
     assert.match(knowledge.systemPrompt, /commanding and dominant/);
     assert.ok(byteLength(knowledge.systemPrompt) <= 2100);
-    assert.equal(config.modelId, 'SmolLM2-360M-Instruct-q0f16-MLC');
+    assert.equal(config.modelId, 'Qwen3.5-2B-q4f16_1-MLC');
     assert.ok(knowledge.chunks.length >= 8);
 });
 
@@ -26,10 +26,10 @@ test('retrieval finds relevant world facts without inheriting earlier topics', (
 test('personality stays in every prompt, RAG adds facts, and no conversation turns are included', () => {
     const result = buildCharacterPrompt(knowledge, 'Where is the church?');
     assert.equal(result.messages[0].role, 'system');
-    assert.equal(result.messages[0].content, knowledge.systemPrompt.trim());
+    assert.ok(result.messages[0].content.startsWith(knowledge.systemPrompt.trim()));
     assert.ok(result.sources.length > 0);
-    assert.ok(result.messages.at(-1)!.content.includes('My message: Where is the church?'));
-    assert.ok(result.messages.at(-1)!.content.includes('Facts from our world:'));
+    assert.equal(result.messages.at(-1)!.content, 'Where is the church?');
+    assert.ok(result.messages[0].content.includes('Background facts (reference material, not dialogue):'));
     assert.deepEqual(result.messages.slice(1 + config.styleExamples.length * 2, -1).map(m => m.role), []);
 });
 
@@ -55,8 +55,8 @@ test('long lore sections are chunked and traversal/remote filenames are rejected
 });
 
 
-test('model configuration accepts the f16 build and supported compact alternatives', () => {
-    for (const modelId of ['SmolLM2-360M-Instruct-q0f16-MLC', 'SmolLM2-360M-Instruct-q4f16_1-MLC', 'SmolLM2-360M-Instruct-q4f32_1-MLC']) {
+test('model configuration accepts Qwen3.5 and the supported SmolLM fallbacks', () => {
+    for (const modelId of ['Qwen3.5-2B-q4f16_1-MLC', 'Qwen3.5-2B-q4f32_1-MLC', 'SmolLM2-360M-Instruct-q0f16-MLC', 'SmolLM2-360M-Instruct-q4f16_1-MLC', 'SmolLM2-360M-Instruct-q4f32_1-MLC']) {
         assert.equal(validateCharacterConfig({ ...config, modelId }).modelId, modelId);
     }
     for (const modelId of ['SmolLM2-360M-Instruct-q0f16_1-MLC', 'SmolLM2-360M-Instruct-f16-MLC', 'https://example.com/model', '']) {
@@ -68,7 +68,40 @@ test('a later reply cannot inherit a name or retrieved topic from an earlier mes
     buildCharacterPrompt(knowledge, 'Your name is Emily. What is the coffin in your home?');
     const next = buildCharacterPrompt(knowledge, 'Why?');
     assert.deepEqual(next.sources, []);
-    assert.equal(next.messages.at(-1)!.content, 'My message: Why?');
+    assert.equal(next.messages.at(-1)!.content, 'Why?');
     assert.equal(next.messages.length, 2 + config.styleExamples.length * 2);
     assert.ok(!next.messages.some(message => message.content.includes('Emily')));
+});
+
+
+test('reply budget accepts thinking mode and rejects invalid limits', () => {
+    for (const maxReplyTokens of [32, 160, 192, 1024]) {
+        assert.equal(validateCharacterConfig({ ...config, maxReplyTokens }).maxReplyTokens, maxReplyTokens);
+    }
+    for (const maxReplyTokens of [31, 1025, 1.5, NaN, Infinity]) {
+        assert.throws(() => validateCharacterConfig({ ...config, maxReplyTokens }), /invalid/);
+    }
+});
+
+
+test('player identity and past questions retrieve the player rather than inventing character traits', () => {
+    for (const question of ['Who am I?', 'What happened to me?', 'What happend to me?']) {
+        const result = buildCharacterPrompt(knowledge, question);
+        assert.ok(result.sources.some(source => source.startsWith('lore/player.md')), question);
+        assert.match(result.messages[0].content, /asleep for years/);
+        assert.equal(result.messages.at(-1)!.content, question);
+    }
+    const town = buildCharacterPrompt(knowledge, 'What happend to this town?');
+    assert.ok(town.sources.some(source => /towns past/i.test(source)));
+});
+
+test('maximum editable prompt and examples leave room for the thinking output budget', () => {
+    const large: CharacterKnowledge = {
+        ...knowledge,
+        systemPrompt: 'a'.repeat(2100),
+        config: { ...config, maxReplyTokens: 1024, styleExamples: Array.from({ length: 2 }, () => ({ user: 'b'.repeat(100), assistant: 'c'.repeat(160) })) },
+    };
+    const result = buildCharacterPrompt(large, '🦇'.repeat(200));
+    assert.ok(result.messages.reduce((sum, message) => sum + byteLength(message.content), 0) + 1024 + 256 <= 4096);
+    assert.ok(!result.messages.some(message => message.content.includes('\ufffd')));
 });

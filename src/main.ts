@@ -572,7 +572,7 @@ function setupMenuListeners(): void {
 // Pointer lock means keyboard and mouse state must be tracked globally, then
 // consumed by the physics/weapons systems during the frame update.
 function setupInputListeners(): void {
-    const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'>) => {
+    const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }) => {
         // Movement state is already held between key events; repeated keydown
         // events must not toggle hook/view/weapon actions multiple times.
         if (e.repeat || gothChat?.isOpen) return;
@@ -617,7 +617,7 @@ function setupInputListeners(): void {
                 if (state.camera && state.isPlaying && state.playerHp > 0 && isInputActive()) {
                     if (gothGirlfriend?.interact(state.camera, state.obstacles)) {
                         chatCharacter = gothGirlfriend;
-                        gothChat?.open();
+                        gothChat?.open(e);
                     }
                 }
                 break;

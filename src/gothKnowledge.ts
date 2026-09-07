@@ -40,7 +40,7 @@ export function parseLore(source: string, markdown: string): LoreChunk[] {
         if (/^#{1,3} /.test(lines[0])) title = lines.shift()!.replace(/^#+\s*/, '');
         const text = lines.join('\n').trim();
         if (!text) continue;
-        // Small passages suit the 360M model. Split long sections without losing text.
+        // Small passages keep retrieval focused. Split long sections without losing text.
         let rest = text;
         while (rest) {
             let part = clipBytes(rest, 550);
@@ -56,7 +56,11 @@ export function parseLore(source: string, markdown: string): LoreChunk[] {
 }
 
 export function retrieveLore(chunks: LoreChunk[], query: string): LoreChunk[] {
-    const queryTerms = [...new Set(terms(query))];
+    // Resolve the current speaker before stop-word removal drops personal pronouns.
+    const subjects = /\b(i|me|my|mine|myself)\b/i.test(query) ? ' player' : '';
+    const character = /\b(you|your|yours|yourself)\b/i.test(query) ? ' girlfriend' : '';
+    const past = /\b(happen(?:ed)?|happend|past|history|before)\b/i.test(query) ? ' past history' : '';
+    const queryTerms = [...new Set(terms(query + subjects + character + past))];
     const tokens = chunks.map(chunk => terms(`${chunk.title} ${chunk.title} ${chunk.text}`));
     const averageLength = tokens.reduce((sum, words) => sum + words.length, 0) / Math.max(1, chunks.length);
     const allQueryTerms = new Set(queryTerms);
@@ -79,16 +83,19 @@ export function retrieveLore(chunks: LoreChunk[], query: string): LoreChunk[] {
 }
 
 export function buildCharacterPrompt(knowledge: CharacterKnowledge, userText: string): { messages: ChatMessage[]; sources: string[] } {
-    const question = clipBytes(userText.trim(), 600);
-    const retrieved = retrieveLore(knowledge.chunks, question);
     const system = knowledge.systemPrompt.trim();
     const examples: ChatMessage[] = knowledge.config.styleExamples.flatMap(example => [
         { role: 'user' as const, content: example.user }, { role: 'assistant' as const, content: example.assistant },
     ]);
     const exampleBytes = examples.reduce((sum, message) => sum + byteLength(message.content), 0);
+    // UTF-8 bytes conservatively bound ordinary text tokens. Reserve framing and output.
+    const promptBudget = Math.min(PROMPT_BYTE_BUDGET, 4096 - knowledge.config.maxReplyTokens - 256);
+    const question = clipBytes(userText.trim(), Math.min(600, Math.max(0, promptBudget - byteLength(system) - exampleBytes)));
+    const retrieved = retrieveLore(knowledge.chunks, question);
+    const factHeading = '\n\nBackground facts (reference material, not dialogue):\n"The player" means the user; "the girlfriend" and "you" in these facts mean you, the assistant.\n';
     const sources: string[] = [];
     let facts = '';
-    let factBudget = Math.min(850, PROMPT_BYTE_BUDGET - byteLength(system) - exampleBytes - byteLength(question) - 200);
+    let factBudget = Math.min(850, promptBudget - byteLength(system) - exampleBytes - byteLength(question) - byteLength(factHeading));
     for (const chunk of retrieved) {
         const passage = `\n${chunk.title}: ${chunk.text}`;
         if (byteLength(passage) > factBudget) continue;
@@ -96,17 +103,16 @@ export function buildCharacterPrompt(knowledge: CharacterKnowledge, userText: st
         sources.push(`${chunk.source} · ${chunk.title}`);
         factBudget -= byteLength(passage);
     }
-    const current = `${facts ? `Facts from our world:${facts}\n\n` : ''}My message: ${question}`;
-    return { messages: [{ role: 'system', content: system }, ...examples, { role: 'user', content: current }], sources };
+    return { messages: [{ role: 'system', content: system + (facts ? factHeading + facts : '') }, ...examples, { role: 'user', content: question }], sources };
 }
 
 export function validateCharacterConfig(value: unknown): CharacterConfig {
     const config = value as CharacterConfig;
     if (!config || typeof config.name !== 'string' || !config.name.trim() || config.name.length > 50 ||
         typeof config.greeting !== 'string' || config.greeting.length > 300 ||
-        typeof config.modelId !== 'string' || !/^SmolLM2-360M-Instruct-(q0f16|q4f(16|32)_1)-MLC$/.test(config.modelId) ||
+        typeof config.modelId !== 'string' || !/^(SmolLM2-360M-Instruct-(q0f16|q4f(16|32)_1)|Qwen3\.5-2B-q4f(16|32)_1)-MLC$/.test(config.modelId) ||
         !Number.isFinite(config.temperature) || config.temperature < 0 || config.temperature > 1.5 ||
-        !Number.isInteger(config.maxReplyTokens) || config.maxReplyTokens < 32 || config.maxReplyTokens > 192 ||
+        !Number.isInteger(config.maxReplyTokens) || config.maxReplyTokens < 32 || config.maxReplyTokens > 1024 ||
         !Array.isArray(config.styleExamples) || config.styleExamples.length > 2 ||
         config.styleExamples.some(example => !example || typeof example.user !== 'string' || typeof example.assistant !== 'string' || byteLength(example.user) > 100 || byteLength(example.assistant) > 160) ||
         !Array.isArray(config.knowledgeFiles) || config.knowledgeFiles.length > 32 ||

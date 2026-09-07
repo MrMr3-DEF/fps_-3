@@ -1,5 +1,6 @@
 import { WebWorkerMLCEngine } from '@mlc-ai/web-llm';
 import type { CharacterConfig, ChatMessage } from './gothKnowledge.js';
+import { visibleGothReply } from './gothReply.js';
 
 export class GothChatEngine {
     private worker: Worker | null = null;
@@ -17,11 +18,11 @@ export class GothChatEngine {
         if (generation !== this.generation) throw new Error('Local AI was stopped.');
         if (!adapter) throw new Error('No WebGPU adapter is available. Try a browser with hardware acceleration enabled.');
         if (config.modelId.includes('f16') && !adapter.features.has('shader-f16')) {
-            throw new Error('This GPU lacks shader-f16. In character.json, use SmolLM2-360M-Instruct-q4f32_1-MLC, then refresh the page. That version uses 4-bit weights and does not need shader-f16.');
+            throw new Error('This GPU lacks shader-f16. In character.json, use Qwen3.5-2B-q4f32_1-MLC, then refresh the page. That version uses 4-bit weights and does not need shader-f16.');
         }
         this.worker = new Worker(new URL('./gothChat.worker.ts', import.meta.url), { type: 'module' });
         this.engine = new WebWorkerMLCEngine(this.worker, { initProgressCallback: report => progress(report.progress, report.text), logLevel: 'WARN' });
-        await this.guard(this.engine.reload(config.modelId, { context_window_size: 4096 }), 300000);
+        await this.guard(this.engine.reload(config.modelId, { context_window_size: 4096, ...(config.modelId.startsWith('Qwen3.5-') ? { max_history_size: 1 } : {}) }), 300000);
         this.ready = true;
     }
 
@@ -49,12 +50,21 @@ export class GothChatEngine {
             await engine.resetChat();
             const stream = await engine.chat.completions.create({
                 messages, stream: true, temperature: config.temperature,
+                ...(config.modelId.startsWith('Qwen3.5-') ? { extra_body: { enable_thinking: true } } : {}),
                 max_tokens: config.maxReplyTokens, top_p: 0.9, repetition_penalty: 1.1,
             });
+            let rawReply = '';
             let reply = '';
             for await (const chunk of stream) {
                 const token = chunk.choices[0]?.delta.content;
-                if (token) { reply += token; onToken(reply); }
+                if (token) {
+                    rawReply += token;
+                    const visible = visibleGothReply(rawReply);
+                    if (visible && visible !== reply) {
+                        reply = visible;
+                        onToken(reply);
+                    }
+                }
             }
             if (!reply.trim()) throw new Error('The model returned an empty reply. Please retry.');
             return reply.trim();
