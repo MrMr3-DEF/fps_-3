@@ -16,6 +16,38 @@ test('50ms enemy-grapple movement stops at pillar instead of crossing it',()=>{
     updatePlayerPhysics(.05);assert.ok(state.camera.position.x<=-3.8);assert.equal(state.velocity.x,0);
     state.obstacles=[];state.hookState='IDLE';
 });
+
+test('diagonal movement slides along a pillar corner without entering it', () => {
+    state.scene = new THREE.Scene();
+    state.camera = new THREE.PerspectiveCamera();
+    state.camera.position.set(3.81, 2, 3.81);
+    state.controls = { isLocked: true, getObject: () => state.camera } as any;
+    state.isPlaying = true;
+    state.canJump = false;
+    state.isShiftDown = false;
+    state.isHovering = false;
+    state.hookState = 'IDLE';
+    state.moveForward = state.moveBackward = state.moveLeft = state.moveRight = false;
+    state.velocity.set(-1, 0, -1);
+
+    const pillar = new THREE.Object3D();
+    pillar.position.set(0, 5, 0);
+    pillar.userData = { height: 10, halfW: 3, halfD: 3, halfH: 5 };
+    state.obstacles = [pillar];
+
+    updatePlayerPhysics(0.016);
+
+    const collisionExtent = 3.8;
+    assert.equal(
+        Math.abs(state.camera.position.x) < collisionExtent && Math.abs(state.camera.position.z) < collisionExtent,
+        false
+    );
+    assert.notEqual(state.velocity.x, 0);
+    assert.equal(state.velocity.z, 0);
+
+    state.obstacles = [];
+});
+
 test('invisible live targets retain projectile collision',()=>{
     state.scene=new THREE.Scene();state.isMultiplayer=false;state.peerIds=[];
     const target=new THREE.Group();target.position.set(0,2,-5);target.userData={index:0,scale:1};target.visible=false;state.targets=[target];rebuildTargetHash();

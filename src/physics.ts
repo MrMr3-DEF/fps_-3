@@ -63,7 +63,6 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     let colZ = false;
 
     if (Math.abs(testPosX.x) > MAP_LIMIT || Math.abs(testPosX.z) > MAP_LIMIT) colX = true;
-    if (Math.abs(testPosZ.x) > MAP_LIMIT || Math.abs(testPosZ.z) > MAP_LIMIT) colZ = true;
 
     const candidates = queryObstaclesNear(actualPos.x, actualPos.z, OBSTACLE_QUERY_RADIUS, _obstacleCandidates);
     const len = candidates.length;
@@ -86,17 +85,34 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
             testPosX.z > bz - ez && testPosX.z < bz + ez) {
             if (blocksHeight) colX = true;
         }
+    }
+
+    // Test Z against the X position that will actually be accepted. Testing
+    // both axes against the old position lets a diagonal step enter a corner:
+    // each axis is safe alone, but their combined destination overlaps.
+    const resolvedX = colX ? actualPos.x : testPosX.x;
+    if (Math.abs(resolvedX) > MAP_LIMIT || Math.abs(testPosZ.z) > MAP_LIMIT) colZ = true;
+
+    for (let i = 0; i < len; i++) {
+        const box = candidates[i];
+        const data = obstacleData(box);
+        const halfH = data.halfH || data.height / 2;
+        const top = box.position.y + halfH;
+        const bottom = box.position.y - halfH;
+        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y > bottom + 0.001;
+        const ex = (data.halfW || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
+        const ez = (data.halfD || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
 
         if (!colZ &&
-            testPosZ.x > bx - ex && testPosZ.x < bx + ex &&
-            testPosZ.z > bz - ez && testPosZ.z < bz + ez) {
+            resolvedX > box.position.x - ex && resolvedX < box.position.x + ex &&
+            testPosZ.z > box.position.z - ez && testPosZ.z < box.position.z + ez) {
             if (blocksHeight) colZ = true;
         }
     }
 
     // Resolve support at the accepted horizontal position. Sampling the old
     // position can miss a roof edge during a fast falling/grappling frame.
-    const finalX = colX ? actualPos.x : testPosX.x;
+    const finalX = resolvedX;
     const finalZ = colZ ? actualPos.z : testPosZ.z;
     for (const box of candidates) {
         const data = obstacleData(box);
