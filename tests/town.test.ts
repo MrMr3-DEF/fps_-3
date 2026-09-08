@@ -242,11 +242,12 @@ test('swept bullets stop at town walls and ceilings, but travel through open gat
     disposeWorld();
 });
 
-test('target respawns never intersect town structures or pillars', () => {
+test('target respawns stay outside the fortress and never intersect structures or pillars', () => {
     setup();
     for (let iteration = 0; iteration < 12; iteration++) for (const target of state.targets) {
         respawnTarget(target);
         const radius = Math.sqrt(3) * target.userData.scale;
+        assert.equal(overlapsTown(target.position.x, target.position.z, radius), false);
         for (const obstacle of state.obstacles) {
             const data = obstacle.userData;
             assert.equal(Math.abs(target.position.x - obstacle.position.x) < data.halfW + radius &&

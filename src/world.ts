@@ -313,6 +313,7 @@ export function respawnTarget(targetGroup: THREE.Group): void {
         const x = (worldRandom() - 0.5) * (MAP_SIZE - 40);
         const y = radius + worldRandom() * (MAX_ENEMY_HEIGHT - radius);
         const z = (worldRandom() - 0.5) * (MAP_SIZE - 40);
+        if (overlapsTown(x, z, radius)) continue;
         const candidates = obstacleHash.query(x, z, radius, _placementObstacleCandidates);
         if (candidates.some(obstacle => {
             const data = obstacleData(obstacle);
@@ -324,8 +325,11 @@ export function respawnTarget(targetGroup: THREE.Group): void {
         placed = true;
         break;
     }
-    // Bounded fallback over the permanently clear spawn plaza.
-    if (!placed) targetGroup.position.set(0, MAX_ENEMY_HEIGHT, 0);
+    // This map-edge fallback is above every pillar and outside the fortress.
+    if (!placed) {
+        const fallbackCoordinate = MAP_SIZE / 2 - 20;
+        targetGroup.position.set(fallbackCoordinate, MAX_ENEMY_HEIGHT, fallbackCoordinate);
+    }
     refreshChunkedRenderObject(targetGroup);
 
     const randClass = ENEMY_CLASSES[Math.floor(worldRandom() * ENEMY_CLASSES.length)];
