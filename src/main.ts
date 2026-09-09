@@ -108,6 +108,8 @@ const UI = {
     get settingParticlesValue() { return getUI<HTMLElement>('setting-particles-value'); },
     get settingRenderDistance() { return getUI<HTMLInputElement>('setting-render-distance'); },
     get settingRenderDistanceValue() { return getUI<HTMLElement>('setting-render-distance-value'); },
+    get settingWebLLMDownload() { return getUI<HTMLInputElement>('setting-webllm-download'); },
+    get settingWebLLMDownloadValue() { return getUI<HTMLElement>('setting-webllm-download-value'); },
     get settingShadows() { return getUI<HTMLInputElement>('setting-shadows'); },
     get settingShadowsValue() { return getUI<HTMLElement>('setting-shadows-value'); },
     get settingShadowQuality() { return getUI<HTMLSelectElement>('setting-shadow-quality'); },
@@ -951,7 +953,8 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.renderDistanceChunks === b.renderDistanceChunks &&
         a.shadows === b.shadows &&
         a.shadowQuality === b.shadowQuality &&
-        a.showFps === b.showFps;
+        a.showFps === b.showFps &&
+        a.downloadWebLLMImmediately === b.downloadWebLLMImmediately;
 }
 
 function updateApplyButton(): void {
@@ -973,6 +976,8 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     if (UI.settingParticlesValue) UI.settingParticlesValue.innerText = formatPercent(settings.particleAmount);
     if (UI.settingRenderDistance) UI.settingRenderDistance.value = settings.renderDistanceChunks.toFixed(0);
     if (UI.settingRenderDistanceValue) UI.settingRenderDistanceValue.innerText = settings.renderDistanceChunks.toFixed(0);
+    if (UI.settingWebLLMDownload) UI.settingWebLLMDownload.checked = settings.downloadWebLLMImmediately;
+    setCheckboxLabel(UI.settingWebLLMDownloadValue, settings.downloadWebLLMImmediately);
     if (UI.settingShadows) UI.settingShadows.checked = settings.shadows;
     setCheckboxLabel(UI.settingShadowsValue, settings.shadows);
     if (UI.settingShadowQuality) {
@@ -1067,6 +1072,18 @@ function setupSettingsControls(): void {
         });
     });
 
+    UI.settingWebLLMDownload?.addEventListener('change', (event) => {
+        const checked = (event.target as HTMLInputElement).checked;
+        if (!checked) {
+            updatePendingSettings(settings => { settings.downloadWebLLMImmediately = false; });
+            return;
+        }
+        gothChat?.requestDownloadApproval(approved => {
+            updatePendingSettings(settings => { settings.downloadWebLLMImmediately = approved; });
+            UI.settingWebLLMDownload?.focus();
+        });
+    });
+
     UI.settingShadows?.addEventListener('change', (e) => {
         updatePendingSettings((settings) => {
             settings.shadows = (e.target as HTMLInputElement).checked;
@@ -1118,6 +1135,8 @@ export function init(): void {
         },
         onReplyStart: () => chatCharacter?.startTalking(),
     });
+
+    if (userSettings.downloadWebLLMImmediately) gothChat.preload();
 
     // Desktop pointer lock and touch sessions share the play/pause/death UI lifecycle.
     if (state.controls) {

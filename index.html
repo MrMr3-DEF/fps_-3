@@ -95,6 +95,21 @@
                         <span class="settings-value" id="setting-render-distance-value">4</span>
                     </div>
                     <div class="settings-row">
+                        <div class="settings-label-with-info">
+                            <label for="setting-webllm-download">Download WebLLM Model Immediately</label>
+                            <span class="settings-info">
+                                <button type="button" class="settings-info-button" aria-label="About automatic model downloads"
+                                    aria-describedby="webllm-download-tooltip">i</button>
+                                <span class="settings-tooltip" id="webllm-download-tooltip" role="tooltip">
+                                    After approval and applying this setting, the model starts loading as soon as the page loads.
+                                    Missing model files are downloaded. Cached files are reused. The default model download is approximately 1.8 GB.
+                                </span>
+                            </span>
+                        </div>
+                        <input type="checkbox" id="setting-webllm-download">
+                        <span class="settings-value" id="setting-webllm-download-value">Off</span>
+                    </div>
+                    <div class="settings-row">
                         <label for="setting-shadows">Shadows</label>
                         <input type="checkbox" id="setting-shadows" checked>
                         <span class="settings-value" id="setting-shadows-value">On</span>

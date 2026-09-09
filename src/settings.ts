@@ -14,6 +14,7 @@ export interface UserSettings {
     shadows: boolean;
     shadowQuality: ShadowQuality;
     showFps: boolean;
+    downloadWebLLMImmediately: boolean;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -26,6 +27,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     shadows: true,
     shadowQuality: 'low',
     showFps: true,
+    downloadWebLLMImmediately: false,
 };
 
 export const userSettings: UserSettings = { ...DEFAULT_USER_SETTINGS };
@@ -56,6 +58,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
             userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
+            userSettings.downloadWebLLMImmediately = readBoolean(parsed.downloadWebLLMImmediately, false);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);
         }
     } catch (err) {

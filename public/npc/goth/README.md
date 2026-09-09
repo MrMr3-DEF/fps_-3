@@ -84,3 +84,10 @@ Edit `modelId` in `public/npc/goth/character.json`, save, and refresh the game p
 | `SmolLM2-360M-Instruct-q4f32_1-MLC` | 4-bit / float32 | 580 MB |
 
 These IDs are accepted by `validateCharacterConfig` in `src/gothKnowledge.ts`. Other models also need validation and prompt-budget review. For a deployed site, rebuild and deploy after editing. The first-use notice lives in `src/gothChat.ts`; revise its size estimate and bump the consent key if changing the default materially changes download requirements. SmolLM2 remains available as a smaller fallback. All supported models can still give unreliable replies.
+
+
+### Loading the model at page startup
+
+The game settings include **Download WebLLM Model Immediately**, off by default. Checking it opens the same AI information window used for the girlfriend. Approval enables the pending setting; declining or pressing Esc leaves it off. Apply saves the setting and reloads the page. On subsequent page loads, saved approval permits background model loading. Cached model files are reused. Without saved approval, automatic loading stays off and interacting with the girlfriend shows the normal approval window.
+
+Starting a game or opening chat reuses an ongoing background load. Closing the conversation clears its messages while an automatic model load can continue. Disabling the setting and applying it stops automatic loading on the reloaded page; it does not delete cached model files.

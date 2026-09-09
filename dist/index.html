@@ -11,7 +11,7 @@
     <!-- Prevent favicon 404/500 requests in browser console -->
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
-  <script type="module" crossorigin src="/assets/index-BnQOt8bS.js"></script>
+  <script type="module" crossorigin src="/assets/index-DI54o1s_.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-DV2eyUWI.js">
   <link rel="stylesheet" crossorigin href="/assets/index-CS04k0OB.css">
 </head>
@@ -94,6 +94,21 @@
                         </div>
                         <input type="range" id="setting-render-distance" min="1" max="16" step="1" value="4">
                         <span class="settings-value" id="setting-render-distance-value">4</span>
+                    </div>
+                    <div class="settings-row">
+                        <div class="settings-label-with-info">
+                            <label for="setting-webllm-download">Download WebLLM Model Immediately</label>
+                            <span class="settings-info">
+                                <button type="button" class="settings-info-button" aria-label="About automatic model downloads"
+                                    aria-describedby="webllm-download-tooltip">i</button>
+                                <span class="settings-tooltip" id="webllm-download-tooltip" role="tooltip">
+                                    After approval and applying this setting, the model starts loading as soon as the page loads.
+                                    Missing model files are downloaded. Cached files are reused. The default model download is approximately 1.8 GB.
+                                </span>
+                            </span>
+                        </div>
+                        <input type="checkbox" id="setting-webllm-download">
+                        <span class="settings-value" id="setting-webllm-download-value">Off</span>
                     </div>
                     <div class="settings-row">
                         <label for="setting-shadows">Shadows</label>

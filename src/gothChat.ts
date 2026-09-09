@@ -12,6 +12,8 @@ interface ChatHooks {
 
 /** Owns the conversation UI, consent gate, transcript and async request lifetime. */
 export class GothChat {
+    private downloadApproval: ((approved: boolean) => void) | null = null;
+    private preloadTask: Promise<void> | null = null;
     private openingKey: string | null = null;
     private panel: HTMLElement;
     private transcript: HTMLElement;
@@ -74,6 +76,15 @@ export class GothChat {
         this.panel.querySelector('form')!.addEventListener('submit', event => { event.preventDefault(); void this.submit(); });
         this.panel.querySelector('[data-action="approve"]')!.addEventListener('click', () => {
             this.consent.accept();
+            if (this.downloadApproval) {
+                const complete = this.downloadApproval;
+                this.downloadApproval = null;
+                this.opened = false;
+                this.panel.hidden = true;
+                document.body.classList.remove('goth-chat-open');
+                complete(true);
+                return;
+            }
             this.showConversation();
         });
         this.panel.querySelector('[data-action="decline"]')!.addEventListener('click', () => this.close(true));
@@ -93,7 +104,7 @@ export class GothChat {
             if (!this.opened) return;
             event.preventDefault();
             event.stopImmediatePropagation();
-            const scroller = this.consent.approved ? this.transcript : this.notice;
+            const scroller = this.consent.approved && !this.downloadApproval ? this.transcript : this.notice;
             const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientHeight : 1;
             scroller.scrollTop += event.deltaY * unit;
         }, { capture: true, passive: false });
@@ -108,7 +119,7 @@ export class GothChat {
         event.stopImmediatePropagation();
         if (event.code === this.openingKey) { event.preventDefault(); return; }
         if (event.isComposing || event.keyCode === 229) return;
-        if (!this.consent.approved) {
+        if (!this.consent.approved || this.downloadApproval) {
             if (event.key === 'Tab') this.trapFocus(event, this.notice);
             return;
         }
@@ -137,6 +148,39 @@ export class GothChat {
         focusable[next]?.focus();
     }
 
+    requestDownloadApproval(complete: (approved: boolean) => void): void {
+        if (this.opened) { complete(false); return; }
+        this.downloadApproval = complete;
+        this.opened = true;
+        this.panel.hidden = false;
+        this.notice.hidden = false;
+        this.conversation.hidden = true;
+        document.body.classList.add('goth-chat-open');
+        this.focus();
+    }
+
+    /** Load in the background only after the saved consent gate has been passed. */
+    preload(): void {
+        if (!this.consent.approved || this.preloadTask || this.engine?.ready) return;
+        this.preloadTask = (async () => {
+            const knowledge = this.knowledge ?? await loadCharacterKnowledge();
+            this.knowledge = knowledge;
+            const { GothChatEngine } = await import('./gothChatEngine.js');
+            this.engine = new GothChatEngine();
+            await this.engine.load(knowledge.config, (fraction, text) => {
+                if (!this.opened || this.downloadApproval) return;
+                this.progress.hidden = false;
+                this.progress.value = Math.min(1, Math.max(0, fraction));
+                this.status.textContent = `Loading local chat · ${Math.round(fraction * 100)}%`;
+                this.progress.title = text;
+            });
+        })().catch(error => {
+            this.engine?.dispose();
+            this.engine = null;
+            console.warn('Automatic local chat loading failed; interaction can retry.', error);
+        }).finally(() => { this.preloadTask = null; });
+    }
+
     open(trigger?: { code: string; preventDefault?: () => void }): void {
         if (this.opened) return;
         // Focus changes during keydown must not insert the interaction key.
@@ -163,7 +207,7 @@ export class GothChat {
     focus(): void {
         if (!this.opened) return;
         // Pointer-lock exit can arrive after open(), so the main lifecycle also calls this.
-        (this.consent.approved ? this.input : this.panel.querySelector<HTMLButtonElement>('[data-action="decline"]')!).focus({ preventScroll: true });
+        (this.consent.approved && !this.downloadApproval ? this.input : this.panel.querySelector<HTMLButtonElement>('[data-action="decline"]')!).focus({ preventScroll: true });
     }
 
     close(resume = false): void {
@@ -171,6 +215,12 @@ export class GothChat {
         this.opened = false;
         this.panel.hidden = true;
         document.body.classList.remove('goth-chat-open');
+        if (this.downloadApproval) {
+            const complete = this.downloadApproval;
+            this.downloadApproval = null;
+            complete(false);
+            return;
+        }
         this.cancelPending();
         this.clearConversation();
         this.hooks.onClose(resume);
@@ -184,7 +234,7 @@ export class GothChat {
         }
         this.fetchController?.abort();
         this.fetchController = null;
-        if (this.pending) { this.engine?.dispose(); this.engine = null; }
+        if (this.pending && !this.preloadTask) { this.engine?.dispose(); this.engine = null; }
         this.pending = false;
     }
 
@@ -199,9 +249,11 @@ export class GothChat {
         this.close(false);
         this.cancelPending();
         this.clearConversation();
-        this.engine?.dispose();
-        this.engine = null;
-        this.knowledge = null;
+        if (!this.preloadTask && !this.engine?.ready) {
+            this.engine?.dispose();
+            this.engine = null;
+            this.knowledge = null;
+        }
     }
 
     private followsLatest(): boolean {
@@ -233,6 +285,8 @@ export class GothChat {
         this.status.textContent = 'Reading her character notes…';
         this.fetchController = new AbortController();
         try {
+            if (this.preloadTask) await this.preloadTask;
+            if (epoch !== this.epoch) return;
             const knowledge = this.knowledge ?? await loadCharacterKnowledge(this.fetchController.signal);
             if (epoch !== this.epoch) return;
             this.knowledge = knowledge;
