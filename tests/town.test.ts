@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, overlapsTown } from '../src/town.ts';
-import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT } from '../src/config.ts';
+import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
 import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
@@ -341,9 +341,40 @@ test('the full rampart loop is walkable through all four open corner lookouts', 
     disposeWorld();
 });
 
+test('thin stone stairs cantilever from the west wall with a wooden outer railing', () => {
+    const boxes = createTownBoxes(generateTownLayout(42));
+    const rise = TOWN_WALL_HEIGHT / TOWN_STAIR_STEPS;
+    const westWallFace = -TOWN_HALF_SIZE + TOWN_WALL_THICKNESS / 2;
+    const treads = boxes.filter(b => b.kind === 'stair' && b.solid && b.depth === TOWN_STAIR_TREAD);
+    assert.equal(treads.length, TOWN_STAIR_STEPS);
+    for (const tread of treads) {
+        assert.equal(tread.material, 'stone');
+        assert.ok(Math.abs(tread.height - rise) < 1e-10);
+        assert.equal(tread.x, TOWN_STAIR_X);
+        assert.ok(Math.abs(tread.x - tread.width / 2 - westWallFace) < 1e-10, 'tread is anchored to the wall face');
+    }
+    assert.ok(Math.abs(treads[0].y - treads[0].height / 2) < 1e-10);
+    assert.ok(treads.at(-1)!.y - treads.at(-1)!.height / 2 > TOWN_WALL_HEIGHT - rise * 2);
+
+    const structure = boxes.filter(b => b.kind === 'stair' && b.solid);
+    assert.ok(structure.every(b => b.material === 'stone'));
+    assert.ok(structure.every(b => b.height <= 0.35 + 1e-10), 'no ground-based stair wedge or landing column');
+
+    const railing = boxes.filter(b => b.kind === 'railing');
+    const slopedRails = railing.filter(b => b.rotationX !== undefined);
+    assert.equal(slopedRails.length, 1);
+    assert.equal(slopedRails[0].material, 'door');
+    assert.equal(slopedRails[0].solid, false);
+    assert.ok(Math.abs(slopedRails[0].rotationX! - Math.atan2(TOWN_WALL_HEIGHT, TOWN_STAIR_STEPS * TOWN_STAIR_TREAD)) < 1e-10);
+    const posts = railing.filter(b => b.solid);
+    assert.ok(posts.length > 2);
+    assert.ok(posts.every(post => post.material === 'door'));
+    assert.ok(posts.every(post => Math.abs(post.x + post.width / 2 - (TOWN_STAIR_X + TOWN_STAIR_WIDTH / 2)) < 1e-10));
+});
+
 test('players can walk the entire stair ascent to the rampart and back down without jumping', () => {
     setup();
-    player(-80, PLAYER_HEIGHT, TOWN_STAIR_START_Z + 2);
+    player(TOWN_STAIR_X, PLAYER_HEIGHT, TOWN_STAIR_START_Z + 2);
     const walk = (axis: 'x' | 'z', destination: number) => {
         const direction = Math.sign(destination - state.camera!.position[axis]);
         let frames = 0;
@@ -363,7 +394,7 @@ test('players can walk the entire stair ascent to the rampart and back down with
     walk('x', -90);
     walk('z', TOWN_STAIR_LANDING_Z);
     assert.equal(state.camera!.position.y, TOWN_WALL_HEIGHT + PLAYER_HEIGHT);
-    walk('x', -80);
+    walk('x', TOWN_STAIR_X);
     walk('z', TOWN_STAIR_START_Z + 2);
     for (let i = 0; i < 20; i++) { state.velocity.x = state.velocity.z = 0; updatePlayerPhysics(.05); }
     assert.equal(state.camera!.position.y, PLAYER_HEIGHT);
@@ -430,8 +461,8 @@ test('grass is cut out under paving while grapple ground remains continuous at e
     disposeWorld();
 });
 
-test('rampart, stair landing and bridge top faces meet without overlapping', () => {
-    const surfaces = createTownBoxes(generateTownLayout(42)).filter(b => b.material === 'trim' && (b.kind === 'walkway' || b.kind === 'stair'));
+test('rampart and cantilevered stair top faces meet without overlapping', () => {
+    const surfaces = createTownBoxes(generateTownLayout(42)).filter(b => b.solid && (b.kind === 'walkway' || b.kind === 'stair'));
     for (let i = 0; i < surfaces.length; i++) for (const b of surfaces.slice(i + 1)) {
         const a = surfaces[i];
         if (Math.abs(a.y + a.height / 2 - b.y - b.height / 2) > 1e-8) continue;
@@ -448,7 +479,7 @@ test('near-limit straight stairs stay smooth with walking input across frame rat
     assert.ok(TOWN_STAIR_STEPS * TOWN_STAIR_TREAD < 41, 'compact single flight');
     assert.ok(TOWN_STAIR_LANDING_Z - 3 > TOWN_GATE_WIDTH / 2 + PLAYER_RADIUS, 'ascent and landing avoid the west gate');
     for (const fps of [20, 24, 30, 40, 50, 60, 90, 100, 120, 144, 240, 0]) {
-        player(-80, PLAYER_HEIGHT, TOWN_STAIR_START_Z + 2);
+        player(TOWN_STAIR_X, PLAYER_HEIGHT, TOWN_STAIR_START_Z + 2);
         state.camera!.quaternion.identity();
         state.canJump = true;
         state.moveForward = true;

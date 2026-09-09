@@ -1114,6 +1114,7 @@ function createTown(): void {
         for (let index = 0; index < parts.length; index++) {
             const part = parts[index];
             dummy.position.set(part.x, part.y, part.z);
+            dummy.rotation.set(part.rotationX ?? 0, 0, 0);
             dummy.scale.set(part.width, part.height, part.depth);
             dummy.updateMatrix();
             if (instances) addChunkedInstance(instances, part.x, part.z, dummy.matrix);

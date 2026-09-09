@@ -11,6 +11,7 @@ export const TOWN_ROAD_WIDTH = 12;
 export const TOWN_APPROACH_LENGTH = 18;
 export const CHURCH_TOWER_HEIGHT = TOWN_WALL_HEIGHT * 0.8;
 export const TOWN_STAIR_WIDTH = 6;
+export const TOWN_STAIR_X = -TOWN_HALF_SIZE + TOWN_WALL_THICKNESS / 2 + TOWN_STAIR_WIDTH / 2;
 export const PLAYER_STEP_HEIGHT = 0.3;
 export const TOWN_STAIR_STEPS = Math.ceil(TOWN_WALL_HEIGHT / (PLAYER_STEP_HEIGHT - 0.0001));
 // Just above the largest normal walking substep (~1/6 unit), so the near-limit

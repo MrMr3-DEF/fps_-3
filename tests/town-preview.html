@@ -17,7 +17,7 @@ if(name==='house-spawn'||name==='death-spawn')placePlayerAtTownSpawn(Number(docu
 if(name==='goth'||name==='goth-interior'){const g=buildings.find(b=>b.name==='goth house');state.camera.position.set(g.x, name==='goth'?12:2, g.z);state.camera.position[g.doorAxis]-=g.doorSide*(name==='goth'?38:8);state.camera.lookAt(g.x,name==='goth'?11:3.5,g.z);}
 if(name==='aerial'){state.camera.position.set(160,165,195);state.camera.lookAt(0,0,0);}
 if(name==='rampart'){state.camera.position.set(90,72,35);state.camera.lookAt(90,73,-90);}
-if(name==='stairs'){state.camera.position.set(-48,35,82);state.camera.lookAt(-80,35,40);}
+if(name==='stairs'){state.camera.position.set(-48,35,82);state.camera.lookAt(-82,35,40);}
 if(name==='well'){state.camera.position.set(7,4,9);state.camera.lookAt(0,1.5,0);}
 if(name==='lookout'){state.camera.position.set(90,72,-90);state.camera.lookAt(-90,72,-90);}
 if(name==='street'){state.camera.position.set(0,2,9);state.camera.lookAt(0,12,-90);}

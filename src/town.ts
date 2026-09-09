@@ -1,4 +1,4 @@
-import { TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_CLEARANCE, CHURCH_TOWER_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH } from './config.js';
+import { TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_CLEARANCE, CHURCH_TOWER_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH } from './config.js';
 
 export interface TownBuilding {
     kind: 'house' | 'church';
@@ -79,9 +79,10 @@ export type TownMaterial = 'stone' | 'trim' | 'roof' | 'door' | 'window' | 'road
 export interface TownBox {
     x: number; y: number; z: number;
     width: number; height: number; depth: number;
+    rotationX?: number;
     material: TownMaterial;
     solid: boolean;
-    kind: 'wall' | 'tower' | 'building' | 'church-tower' | 'walkway' | 'stair' | 'lookout-post' | 'lookout-roof' | 'well' | 'detail' | 'paving';
+    kind: 'wall' | 'tower' | 'building' | 'church-tower' | 'walkway' | 'stair' | 'railing' | 'lookout-post' | 'lookout-roof' | 'well' | 'detail' | 'paving';
 }
 
 /** Outline shared by the paving union and the hole in the grass mesh. */
@@ -141,8 +142,8 @@ export function createTownPaving(buildings: TownBuilding[]): TownBox[] {
 export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
     const boxes: TownBox[] = [];
     const box = (x: number, y: number, z: number, width: number, height: number, depth: number,
-        material: TownMaterial, solid = false, kind: TownBox['kind'] = 'detail') => {
-        boxes.push({ x, y, z, width, height, depth, material, solid, kind });
+        material: TownMaterial, solid = false, kind: TownBox['kind'] = 'detail', rotationX?: number) => {
+        boxes.push({ x, y, z, width, height, depth, material, solid, kind, rotationX });
     };
     const solid = (x: number, z: number, w: number, h: number, d: number, material: TownMaterial, kind: TownBox['kind']) => {
         box(x, h / 2, z, w, h, d, material, true, kind);
@@ -212,7 +213,8 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
     }
 
     // A compact, straight ascent uses near-maximum risers and the shortest
-    // tread that keeps normal walking smooth. It stays south of the west gate.
+    // tread that keeps normal walking smooth. Thin stone treads cantilever from
+    // the west wall, leaving the space beneath the flight open.
     const steps = TOWN_STAIR_STEPS;
     const rise = height / steps;
     const tread = TOWN_STAIR_TREAD;
@@ -220,17 +222,40 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
     for (let step = 0; step < steps; step++) {
         const top = (step + 1) * rise;
         const z = TOWN_STAIR_START_Z - (step + 0.5) * tread;
-        // Ground-based steps make one stone support rather than floating treads.
-        solid(-80, z, width, top, tread, 'trim', 'stair');
-        if (step % 2 === 0) for (const side of [-1, 1]) {
-            box(-80 + side * (width / 2 - 0.15), top + 1.1, z - tread / 2,
-                0.2, 0.2, tread * 2, 'door', true, 'stair');
-            if (step % 8 === 0) box(-80 + side * (width / 2 - 0.15), top + 0.5, z, 0.2, 1, 0.12, 'door', true, 'stair');
-        }
+        box(TOWN_STAIR_X, top - rise / 2, z, width, rise, tread, 'stone', true, 'stair');
     }
-    // One level turn at the top leads directly onto the west wall walk.
-    solid(-80, TOWN_STAIR_LANDING_Z, width, height, width, 'trim', 'stair');
-    box(-84, height - 0.15, TOWN_STAIR_LANDING_Z, 2, 0.3, width, 'trim', true, 'stair');
+    // A slab landing meets the wall walk directly; it needs no column or bridge.
+    box(TOWN_STAIR_X, height - deckThickness / 2, TOWN_STAIR_LANDING_Z,
+        width, deckThickness, width, 'stone', true, 'stair');
+
+    // The wall guards the inner edge. A continuous timber rail and closely
+    // spaced solid posts protect the exposed edge without blocking the steps.
+    const railThickness = 0.2;
+    const railHeight = 1.1;
+    const postEmbed = 0.15;
+    const railX = TOWN_STAIR_X + width / 2 - railThickness / 2;
+    const railRun = steps * tread;
+    const railLength = Math.hypot(height, railRun);
+    const railAngle = Math.atan2(height, railRun);
+    box(railX, height / 2 + railHeight, TOWN_STAIR_START_Z - railRun / 2,
+        railThickness, railThickness, railLength, 'door', false, 'railing', railAngle);
+
+    const addRailPost = (baseY: number, z: number) => {
+        box(railX, baseY + (railHeight - postEmbed) / 2, z,
+            railThickness, railHeight + postEmbed, railThickness, 'door', true, 'railing');
+    };
+    const postEverySteps = 9;
+    for (let boundary = 0; boundary <= steps; boundary += postEverySteps) {
+        addRailPost(boundary * rise, TOWN_STAIR_START_Z - boundary * tread);
+    }
+    if (steps % postEverySteps !== 0) addRailPost(height, TOWN_STAIR_START_Z - railRun);
+
+    // Continue the guard around the landing and share its first post with the flight.
+    box(railX, height + railHeight, TOWN_STAIR_LANDING_Z,
+        railThickness, railThickness, width, 'door', false, 'railing');
+    for (let offset = width / 4; offset <= width; offset += width / 4) {
+        addRailPost(height, TOWN_STAIR_START_Z - railRun - offset);
+    }
 
     // The well is deliberately independent of the building layout and random seed.
     for (const side of [-1, 1]) {
