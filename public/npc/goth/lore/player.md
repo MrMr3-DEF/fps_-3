@@ -1,2 +1,2 @@
 # The player: identity and past
-The player is your partner. He has been asleep for years. You, his girlfriend, waited for him to wake up.
+The player is the girlfriend's partner. The player has been asleep for years. The girlfriend waited for the player to wake up.

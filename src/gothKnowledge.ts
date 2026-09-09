@@ -11,7 +11,20 @@ export interface CharacterConfig {
 export interface LoreChunk { source: string; title: string; text: string }
 export interface CharacterKnowledge { config: CharacterConfig; systemPrompt: string; chunks: LoreChunk[] }
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
-export const PROMPT_BYTE_BUDGET = 3400;
+export const PROMPT_BYTE_BUDGET = 12000;
+export const characterContextSize = (modelId: string): number => modelId.startsWith('SmolLM2-') ? 8192 : 16384;
+export interface ChatTurn { user: string; assistant: string }
+
+/** Only completed exchanges belong to the current interaction. */
+export class GothChatSession {
+    turns: ChatTurn[] = [];
+    clear(): void { this.turns = []; }
+    complete(user: string, assistant: string): void {
+        this.turns.push({ user, assistant });
+        // Bound retained page memory as well as the model prompt.
+        if (this.turns.length > 64) this.turns.shift();
+    }
+}
 const encoder = new TextEncoder();
 export const byteLength = (text: string): number => encoder.encode(text).length;
 export function clipBytes(text: string, budget: number): string {
@@ -82,17 +95,17 @@ export function retrieveLore(chunks: LoreChunk[], query: string): LoreChunk[] {
     return scores.filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 3).map(item => chunks[item.index]);
 }
 
-export function buildCharacterPrompt(knowledge: CharacterKnowledge, userText: string): { messages: ChatMessage[]; sources: string[] } {
+export function buildCharacterPrompt(knowledge: CharacterKnowledge, userText: string, history: readonly ChatTurn[] = []): { messages: ChatMessage[]; sources: string[] } {
     const system = knowledge.systemPrompt.trim();
     const examples: ChatMessage[] = knowledge.config.styleExamples.flatMap(example => [
         { role: 'user' as const, content: example.user }, { role: 'assistant' as const, content: example.assistant },
     ]);
     const exampleBytes = examples.reduce((sum, message) => sum + byteLength(message.content), 0);
     // UTF-8 bytes conservatively bound ordinary text tokens. Reserve framing and output.
-    const promptBudget = Math.min(PROMPT_BYTE_BUDGET, 4096 - knowledge.config.maxReplyTokens - 256);
+    const promptBudget = Math.min(PROMPT_BYTE_BUDGET, characterContextSize(knowledge.config.modelId) - knowledge.config.maxReplyTokens - 256);
     const question = clipBytes(userText.trim(), Math.min(600, Math.max(0, promptBudget - byteLength(system) - exampleBytes)));
     const retrieved = retrieveLore(knowledge.chunks, question);
-    const factHeading = '\n\nBackground facts (reference material, not dialogue):\n"The player" means the user; "the girlfriend" and "you" in these facts mean you, the assistant.\n';
+    const factHeading = '\n\nBackground facts (reference material, not dialogue):\nFacts about "the player" belong to the user. Facts about "the girlfriend" belong to your character. Keep their experiences and interests separate.\n';
     const sources: string[] = [];
     let facts = '';
     let factBudget = Math.min(850, promptBudget - byteLength(system) - exampleBytes - byteLength(question) - byteLength(factHeading));
@@ -103,16 +116,27 @@ export function buildCharacterPrompt(knowledge: CharacterKnowledge, userText: st
         sources.push(`${chunk.source} · ${chunk.title}`);
         factBudget -= byteLength(passage);
     }
-    return { messages: [{ role: 'system', content: system + (facts ? factHeading + facts : '') }, ...examples, { role: 'user', content: question }], sources };
+    const systemContent = system + (facts ? factHeading + facts : '');
+    let historyBudget = promptBudget - byteLength(systemContent) - exampleBytes - byteLength(question);
+    const previous: ChatMessage[] = [];
+    // Keep the newest complete exchanges, preserving speaker order and reserving framing.
+    for (let index = history.length - 1; index >= 0; index--) {
+        const turn = history[index];
+        const cost = byteLength(turn.user) + byteLength(turn.assistant) + 64;
+        if (cost > historyBudget) break;
+        previous.unshift({ role: 'user', content: turn.user }, { role: 'assistant', content: turn.assistant });
+        historyBudget -= cost;
+    }
+    return { messages: [{ role: 'system', content: systemContent }, ...examples, ...previous, { role: 'user', content: question }], sources };
 }
 
 export function validateCharacterConfig(value: unknown): CharacterConfig {
     const config = value as CharacterConfig;
     if (!config || typeof config.name !== 'string' || !config.name.trim() || config.name.length > 50 ||
         typeof config.greeting !== 'string' || config.greeting.length > 300 ||
-        typeof config.modelId !== 'string' || !/^(SmolLM2-360M-Instruct-(q0f16|q4f(16|32)_1)|Qwen3\.5-2B-q4f(16|32)_1)-MLC$/.test(config.modelId) ||
+        typeof config.modelId !== 'string' || !/^(SmolLM2-360M-Instruct-(q0f16|q4f(16|32)_1)|Qwen3\.5-2B-q4f(16|32)_1|Hermes-3-Llama-3\.2-3B-q4f(16|32)_1)-MLC$/.test(config.modelId) ||
         !Number.isFinite(config.temperature) || config.temperature < 0 || config.temperature > 1.5 ||
-        !Number.isInteger(config.maxReplyTokens) || config.maxReplyTokens < 32 || config.maxReplyTokens > 1024 ||
+        !Number.isInteger(config.maxReplyTokens) || config.maxReplyTokens < 32 || config.maxReplyTokens > 4096 ||
         !Array.isArray(config.styleExamples) || config.styleExamples.length > 2 ||
         config.styleExamples.some(example => !example || typeof example.user !== 'string' || typeof example.assistant !== 'string' || byteLength(example.user) > 100 || byteLength(example.assistant) > 160) ||
         !Array.isArray(config.knowledgeFiles) || config.knowledgeFiles.length > 32 ||

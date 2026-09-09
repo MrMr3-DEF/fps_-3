@@ -1,5 +1,5 @@
 import { WebWorkerMLCEngine } from '@mlc-ai/web-llm';
-import type { CharacterConfig, ChatMessage } from './gothKnowledge.js';
+import { characterContextSize, type CharacterConfig, type ChatMessage } from './gothKnowledge.js';
 import { visibleGothReply } from './gothReply.js';
 
 export class GothChatEngine {
@@ -18,11 +18,12 @@ export class GothChatEngine {
         if (generation !== this.generation) throw new Error('Local AI was stopped.');
         if (!adapter) throw new Error('No WebGPU adapter is available. Try a browser with hardware acceleration enabled.');
         if (config.modelId.includes('f16') && !adapter.features.has('shader-f16')) {
-            throw new Error('This GPU lacks shader-f16. In character.json, use Qwen3.5-2B-q4f32_1-MLC, then refresh the page. That version uses 4-bit weights and does not need shader-f16.');
+            const fallback = config.modelId.replace(/q(?:0f16|4f16_1)-MLC$/, 'q4f32_1-MLC');
+            throw new Error(`This GPU lacks shader-f16. In character.json, use ${fallback}, then refresh the page. That version uses 4-bit weights and does not need shader-f16.`);
         }
         this.worker = new Worker(new URL('./gothChat.worker.ts', import.meta.url), { type: 'module' });
         this.engine = new WebWorkerMLCEngine(this.worker, { initProgressCallback: report => progress(report.progress, report.text), logLevel: 'WARN' });
-        await this.guard(this.engine.reload(config.modelId, { context_window_size: 4096, ...(config.modelId.startsWith('Qwen3.5-') ? { max_history_size: 1 } : {}) }), 300000);
+        await this.guard(this.engine.reload(config.modelId, { context_window_size: characterContextSize(config.modelId) }), 300000);
         this.ready = true;
     }
 
@@ -46,7 +47,7 @@ export class GothChatEngine {
         if (!this.engine || !this.ready) throw new Error('Load the local model first.');
         const engine = this.engine;
         return this.guard((async () => {
-            // The complete, bounded prompt is rebuilt each turn, including fresh RAG facts.
+            // Refresh RAG/KV state; the supplied messages retain this interaction’s conversation.
             await engine.resetChat();
             const stream = await engine.chat.completions.create({
                 messages, stream: true, temperature: config.temperature,
@@ -68,7 +69,7 @@ export class GothChatEngine {
             }
             if (!reply.trim()) throw new Error('The model returned an empty reply. Please retry.');
             return reply.trim();
-        })(), 90000);
+        })(), 300000);
     }
 
     dispose(): void {

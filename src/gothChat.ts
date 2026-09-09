@@ -1,7 +1,7 @@
 import './gothChat.css';
 import { ChatConsent } from './gothChatConsent.js';
 import { ChatEscape } from './chatEscape.js';
-import { buildCharacterPrompt, byteLength, loadCharacterKnowledge, type CharacterKnowledge } from './gothKnowledge.js';
+import { buildCharacterPrompt, byteLength, GothChatSession, loadCharacterKnowledge, type CharacterKnowledge } from './gothKnowledge.js';
 import type { GothChatEngine } from './gothChatEngine.js';
 
 interface ChatHooks {
@@ -30,6 +30,7 @@ export class GothChat {
     private pending = false;
     private opened = false;
     private greetingShown = false;
+    private session = new GothChatSession();
     private activeAnswer: HTMLElement | null = null;
     get isOpen(): boolean { return this.opened; }
 
@@ -48,8 +49,8 @@ export class GothChat {
                 <p>You’re talking to a fictional character powered by AI. Her replies are generated, can be inaccurate or inappropriate, and are not professional advice.</p>
                 <ul>
                     <li><strong>Runs on your device.</strong> Chat text is processed locally with <a href="https://webllm.mlc.ai/" target="_blank" rel="noopener noreferrer">WebLLM</a> and a local language model. This chat does not send your messages to an AI service.</li>
-                    <li><strong>A download on first use.</strong> Enabling chat downloads model files (roughly 1.1 GB with the default Qwen3.5 2B model) from Hugging Face and MLC’s hosting. These hosts receive normal connection information, such as your IP address. Running the model uses your device’s GPU and memory.</li>
-                    <li><strong>You control when it starts.</strong> Messages stay in this page’s memory and clear when you refresh or leave the world. Model files may remain cached. Approval is saved in this browser; clearing site data removes it.</li>
+                    <li><strong>A download on first use.</strong> Enabling chat downloads model files (roughly 1.8 GB with the default Hermes 3 3B model) from Hugging Face and MLC’s hosting. These hosts receive normal connection information, such as your IP address. Running the model uses your device’s GPU and memory.</li>
+                    <li><strong>You control when it starts.</strong> Messages stay in this page’s memory while chat is open. Closing chat clears the conversation. Model files may remain cached. Approval is saved in this browser; clearing site data removes it.</li>
                 </ul>
                 <p class="goth-chat-legal">Site information: <a href="https://luigismansion.de/impressum" target="_blank" rel="noopener noreferrer">Impressum</a> · <a href="https://luigismansion.de/datenschutz" target="_blank" rel="noopener noreferrer">Datenschutz</a></p>
                 <div class="goth-chat-notice-actions"><button type="button" data-action="decline">Not now</button><button type="button" data-action="approve">I understand — enable AI chat</button></div>
@@ -171,6 +172,7 @@ export class GothChat {
         this.panel.hidden = true;
         document.body.classList.remove('goth-chat-open');
         this.cancelPending();
+        this.clearConversation();
         this.hooks.onClose(resume);
     }
 
@@ -186,12 +188,17 @@ export class GothChat {
         this.pending = false;
     }
 
-    reset(): void {
-        this.close(false);
-        this.cancelPending();
+    private clearConversation(): void {
+        this.session.clear();
         this.transcript.replaceChildren();
         this.greetingShown = false;
         this.input.value = '';
+    }
+
+    reset(): void {
+        this.close(false);
+        this.cancelPending();
+        this.clearConversation();
         this.engine?.dispose();
         this.engine = null;
         this.knowledge = null;
@@ -267,7 +274,7 @@ export class GothChat {
         if (!text) return;
         if (byteLength(text) > 600) { this.status.textContent = 'Please shorten your message a little so she can follow it.'; return; }
         const epoch = ++this.epoch;
-        const { messages } = buildCharacterPrompt(this.knowledge, text);
+        const { messages } = buildCharacterPrompt(this.knowledge, text, this.session.turns);
         this.pending = true;
         this.input.value = '';
         this.message('user', text);
@@ -287,6 +294,7 @@ export class GothChat {
             if (epoch !== this.epoch) return;
             this.activeAnswer = null;
             answer.textContent = reply;
+            this.session.complete(text, reply);
             this.setReady();
         } catch (error) {
             if (epoch !== this.epoch) return;

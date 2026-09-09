@@ -1,5 +1,5 @@
 /** Bump the key when the information shown to players materially changes. */
-export const CHAT_CONSENT_KEY = 'testfps.goth-chat-consent.v3';
+export const CHAT_CONSENT_KEY = 'testfps.goth-chat-consent.v4';
 
 type ConsentStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
