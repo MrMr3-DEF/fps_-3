@@ -117,7 +117,7 @@ Gameplay queries do not iterate the whole world. `world.ts` maintains separate s
 
 Visible static props are largely batched into `InstancedMesh` groups by material. The world is divided into 200-by-200-unit render chunks. Crossing a chunk boundary updates active chunks and rebuilds only the relevant instance matrices. Dynamic target billboards update every other frame. Shared geometries and materials are tracked so disposal removes match-owned resources without destroying reusable assets.
 
-The render-distance slider is a chunk radius from 1 to 16, with 4 as the default. It affects visible town structures, pillars, lava, bushes, distant vegetation, enemies, and decorative lava. It does not remove gameplay colliders or spatial-index entries, so lowering it never changes physics or shot validation. Emissive lava tiles are supplemented by a capped pool of six flickering point lights assigned to the pools nearest the player, avoiding a light per generated tile.
+The render-distance slider is a chunk radius from 1 to 16, with 4 as the default. It affects visible town structures, pillars, lava, bushes, distant vegetation, enemies, and decorative lava. It does not remove gameplay colliders or spatial-index entries, so lowering it never changes physics or shot validation. Emissive lava tiles are supplemented by one flickering point light assigned to the pool nearest the player, avoiding a light per generated tile. All eight street lanterns contribute real flickering light together at night.
 
 ## Gameplay flow
 

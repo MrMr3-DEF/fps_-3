@@ -56,7 +56,7 @@ const TOWN_LANTERN_POSITIONS = [
     [-60, 8.5], [-25, -8.5], [25, 8.5], [60, -8.5],
 ] as const;
 
-const LAVA_LIGHT_COUNT = 6;
+const LAVA_LIGHT_COUNT = 1;
 const LAVA_LIGHT_QUERY_RADIUS = 72;
 const LAVA_LIGHT_REASSIGN_DISTANCE_SQ = 8 * 8;
 const lavaLights: THREE.PointLight[] = [];

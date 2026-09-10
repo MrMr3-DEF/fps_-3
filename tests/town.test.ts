@@ -5,7 +5,7 @@ import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, ov
 import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
-import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
+import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
@@ -112,18 +112,31 @@ test('real world respects explicit seeds, reserves the town, synchronizes geomet
     }
 });
 
-test('lava illumination follows nearby pools with a capped reusable light set', () => {
+test('lava illumination follows the nearest pool with one reusable light', () => {
     setup();
     const lava = state.lavaPools[0];
     updateLavaLights(1, lava.position, 1);
     const group = state.scene!.getObjectByName('lava-lights')!;
     const lights = group.children.filter(child => (child as THREE.PointLight).isPointLight) as THREE.PointLight[];
-    assert.equal(lights.length, 6);
+    assert.equal(lights.length, 1);
     assert.ok(lights.some(light => light.visible && light.intensity > 0));
-    assert.ok(lights.filter(light => light.visible).length <= 6);
+    assert.equal(lights.filter(light => light.visible).length, 1);
 
     updateLavaLights(2, new THREE.Vector3(0, 2, 0), 1);
     assert.ok(lights.every(light => !light.visible), 'town remains free of wilderness lava lights');
+    disposeWorld();
+});
+
+test('all town lanterns emit light together at night', () => {
+    setup();
+    updateTownLanterns(1, 1);
+    const group = state.scene!.getObjectByName('town-lanterns')!;
+    const lights = group.children.filter(child => (child as THREE.PointLight).isPointLight) as THREE.PointLight[];
+    assert.equal(lights.length, 8);
+    assert.ok(lights.every(light => light.visible && light.intensity > 0));
+
+    updateTownLanterns(2, 0);
+    assert.ok(lights.every(light => !light.visible));
     disposeWorld();
 });
 

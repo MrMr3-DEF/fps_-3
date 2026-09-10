@@ -1226,8 +1226,10 @@ export function animate(): void {
     const time = performance.now();
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
     const lanternStrength = state.camera ? dayNightCycle?.update(delta, state.camera.position) ?? 0 : 0;
-    updateTownLanterns(time / 1000, lanternStrength);
-    if (state.camera) updateLavaLights(time / 1000, state.camera.position, lanternStrength);
+    if (state.camera) {
+        updateTownLanterns(time / 1000, lanternStrength);
+        updateLavaLights(time / 1000, state.camera.position, lanternStrength);
+    }
 
     updateWeapons(delta);
 
