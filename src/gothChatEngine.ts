@@ -1,5 +1,6 @@
 import { WebWorkerMLCEngine } from '@mlc-ai/web-llm';
 import { characterContextSize, type CharacterConfig, type ChatMessage } from './gothKnowledge.js';
+import { modelFailure } from './gothModelFailure.js';
 import { visibleGothReply } from './gothReply.js';
 
 export class GothChatEngine {
@@ -7,6 +8,7 @@ export class GothChatEngine {
     private engine: WebWorkerMLCEngine | null = null;
     private abort: (() => void) | null = null;
     private generation = 0;
+    private touchTimeout: (() => void) | null = null;
     ready = false;
 
     async load(config: CharacterConfig, progress: (fraction: number, text: string) => void): Promise<void> {
@@ -22,7 +24,7 @@ export class GothChatEngine {
             throw new Error(`This GPU lacks shader-f16. In character.json, use ${fallback}, then refresh the page. That version uses 4-bit weights and does not need shader-f16.`);
         }
         this.worker = new Worker(new URL('./gothChat.worker.ts', import.meta.url), { type: 'module' });
-        this.engine = new WebWorkerMLCEngine(this.worker, { initProgressCallback: report => progress(report.progress, report.text), logLevel: 'WARN' });
+        this.engine = new WebWorkerMLCEngine(this.worker, { initProgressCallback: report => { this.touchTimeout?.(); progress(report.progress, report.text); }, logLevel: 'WARN' });
         await this.guard(this.engine.reload(config.modelId, { context_window_size: characterContextSize(config.modelId) }), 300000);
         this.ready = true;
     }
@@ -32,15 +34,18 @@ export class GothChatEngine {
         const failure = new Promise<never>((_, reject) => {
             this.abort = () => reject(new Error('Local AI was stopped.'));
             if (this.worker) this.worker.onerror = () => reject(new Error('The local AI worker stopped. Try loading it again.'));
-            timer = setTimeout(() => reject(new Error('Local AI timed out. Check your connection or GPU and retry.')), timeout);
+            this.touchTimeout = () => {
+                clearTimeout(timer);
+                timer = setTimeout(() => reject(new Error('Local AI reported no progress for five minutes. Retry loading the model.')), timeout);
+            };
+            this.touchTimeout();
         });
         try { return await Promise.race([operation, failure]); }
         catch (error) {
             this.dispose();
-            if (error instanceof Error) throw error;
-            throw new Error(`The local model could not run on this browser/GPU (${String(error)}). Try a current Chrome or Edge browser, then retry.`);
+            throw modelFailure(error);
         }
-        finally { clearTimeout(timer); this.abort = null; }
+        finally { clearTimeout(timer); this.abort = null; this.touchTimeout = null; }
     }
 
     async reply(messages: ChatMessage[], config: CharacterConfig, onToken: (text: string) => void): Promise<string> {
@@ -59,6 +64,7 @@ export class GothChatEngine {
             for await (const chunk of stream) {
                 const token = chunk.choices[0]?.delta.content;
                 if (token) {
+                    this.touchTimeout?.();
                     rawReply += token;
                     const visible = visibleGothReply(rawReply);
                     if (visible && visible !== reply) {

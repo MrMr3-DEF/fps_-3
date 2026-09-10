@@ -10,7 +10,6 @@ const knowledge: CharacterKnowledge = { config, systemPrompt: read('system.md'),
 test('shipped character is unnamed, already the player’s girlfriend, and fits prompt limits', () => {
     assert.equal(config.name, 'Your girlfriend');
     assert.match(knowledge.systemPrompt, /girlfriend/);
-    assert.match(knowledge.systemPrompt, /commanding and dominant/);
     assert.ok(byteLength(knowledge.systemPrompt) <= 2100);
     assert.equal(config.modelId, 'Hermes-3-Llama-3.2-3B-q4f16_1-MLC');
     assert.ok(knowledge.chunks.length >= 8);

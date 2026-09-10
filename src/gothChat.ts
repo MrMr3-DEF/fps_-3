@@ -13,6 +13,7 @@ interface ChatHooks {
 /** Owns the conversation UI, consent gate, transcript and async request lifetime. */
 export class GothChat {
     private downloadApproval: ((approved: boolean) => void) | null = null;
+    private preloadError: unknown = null;
     private preloadTask: Promise<void> | null = null;
     private openingKey: string | null = null;
     private panel: HTMLElement;
@@ -162,6 +163,7 @@ export class GothChat {
     /** Load in the background only after the saved consent gate has been passed. */
     preload(): void {
         if (!this.consent.approved || this.preloadTask || this.engine?.ready) return;
+        this.preloadError = null;
         this.preloadTask = (async () => {
             const knowledge = this.knowledge ?? await loadCharacterKnowledge();
             this.knowledge = knowledge;
@@ -175,6 +177,7 @@ export class GothChat {
                 this.progress.title = text;
             });
         })().catch(error => {
+            this.preloadError = error;
             this.engine?.dispose();
             this.engine = null;
             console.warn('Automatic local chat loading failed; interaction can retry.', error);
@@ -285,29 +288,15 @@ export class GothChat {
         this.status.textContent = 'Reading her character notes…';
         this.fetchController = new AbortController();
         try {
+            // Both entry points share one load. Closing chat only detaches its UI.
+            this.preload();
             if (this.preloadTask) await this.preloadTask;
             if (epoch !== this.epoch) return;
-            const knowledge = this.knowledge ?? await loadCharacterKnowledge(this.fetchController.signal);
-            if (epoch !== this.epoch) return;
-            this.knowledge = knowledge;
+            if (this.preloadError) throw this.preloadError;
+            if (!this.knowledge || !this.engine?.ready) throw new Error('Local model loading did not complete.');
             if (!this.greetingShown) {
                 this.message('assistant', this.knowledge.config.greeting);
                 this.greetingShown = true;
-            }
-            if (!this.engine?.ready) {
-                this.status.textContent = 'Loading local chat. You can write while the model loads…';
-                this.progress.hidden = false;
-                this.progress.value = 0;
-                this.progress.title = '';
-                const { GothChatEngine } = await import('./gothChatEngine.js');
-                if (epoch !== this.epoch) return;
-                this.engine = new GothChatEngine();
-                await this.engine.load(this.knowledge.config, (fraction, text) => {
-                    if (epoch !== this.epoch) return;
-                    this.progress.value = Math.min(1, Math.max(0, fraction));
-                    this.status.textContent = `Loading local chat · ${Math.round(fraction * 100)}% · You can write while it loads`;
-                    this.progress.title = text;
-                });
             }
             if (epoch === this.epoch) this.setReady();
         } catch (error) { if (epoch === this.epoch) this.showError(error); }

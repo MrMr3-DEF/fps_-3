@@ -12,7 +12,8 @@ export interface LoreChunk { source: string; title: string; text: string }
 export interface CharacterKnowledge { config: CharacterConfig; systemPrompt: string; chunks: LoreChunk[] }
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
 export const PROMPT_BYTE_BUDGET = 12000;
-export const characterContextSize = (modelId: string): number => modelId.startsWith('SmolLM2-') ? 8192 : 16384;
+// Reserve a 4K reply without the larger 16K GPU cache allocation.
+export const characterContextSize = (_modelId: string): number => 8192;
 export interface ChatTurn { user: string; assistant: string }
 
 /** Only completed exchanges belong to the current interaction. */

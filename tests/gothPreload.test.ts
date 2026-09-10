@@ -7,7 +7,7 @@ import { CHAT_CONSENT_KEY } from '../src/gothChatConsent.ts';
 // Exercise the real UI lifecycle without a browser, GPU or model downloads.
 const fakeEngine = `export class GothChatEngine {
   ready = false;
-  async load() { globalThis.modelLoads++; this.ready = true; }
+  async load() { globalThis.modelLoads++; await globalThis.modelGate; if (globalThis.modelFailure) throw new Error("Simulated GPU loss"); this.ready = true; }
   dispose() { this.ready = false; }
 }`;
 registerHooks({
@@ -90,6 +90,24 @@ test('automatic loading requires consent, shares its model with chat, and settin
         assert.equal(panel.querySelector('.goth-chat-notice').hidden, false, 'show the same notice even with saved approval');
         chat.close();
         assert.equal(approval, false);
+        let release!: () => void;
+        Object.assign(globalThis, { modelGate: new Promise<void>(resolve => { release = resolve; }) });
+        const waiting = new GothChat({ onOpen() {}, onClose() {}, onReplyStart() {} });
+        waiting.open();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        waiting.close();
+        waiting.open();
+        release();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.equal((globalThis as unknown as { modelLoads: number }).modelLoads, 2, 'reopening during a normal download shares one worker');
+        waiting.close();
+        Object.assign(globalThis, { modelFailure: true });
+        const failed = new GothChat({ onOpen() {}, onClose() {}, onReplyStart() {} });
+        failed.open();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.equal((globalThis as unknown as { modelLoads: number }).modelLoads, 3, 'failed loads do not immediately allocate a second GPU session');
+        assert.match(panel.querySelector('.goth-chat-status').textContent, /Simulated GPU loss/);
+        failed.close();
     } finally {
         Object.assign(globalThis, original);
     }
