@@ -5,7 +5,7 @@ import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, ov
 import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
-import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
+import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
@@ -110,6 +110,21 @@ test('real world respects explicit seeds, reserves the town, synchronizes geomet
         assert.equal(queryObstaclesAlongSegment(-200, 0, 200, 0).length, 0);
         for (const collider of colliders) assert.equal(collider.parent, null);
     }
+});
+
+test('lava illumination follows nearby pools with a capped reusable light set', () => {
+    setup();
+    const lava = state.lavaPools[0];
+    updateLavaLights(1, lava.position, 1);
+    const group = state.scene!.getObjectByName('lava-lights')!;
+    const lights = group.children.filter(child => (child as THREE.PointLight).isPointLight) as THREE.PointLight[];
+    assert.equal(lights.length, 6);
+    assert.ok(lights.some(light => light.visible && light.intensity > 0));
+    assert.ok(lights.filter(light => light.visible).length <= 6);
+
+    updateLavaLights(2, new THREE.Vector3(0, 2, 0), 1);
+    assert.ok(lights.every(light => !light.visible), 'town remains free of wilderness lava lights');
+    disposeWorld();
 });
 
 test('walls, roofs and doorways share real grapple and projectile broad-phase geometry regardless of render distance', () => {

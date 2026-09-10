@@ -56,6 +56,14 @@ const TOWN_LANTERN_POSITIONS = [
     [-60, 8.5], [-25, -8.5], [25, 8.5], [60, -8.5],
 ] as const;
 
+const LAVA_LIGHT_COUNT = 6;
+const LAVA_LIGHT_QUERY_RADIUS = 72;
+const LAVA_LIGHT_REASSIGN_DISTANCE_SQ = 8 * 8;
+const lavaLights: THREE.PointLight[] = [];
+const lavaLightCandidates: THREE.Object3D[] = [];
+const lavaLightAnchor = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
+let lavaLightGroup: THREE.Group | null = null;
+
 interface ChunkedInstanceSet {
     mesh: THREE.InstancedMesh;
     matricesByChunk: Map<string, THREE.Matrix4[]>;
@@ -247,6 +255,66 @@ export function updateTownLanterns(timeSeconds: number, strength: number): void 
         townLanternFlames!.setMatrixAt(index, lanternMatrixDummy.matrix);
     });
     townLanternFlames.instanceMatrix.needsUpdate = true;
+}
+
+function createLavaLights(): void {
+    lavaLightGroup = new THREE.Group();
+    lavaLightGroup.name = 'lava-lights';
+    lavaLights.length = 0;
+    for (let index = 0; index < LAVA_LIGHT_COUNT; index++) {
+        const light = new THREE.PointLight(0xff4b16, 0, 42, 2);
+        light.visible = false;
+        light.castShadow = false;
+        lavaLightGroup.add(light);
+        lavaLights.push(light);
+    }
+    lavaLightAnchor.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
+    addWorldObject(lavaLightGroup);
+}
+
+function refreshLavaLightPositions(observerPosition: THREE.Vector3): void {
+    const dx = observerPosition.x - lavaLightAnchor.x;
+    const dz = observerPosition.z - lavaLightAnchor.z;
+    if (dx * dx + dz * dz <= LAVA_LIGHT_REASSIGN_DISTANCE_SQ) return;
+    lavaLightAnchor.set(observerPosition.x, 0, observerPosition.z);
+
+    lavaHash.query(observerPosition.x, observerPosition.z, LAVA_LIGHT_QUERY_RADIUS, lavaLightCandidates);
+    lavaLightCandidates.sort((a, b) => {
+        const adx = a.position.x - observerPosition.x;
+        const adz = a.position.z - observerPosition.z;
+        const bdx = b.position.x - observerPosition.x;
+        const bdz = b.position.z - observerPosition.z;
+        return adx * adx + adz * adz - bdx * bdx - bdz * bdz;
+    });
+
+    const maxDistance = LAVA_LIGHT_QUERY_RADIUS + LAVA_POOL_HALF_SIZE;
+    const maxDistanceSq = maxDistance * maxDistance;
+    let assigned = 0;
+    for (let index = 0; index < lavaLightCandidates.length && assigned < lavaLights.length; index++) {
+        const candidate = lavaLightCandidates[index];
+        const candidateDx = candidate.position.x - observerPosition.x;
+        const candidateDz = candidate.position.z - observerPosition.z;
+        if (candidateDx * candidateDx + candidateDz * candidateDz > maxDistanceSq) continue;
+        const light = lavaLights[assigned++];
+        light.position.set(candidate.position.x, 1.8, candidate.position.z);
+        light.visible = true;
+    }
+    for (; assigned < lavaLights.length; assigned++) lavaLights[assigned].visible = false;
+}
+
+export function updateLavaLights(timeSeconds: number, observerPosition: THREE.Vector3, nightStrength: number): void {
+    if (!lavaLightGroup) return;
+    refreshLavaLightPositions(observerPosition);
+    const darkness = Math.max(0, Math.min(1, nightStrength));
+    const baseIntensity = THREE.MathUtils.lerp(22, 36, darkness);
+    for (let index = 0; index < lavaLights.length; index++) {
+        const light = lavaLights[index];
+        if (!light.visible) continue;
+        const flicker = 0.91
+            + Math.sin(timeSeconds * 3.1 + index * 1.37) * 0.055
+            + Math.sin(timeSeconds * 7.7 + index * 2.11) * 0.035;
+        light.intensity = baseIntensity * flicker;
+    }
 }
 
 function getRenderChunkKey(x: number, z: number): string {
@@ -1102,6 +1170,7 @@ function createLavaPools(): void {
             }
         }
     }
+    createLavaLights();
 }
 
 function createBushes(): void {
@@ -1347,6 +1416,10 @@ export function disposeWorld(): void {
     townLanternFlames = null;
     townLanternGlassMaterial = null;
     townLanternLights.length = 0;
+    lavaLightGroup = null;
+    lavaLights.length = 0;
+    lavaLightCandidates.length = 0;
+    lavaLightAnchor.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
     state.lavaPools = [];
     state.fakePillars = [];
     obstacleHash.clear();

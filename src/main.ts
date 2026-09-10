@@ -36,7 +36,7 @@ import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets, updateTownLanterns } from './world.js';
+import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -1227,6 +1227,7 @@ export function animate(): void {
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
     const lanternStrength = state.camera ? dayNightCycle?.update(delta, state.camera.position) ?? 0 : 0;
     updateTownLanterns(time / 1000, lanternStrength);
+    if (state.camera) updateLavaLights(time / 1000, state.camera.position, lanternStrength);
 
     updateWeapons(delta);
 
