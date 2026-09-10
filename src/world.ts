@@ -28,6 +28,7 @@ import { obstacleData, targetData } from './userDataTypes.js';
 import { GothGirlfriend } from './gothGirlfriend.js';
 import { createGothHouseDecor } from './gothHouse.js';
 import { createTownBoxes, generateTownLayout, getTownPavingOutline, overlapsTown, type TownMaterial } from './town.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const obstacleHash = new SpatialHash<THREE.Object3D>(32);
 const lavaHash = new SpatialHash<THREE.Object3D>(32);
@@ -38,6 +39,22 @@ const worldObjects: THREE.Object3D[] = [];
 const renderChunks = new Map<string, THREE.Object3D[]>();
 const activeRenderChunks = new Set<string>();
 let grappleFloor: THREE.Object3D | null = null;
+let townLanternFlames: THREE.InstancedMesh | null = null;
+let townLanternGlassMaterial: THREE.MeshStandardMaterial | null = null;
+
+interface TownLanternLight {
+    light: THREE.PointLight;
+    x: number;
+    z: number;
+    phase: number;
+}
+
+const townLanternLights: TownLanternLight[] = [];
+const lanternMatrixDummy = new THREE.Object3D();
+const TOWN_LANTERN_POSITIONS = [
+    [-8.5, -60], [8.5, -25], [-8.5, 25], [8.5, 60],
+    [-60, 8.5], [-25, -8.5], [25, 8.5], [60, -8.5],
+] as const;
 
 interface ChunkedInstanceSet {
     mesh: THREE.InstancedMesh;
@@ -105,6 +122,131 @@ function addWorldObject<T extends THREE.Object3D>(obj: T): T {
     state.scene!.add(obj);
     worldObjects.push(obj);
     return obj;
+}
+
+function mergeLanternParts(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+    const merged = mergeGeometries(parts, false);
+    parts.forEach(part => part.dispose());
+    if (!merged) throw new Error('Unable to build the town lantern geometry.');
+    return merged;
+}
+
+function createLanternFrameGeometry(): THREE.BufferGeometry {
+    const parts: THREE.BufferGeometry[] = [
+        new THREE.CylinderGeometry(0.34, 0.43, 0.3, 8).translate(0, 0.15, 0),
+        new THREE.CylinderGeometry(0.09, 0.13, 3.8, 10).translate(0, 2.05, 0),
+        new THREE.CylinderGeometry(0.22, 0.15, 0.25, 8).translate(0, 4.04, 0),
+        new THREE.BoxGeometry(0.82, 0.12, 0.82).translate(0, 4.25, 0),
+        new THREE.ConeGeometry(0.68, 0.48, 4).rotateY(Math.PI / 4).translate(0, 5.37, 0),
+        new THREE.SphereGeometry(0.11, 8, 5).translate(0, 5.7, 0),
+    ];
+    for (const x of [-0.36, 0.36]) for (const z of [-0.36, 0.36]) {
+        parts.push(new THREE.BoxGeometry(0.055, 0.95, 0.055).translate(x, 4.75, z));
+    }
+    return mergeLanternParts(parts);
+}
+
+function createTownLanterns(): void {
+    const frameGeometry = createLanternFrameGeometry();
+    const glassGeometry = new THREE.CylinderGeometry(0.34, 0.43, 0.85, 4, 1, true)
+        .rotateY(Math.PI / 4)
+        .translate(0, 4.73, 0);
+    const flameGeometry = new THREE.SphereGeometry(0.11, 8, 5).scale(1, 2.2, 1);
+
+    const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x171512,
+        metalness: 0.7,
+        roughness: 0.42,
+    });
+    townLanternGlassMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffad55,
+        emissive: 0xff7a1a,
+        emissiveIntensity: 0.05,
+        transparent: true,
+        opacity: 0.34,
+        roughness: 0.22,
+        side: THREE.DoubleSide,
+    });
+    const flameMaterial = new THREE.MeshBasicMaterial({ color: 0xffd27a });
+
+    const group = new THREE.Group();
+    group.name = 'town-lanterns';
+    const frames = new THREE.InstancedMesh(frameGeometry, frameMaterial, TOWN_LANTERN_POSITIONS.length);
+    frames.name = 'town-lantern-frames';
+    const glass = new THREE.InstancedMesh(glassGeometry, townLanternGlassMaterial, TOWN_LANTERN_POSITIONS.length);
+    glass.name = 'town-lantern-glass';
+    townLanternFlames = new THREE.InstancedMesh(flameGeometry, flameMaterial, TOWN_LANTERN_POSITIONS.length);
+    townLanternFlames.name = 'town-lantern-flames';
+    townLanternFlames.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    const colliderGeometry = new THREE.BoxGeometry(0.7, 5.7, 0.7);
+    const colliderMaterial = new THREE.MeshBasicMaterial();
+    townLanternLights.length = 0;
+    TOWN_LANTERN_POSITIONS.forEach(([x, z], index) => {
+        lanternMatrixDummy.position.set(x, 0, z);
+        lanternMatrixDummy.scale.set(1, 1, 1);
+        lanternMatrixDummy.updateMatrix();
+        frames.setMatrixAt(index, lanternMatrixDummy.matrix);
+        glass.setMatrixAt(index, lanternMatrixDummy.matrix);
+
+        lanternMatrixDummy.position.set(x, 4.67, z);
+        lanternMatrixDummy.scale.setScalar(0);
+        lanternMatrixDummy.updateMatrix();
+        townLanternFlames!.setMatrixAt(index, lanternMatrixDummy.matrix);
+
+        const light = new THREE.PointLight(0xffa34d, 0, 30, 2);
+        light.position.set(x, 4.7, z);
+        light.visible = false;
+        group.add(light);
+        townLanternLights.push({ light, x, z, phase: index * 1.731 });
+
+        const collider = new THREE.Mesh(colliderGeometry, colliderMaterial);
+        collider.name = 'town-lantern';
+        collider.position.set(x, 2.85, z);
+        Object.assign(obstacleData(collider), {
+            height: 5.7,
+            halfW: 0.35,
+            halfD: 0.35,
+            halfH: 2.85,
+        });
+        collider.visible = false;
+        addWorldObject(collider);
+        state.obstacles.push(collider);
+        obstacleHash.insert(x, z, 0.5, collider);
+    });
+    frames.instanceMatrix.needsUpdate = true;
+    glass.instanceMatrix.needsUpdate = true;
+    townLanternFlames.instanceMatrix.needsUpdate = true;
+    frames.frustumCulled = glass.frustumCulled = townLanternFlames.frustumCulled = false;
+    group.add(frames, glass, townLanternFlames);
+    addWorldObject(group);
+    addChunkedRenderObject(group);
+}
+
+export function getGasLanternFlicker(timeSeconds: number, phase: number): number {
+    return 0.91
+        + Math.sin(timeSeconds * 11.3 + phase) * 0.055
+        + Math.sin(timeSeconds * 23.7 + phase * 1.7) * 0.025
+        + Math.sin(timeSeconds * 4.1 + phase * 0.6) * 0.02;
+}
+
+export function updateTownLanterns(timeSeconds: number, strength: number): void {
+    if (!townLanternFlames || !townLanternGlassMaterial) return;
+    const clampedStrength = Math.max(0, Math.min(1, strength));
+    townLanternGlassMaterial.emissiveIntensity = 0.05 + clampedStrength * 1.25;
+
+    townLanternLights.forEach(({ light, x, z, phase }, index) => {
+        const flicker = getGasLanternFlicker(timeSeconds, phase);
+        light.intensity = 42 * clampedStrength * flicker;
+        light.visible = clampedStrength > 0.015;
+
+        const flameScale = clampedStrength * flicker;
+        lanternMatrixDummy.position.set(x, 4.67, z);
+        lanternMatrixDummy.scale.set(flameScale, flameScale * 1.08, flameScale);
+        lanternMatrixDummy.updateMatrix();
+        townLanternFlames!.setMatrixAt(index, lanternMatrixDummy.matrix);
+    });
+    townLanternFlames.instanceMatrix.needsUpdate = true;
 }
 
 function getRenderChunkKey(x: number, z: number): string {
@@ -1151,6 +1293,7 @@ export function createEnvironment(preserveSeed = false): void {
     createLavaPools();
     createBushes();
     createTown();
+    createTownLanterns();
     createEnemies();
 }
 
@@ -1201,6 +1344,9 @@ export function disposeWorld(): void {
     state.targets = [];
     state.obstacles = [];
     grappleFloor = null;
+    townLanternFlames = null;
+    townLanternGlassMaterial = null;
+    townLanternLights.length = 0;
     state.lavaPools = [];
     state.fakePillars = [];
     obstacleHash.clear();

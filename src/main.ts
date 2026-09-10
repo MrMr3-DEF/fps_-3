@@ -23,7 +23,6 @@ import {
     PLAYER_RADIUS,
     WEAPON_STATS,
     REGEN_DELAY_MS,
-    MAX_PILLAR_HEIGHT,
     MAX_FRAME_DELTA,
     ROOM_CODE_LENGTH,
     MAP_HALF_SIZE,
@@ -37,7 +36,7 @@ import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets } from './world.js';
+import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateTargets, updateTownLanterns } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -55,9 +54,11 @@ import type { PlayerDiedPacket } from './networkTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
+import { DayNightCycle } from './dayNightCycle.js';
 
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
+let dayNightCycle: DayNightCycle | null = null;
 const conversationCamera = new ConversationCamera();
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
@@ -298,31 +299,11 @@ function setupRenderer(): void {
     state.scene.background = new THREE.Color(0xd0dbf0);
     state.scene.fog = new THREE.FogExp2(0xd0dbf0, 0.002);
 
-    const ambientLight = new THREE.AmbientLight(0x777777);
-    state.scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    // Keep the sun outside the expanded playable map so the full arena fits
-    // inside the directional shadow camera instead of losing shadows at edges.
-    const shadowLightOffset = MAP_HALF_SIZE * 0.75;
-    directionalLight.position.set(shadowLightOffset, shadowLightOffset * 2, shadowLightOffset);
-    directionalLight.castShadow = userSettings.shadows;
-    
     const shadowMapSize = userSettings.shadowQuality === 'high' ? 2048 : 1024;
-    directionalLight.shadow.mapSize.width = shadowMapSize;
-    directionalLight.shadow.mapSize.height = shadowMapSize;
-    directionalLight.shadow.camera.near = 0.5;
-    directionalLight.shadow.camera.far = MAP_HALF_SIZE * 3.2;
-    
-    const d = Math.SQRT2 * MAP_HALF_SIZE + MAX_PILLAR_HEIGHT;
-    directionalLight.shadow.camera.left = -d;
-    directionalLight.shadow.camera.right = d;
-    directionalLight.shadow.camera.top = d;
-    directionalLight.shadow.camera.bottom = -d;
-    directionalLight.shadow.camera.updateProjectionMatrix();
-    
-    directionalLight.shadow.bias = -0.0005;
-    state.scene.add(directionalLight);
+    dayNightCycle = new DayNightCycle(state.scene, {
+        shadows: userSettings.shadows,
+        shadowMapSize,
+    });
 
     state.renderer = new THREE.WebGLRenderer({ antialias: true });
     applyRendererSettings(state.renderer);
@@ -779,6 +760,8 @@ function disposeGameRuntime(): void {
     disposePlayerVisuals();
     disposeHookMesh();
     disposeWorld();
+    dayNightCycle?.dispose();
+    dayNightCycle = null;
 }
 
 function prepareFreshArena(): void {
@@ -1242,6 +1225,8 @@ export function animate(): void {
 
     const time = performance.now();
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
+    const lanternStrength = state.camera ? dayNightCycle?.update(delta, state.camera.position) ?? 0 : 0;
+    updateTownLanterns(time / 1000, lanternStrength);
 
     updateWeapons(delta);
 

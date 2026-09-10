@@ -46,9 +46,10 @@ Starting a fresh arena disposes world-owned graphics and rebuilds them. Offline 
 | File | Responsibility |
 | --- | --- |
 | `main.ts` | Composition root, renderer and UI lifecycle, input, frame loop, local health/death, lava, regeneration, world-border warning |
+| `dayNightCycle.ts` | Eight-minute sky cycle, moving sun/moon, ambient lighting, fog color, and sun shadow setup |
 | `config.ts` | Shared gameplay constants, world counts, network limits, weapon statistics |
 | `state.ts` | Mutable client runtime state and reset helpers |
-| `world.ts` | Deterministic arena construction, procedural textures, render chunks, spatial indexes, targets, world disposal |
+| `world.ts` | Deterministic arena construction, procedural textures, render chunks, spatial indexes, targets, flickering town lanterns, world disposal |
 | `town.ts` | Seeded central-town plots, walls, gateways, building shells, interiors, and wilderness exclusion |
 | `physics.ts` | Local movement, gravity, hover fuel, ground/ceiling detection, and obstacle collision |
 | `grapple.ts` | Hook ray acquisition, firing/pulling/release state, hook mesh updates |
