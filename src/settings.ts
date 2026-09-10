@@ -12,6 +12,7 @@ export interface UserSettings {
     particleAmount: number;
     renderDistanceChunks: number;
     shadows: boolean;
+    lavaGlow: boolean;
     shadowQuality: ShadowQuality;
     showFps: boolean;
     downloadWebLLMImmediately: boolean;
@@ -25,6 +26,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     particleAmount: 1.0,
     renderDistanceChunks: 4,
     shadows: true,
+    lavaGlow: false,
     shadowQuality: 'low',
     showFps: true,
     downloadWebLLMImmediately: false,
@@ -57,6 +59,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.particleAmount = clamp(parsed.particleAmount ?? DEFAULT_USER_SETTINGS.particleAmount, 0.2, 1.0);
             userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
+            userSettings.lavaGlow = readBoolean(parsed.lavaGlow, DEFAULT_USER_SETTINGS.lavaGlow);
             userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
             userSettings.downloadWebLLMImmediately = readBoolean(parsed.downloadWebLLMImmediately, false);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);

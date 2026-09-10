@@ -113,6 +113,8 @@ const UI = {
     get settingWebLLMDownloadValue() { return getUI<HTMLElement>('setting-webllm-download-value'); },
     get settingShadows() { return getUI<HTMLInputElement>('setting-shadows'); },
     get settingShadowsValue() { return getUI<HTMLElement>('setting-shadows-value'); },
+    get settingLavaGlow() { return getUI<HTMLInputElement>('setting-lava-glow'); },
+    get settingLavaGlowValue() { return getUI<HTMLElement>('setting-lava-glow-value'); },
     get settingShadowQuality() { return getUI<HTMLSelectElement>('setting-shadow-quality'); },
     get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
     get settingFpsValue() { return getUI<HTMLElement>('setting-fps-value'); },
@@ -935,6 +937,7 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.particleAmount === b.particleAmount &&
         a.renderDistanceChunks === b.renderDistanceChunks &&
         a.shadows === b.shadows &&
+        a.lavaGlow === b.lavaGlow &&
         a.shadowQuality === b.shadowQuality &&
         a.showFps === b.showFps &&
         a.downloadWebLLMImmediately === b.downloadWebLLMImmediately;
@@ -963,6 +966,8 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     setCheckboxLabel(UI.settingWebLLMDownloadValue, settings.downloadWebLLMImmediately);
     if (UI.settingShadows) UI.settingShadows.checked = settings.shadows;
     setCheckboxLabel(UI.settingShadowsValue, settings.shadows);
+    if (UI.settingLavaGlow) UI.settingLavaGlow.checked = settings.lavaGlow;
+    setCheckboxLabel(UI.settingLavaGlowValue, settings.lavaGlow);
     if (UI.settingShadowQuality) {
         UI.settingShadowQuality.value = settings.shadowQuality;
         UI.settingShadowQuality.disabled = !settings.shadows;
@@ -1070,6 +1075,12 @@ function setupSettingsControls(): void {
     UI.settingShadows?.addEventListener('change', (e) => {
         updatePendingSettings((settings) => {
             settings.shadows = (e.target as HTMLInputElement).checked;
+        });
+    });
+
+    UI.settingLavaGlow?.addEventListener('change', (e) => {
+        updatePendingSettings((settings) => {
+            settings.lavaGlow = (e.target as HTMLInputElement).checked;
         });
     });
 
@@ -1228,7 +1239,7 @@ export function animate(): void {
     const lanternStrength = state.camera ? dayNightCycle?.update(delta, state.camera.position) ?? 0 : 0;
     if (state.camera) {
         updateTownLanterns(time / 1000, lanternStrength);
-        updateLavaLights(time / 1000, state.camera.position, lanternStrength);
+        updateLavaLights(time / 1000, state.camera.position, lanternStrength, userSettings.lavaGlow);
     }
 
     updateWeapons(delta);

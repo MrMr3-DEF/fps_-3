@@ -302,8 +302,16 @@ function refreshLavaLightPositions(observerPosition: THREE.Vector3): void {
     for (; assigned < lavaLights.length; assigned++) lavaLights[assigned].visible = false;
 }
 
-export function updateLavaLights(timeSeconds: number, observerPosition: THREE.Vector3, nightStrength: number): void {
+export function updateLavaLights(timeSeconds: number, observerPosition: THREE.Vector3, nightStrength: number, enabled = true): void {
     if (!lavaLightGroup) return;
+    if (!enabled) {
+        for (const light of lavaLights) {
+            light.intensity = 0;
+            light.visible = false;
+        }
+        lavaLightAnchor.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
+        return;
+    }
     refreshLavaLightPositions(observerPosition);
     const darkness = Math.max(0, Math.min(1, nightStrength));
     const baseIntensity = THREE.MathUtils.lerp(22, 36, darkness);

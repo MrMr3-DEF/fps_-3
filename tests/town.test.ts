@@ -122,6 +122,12 @@ test('lava illumination follows the nearest pool with one reusable light', () =>
     assert.ok(lights.some(light => light.visible && light.intensity > 0));
     assert.equal(lights.filter(light => light.visible).length, 1);
 
+    updateLavaLights(1.5, lava.position, 1, false);
+    assert.ok(lights.every(light => !light.visible && light.intensity === 0));
+
+    updateLavaLights(1.75, lava.position, 1, true);
+    assert.ok(lights.some(light => light.visible && light.intensity > 0));
+
     updateLavaLights(2, new THREE.Vector3(0, 2, 0), 1);
     assert.ok(lights.every(light => !light.visible), 'town remains free of wilderness lava lights');
     disposeWorld();

@@ -95,7 +95,7 @@ test('automatic loading requires consent, shares its model with chat, and settin
     }
 });
 
-test('automatic download preference is off by default and persists only as a boolean', async () => {
+test('boolean settings preserve defaults and persist only boolean values', async () => {
     const { DEFAULT_USER_SETTINGS, userSettings, loadUserSettings, saveUserSettings } = await import('../src/settings.ts');
     const originalStorage = globalThis.localStorage;
     const originalSettings = { ...userSettings };
@@ -103,13 +103,19 @@ test('automatic download preference is off by default and persists only as a boo
     Object.assign(globalThis, { localStorage: { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } } });
     try {
         assert.equal(DEFAULT_USER_SETTINGS.downloadWebLLMImmediately, false);
+        assert.equal(DEFAULT_USER_SETTINGS.lavaGlow, false);
         assert.equal(loadUserSettings().downloadWebLLMImmediately, false);
+        assert.equal(loadUserSettings().lavaGlow, false);
         userSettings.downloadWebLLMImmediately = true;
+        userSettings.lavaGlow = true;
         saveUserSettings();
         userSettings.downloadWebLLMImmediately = false;
+        userSettings.lavaGlow = false;
         assert.equal(loadUserSettings().downloadWebLLMImmediately, true);
-        saved = '{"downloadWebLLMImmediately":"true"}';
+        assert.equal(loadUserSettings().lavaGlow, true);
+        saved = '{"downloadWebLLMImmediately":"true","lavaGlow":"true"}';
         assert.equal(loadUserSettings().downloadWebLLMImmediately, false);
+        assert.equal(loadUserSettings().lavaGlow, false);
     } finally {
         Object.assign(userSettings, originalSettings);
         Object.assign(globalThis, { localStorage: originalStorage });
