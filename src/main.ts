@@ -1255,7 +1255,7 @@ export function animate(): void {
     updateHoverBar(state.hoverFuel, state.isHovering && isInputActive());
     const jumpToggle = document.getElementById('powerjump-toggle');
     if (jumpToggle) {
-        jumpToggle.hidden = !isInputActive() || state.playerHp <= 0;
+        jumpToggle.hidden = !isInputActive() || state.playerHp <= 0 || state.isScoped;
         jumpToggle.setAttribute('aria-pressed', String(state.powerJumpEnabled));
         jumpToggle.textContent = state.powerJumpEnabled ? 'POWER JUMP ON' : 'POWER JUMP OFF';
     }
