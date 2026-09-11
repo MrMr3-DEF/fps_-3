@@ -599,12 +599,7 @@ function setupInputListeners(): void {
                 cancelInspect();
                 break;
             case 'KeyF':
-                if (state.camera && state.isPlaying && state.playerHp > 0 && isInputActive()) {
-                    if (gothGirlfriend?.interact(state.camera, state.obstacles)) {
-                        chatCharacter = gothGirlfriend;
-                        gothChat?.open(e);
-                    }
-                }
+                interactWithGirlfriend(e);
                 break;
             case 'KeyR':
                 if (state.controls && isInputActive()) {
@@ -693,6 +688,11 @@ function setupInputListeners(): void {
             if (held && isInputActive() && state.fireCooldown <= 0 && state.switchState === 'IDLE') { cancelInspect(); fireProjectile(); }
         },
     });
+    document.getElementById('npc-interaction')?.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        interactWithGirlfriend();
+    });
     document.getElementById('powerjump-toggle')?.addEventListener('click', () => {
         if (isInputActive()) state.powerJumpEnabled = !state.powerJumpEnabled;
     });
@@ -710,6 +710,13 @@ function setupInputListeners(): void {
     window.addEventListener('wheel', handleWeaponWheel, { passive: false });
 
     window.addEventListener('resize', onWindowResize);
+}
+
+function interactWithGirlfriend(trigger?: { code: string; preventDefault?: () => void }): void {
+    if (!state.camera || !state.isPlaying || state.playerHp <= 0 || !isInputActive() || gothChat?.isOpen) return;
+    if (!canUseGothChat(state) || !gothGirlfriend?.interact(state.camera, state.obstacles)) return;
+    chatCharacter = gothGirlfriend;
+    gothChat?.open(trigger);
 }
 
 // Build scene systems after controls exist because several meshes attach to the camera.
@@ -1299,7 +1306,7 @@ export function animate(): void {
         interactionPrompt.hidden = !nearby;
         if (nearby) interactionPrompt.textContent = gothGirlfriend?.animator?.gesture
             ? 'Goth girlfriend · ' + gothGirlfriend.animator.gesture
-            : '[F] Talk to goth girlfriend';
+            : touchMode ? 'Tap to talk to goth girlfriend' : '[F] Talk to goth girlfriend';
     }
 
     updateParticles(delta);

@@ -624,3 +624,9 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 
+
+/* The mobile indicator sits above the look pad and acts as the interaction button. */
+#npc-interaction[hidden] { display: none; }
+.touch-device #npc-interaction { pointer-events: auto; touch-action: manipulation; cursor: pointer; min-height: 44px; margin: 0; }
+.touch-device #npc-interaction:active { background: #dce8f0; }
+#npc-interaction:focus-visible { outline: 2px solid #087da8; outline-offset: 3px; }
