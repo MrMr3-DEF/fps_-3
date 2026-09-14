@@ -7,7 +7,7 @@ interface PauseShortcutState {
 
 export type EscapePauseAction = 'pause' | 'resume' | null;
 
-/** Use an explicit unlock so a later Escape can re-enter pointer lock. */
+/** Only toggle pause during a living game, outside unrelated overlays. */
 export function getEscapePauseAction(code: string, state: PauseShortcutState): EscapePauseAction {
     if (code !== 'Escape' || !state.isPlaying || !state.isAlive) return null;
     if (state.isInputActive) return 'pause';

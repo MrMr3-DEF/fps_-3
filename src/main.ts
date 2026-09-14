@@ -3,7 +3,7 @@ import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setupMobileControls } from './mobileControls.js';
-import { onInputStarted, onInputEnded, isInputActive, isKeyboardResumeActive, beginInput, endInput, resumeInputFromEscape, touchMode } from './inputSession.js';
+import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
 import { getEscapePauseAction } from './pauseShortcut.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
@@ -569,6 +569,7 @@ function setupMenuListeners(): void {
 // Pointer lock means keyboard and mouse state must be tracked globally, then
 // consumed by the physics/weapons systems during the frame update.
 function setupInputListeners(): void {
+    // Reacquire after key release so Escape cannot immediately unlock the new session.
     let resumeOnEscapeUp = false;
     const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }) => {
         // Movement state is already held between key events; repeated keydown
@@ -701,7 +702,7 @@ function setupInputListeners(): void {
                     isAlive: state.playerHp > 0,
                     isInputActive: isInputActive(),
                     isPauseMenuVisible: UI.panelPause?.style.display === 'flex',
-                }) === 'resume') resumeInputFromEscape();
+                }) === 'resume') beginInput();
                 break;
             case 'KeyW': state.moveForward = false; break;
             case 'KeyA': state.moveLeft = false; break;
@@ -871,11 +872,6 @@ function preventLockedMouseDefault(e: Event): void {
 
 function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
     if (touchMode || ('pointerType' in e && e.pointerType === 'touch')) return;
-    if (e.type === 'mousedown' && isKeyboardResumeActive()) {
-        e.preventDefault();
-        beginInput();
-        return;
-    }
     preventLockedMouseDefault(e);
     if (!isGameInputLocked()) return;
 

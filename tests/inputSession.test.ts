@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from '../src/state.js';
-import { beginInput, enableTouchMode, endInput, isInputActive, isKeyboardResumeActive, onInputStarted, onInputEnded, resumeInputFromEscape, touchMove } from '../src/inputSession.js';
+import { beginInput, enableTouchMode, endInput, isInputActive, onInputStarted, onInputEnded, touchMove } from '../src/inputSession.js';
 
 test('desktop uses pointer lock; landscape touch uses the same session lifecycle without requesting it', async () => {
     let locks = 0, unlocks = 0, starts = 0, ends = 0;
     const events = new Map<string, () => void>();
     const controls = {
         isLocked: false,
-        lock() { locks++; this.isLocked = true; events.get('lock')?.(); },
+        lock() { locks++; },
         unlock() { unlocks++; this.isLocked = false; events.get('unlock')?.(); },
         addEventListener(name: string, callback: () => void) { events.set(name, callback); },
     };
@@ -16,21 +16,24 @@ test('desktop uses pointer lock; landscape touch uses the same session lifecycle
     onInputStarted(() => starts++);
     onInputEnded(() => ends++);
     beginInput();
+    assert.equal(isInputActive(), false, 'a request alone must not start gameplay');
+    assert.equal(starts, 0);
+    controls.isLocked = true;
+    events.get('lock')?.();
     assert.equal(isInputActive(), true);
     endInput();
     assert.equal(isInputActive(), false);
     assert.equal(locks, 1);
     assert.equal(unlocks, 1);
 
-    resumeInputFromEscape();
-    assert.equal(isInputActive(), true, 'Escape resumes gameplay without an impermissible lock request');
-    assert.equal(isKeyboardResumeActive(), true);
-    assert.equal(starts, 2);
-    assert.equal(locks, 1);
     beginInput();
-    assert.equal(locks, 2, 'the next mouse gesture can recapture pointer lock');
-    assert.equal(isKeyboardResumeActive(), false);
-    assert.equal(starts, 2, 'capturing an already active session does not start it twice');
+    assert.equal(locks, 2, 'resume must request pointer lock again');
+    assert.equal(isInputActive(), false, 'a pending or denied resume must remain paused');
+    assert.equal(starts, 1, 'do not hide the pause menu before capture succeeds');
+    controls.isLocked = true;
+    events.get('lock')?.();
+    assert.equal(isInputActive(), true);
+    assert.equal(starts, 2);
     endInput();
     assert.equal(ends, 2);
     assert.equal(unlocks, 2);
