@@ -15,6 +15,7 @@ import {
     JUMP_FORCE,
     WALK_SPEED,
     PLAYER_HEIGHT,
+    CAMERA_CEILING_CLEARANCE,
     HOVER_DRAIN_RATE,
     HOVER_RECHARGE_RATE,
     GROUND_FRICTION,
@@ -321,11 +322,13 @@ function stepPlayerPhysics(delta: number): void {
                 }
             }
 
-            playerObj.position.y += normalBallistic
+            const verticalDisplacement = normalBallistic
                 ? (initialVerticalVelocity + state.velocity.y) * 0.5 * delta
                 : state.velocity.y * delta;
-            if (state.velocity.y > 0 && playerObj.position.y >= ceilingY) {
-                playerObj.position.y = ceilingY - 0.002;
+            playerObj.position.y += verticalDisplacement;
+            const maxCameraY = ceilingY - CAMERA_CEILING_CLEARANCE;
+            if (verticalDisplacement > 0 && playerObj.position.y >= maxCameraY) {
+                playerObj.position.y = maxCameraY;
                 state.velocity.y = 0;
                 if (state.hookState === 'PULLING') resetHook();
             }

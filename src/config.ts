@@ -58,6 +58,9 @@ export const ENEMY_CLASSES: EnemyClass[] = [
 ];
 
 export const PLAYER_HEIGHT = 2.0;
+// Keep the camera's 0.1-unit near plane fully below ceilings, including at the
+// widest supported FOV, so a head impact cannot briefly reveal the roof top.
+export const CAMERA_CEILING_CLEARANCE = 0.15;
 export const NORMAL_JUMP_HEIGHT = PLAYER_HEIGHT * 0.9;
 // A 25% longer normal hop, with the same peak height.
 export const NORMAL_JUMP_GRAVITY = BASE_GRAVITY / (1.25 * 1.25);

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, overlapsTown } from '../src/town.ts';
-import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT, MAP_HALF_SIZE } from '../src/config.ts';
+import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, CAMERA_CEILING_CLEARANCE, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT, MAP_HALF_SIZE } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
 import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
@@ -258,6 +258,22 @@ test('ceilings and lintels stop upward motion, rooftops support landings and wal
     state.hookState = 'PULLING'; state.hookIsEnemy = true;
     updatePlayerPhysics(0.05);
     assert.ok(state.camera!.position.z > 92, 'gateway permits high-speed traversal');
+    disposeWorld();
+});
+
+test('ceiling impacts keep the camera near plane inside the room through a jump apex', () => {
+    setup();
+    const b = generateTownLayout(42).find(b => b.kind === 'house' && !b.name)!;
+    const ceilingY = b.height - 0.7;
+
+    // At 120 FPS this normal jump crosses its apex during the frame: the
+    // trapezoidal displacement is upward even though the final velocity is down.
+    player(b.x, ceilingY - CAMERA_CEILING_CLEARANCE - 0.002, b.z, 0, 2);
+    state.normalJumpActive = true;
+    updatePlayerPhysics(1 / 120);
+
+    assert.equal(state.camera!.position.y, ceilingY - CAMERA_CEILING_CLEARANCE);
+    assert.equal(state.velocity.y, 0);
     disposeWorld();
 });
 
