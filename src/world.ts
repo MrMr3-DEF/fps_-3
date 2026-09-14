@@ -1265,7 +1265,13 @@ function createEnemies(): void {
     const barBgMat = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
     
     const barFgGeo = new THREE.PlaneGeometry(1.8, 0.15).translate(0.9, 0, 0);
-    const barFgMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, side: THREE.DoubleSide });
+    const barFgMat = new THREE.MeshBasicMaterial({
+        color: 0x00ffcc,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+    });
 
     for (let i = 0; i < ENEMY_COUNT; i++) {
         const targetGroup = new THREE.Group();
@@ -1446,7 +1452,7 @@ export function disposeWorld(): void {
 
 export function updateTargets(delta: number): void {
     targetUpdateFrame++;
-    const updateBillboards = (targetUpdateFrame % 2) === 0;
+    const updateDistantBillboards = (targetUpdateFrame % 2) === 0;
     const targetsLen = state.targets.length;
     for (let i = 0; i < targetsLen; i++) {
         const target = state.targets[i];
@@ -1454,13 +1460,13 @@ export function updateTargets(delta: number): void {
         const data = targetData(target);
         data.bodyMesh.rotation.x += 1.0 * delta;
         data.bodyMesh.rotation.y += 1.5 * delta;
-        if (updateBillboards && state.camera) {
+        if (state.camera) {
             data.healthBarGroup.quaternion.copy(state.camera.quaternion);
         }
     }
 
     // Billboard pillars face the player horizontally, not the full camera pitch.
-    if (updateBillboards && state.fakePillars && state.controls) {
+    if (updateDistantBillboards && state.fakePillars && state.controls) {
         const playerObj = state.controls.getObject();
         const px = playerObj.position.x;
         const pz = playerObj.position.z;

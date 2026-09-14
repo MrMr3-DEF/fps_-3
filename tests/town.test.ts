@@ -5,7 +5,7 @@ import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, ov
 import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT, MAP_HALF_SIZE } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
-import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
+import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
@@ -113,6 +113,27 @@ test('real world respects explicit seeds, reserves the town, synchronizes geomet
         assert.equal(queryObstaclesAlongSegment(-200, 0, 200, 0).length, 0);
         for (const collider of colliders) assert.equal(collider.parent, null);
     }
+});
+
+test('enemy health bars track the camera every frame without coplanar depth flicker', () => {
+    setup();
+    const target = state.targets[0];
+    const healthBarGroup = target.userData.healthBarGroup as THREE.Group;
+    const foreground = target.userData.healthBarFg as THREE.Mesh;
+    const foregroundMaterial = foreground.material as THREE.MeshBasicMaterial;
+    target.visible = true;
+
+    assert.equal(foregroundMaterial.polygonOffset, true);
+    assert.ok(foregroundMaterial.polygonOffsetFactor < 0);
+    assert.ok(foregroundMaterial.polygonOffsetUnits < 0);
+
+    for (const yaw of [0.2, -0.4]) {
+        state.camera!.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+        updateTargets(1 / 60);
+        assert.ok(healthBarGroup.quaternion.angleTo(state.camera!.quaternion) < 1e-6);
+    }
+
+    disposeWorld();
 });
 
 test('lava illumination follows the nearest pool with one reusable light', () => {
