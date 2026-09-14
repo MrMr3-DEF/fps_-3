@@ -55,14 +55,17 @@ import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
 import { DayNightCycle } from './dayNightCycle.js';
+import { SmartGogglesHud } from './smartGoggles.js';
 
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
 let dayNightCycle: DayNightCycle | null = null;
+let smartGoggles: SmartGogglesHud | null = null;
 const conversationCamera = new ConversationCamera();
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
 const _logicalCameraPos = new THREE.Vector3();
+const _gogglesWeaponOrigin = new THREE.Vector3();
 const _tpCamDir = new THREE.Vector3();
 const _tpCamOffset = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
@@ -83,6 +86,7 @@ const UI = {
     get fpsCounter() { return getUI<HTMLElement>('fps-counter'); },
     get reloadBar() { return getUI<HTMLElement>('reload-bar'); },
     get gogglesScope() { return getUI<HTMLElement>('goggles-scope'); },
+    get gogglesTargetLayer() { return getUI<HTMLElement>('goggles-target-layer'); },
     get crosshair() { return getUI<HTMLElement>('crosshair'); },
     get ui() { return getUI<HTMLElement>('ui'); },
     get healthContainer() { return getUI<HTMLElement>('health-container'); },
@@ -761,6 +765,7 @@ function disposeHookMesh(): void {
 
 function disposeGameRuntime(): void {
     gothChat?.reset();
+    smartGoggles?.reset();
     state.controls?.dispose();
     disconnectMultiplayer();
     resetHook();
@@ -775,6 +780,7 @@ function disposeGameRuntime(): void {
 
 function prepareFreshArena(): void {
     gothChat?.reset();
+    smartGoggles?.reset();
     chatCharacter = null;
     resetHook();
     resetProjectiles();
@@ -1110,6 +1116,7 @@ export function init(): void {
     setupRenderer();
     setupSettingsControls();
     applyLiveSettings();
+    if (UI.gogglesTargetLayer) smartGoggles = new SmartGogglesHud(UI.gogglesTargetLayer);
 
     setupMenuListeners();
     gothChat = new GothChat({
@@ -1182,6 +1189,7 @@ export function init(): void {
             state.rightClickActive = false;
             state.keyCActive = false;
             middleMouseChordActive = false;
+            smartGoggles?.reset();
             setAccelerometerVisible(false);
             cancelInspect();
             if (UI.healthContainer) UI.healthContainer.style.display = 'none';
@@ -1398,6 +1406,27 @@ export function animate(): void {
                 state.camera.position.add(_tpCamOffset);
             }
 
+            // Match the exact camera pose used for this draw. In third person,
+            // distance still comes from the logical player position rather than
+            // the temporary render offset.
+            state.camera.updateMatrixWorld(true);
+            const gogglesPlayerPosition = logicalCameraPos ?? state.camera.position;
+            _gogglesWeaponOrigin.copy(gogglesPlayerPosition);
+            state.rightGun?.getWorldPosition(_gogglesWeaponOrigin);
+            // Let the scope zoom settle before acquiring targets. Starting the
+            // lock animation during the FOV transition makes its convergence
+            // and leader draw disappear inside the larger scope movement.
+            const gogglesAcquisitionReady = state.isScoped && state.camera.fov === userSettings.scopedFov;
+            smartGoggles?.update(
+                state.camera,
+                gogglesPlayerPosition,
+                _gogglesWeaponOrigin,
+                state.targets,
+                state.peers,
+                Boolean(gogglesAcquisitionReady && state.isPlaying && state.playerHp > 0 && isInputActive()),
+                time,
+            );
+
             state.renderer.render(state.scene, state.camera);
         } finally {
             if (state.playerMesh && playerVisible !== undefined) state.playerMesh.visible = playerVisible;
@@ -1438,6 +1467,7 @@ export function takePlayerDamage(damage: number, attackerName: string, attackerP
 
 export function triggerDeath(): void {
     gothChat?.close(false);
+    smartGoggles?.reset();
     // The death overlay sits directly over the world, including when already paused.
     if (UI.blocker) UI.blocker.style.display = 'none';
     if (UI.panelPause) {

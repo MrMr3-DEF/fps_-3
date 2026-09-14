@@ -24,12 +24,14 @@ import {
     PROJECTILE_RADIUS,
     TARGET_HIT_RANGE_MULTIPLIER,
     PLAYER_HIT_RANGE,
+    PLAYER_MAX_HP,
     PILLAR_WIDTH,
     ROOM_CODE_LENGTH,
     MAP_HALF_SIZE,
     PEER_Y_OFFSET,
     HIT_FLASH_DURATION_MS,
     WEAPON_STATS,
+    BULLET_TRAVEL_DISTANCE,
     MAX_PROJECTILES
 } from './config.js';
 import { setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
@@ -235,6 +237,8 @@ let lastSentSnapshot: {
     hookX: number;
     hookY: number;
     hookZ: number;
+    hp: number;
+    maxHp: number;
 } | null = null;
 
 export function generateRoomCode(): string {
@@ -891,6 +895,27 @@ function getPeerHitPosition(peerId: string): THREE.Vector3 | null {
     return _peerTargetPosition;
 }
 
+/** Keep a reported sniper impact on its shot ray and within visual weapon range. */
+function canonicalSniperBeamEnd(
+    barrelPosition: THREE.Vector3,
+    normalizedDirection: THREE.Vector3,
+    reportedHitPoint: FirePacket['hitPoint'],
+    out: THREE.Vector3,
+): THREE.Vector3 {
+    let distance = BULLET_TRAVEL_DISTANCE;
+    if (reportedHitPoint) {
+        const offsetX = reportedHitPoint.x - barrelPosition.x;
+        const offsetY = reportedHitPoint.y - barrelPosition.y;
+        const offsetZ = reportedHitPoint.z - barrelPosition.z;
+        distance = THREE.MathUtils.clamp(
+            offsetX * normalizedDirection.x + offsetY * normalizedDirection.y + offsetZ * normalizedDirection.z,
+            0,
+            BULLET_TRAVEL_DISTANCE,
+        );
+    }
+    return out.copy(barrelPosition).addScaledVector(normalizedDirection, distance);
+}
+
 export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket): NetworkPacket | null {
     if (!isKnownClient(fromPeerId)) return null;
     const now = performance.now();
@@ -946,6 +971,14 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
         if (_barrelPos.distanceTo(runtime.position) > 5 || shotIsBlocked(runtime.position, _barrelPos)) return null;
         if (!runtime.shots.record(packet, now, runtime.wasDead)) return null;
+        if (packet.weapon === 'SNIPER') {
+            _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
+            canonicalSniperBeamEnd(_barrelPos, _baseFireDir, packet.hitPoint, _targetPos);
+            packet = {
+                ...packet,
+                hitPoint: { x: _targetPos.x, y: _targetPos.y, z: _targetPos.z },
+            };
+        }
         return { ...packet, senderPeerId: fromPeerId };
     }
 
@@ -1010,6 +1043,7 @@ function spawnRemoteBullet(barrelPos: THREE.Vector3, direction: THREE.Vector3, c
     data.dy = direction.y;
     data.dz = direction.z;
     data.age = 0;
+    data.distanceTraveled = bullet.position.distanceTo(barrelPos);
     data.visualOnly = true;
     data.damage = undefined;
     state.scene.add(bullet);
@@ -1064,6 +1098,9 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             justJoined = true;
         }
 
+        peerData.hp = msg.hp;
+        peerData.maxHp = msg.maxHp;
+
         if (msg.bodyColor !== undefined) setBeanColor(peerData.mesh, msg.bodyColor);
         _targetPos.set(msg.pos.x, msg.pos.y - PEER_Y_OFFSET, msg.pos.z);
         peerData.targetPosition.copy(_targetPos);
@@ -1074,12 +1111,18 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         }
 
         if (msg.isDead) {
+            peerData.hp = 0;
             peerData.mesh.visible = false;
         } else {
             if (justJoined) {
                 peerData.mesh.visible = true;
                 spawnLightBeam(peerData.mesh.position);
             } else if (peerData.mesh.visible === false) {
+                // A new life starts at a spawn, not along an interpolation path
+                // from the previous death position. This also gives the HUD one
+                // clean retiring lock instead of a trail of teleport records.
+                peerData.mesh.position.copy(peerData.targetPosition);
+                peerData.mesh.rotation.y = msg.yaw;
                 peerData.mesh.visible = true;
                 spawnLightBeam(peerData.mesh.position);
             }
@@ -1175,11 +1218,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
 
         if (msg.weapon === 'SNIPER') {
             const targetPos = _targetPos;
-            if (msg.hitPoint) {
-                targetPos.set(msg.hitPoint.x, msg.hitPoint.y, msg.hitPoint.z);
-            } else {
-                targetPos.copy(_barrelPos).addScaledVector(_baseFireDir, 500);
-            }
+            canonicalSniperBeamEnd(_barrelPos, _baseFireDir, msg.hitPoint, targetPos);
             createLaserBeam(_barrelPos, targetPos, 0xffff00);
 
         } else {
@@ -1230,6 +1269,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
     } else if (msg.type === 'player_died') {
         const victimPeer = state.peers[msg.victimPeerId || senderId];
         if (victimPeer && victimPeer.mesh) {
+            victimPeer.hp = 0;
             spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
             victimPeer.mesh.visible = false;
         }
@@ -1329,7 +1369,9 @@ export function sendLocalState(force = false): void {
         flags,
         hookX,
         hookY,
-        hookZ
+        hookZ,
+        hp: THREE.MathUtils.clamp(state.playerHp, 0, state.playerMaxHp),
+        maxHp: state.playerMaxHp,
     };
 
     const changed = !lastSentSnapshot ||
@@ -1342,7 +1384,9 @@ export function sendLocalState(force = false): void {
         snapshot.flags !== lastSentSnapshot.flags ||
         snapshot.hookX !== lastSentSnapshot.hookX ||
         snapshot.hookY !== lastSentSnapshot.hookY ||
-        snapshot.hookZ !== lastSentSnapshot.hookZ;
+        snapshot.hookZ !== lastSentSnapshot.hookZ ||
+        snapshot.hp !== lastSentSnapshot.hp ||
+        snapshot.maxHp !== lastSentSnapshot.maxHp;
 
     if (!force && !changed && now - lastForceSendTime < 250) return;
     lastSentTime = now;
@@ -1363,6 +1407,8 @@ export function sendLocalState(force = false): void {
         hookState: state.hookState,
         hookPos: state.hookState !== 'IDLE' ? { x: hookX, y: hookY, z: hookZ } : null,
         isHovering: state.isHovering,
+        hp: snapshot.hp,
+        maxHp: snapshot.maxHp,
         hoverKeys: state.isHovering ? {
             w: state.moveForward,
             s: state.moveBackward,
@@ -1524,6 +1570,8 @@ function createPeerBean(username: string): PeerData {
         arMesh: arMesh,
         sniperMesh: sniperMesh,
         minigunMesh: minigunMesh,
-        hookLine: null
+        hookLine: null,
+        hp: PLAYER_MAX_HP,
+        maxHp: PLAYER_MAX_HP,
     };
 }

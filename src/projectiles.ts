@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { state } from './state.js';
 import {
+    BULLET_TRAVEL_DISTANCE,
     PILLAR_WIDTH,
     PLAYER_HIT_RANGE,
     PROJECTILE_LIFETIME,
@@ -51,15 +52,28 @@ export function updateProjectiles(delta: number, attackerName: string): void {
         const data = projectileData(proj);
         data.age += delta;
 
+        // Treat the muzzle offset as part of the shot's range and cap the final
+        // swept segment. An age-only limit can overshoot by a full render frame.
+        data.distanceTraveled = Number.isFinite(data.distanceTraveled)
+            ? Math.max(0, data.distanceTraveled)
+            : 0;
+        const remainingDistance = Math.max(0, BULLET_TRAVEL_DISTANCE - data.distanceTraveled);
+        if (remainingDistance === 0 || data.age > PROJECTILE_LIFETIME) {
+            retireProjectile(i, proj);
+            continue;
+        }
+        const stepDistance = Math.min(PROJECTILE_SPEED * delta, remainingDistance);
+        const reachesRangeLimit = stepDistance >= remainingDistance;
+
         let projectileHit = false;
         const visualOnly = data.visualOnly === true;
         const damage = data.damage ?? fallbackDamage;
 
         _segmentStart.copy(proj.position);
         _segmentEnd.set(
-            _segmentStart.x + data.dx * PROJECTILE_SPEED * delta,
-            _segmentStart.y + data.dy * PROJECTILE_SPEED * delta,
-            _segmentStart.z + data.dz * PROJECTILE_SPEED * delta
+            _segmentStart.x + data.dx * stepDistance,
+            _segmentStart.y + data.dy * stepDistance,
+            _segmentStart.z + data.dz * stepDistance
         );
         _segmentMidpoint.addVectors(_segmentStart, _segmentEnd).multiplyScalar(0.5);
         const travelDistance = _segmentStart.distanceTo(_segmentEnd);
@@ -151,6 +165,10 @@ export function updateProjectiles(delta: number, attackerName: string): void {
         if (closestHitT !== Infinity) {
             _impactPoint.lerpVectors(_segmentStart, _segmentEnd, closestHitT);
             proj.position.copy(_impactPoint);
+            data.distanceTraveled = Math.min(
+                BULLET_TRAVEL_DISTANCE,
+                data.distanceTraveled + travelDistance * closestHitT
+            );
 
             if (hitTarget) {
                 const targetInfo = targetData(hitTarget);
@@ -179,9 +197,13 @@ export function updateProjectiles(delta: number, attackerName: string): void {
             }
         } else {
             proj.position.copy(_segmentEnd);
+            data.distanceTraveled = Math.min(
+                BULLET_TRAVEL_DISTANCE,
+                data.distanceTraveled + travelDistance
+            );
         }
 
-        if (projectileHit || data.age > PROJECTILE_LIFETIME) {
+        if (projectileHit || reachesRangeLimit || data.age > PROJECTILE_LIFETIME) {
             retireProjectile(i, proj);
         }
     }

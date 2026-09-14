@@ -1,5 +1,5 @@
 import { isUsername, isPeerId } from './roomIdentity.js';
-import { MAX_PLAYERS } from './config.js';
+import { MAX_PLAYERS, PLAYER_MAX_HP } from './config.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
 export type WeaponName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
 
@@ -34,6 +34,8 @@ export interface UpdatePacket {
     hookPos: Vec3Packet | null;
     isHovering: boolean;
     hoverKeys: HoverKeysPacket | null;
+    hp: number;
+    maxHp: number;
 }
 
 export interface FirePacket {
@@ -185,6 +187,11 @@ function isTargetState(value: unknown): value is TargetState {
         value.hp <= value.maxHp;
 }
 
+function isPlayerHealth(value: Record<string, unknown>): boolean {
+    if (value.maxHp !== PLAYER_MAX_HP || !isInteger(value.hp, 0, PLAYER_MAX_HP)) return false;
+    return value.isDead === true ? value.hp === 0 : value.isDead === false && value.hp > 0;
+}
+
 /**
  * PeerJS delivers untrusted `unknown` data. Keep structural validation at this
  * boundary so malformed packets cannot crash the render/update loop.
@@ -201,7 +208,8 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 typeof value.isDead !== 'boolean' || !isHookState(value.hookState) ||
                 typeof value.isHovering !== 'boolean' ||
                 !(value.hookPos === null || isVec3(value.hookPos)) ||
-                !(value.hoverKeys === null || isHoverKeys(value.hoverKeys))) return null;
+                !(value.hoverKeys === null || isHoverKeys(value.hoverKeys)) ||
+                !isPlayerHealth(value)) return null;
             return value as unknown as UpdatePacket;
 
         case 'fire': {

@@ -57,6 +57,9 @@ Starting a fresh arena disposes world-owned graphics and rebuilds them. Offline 
 | `projectiles.ts` | Projectile pooling, swept collision, local target/player hits, projectile retirement |
 | `particles.ts` | Instanced debris, beams, exhaust, shockwaves, material pools, cleanup |
 | `hud.ts` | Health/reload/hover bars, FPS, speed lines, accelerometer |
+| `smartGoggles.ts` | Scoped enemy recognition, line-of-sight filtering, target-lock DOM lifecycle, and live distance/health callouts |
+| `smartGogglesMath.ts` | Clipped oriented-box projection, adaptive 45-degree callout layout, and target-surface distance math |
+| `smartGogglesPeerMath.ts` | Visible-mesh projection and distance helpers for remote player avatars |
 | `settings.ts` | Settings schema, validation, persistence, renderer settings, particle scaling |
 | `multiplayer.ts` | PeerJS lifecycle, host/client topology, packet authorization and relay, world synchronization, peer avatars and interpolation |
 | `networkTypes.ts` | Packet types and runtime validation of untrusted WebRTC data |
@@ -99,7 +102,7 @@ Three.js objects carry typed metadata through the accessors in `userDataTypes.ts
 6. Animate visible targets and particles.
 7. Send a multiplayer state update when required.
 8. Update border warnings, FPS, FOV/scope UI, and pointer sensitivity.
-9. Temporarily offset the camera for third person, render, then restore its logical position.
+9. Temporarily offset the camera for third person, project smart-goggles locks from that exact render pose, render, then restore the logical player position.
 
 Moving damage or collision work across the networking or rendering steps can change authority, visual timing, and hit positions.
 
@@ -123,7 +126,9 @@ The render-distance slider is a chunk radius from 1 to 16, with 4 as the default
 
 The local player supports walking, jumping, air hover with rechargeable fuel, grapple movement, five weapons, aim-down-sights, inspection, and a presentation-only third-person view. Core values live in `config.ts`; avoid duplicating weapon or movement numbers elsewhere.
 
-Projectile weapons reuse a preallocated pool. Collision checks sweep each projectile's previous-to-next segment against nearby obstacle AABBs, targets, and peer hit volumes. The sniper uses a hitscan ray. Target damage is applied locally in offline play and only by the host in multiplayer. A killed target respawns with authoritative position, class, health, scale, color, and score.
+Projectile weapons reuse a preallocated pool. Every weapon has the sniper's 500-unit travel distance; simulated projectiles track muzzle-inclusive distance and clamp their final swept segment to that exact limit. Collision checks sweep each projectile's previous-to-next segment against nearby obstacle AABBs, targets, and peer hit volumes. The sniper uses a hitscan ray with the same range. Target damage is applied locally in offline play and only by the host in multiplayer. A killed target respawns with authoritative position, class, health, scale, color, and score.
+
+While aiming through the goggles, each visible, unobstructed NPC target or multiplayer opponent is framed from the clipped screen projection of its rendered body. Target acquisition waits until the scope FOV has settled, then runs a roughly half-second sequence: four brackets visibly converge on the silhouette, the 45-degree/horizontal leader draws outward, then a two-row readout types beneath its single leader rule with distance above health. Targets beyond the shared weapon range use the same sequence but type only `OUT OF RANGE`; annotations follow partially visible targets and collapse after the projected body fully leaves the view. Other enemies participate in visibility checks, so a fully covered rear target is not annotated. The world-space NPC health bars are hidden during this mode to avoid duplicate health readouts. Peer state updates require canonical health totals consistent with alive/dead state so remote-player facts stay usable without making those self-reported values authoritative for hit validation.
 
 Player damage records the last damage time for regeneration and kill attribution. Remote avatars use a short emissive red pulse on hit; their base materials are restored after the pulse, including when hits overlap. Death hides the avatar until a later live state update makes it visible again.
 

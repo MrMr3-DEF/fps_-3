@@ -11,6 +11,7 @@ import {
     MINIGUN_MIN_RPM,
     MINIGUN_MAX_RPM,
     MAX_PROJECTILES,
+    BULLET_TRAVEL_DISTANCE,
     PROJECTILE_RADIUS
 } from './config.js';
 import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './weaponNetworkPort.js';
@@ -440,6 +441,7 @@ export function fireProjectile(): void {
         data.dy = camDirection.y;
         data.dz = camDirection.z;
         data.age = 0;
+        data.distanceTraveled = projectile.position.distanceTo(barrelWorldPosition);
         data.visualOnly = false;
         data.damage = stats.damage;
         data.shotId = shotId;
@@ -464,7 +466,7 @@ export function fireProjectile(): void {
         state.camera.getWorldDirection(camDirection);
 
         _raycaster.set(barrelWorldPosition, camDirection);
-        _raycaster.far = 500;
+        _raycaster.far = BULLET_TRAVEL_DISTANCE;
         (_raycaster as any).camera = state.camera;
 
         _rayEnd.copy(barrelWorldPosition).addScaledVector(camDirection, _raycaster.far);
@@ -532,7 +534,7 @@ export function fireProjectile(): void {
         }
         _raycaster.far = Infinity;
 
-        const hitPoint = _hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, 300);
+        const hitPoint = _hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, BULLET_TRAVEL_DISTANCE);
         let sniperFireBroadcast = false;
 
         if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {

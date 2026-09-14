@@ -34,6 +34,9 @@ export interface PeerData {
     lastUpdateTime?: number;
     lastRemoteExhaustTime?: number;
     hookLine: THREE.Mesh | null;
+    /** Last health values advertised by this peer for the smart-goggles readout. */
+    hp: number;
+    maxHp: number;
 }
 
 export interface GameState {

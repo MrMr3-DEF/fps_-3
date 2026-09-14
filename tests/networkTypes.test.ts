@@ -14,12 +14,31 @@ const validUpdate = {
     hookState: 'IDLE',
     hookPos: null,
     isHovering: false,
-    hoverKeys: null
+    hoverKeys: null,
+    hp: 10,
+    maxHp: 10,
 };
 
 test('network parser accepts a valid update packet', () => {
     const parsed = parseNetworkPacket(validUpdate);
     assert.equal(parsed?.type, 'update');
+});
+
+test('network parser requires canonical peer health consistent with life state', () => {
+    assert.equal(parseNetworkPacket({ ...validUpdate, hp: 7, maxHp: 10 })?.type, 'update');
+    assert.equal(parseNetworkPacket({ ...validUpdate, isDead: true, hp: 0, maxHp: 10 })?.type, 'update');
+    for (const health of [
+        { hp: undefined },
+        { maxHp: undefined },
+        { hp: -1, maxHp: 10 },
+        { hp: 11, maxHp: 10 },
+        { hp: Number.NaN, maxHp: 10 },
+        { hp: 0, maxHp: 10 },
+        { hp: 7, maxHp: 999 },
+        { isDead: true, hp: 7, maxHp: 10 },
+    ]) {
+        assert.equal(parseNetworkPacket({ ...validUpdate, ...health }), null);
+    }
 });
 
 test('network parser rejects malformed vectors and unsupported weapons', () => {

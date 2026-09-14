@@ -23,6 +23,7 @@ export interface ProjectileUserData {
     dy: number;
     dz: number;
     age: number;
+    distanceTraveled: number;
     visualOnly: boolean;
     damage?: number;
     shotId?: number;

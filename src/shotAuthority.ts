@@ -1,7 +1,9 @@
 import * as THREE from 'three';
-import { WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS } from './config.js';
+import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS } from './config.js';
 import { segmentSphereHitT } from './gameplayMath.js';
 import type { FirePacket, WeaponName } from './networkTypes.js';
+
+const PROJECTILE_MUZZLE_OFFSET = 0.1;
 
 /** Identical spread on the shooter, host and viewers. */
 export function spreadDirection(base: THREE.Vector3, seed: number, pelletIndex: number, spread: number, out = new THREE.Vector3()): THREE.Vector3 {
@@ -45,10 +47,20 @@ export class ShotLedger {
         blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
         const shot = this.shots.get(shotId);
         if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + 250 || damage !== WEAPON_STATS[shot.weapon].damage) return false;
-        const range = shot.weapon === 'SNIPER' ? 500 : Math.min(PROJECTILE_SPEED * PROJECTILE_LIFETIME, PROJECTILE_SPEED * ((now - shot.at + 100) / 1000));
-        const end = shot.origin.clone().addScaledVector(shot.directions[pelletIndex], range);
-        const hit = segmentSphereHitT(shot.origin, end, target, radius + PROJECTILE_RADIUS);
-        if (hit === null || blocked(shot.origin, shot.origin.clone().lerp(end, hit))) return false;
+        const range = shot.weapon === 'SNIPER'
+            ? BULLET_TRAVEL_DISTANCE
+            : Math.min(BULLET_TRAVEL_DISTANCE, PROJECTILE_SPEED * ((now - shot.at + 100) / 1000));
+        const direction = shot.directions[pelletIndex];
+        const start = shot.origin.clone();
+        if (shot.weapon !== 'SNIPER') {
+            // Simulated projectiles are born just ahead of the weapon. Begin host
+            // collision/occlusion checks at that same point while preserving the
+            // shared endpoint measured from the barrel.
+            start.addScaledVector(direction, Math.min(PROJECTILE_MUZZLE_OFFSET, range));
+        }
+        const end = shot.origin.clone().addScaledVector(direction, range);
+        const hit = segmentSphereHitT(start, end, target, radius + PROJECTILE_RADIUS);
+        if (hit === null || blocked(start, start.clone().lerp(end, hit))) return false;
         shot.used.add(pelletIndex);
         return true;
     }

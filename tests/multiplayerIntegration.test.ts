@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed } from '../src/world.ts';
 import { state } from '../src/state.ts';
-import { hostGame, joinGame, disconnectMultiplayer, broadcastToAll, authorizeClientPacket } from '../src/multiplayer.ts';
+import { hostGame, joinGame, disconnectMultiplayer, broadcastToAll, authorizeClientPacket, sendLocalState } from '../src/multiplayer.ts';
+import { BULLET_TRAVEL_DISTANCE, PLAYER_MAX_HP } from '../src/config.ts';
 import { Peer, Connection } from './fakePeer.ts';
 import worker, { TurnRateLimiter } from '../src/worker.ts';
 import { TurnRoomStateMachine } from '../src/turnRoom.ts';
@@ -35,7 +36,7 @@ function backend(){
     }) as typeof fetch;
 }
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
-function update(name:string,lifeId=0){return {type:'update' as const,lifeId,username:name,pos:{x:0,y:2,z:0},yaw:0,pitch:0,activeWeapon:'SNIPER' as const,isMouseDown:false,isDead:false,hookState:'IDLE' as const,hookPos:null,isHovering:false,hoverKeys:null};}
+function update(name:string,lifeId=0){return {type:'update' as const,lifeId,username:name,pos:{x:0,y:2,z:0},yaw:0,pitch:0,activeWeapon:'SNIPER' as const,isMouseDown:false,isDead:false,hookState:'IDLE' as const,hookPos:null,isHovering:false,hoverKeys:null,hp:PLAYER_MAX_HP,maxHp:PLAYER_MAX_HP};}
 
 test('Worker-backed host admission, fixed names, host kill credit, departure and stale events',async()=>{
     backend();state.scene=null;
@@ -53,12 +54,27 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(state.connections.length,2);assert.equal(ca.sent[0].proof,a.admissionProof);assert.equal(ca.sent[1].type,'world_snapshot');
         assert.equal(ca.sent[1].spawnHouseSlot,1);assert.equal(cb.sent[1].spawnHouseSlot,2);
         state.scene=new THREE.Scene();state.isPlaying=true;
-        ca.emit('data',update('Forged'));cb.emit('data',update('Other'));
+        ca.emit('data',{...update('Forged'),hp:7,maxHp:PLAYER_MAX_HP});cb.emit('data',update('Other'));
         assert.equal(cb.sent.find(p=>p.type==='update').username,'Pilot');
+        assert.equal(state.peers['peer-a'].hp,7);
+        assert.equal(state.peers['peer-a'].maxHp,PLAYER_MAX_HP);
+        assert.equal(state.peers['peer-b'].hp,PLAYER_MAX_HP);
+        ca.emit('data',{type:'fire',weapon:'SNIPER',shotId:1,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1},hitPoint:{x:4000,y:4000,z:-4000}});
+        const relayedFire=cb.sent.find(p=>p.type==='fire'&&p.senderPeerId==='peer-a');
+        assert.deepEqual(relayedFire.hitPoint,{x:0,y:2,z:-BULLET_TRAVEL_DISTANCE},'host clamps and aligns relayed sniper beams');
+        state.playerHp=6;state.playerMaxHp=PLAYER_MAX_HP;sendLocalState(true);
+        const hostUpdate=ca.sent.filter(p=>p.type==='update').at(-1);
+        assert.equal(hostUpdate.hp,6);assert.equal(hostUpdate.maxHp,PLAYER_MAX_HP);
+        state.playerHp=-4;sendLocalState(true);
+        assert.equal(ca.sent.filter(p=>p.type==='update').at(-1).hp,0,'outbound health is clamped to its validated range');
+        state.playerHp=PLAYER_MAX_HP;
         broadcastToAll({type:'player_hit',shotId:1,pelletIndex:0,targetPeerId:'peer-a',damage:10,attackerName:'Host'});
         const death={type:'player_died' as const,lifeId:0,cause:'player' as const,killerPeerId:host.id,killerName:'Host',victimName:'Pilot',victimPeerId:'peer-a'};
         ca.emit('data',death);assert.equal(state.kills,1);ca.emit('data',death);assert.equal(state.kills,1);
         assert.equal(authorizeClientPacket('peer-a',{type:'fire',weapon:'SNIPER',shotId:2,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}}),null);
+        ca.emit('data',{...update('Forged',1),pos:{x:80,y:2,z:40}});
+        assert.equal(state.peers['peer-a'].mesh.visible,true);
+        assert.deepEqual(state.peers['peer-a'].mesh.position.toArray(),state.peers['peer-a'].targetPosition.toArray(),'respawns snap instead of lerping from the death site');
         ca.close();await tick();assert.ok(cb.sent.some(p=>p.type==='peer_left'&&p.peerId==='peer-a'));
         const replacement=await registerTurnSession('ABCDEFGH','join-room','pilot','peer-new');
         const cc=new Connection('peer-new',{admissionToken:replacement.admissionToken});

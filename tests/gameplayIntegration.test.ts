@@ -6,6 +6,7 @@ import { state } from '../src/state.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { rebuildTargetHash } from '../src/world.ts';
+import { BULLET_TRAVEL_DISTANCE } from '../src/config.ts';
 import { setDamageHandlers } from '../src/damage.ts';
 (globalThis as any).document={getElementById:()=>null};
 test('50ms enemy-grapple movement stops at pillar instead of crossing it',()=>{
@@ -54,6 +55,20 @@ test('invisible live targets retain projectile collision',()=>{
     let hits=0;setDamageHandlers(()=>hits++,()=>{});
     const bullet=new THREE.Object3D();bullet.position.set(0,2,0);bullet.userData={dx:0,dy:0,dz:-1,age:0,damage:1,visualOnly:false};state.projectiles=[bullet];
     updateProjectiles(.02,'Pilot');assert.equal(hits,1);resetProjectiles();state.targets=[];rebuildTargetHash();
+});
+
+test('projectiles cap their final swept segment at the shared bullet range',()=>{
+    state.scene=new THREE.Scene();state.isMultiplayer=false;state.peerIds=[];state.obstacles=[];state.targets=[];rebuildTargetHash();
+    state.projectilePool=[];
+    const bullet=new THREE.Object3D();bullet.position.set(0,2,-0.1);
+    bullet.userData={dx:0,dy:0,dz:-1,age:0,distanceTraveled:0.1,damage:1,visualOnly:false};
+    state.projectiles=[bullet];
+    updateProjectiles(2,'Pilot');
+    assert.equal(state.projectiles.length,0);
+    assert.ok(Math.abs(bullet.position.z+BULLET_TRAVEL_DISTANCE)<1e-9);
+    assert.equal(bullet.userData.distanceTraveled,BULLET_TRAVEL_DISTANCE);
+    assert.equal(state.projectilePool[0],bullet);
+    state.projectilePool=[];
 });
 
 test('analog movement preserves partial speed, caps diagonals and is ignored while paused', () => {

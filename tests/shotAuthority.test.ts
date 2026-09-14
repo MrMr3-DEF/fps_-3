@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { ShotLedger, spreadDirection, acceptDeath, acceptLifeUpdate } from '../src/shotAuthority.ts';
 import { segmentAabbHitT } from '../src/gameplayMath.ts';
-import { WEAPON_STATS } from '../src/config.ts';
+import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS } from '../src/config.ts';
 import type { FirePacket, WeaponName } from '../src/networkTypes.ts';
 const fire=(weapon:WeaponName,shotId=1):FirePacket=>({type:'fire',weapon,shotId,spreadSeed:42,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}});
 test('each weapon enforces millisecond cooldowns and rejects duplicate shots',()=>{
@@ -34,6 +34,46 @@ test('exact pellet consumption rejects replays, wrong damage and impossible trav
     assert.equal(ledger.consume(1,0,target,1,10,1400,()=>false),false);
     assert.ok(ledger.consume(1,0,target,1,1,1400,()=>false));
     assert.equal(ledger.consume(1,0,target,1,1,1400,()=>false),false);
+});
+test('host authority applies the sniper range to every weapon',()=>{
+    const weapons=['PISTOL','SHOTGUN','AR','SNIPER','MINIGUN'] as WeaponName[];
+    const ledgerFor=(weapon:WeaponName)=>{
+        const ledger=new ShotLedger();
+        if(weapon==='MINIGUN') ledger.updateTrigger(true,0);
+        assert.ok(ledger.record(fire(weapon),1000,false));
+        return ledger;
+    };
+    for(const weapon of weapons){
+        const direction=spreadDirection(new THREE.Vector3(0,0,-1),42,0,WEAPON_STATS[weapon].spread);
+        const boundary=new THREE.Vector3(0,2,0).addScaledVector(direction,BULLET_TRAVEL_DISTANCE);
+        const beyond=new THREE.Vector3(0,2,0).addScaledVector(direction,BULLET_TRAVEL_DISTANCE+1);
+        assert.ok(ledgerFor(weapon).consume(1,0,boundary,0,WEAPON_STATS[weapon].damage,2500,()=>false),`${weapon} boundary`);
+        assert.equal(ledgerFor(weapon).consume(1,0,beyond,0,WEAPON_STATS[weapon].damage,2500,()=>false),false,`${weapon} beyond`);
+    }
+});
+test('host authority starts simulated shots at the projectile muzzle offset',()=>{
+    const origin=new THREE.Vector3(0,2,0);
+    for(const weapon of ['PISTOL','SHOTGUN','AR','MINIGUN'] as WeaponName[]){
+        const ledger=new ShotLedger();
+        if(weapon==='MINIGUN') ledger.updateTrigger(true,0);
+        assert.ok(ledger.record(fire(weapon),1000,false));
+        const direction=spreadDirection(new THREE.Vector3(0,0,-1),42,0,WEAPON_STATS[weapon].spread);
+        const target=origin.clone().addScaledVector(direction,10);
+        let validationStart:THREE.Vector3|null=null;
+        assert.ok(ledger.consume(1,0,target,0,WEAPON_STATS[weapon].damage,1500,(start)=>{
+            validationStart=start.clone();return false;
+        }));
+        assert.ok(validationStart);
+        assert.ok(Math.abs(validationStart.distanceTo(origin)-0.1)<1e-9,`${weapon} start`);
+    }
+
+    const sniper=new ShotLedger();assert.ok(sniper.record(fire('SNIPER'),1000,false));
+    let sniperStart:THREE.Vector3|null=null;
+    assert.ok(sniper.consume(1,0,new THREE.Vector3(0,2,-10),0,WEAPON_STATS.SNIPER.damage,1000,(start)=>{
+        sniperStart=start.clone();return false;
+    }));
+    assert.ok(sniperStart);
+    assert.equal(sniperStart.distanceTo(origin),0);
 });
 test('death is consumed once per life and revival requires the next life',()=>{
     const life={lifeId:3,wasDead:false,deathReported:false};
