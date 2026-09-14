@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from '../src/state.js';
-import { beginInput, enableTouchMode, endInput, isInputActive, onInputStarted, onInputEnded, touchMove } from '../src/inputSession.js';
+import { beginInput, enableTouchMode, endInput, isInputActive, isKeyboardResumeActive, onInputStarted, onInputEnded, resumeInputFromEscape, touchMove } from '../src/inputSession.js';
 
 test('desktop uses pointer lock; landscape touch uses the same session lifecycle without requesting it', async () => {
     let locks = 0, unlocks = 0, starts = 0, ends = 0;
@@ -22,12 +22,25 @@ test('desktop uses pointer lock; landscape touch uses the same session lifecycle
     assert.equal(locks, 1);
     assert.equal(unlocks, 1);
 
+    resumeInputFromEscape();
+    assert.equal(isInputActive(), true, 'Escape resumes gameplay without an impermissible lock request');
+    assert.equal(isKeyboardResumeActive(), true);
+    assert.equal(starts, 2);
+    assert.equal(locks, 1);
+    beginInput();
+    assert.equal(locks, 2, 'the next mouse gesture can recapture pointer lock');
+    assert.equal(isKeyboardResumeActive(), false);
+    assert.equal(starts, 2, 'capturing an already active session does not start it twice');
+    endInput();
+    assert.equal(ends, 2);
+    assert.equal(unlocks, 2);
+
     enableTouchMode();
     Object.defineProperty(globalThis, 'innerWidth', { value: 390, writable: true, configurable: true });
     Object.defineProperty(globalThis, 'innerHeight', { value: 844, writable: true, configurable: true });
     beginInput();
     assert.equal(isInputActive(), false, 'portrait must never enable gameplay');
-    assert.equal(starts, 1);
+    assert.equal(starts, 2);
     globalThis.innerWidth = 844;
     globalThis.innerHeight = 390;
     // Fullscreen and orientation rejection must not prevent landscape play.
@@ -37,13 +50,13 @@ test('desktop uses pointer lock; landscape touch uses the same session lifecycle
     beginInput();
     await Promise.resolve();
     assert.equal(isInputActive(), true);
-    assert.equal(locks, 1, 'touch must not request desktop pointer lock');
+    assert.equal(locks, 2, 'touch must not request another desktop pointer lock');
     touchMove.x = 0.5;
     touchMove.y = -1;
     endInput();
     assert.equal(isInputActive(), false);
     assert.deepEqual(touchMove, { x: 0, y: 0 });
-    assert.equal(starts, 2);
-    assert.equal(ends, 2);
-    assert.equal(unlocks, 1);
+    assert.equal(starts, 3);
+    assert.equal(ends, 3);
+    assert.equal(unlocks, 2);
 });

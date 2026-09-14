@@ -3,7 +3,7 @@ import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setupMobileControls } from './mobileControls.js';
-import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
+import { onInputStarted, onInputEnded, isInputActive, isKeyboardResumeActive, beginInput, endInput, resumeInputFromEscape, touchMode } from './inputSession.js';
 import { getEscapePauseAction } from './pauseShortcut.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
@@ -569,6 +569,7 @@ function setupMenuListeners(): void {
 // Pointer lock means keyboard and mouse state must be tracked globally, then
 // consumed by the physics/weapons systems during the frame update.
 function setupInputListeners(): void {
+    let resumeOnEscapeUp = false;
     const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }) => {
         // Movement state is already held between key events; repeated keydown
         // events must not toggle hook/view/weapon actions multiple times.
@@ -586,7 +587,7 @@ function setupInputListeners(): void {
                 if (pauseAction) {
                     e.preventDefault?.();
                     if (pauseAction === 'pause') endInput();
-                    else beginInput();
+                    else resumeOnEscapeUp = true;
                 }
                 break;
             case 'KeyW': state.moveForward = true; break;
@@ -689,8 +690,19 @@ function setupInputListeners(): void {
         }
     };
 
-    const onKeyUp = (e: Pick<KeyboardEvent, 'code'>) => {
+    const onKeyUp = (e: Pick<KeyboardEvent, 'code'> & { preventDefault?: () => void }) => {
         switch (e.code) {
+            case 'Escape':
+                if (!resumeOnEscapeUp) break;
+                resumeOnEscapeUp = false;
+                e.preventDefault?.();
+                if (state.controls && getEscapePauseAction(e.code, {
+                    isPlaying: state.isPlaying,
+                    isAlive: state.playerHp > 0,
+                    isInputActive: isInputActive(),
+                    isPauseMenuVisible: UI.panelPause?.style.display === 'flex',
+                }) === 'resume') resumeInputFromEscape();
+                break;
             case 'KeyW': state.moveForward = false; break;
             case 'KeyA': state.moveLeft = false; break;
             case 'KeyS': state.moveBackward = false; break;
@@ -859,6 +871,11 @@ function preventLockedMouseDefault(e: Event): void {
 
 function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
     if (touchMode || ('pointerType' in e && e.pointerType === 'touch')) return;
+    if (e.type === 'mousedown' && isKeyboardResumeActive()) {
+        e.preventDefault();
+        beginInput();
+        return;
+    }
     preventLockedMouseDefault(e);
     if (!isGameInputLocked()) return;
 

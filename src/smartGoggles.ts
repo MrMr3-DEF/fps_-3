@@ -25,6 +25,9 @@ const CORNER_SIZE = 15;
 const BOX_PADDING = 6;
 const MIN_BOX_SIZE = 20;
 const LABEL_WIDTH = 168;
+const LABEL_GLYPH_WIDTH = 9.85;
+const LABEL_HORIZONTAL_PADDING = 16;
+const LABEL_VIEWPORT_MARGIN = 12;
 const CALLOUT_DIAGONAL_LENGTH = 54;
 const ENTER_DELAY_MS = 16;
 const TYPE_START_DELAY_MS = 310;
@@ -79,6 +82,7 @@ interface TargetLockRecord {
     killMark: SVGSVGElement;
     path: SVGPathElement;
     label: HTMLDivElement;
+    labelWidth: number;
     identifier: HTMLSpanElement;
     distanceFact: HTMLSpanElement;
     healthFact: HTMLSpanElement;
@@ -164,6 +168,16 @@ function padBounds(bounds: ScreenBounds): void {
     }
     bounds.width = Math.max(0, bounds.right - bounds.left);
     bounds.height = Math.max(0, bounds.bottom - bounds.top);
+}
+
+function formatCelestialDistance(distanceKm: number): string {
+    return `DISTANCE ${Math.round(distanceKm).toLocaleString('en-US')} KM`;
+}
+
+function getCelestialLabelWidth(distanceText: string, viewportWidth: number): number {
+    const desiredWidth = Math.ceil(distanceText.length * LABEL_GLYPH_WIDTH + LABEL_HORIZONTAL_PADDING);
+    const availableWidth = Math.max(LABEL_WIDTH, viewportWidth - LABEL_VIEWPORT_MARGIN * 2);
+    return Math.min(Math.max(LABEL_WIDTH, desiredWidth), availableWidth);
 }
 
 function setFactVisibility(record: TargetLockRecord, outOfRange: boolean): void {
@@ -570,13 +584,19 @@ export class SmartGogglesHud {
         record.lastIdentifierText = identifierText;
         record.lastWorldPosition.copy(worldPosition);
         record.lastWorldRadius = worldRadius;
+        const distanceText = variant === 'celestial'
+            ? formatCelestialDistance(centerDistance)
+            : `DISTANCE ${Math.round(centerDistance)} M`;
+        record.labelWidth = variant === 'celestial'
+            ? getCelestialLabelWidth(distanceText, viewportWidth)
+            : LABEL_WIDTH;
         padBounds(record.bounds);
         layoutSmartGogglesCallout(
             record.bounds,
             viewportWidth,
             viewportHeight,
             record.layout,
-            { labelWidth: LABEL_WIDTH, diagonalLength: CALLOUT_DIAGONAL_LENGTH },
+            { labelWidth: record.labelWidth, diagonalLength: CALLOUT_DIAGONAL_LENGTH },
         );
         this.updateGeometry(record);
 
@@ -595,9 +615,7 @@ export class SmartGogglesHud {
             record.warning.textContent = '';
         }
         if (!outOfRange) {
-            record.lastDistanceText = variant === 'celestial'
-                ? `DISTANCE ${Math.round(centerDistance).toLocaleString('en-US')} KM`
-                : `DISTANCE ${Math.round(centerDistance)} M`;
+            record.lastDistanceText = distanceText;
             record.lastHealthText = variant === 'celestial'
                 ? ''
                 : variant === 'anomaly'
@@ -724,6 +742,7 @@ export class SmartGogglesHud {
             killMark,
             path,
             label,
+            labelWidth: LABEL_WIDTH,
             identifier,
             distanceFact,
             healthFact,
@@ -776,7 +795,7 @@ export class SmartGogglesHud {
         record.root.classList.toggle('is-up', layout.vertical === 'up');
         record.label.style.left = `${layout.labelX.toFixed(1)}px`;
         record.label.style.top = `${layout.labelY.toFixed(1)}px`;
-        record.label.style.width = `${LABEL_WIDTH}px`;
+        record.label.style.width = `${record.labelWidth}px`;
         // The readout always hangs beneath the single horizontal leader rule.
         record.label.style.transform = 'translateY(5px)';
         record.label.style.setProperty('--goggles-label-shift', '-3px');
@@ -814,7 +833,7 @@ export class SmartGogglesHud {
             viewportWidth,
             viewportHeight,
             record.layout,
-            { labelWidth: LABEL_WIDTH, diagonalLength: CALLOUT_DIAGONAL_LENGTH },
+            { labelWidth: record.labelWidth, diagonalLength: CALLOUT_DIAGONAL_LENGTH },
         );
         this.updateGeometry(record);
         return true;

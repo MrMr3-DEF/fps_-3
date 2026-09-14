@@ -147,7 +147,7 @@ Player damage records the last damage time for regeneration and kill attribution
 | `1`–`5` | Select pistol, shotgun, AR, sniper, or minigun |
 | `X` | Inspect the active weapon |
 | `P` | Toggle third-person presentation |
-| `Escape` | Toggle pause and pointer lock |
+| `Escape` | Toggle pause; after keyboard resume, click once to recapture the mouse |
 
 ## Multiplayer topology and synchronization
 
