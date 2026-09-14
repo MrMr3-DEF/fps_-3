@@ -52,7 +52,7 @@ import { applyRendererSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUse
 import { targetData } from './userDataTypes.js';
 import type { PlayerDiedPacket } from './networkTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
-import { decodeMouseButtons } from './mouseButtons.js';
+import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
 import { DayNightCycle } from './dayNightCycle.js';
 
@@ -699,11 +699,11 @@ function setupInputListeners(): void {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
 
-    // Keep button state on one pointer event stream. Registering both mouse and
-    // pointer/raw-pointer listeners made every move update run two or three times.
-    window.addEventListener('pointerdown', handleGameMouseButtons, true);
-    window.addEventListener('pointerup', handleGameMouseButtons, true);
-    window.addEventListener('pointermove', handleGameMouseButtons, true);
+    // Mouse down/up fires for every button transition, including pressing Aim
+    // while Fire remains held. Pointer down/up only covers the first/last button.
+    for (const eventType of MOUSE_BUTTON_EVENT_TYPES) {
+        window.addEventListener(eventType, handleGameMouseButtons, true);
+    }
     window.addEventListener('pointercancel', handleGameMouseButtons, true);
     window.addEventListener('contextmenu', preventLockedMouseDefault, true);
     window.addEventListener('auxclick', preventLockedMouseDefault, true);
@@ -828,8 +828,8 @@ function preventLockedMouseDefault(e: Event): void {
     }
 }
 
-function handleGameMouseButtons(e: PointerEvent): void {
-    if (e.pointerType === 'touch' || touchMode) return;
+function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
+    if (touchMode || ('pointerType' in e && e.pointerType === 'touch')) return;
     preventLockedMouseDefault(e);
     if (!isGameInputLocked()) return;
 
@@ -907,14 +907,14 @@ function updateLocalAccelerometer(delta: number): void {
     updateAccelerometer(smoothedGRight, smoothedGUp);
 }
 
-function updateMouseButtonStateFromChange(e: PointerEvent): void {
+function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
     const previousPrimary = state.isMouseDown;
     const previousSecondary = state.rightClickActive;
     const buttons = decodeMouseButtons(e.type === 'pointercancel' ? 0 : e.buttons);
 
     // Some mouse drivers expose left+right emulation as a middle-button chord.
     // Preserve that compatibility path, but derive normal left/right state from
-    // the complete bitmask on every event—including button-less pointermove.
+    // the complete bitmask on every event—including button-less mousemove.
     middleMouseChordActive = buttons.middle && (
         middleMouseChordActive || buttons.primary || buttons.secondary || previousPrimary || previousSecondary
     );

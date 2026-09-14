@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeMouseButtons } from '../src/mouseButtons.ts';
+import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from '../src/mouseButtons.ts';
+
+test('desktop button tracking observes additional buttons pressed while firing', () => {
+    assert.deepEqual(MOUSE_BUTTON_EVENT_TYPES, ['mousedown', 'mouseup', 'mousemove']);
+});
 
 test('mouse button bitmask preserves simultaneous fire and ADS', () => {
     assert.deepEqual(decodeMouseButtons(0), { primary: false, secondary: false, middle: false });
