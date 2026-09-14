@@ -15,6 +15,7 @@ export interface UserSettings {
     lavaGlow: boolean;
     shadowQuality: ShadowQuality;
     showFps: boolean;
+    photosensitivityMode: boolean;
     downloadWebLLMImmediately: boolean;
 }
 
@@ -29,6 +30,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     lavaGlow: false,
     shadowQuality: 'low',
     showFps: true,
+    photosensitivityMode: false,
     downloadWebLLMImmediately: false,
 };
 
@@ -63,6 +65,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
             userSettings.downloadWebLLMImmediately = readBoolean(parsed.downloadWebLLMImmediately, false);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);
+            userSettings.photosensitivityMode = readBoolean(parsed.photosensitivityMode, DEFAULT_USER_SETTINGS.photosensitivityMode);
         }
     } catch (err) {
         console.warn('Failed to load settings:', err);

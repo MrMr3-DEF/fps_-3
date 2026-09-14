@@ -26,6 +26,7 @@
 <body>
     <div id="preview-note">SMART GOGGLES · LIVE TRACKING / RANGE / EXIT PREVIEW</div>
     <div id="goggles-scope">
+        <div class="goggles-tv-noise" aria-hidden="true"></div>
         <div class="goggles-scanlines"></div>
         <div id="goggles-target-layer" aria-hidden="true"></div>
         <div class="goggles-dot"></div>
@@ -93,9 +94,39 @@
         peerMesh.add(peerBody, peerHead);
         scene.add(peerMesh);
         const peers = { previewPeer: { mesh: peerMesh, hp: 6, maxHp: 10 } };
+        const anomalyVisual = new THREE.Group();
+        anomalyVisual.position.set(-25, 0, -82);
+        const anomalyMaterial = new THREE.MeshStandardMaterial({
+            color: 0x35293f,
+            emissive: 0xa6388f,
+            emissiveIntensity: 0.24,
+            roughness: 0.5,
+        });
+        const anomalyBody = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.62, 2.7, 12), anomalyMaterial);
+        const anomalyHead = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 10), anomalyMaterial);
+        anomalyHead.position.y = 1.65;
+        anomalyVisual.add(anomalyBody, anomalyHead);
+        scene.add(anomalyVisual);
+        const anomalyHitbox = new THREE.Mesh(
+            new THREE.BoxGeometry(1.1, 3.564, 0.8),
+            new THREE.MeshBasicMaterial(),
+        );
+        anomalyHitbox.position.set(-25, 0.45, -82);
+        anomalyHitbox.visible = false;
+        scene.add(anomalyHitbox);
+        const anomaly = { hitbox: anomalyHitbox };
         const hud = new SmartGogglesHud(document.getElementById('goggles-target-layer'));
         const previewStartedAt = performance.now();
+        const previewParams = new URLSearchParams(location.search);
+        const panDuringElimination = previewParams.has('elimination-pan');
+        const brickPreview = previewParams.has('brick-preview');
+        const photosensitivePreview = previewParams.has('photosensitive');
+        const gogglesScope = document.getElementById('goggles-scope');
+        const previewNote = document.getElementById('preview-note');
+        gogglesScope.classList.toggle('is-photosensitivity-mode', photosensitivePreview);
         let eliminationPlayed = false;
+        let brickAnimationStarted = false;
+        let brickNoiseStarted = false;
 
         function resize() {
             camera.aspect = innerWidth / innerHeight;
@@ -106,10 +137,28 @@
 
         function frame(now) {
             const seconds = now / 1000;
-            if (!eliminationPlayed && now - previewStartedAt >= 2200) {
+            const previewElapsed = now - previewStartedAt;
+            if (brickPreview && !brickAnimationStarted && previewElapsed >= 900) {
+                gogglesScope.classList.add('is-tv-off');
+                previewNote.textContent = 'SMART GOGGLES · TERMINAL ANOMALY / HARDWARE FAILURE';
+                brickAnimationStarted = true;
+            }
+            if (brickPreview && !brickNoiseStarted && previewElapsed >= 1420) {
+                gogglesScope.classList.remove('is-tv-off');
+                gogglesScope.classList.add('is-bricked-noise');
+                previewNote.textContent = photosensitivePreview
+                    ? 'SMART GOGGLES · RESTART ATTEMPT / PHOTOSENSITIVITY MODE'
+                    : 'SMART GOGGLES · RESTART ATTEMPT / NO SIGNAL';
+                brickNoiseStarted = true;
+            }
+            if (!eliminationPlayed && previewElapsed >= 2200) {
                 targets[0].userData.eliminationRevision++;
                 targets[0].visible = false;
                 eliminationPlayed = true;
+            }
+            if (panDuringElimination && previewElapsed >= 2200) {
+                const panProgress = Math.min(1, (previewElapsed - 2200) / 360);
+                camera.rotation.y = THREE.MathUtils.degToRad(32) * panProgress;
             }
             targets[0].children[0].rotation.set(seconds * 0.45, seconds * 0.72, 0);
             targets[1].children[0].rotation.set(seconds * 0.18, seconds * 0.34, 0);
@@ -120,7 +169,7 @@
             targets[2].position.x = Math.sin(seconds * 0.48) * 85;
 
             camera.updateMatrixWorld(true);
-            hud.update(camera, camera.position, camera.position, targets, peers, true, now);
+            hud.update(camera, camera.position, camera.position, targets, peers, true, now, anomaly);
             renderer.render(scene, camera);
             requestAnimationFrame(frame);
         }

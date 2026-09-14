@@ -122,18 +122,24 @@ test('boolean settings preserve defaults and persist only boolean values', async
     try {
         assert.equal(DEFAULT_USER_SETTINGS.downloadWebLLMImmediately, false);
         assert.equal(DEFAULT_USER_SETTINGS.lavaGlow, false);
+        assert.equal(DEFAULT_USER_SETTINGS.photosensitivityMode, false);
         assert.equal(loadUserSettings().downloadWebLLMImmediately, false);
         assert.equal(loadUserSettings().lavaGlow, false);
+        assert.equal(loadUserSettings().photosensitivityMode, false);
         userSettings.downloadWebLLMImmediately = true;
         userSettings.lavaGlow = true;
+        userSettings.photosensitivityMode = true;
         saveUserSettings();
         userSettings.downloadWebLLMImmediately = false;
         userSettings.lavaGlow = false;
+        userSettings.photosensitivityMode = false;
         assert.equal(loadUserSettings().downloadWebLLMImmediately, true);
         assert.equal(loadUserSettings().lavaGlow, true);
-        saved = '{"downloadWebLLMImmediately":"true","lavaGlow":"true"}';
+        assert.equal(loadUserSettings().photosensitivityMode, true);
+        saved = '{"downloadWebLLMImmediately":"true","lavaGlow":"true","photosensitivityMode":"true"}';
         assert.equal(loadUserSettings().downloadWebLLMImmediately, false);
         assert.equal(loadUserSettings().lavaGlow, false);
+        assert.equal(loadUserSettings().photosensitivityMode, false);
     } finally {
         Object.assign(userSettings, originalSettings);
         Object.assign(globalThis, { localStorage: originalStorage });

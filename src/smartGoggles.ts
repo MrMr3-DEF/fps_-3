@@ -33,6 +33,12 @@ const EXIT_DURATION_MS = 180;
 const ELIMINATION_DURATION_MS = 540;
 const TELEPORT_DISTANCE_SQ = 40 * 40;
 const OCCLUSION_SURFACE_EPSILON = 0.02;
+const CORRUPTED_HEALTH_FRAMES = [
+    'HEALTH ?? / ##',
+    'HEALTH #? / ?#',
+    'HEALTH // / ??',
+    'HEALTH ?# / //',
+] as const;
 
 export type SmartGogglesObstacleQuery = (
     startX: number,
@@ -44,6 +50,7 @@ export type SmartGogglesObstacleQuery = (
 
 type LockPhase = 'entering' | 'tracking' | 'leaving' | 'eliminated';
 type ReadoutMode = 'facts' | 'warning';
+type TargetVariant = 'enemy' | 'anomaly';
 
 export interface SmartGogglesPeerTarget {
     mesh: THREE.Group;
@@ -52,6 +59,11 @@ export interface SmartGogglesPeerTarget {
 }
 
 export type SmartGogglesPeerTargets = Readonly<Record<string, SmartGogglesPeerTarget>>;
+
+export interface SmartGogglesAnomalyTarget {
+    /** Fixed world-space gameplay proxy; animated render meshes are not traced. */
+    hitbox: THREE.Mesh;
+}
 
 interface TargetLockRecord {
     targetKey: string;
@@ -66,6 +78,7 @@ interface TargetLockRecord {
     bounds: ScreenBounds;
     layout: SmartGogglesCalloutLayout;
     lastWorldPosition: THREE.Vector3;
+    lastWorldRadius: number;
     targetRevision: number;
     phase: LockPhase;
     seenFrame: number;
@@ -78,8 +91,11 @@ interface TargetLockRecord {
 }
 
 const _bodyCenter = new THREE.Vector3();
+const _peerRootPosition = new THREE.Vector3();
 const _toBody = new THREE.Vector3();
 const _sightSample = new THREE.Vector3();
+const _eliminatedWorldSphere = new THREE.Sphere();
+const _worldIdentity = new THREE.Matrix4();
 const _cameraFrustum = new THREE.Frustum();
 const _viewProjection = new THREE.Matrix4();
 const _occlusionRaycaster = new THREE.Raycaster();
@@ -148,6 +164,66 @@ function setFactVisibility(record: TargetLockRecord, outOfRange: boolean): void 
     record.root.classList.toggle('is-out-of-range', outOfRange);
 }
 
+function ensureAnomalyTearFilters(layer: HTMLElement): void {
+    if (document.getElementById('goggles-anomaly-tear-a')) return;
+
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.classList.add('goggles-anomaly-filter-defs');
+    svg.setAttribute('aria-hidden', 'true');
+    const defs = document.createElementNS(SVG_NS, 'defs');
+    for (const [id, seed] of [['goggles-anomaly-tear-a', '7'], ['goggles-anomaly-tear-b', '19']]) {
+        const filter = document.createElementNS(SVG_NS, 'filter');
+        filter.setAttribute('id', id);
+        filter.setAttribute('x', '-20%');
+        filter.setAttribute('y', '-10%');
+        filter.setAttribute('width', '140%');
+        filter.setAttribute('height', '120%');
+
+        const turbulence = document.createElementNS(SVG_NS, 'feTurbulence');
+        turbulence.setAttribute('type', 'fractalNoise');
+        turbulence.setAttribute('baseFrequency', '0.006 0.15');
+        turbulence.setAttribute('numOctaves', '1');
+        turbulence.setAttribute('seed', seed);
+        turbulence.setAttribute('result', 'noise');
+
+        // Preserve high-frequency horizontal bands while neutralizing vertical
+        // displacement, then quantize them into hard scanline offsets.
+        const horizontalNoise = document.createElementNS(SVG_NS, 'feColorMatrix');
+        horizontalNoise.setAttribute('in', 'noise');
+        horizontalNoise.setAttribute('type', 'matrix');
+        horizontalNoise.setAttribute('values', [
+            '1 0 0 0 0',
+            '0 0 0 0 0.5',
+            '0 0 0 0 0',
+            '0 0 0 1 0',
+        ].join(' '));
+        horizontalNoise.setAttribute('result', 'horizontal-noise');
+
+        const steppedNoise = document.createElementNS(SVG_NS, 'feComponentTransfer');
+        steppedNoise.setAttribute('in', 'horizontal-noise');
+        steppedNoise.setAttribute('result', 'stepped-noise');
+        const redSteps = document.createElementNS(SVG_NS, 'feFuncR');
+        redSteps.setAttribute('type', 'discrete');
+        redSteps.setAttribute('tableValues', '0 0.18 0.18 0.5 0.5 0.82 0.82 1');
+        const greenCenter = document.createElementNS(SVG_NS, 'feFuncG');
+        greenCenter.setAttribute('type', 'linear');
+        greenCenter.setAttribute('slope', '0');
+        greenCenter.setAttribute('intercept', '0.5');
+        steppedNoise.append(redSteps, greenCenter);
+
+        const displacement = document.createElementNS(SVG_NS, 'feDisplacementMap');
+        displacement.setAttribute('in', 'SourceGraphic');
+        displacement.setAttribute('in2', 'stepped-noise');
+        displacement.setAttribute('scale', '28');
+        displacement.setAttribute('xChannelSelector', 'R');
+        displacement.setAttribute('yChannelSelector', 'G');
+        filter.append(turbulence, horizontalNoise, steppedNoise, displacement);
+        defs.appendChild(filter);
+    }
+    svg.appendChild(defs);
+    layer.appendChild(svg);
+}
+
 /** One DOM overlay per visible NPC or remote-player enemy. */
 export class SmartGogglesHud {
     private readonly records = new Map<string, TargetLockRecord>();
@@ -157,10 +233,16 @@ export class SmartGogglesHud {
     private readonly reducedMotion: boolean;
     private frame = 0;
     private active = false;
+    private anomalyDetectedThisFrame = false;
 
     constructor(layer: HTMLElement) {
         this.layer = layer;
         this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+        ensureAnomalyTearFilters(layer);
+    }
+
+    get isAnomalyDetected(): boolean {
+        return this.anomalyDetectedThisFrame;
     }
 
     update(
@@ -171,7 +253,9 @@ export class SmartGogglesHud {
         peers: SmartGogglesPeerTargets,
         enabled: boolean,
         now = performance.now(),
+        anomalyTarget: SmartGogglesAnomalyTarget | null = null,
     ): void {
+        this.anomalyDetectedThisFrame = false;
         if (!enabled) {
             if (this.active || this.records.size > 0 || this.retiringRecords.size > 0) this.reset();
             return;
@@ -254,8 +338,10 @@ export class SmartGogglesHud {
             this.trackTarget(
                 targetKey,
                 targetRevision,
+                'enemy',
                 projectionBounds,
                 _bodyCenter,
+                localSphere.radius * data.bodyMesh.matrixWorld.getMaxScaleOnAxis(),
                 playerPosition.distanceTo(_bodyCenter),
                 reachableDistance,
                 data.hp,
@@ -301,13 +387,16 @@ export class SmartGogglesHud {
                 ),
             )) continue;
 
-            peer.mesh.getWorldPosition(_bodyCenter);
+            _bodyCenter.copy(stablePeerSphere.center).applyMatrix4(peer.mesh.matrixWorld);
+            peer.mesh.getWorldPosition(_peerRootPosition);
             this.trackTarget(
                 targetKey,
                 0,
+                'enemy',
                 projectionBounds,
                 _bodyCenter,
-                playerPosition.distanceTo(_bodyCenter),
+                stablePeerSphere.radius * peer.mesh.matrixWorld.getMaxScaleOnAxis(),
+                playerPosition.distanceTo(_peerRootPosition),
                 distanceToVisiblePeerMeshes(weaponOrigin, peer.mesh),
                 peer.hp,
                 peer.maxHp,
@@ -315,6 +404,54 @@ export class SmartGogglesHud {
                 viewportHeight,
                 now,
             );
+        }
+
+        if (anomalyTarget) {
+            const hitbox = anomalyTarget.hitbox;
+            const geometry = hitbox.geometry;
+            if (!geometry.boundingBox) geometry.computeBoundingBox();
+            if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+            const localBox = geometry.boundingBox;
+            const localSphere = geometry.boundingSphere;
+            if (localBox && localSphere) {
+                hitbox.updateWorldMatrix(true, false);
+                const targetKey = 'anomaly:goth-girlfriend';
+                const record = this.records.get(targetKey);
+                const projectionBounds = record?.bounds ?? createScreenBounds();
+                if (_cameraFrustum.intersectsObject(hitbox) && hasLineOfSightToOrientedBox(
+                    camera.position,
+                    localBox,
+                    hitbox.matrixWorld,
+                    queryObstaclesAlongSegment,
+                    _enemyOccluders,
+                    hitbox,
+                ) && projectStableTargetSphereToScreen(
+                    localSphere,
+                    hitbox.matrixWorld,
+                    camera,
+                    viewportWidth,
+                    viewportHeight,
+                    projectionBounds,
+                )) {
+                    _bodyCenter.copy(localSphere.center).applyMatrix4(hitbox.matrixWorld);
+                    this.trackTarget(
+                        targetKey,
+                        0,
+                        'anomaly',
+                        projectionBounds,
+                        _bodyCenter,
+                        localSphere.radius * hitbox.matrixWorld.getMaxScaleOnAxis(),
+                        playerPosition.distanceTo(_bodyCenter),
+                        distanceToOrientedBox(weaponOrigin, localBox, hitbox.matrixWorld),
+                        0,
+                        0,
+                        viewportWidth,
+                        viewportHeight,
+                        now,
+                    );
+                    this.anomalyDetectedThisFrame = true;
+                }
+            }
         }
 
         for (const [targetKey, record] of this.records) {
@@ -326,17 +463,23 @@ export class SmartGogglesHud {
             }
         }
         for (const record of this.retiringRecords) {
-            if (now < record.removeAt) continue;
-            record.root.remove();
-            this.retiringRecords.delete(record);
+            if (now >= record.removeAt || (
+                record.phase === 'eliminated' &&
+                !this.updateEliminatedGeometry(record, camera, viewportWidth, viewportHeight)
+            )) {
+                record.root.remove();
+                this.retiringRecords.delete(record);
+            }
         }
     }
 
     private trackTarget(
         targetKey: string,
         targetRevision: number,
+        variant: TargetVariant,
         bounds: ScreenBounds,
         worldPosition: THREE.Vector3,
+        worldRadius: number,
         centerDistance: number,
         reachableDistance: number,
         hp: number,
@@ -352,12 +495,13 @@ export class SmartGogglesHud {
             record = undefined;
         }
         if (!record) {
-            record = this.createRecord(targetKey, targetRevision, bounds, now);
+            record = this.createRecord(targetKey, targetRevision, variant, bounds, now);
             this.records.set(targetKey, record);
         }
 
         record.seenFrame = this.frame;
         record.lastWorldPosition.copy(worldPosition);
+        record.lastWorldRadius = worldRadius;
         padBounds(record.bounds);
         layoutSmartGogglesCallout(
             record.bounds,
@@ -368,7 +512,7 @@ export class SmartGogglesHud {
         );
         this.updateGeometry(record);
 
-        const outOfRange = classifyOutOfRange(
+        const outOfRange = variant === 'enemy' && classifyOutOfRange(
             reachableDistance,
             BULLET_TRAVEL_DISTANCE,
         );
@@ -383,7 +527,11 @@ export class SmartGogglesHud {
         }
         if (!outOfRange) {
             record.lastDistanceText = `DISTANCE ${Math.round(centerDistance)} M`;
-            record.lastHealthText = `HEALTH ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
+            record.lastHealthText = variant === 'anomaly'
+                ? CORRUPTED_HEALTH_FRAMES[
+                    this.reducedMotion ? 0 : Math.floor(now / 72) % CORRUPTED_HEALTH_FRAMES.length
+                ]
+                : `HEALTH ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
         }
         this.updateTypedReadout(record, now);
 
@@ -427,17 +575,20 @@ export class SmartGogglesHud {
         for (const [healthBar, wasVisible] of this.hiddenHealthBars) healthBar.visible = wasVisible;
         this.hiddenHealthBars.clear();
         this.active = false;
+        this.anomalyDetectedThisFrame = false;
     }
 
     private createRecord(
         targetKey: string,
         targetRevision: number,
+        variant: TargetVariant,
         bounds: ScreenBounds,
         now: number,
     ): TargetLockRecord {
         const root = document.createElement('div');
         root.className = 'goggles-target-lock';
         root.dataset.targetKey = targetKey;
+        root.classList.toggle('is-anomalous', variant === 'anomaly');
 
         const cornerClasses = ['tl', 'tr', 'bl', 'br'] as const;
         const corners = cornerClasses.map((cornerName) => {
@@ -473,6 +624,7 @@ export class SmartGogglesHud {
         panel.className = 'goggles-target-label-panel';
         const distanceFact = this.createFact();
         const healthFact = this.createFact();
+        healthFact.classList.toggle('is-corrupted', variant === 'anomaly');
         const warning = document.createElement('span');
         warning.className = 'goggles-target-warning';
         warning.hidden = true;
@@ -494,6 +646,7 @@ export class SmartGogglesHud {
             bounds,
             layout: createSmartGogglesCalloutLayout(),
             lastWorldPosition: new THREE.Vector3(),
+            lastWorldRadius: 0,
             targetRevision,
             phase: 'entering',
             seenFrame: this.frame,
@@ -546,6 +699,39 @@ export class SmartGogglesHud {
             '--goggles-label-align',
             layout.horizontal === 'left' ? 'flex-end' : 'flex-start',
         );
+    }
+
+    private updateEliminatedGeometry(
+        record: TargetLockRecord,
+        camera: THREE.PerspectiveCamera,
+        viewportWidth: number,
+        viewportHeight: number,
+    ): boolean {
+        // Once the eliminated target's fixed world-space center leaves the
+        // camera frustum, the kill confirmation no longer belongs on screen.
+        if (!_cameraFrustum.containsPoint(record.lastWorldPosition)) return false;
+
+        _eliminatedWorldSphere.center.copy(record.lastWorldPosition);
+        _eliminatedWorldSphere.radius = record.lastWorldRadius;
+        if (!projectStableTargetSphereToScreen(
+            _eliminatedWorldSphere,
+            _worldIdentity,
+            camera,
+            viewportWidth,
+            viewportHeight,
+            record.bounds,
+        )) return false;
+
+        padBounds(record.bounds);
+        layoutSmartGogglesCallout(
+            record.bounds,
+            viewportWidth,
+            viewportHeight,
+            record.layout,
+            { labelWidth: LABEL_WIDTH, diagonalLength: CALLOUT_DIAGONAL_LENGTH },
+        );
+        this.updateGeometry(record);
+        return true;
     }
 
     private hideWorldHealthBar(healthBar: THREE.Object3D): void {

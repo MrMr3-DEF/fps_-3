@@ -56,6 +56,11 @@ import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js'
 import { RoomAccessChallenge } from './turnSecurity.js';
 import { DayNightCycle } from './dayNightCycle.js';
 import { SmartGogglesHud } from './smartGoggles.js';
+import {
+    finishGogglesShutdown,
+    resolveGogglesScopeAttempt,
+    updateGogglesFailureScan,
+} from './gogglesFailure.js';
 
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
@@ -122,6 +127,8 @@ const UI = {
     get settingShadowQuality() { return getUI<HTMLSelectElement>('setting-shadow-quality'); },
     get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
     get settingFpsValue() { return getUI<HTMLElement>('setting-fps-value'); },
+    get settingPhotosensitivity() { return getUI<HTMLInputElement>('setting-photosensitivity'); },
+    get settingPhotosensitivityValue() { return getUI<HTMLElement>('setting-photosensitivity-value'); },
     get panelMain() { return getUI<HTMLElement>('panel-main'); },
     get panelSettings() { return getUI<HTMLElement>('panel-settings'); },
     get panelMp() { return getUI<HTMLElement>('panel-mp'); },
@@ -655,7 +662,7 @@ function setupInputListeners(): void {
             case 'KeyC':
                 if (state.controls && isInputActive()) {
                     state.keyCActive = true;
-                    state.isScoped = state.rightClickActive || state.keyCActive;
+                    refreshScopedState();
                     cancelInspect();
                 }
                 break;
@@ -675,7 +682,7 @@ function setupInputListeners(): void {
             case 'KeyD': state.moveRight = false; break;
             case 'KeyC':
                 state.keyCActive = false;
-                state.isScoped = state.rightClickActive || state.keyCActive;
+                refreshScopedState();
                 break;
             case 'ShiftLeft':
             case 'ShiftRight':
@@ -788,6 +795,7 @@ function prepareFreshArena(): void {
     disposeWorld();
     createEnvironment();
     performPlayerReset(true);
+    syncGogglesFailureVisuals();
     state.prevTime = performance.now();
 }
 
@@ -933,7 +941,27 @@ function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
         state.rightClickActive = buttons.secondary;
     }
 
-    state.isScoped = state.rightClickActive || state.keyCActive;
+    refreshScopedState();
+}
+
+function refreshScopedState(): void {
+    if (!isInputActive()) {
+        state.isScoped = false;
+        return;
+    }
+    state.isScoped = resolveGogglesScopeAttempt(
+        state.gogglesFailure,
+        state.rightClickActive || state.keyCActive,
+    );
+}
+
+function syncGogglesFailureVisuals(): void {
+    const scope = UI.gogglesScope;
+    if (!scope) return;
+    const shuttingDown = state.gogglesFailure.shutdownUntil > 0;
+    scope.classList.toggle('is-tv-off', shuttingDown);
+    scope.classList.toggle('is-bricked-noise', state.gogglesFailure.bricked && !shuttingDown);
+    scope.classList.toggle('is-photosensitivity-mode', userSettings.photosensitivityMode);
 }
 
 function syncHudCounters(): void {
@@ -953,6 +981,7 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.lavaGlow === b.lavaGlow &&
         a.shadowQuality === b.shadowQuality &&
         a.showFps === b.showFps &&
+        a.photosensitivityMode === b.photosensitivityMode &&
         a.downloadWebLLMImmediately === b.downloadWebLLMImmediately;
 }
 
@@ -987,6 +1016,8 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     }
     if (UI.settingFps) UI.settingFps.checked = settings.showFps;
     setCheckboxLabel(UI.settingFpsValue, settings.showFps);
+    if (UI.settingPhotosensitivity) UI.settingPhotosensitivity.checked = settings.photosensitivityMode;
+    setCheckboxLabel(UI.settingPhotosensitivityValue, settings.photosensitivityMode);
     updateApplyButton();
 }
 
@@ -1106,6 +1137,12 @@ function setupSettingsControls(): void {
     UI.settingFps?.addEventListener('change', (e) => {
         updatePendingSettings((settings) => {
             settings.showFps = (e.target as HTMLInputElement).checked;
+        });
+    });
+
+    UI.settingPhotosensitivity?.addEventListener('change', (e) => {
+        updatePendingSettings((settings) => {
+            settings.photosensitivityMode = (e.target as HTMLInputElement).checked;
         });
     });
 }
@@ -1251,6 +1288,9 @@ export function animate(): void {
 
     const time = performance.now();
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
+    finishGogglesShutdown(state.gogglesFailure, time);
+    refreshScopedState();
+    syncGogglesFailureVisuals();
     const lanternStrength = state.camera ? dayNightCycle?.update(delta, state.camera.position) ?? 0 : 0;
     if (state.camera) {
         updateTownLanterns(time / 1000, lanternStrength);
@@ -1417,15 +1457,26 @@ export function animate(): void {
             // lock animation during the FOV transition makes its convergence
             // and leader draw disappear inside the larger scope movement.
             const gogglesAcquisitionReady = state.isScoped && state.camera.fov === userSettings.scopedFov;
+            const gogglesHudReady = gogglesAcquisitionReady && (
+                !state.gogglesFailure.bricked || state.gogglesFailure.shutdownUntil > 0
+            );
             smartGoggles?.update(
                 state.camera,
                 gogglesPlayerPosition,
                 _gogglesWeaponOrigin,
                 state.targets,
                 state.peers,
-                Boolean(gogglesAcquisitionReady && state.isPlaying && state.playerHp > 0 && isInputActive()),
+                Boolean(gogglesHudReady && state.isPlaying && state.playerHp > 0 && isInputActive()),
+                time,
+                gothGirlfriend?.animator ? gothGirlfriend : null,
+            );
+            const gogglesBrickedThisFrame = updateGogglesFailureScan(
+                state.gogglesFailure,
+                Boolean(gogglesHudReady && smartGoggles?.isAnomalyDetected),
+                delta * 1000,
                 time,
             );
+            if (gogglesBrickedThisFrame) syncGogglesFailureVisuals();
 
             state.renderer.render(state.scene, state.camera);
         } finally {

@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { ConversationCamera, CONVERSATION_MOVE_SECONDS } from '../src/conversationCamera.js';
-import { getGothConversationPose, getGothPlacement, fitGothModel, GOTH_MODEL_HEIGHT, GOTH_CONVERSATION_DISTANCE } from '../src/gothGirlfriend.js';
+import { GothGirlfriend, getGothConversationPose, getGothPlacement, fitGothModel, GOTH_MODEL_HEIGHT, GOTH_CONVERSATION_DISTANCE, GOTH_HITBOX_DEPTH, GOTH_HITBOX_WIDTH } from '../src/gothGirlfriend.js';
 import { generateTownLayout, createTownBoxes } from '../src/town.js';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../src/config.js';
 import { createPlayerMesh, disposePlayerVisuals } from '../src/weapons.js';
 import { state } from '../src/state.js';
+import { obstacleData } from '../src/userDataTypes.js';
 
 const near = (a: THREE.Vector3, b: THREE.Vector3) => assert.ok(a.distanceTo(b) < 1e-6, `${a.toArray()} != ${b.toArray()}`);
 
@@ -96,4 +97,44 @@ test('NPC fitting is uniform, grounds the asset and makes it 8% taller than the 
     assert.equal(model.scale.x, model.scale.y);
     assert.equal(model.scale.y, model.scale.z);
     geometry.dispose(); material.dispose(); disposePlayerVisuals(); state.scene = null;
+});
+
+test('girlfriend uses one fixed box hitbox and ignores it during her own interaction ray', () => {
+    const building = generateTownLayout(42).find(candidate => candidate.name === 'goth house')!;
+    const girlfriend = new GothGirlfriend(building);
+    const hitbox = girlfriend.hitbox;
+    const geometry = hitbox.geometry as THREE.BoxGeometry;
+    assert.equal(geometry.parameters.width, GOTH_HITBOX_WIDTH);
+    assert.equal(geometry.parameters.height, GOTH_MODEL_HEIGHT);
+    assert.equal(geometry.parameters.depth, GOTH_HITBOX_DEPTH);
+    assert.equal(hitbox.visible, false);
+    assert.deepEqual(obstacleData(hitbox), {
+        height: GOTH_MODEL_HEIGHT,
+        halfW: GOTH_HITBOX_WIDTH / 2,
+        halfD: GOTH_HITBOX_DEPTH / 2,
+        halfH: GOTH_MODEL_HEIGHT / 2,
+    });
+
+    // The gameplay proxy blocks the world but must not make conversation with
+    // its own character fail the visibility test.
+    girlfriend.animator = {} as any;
+    state.isMultiplayer = false;
+    const pose = getGothConversationPose(girlfriend.group);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.copy(pose.position);
+    camera.lookAt(pose.lookAt);
+    camera.updateMatrixWorld(true);
+    hitbox.updateMatrixWorld(true);
+    const selfRay = new THREE.Raycaster(
+        camera.position,
+        pose.lookAt.clone().sub(camera.position).normalize(),
+        0,
+        camera.position.distanceTo(pose.lookAt),
+    );
+    assert.ok(selfRay.intersectObject(hitbox).length > 0, 'interaction ray crosses the physical proxy');
+    assert.equal(girlfriend.canInteract(camera, [hitbox]), true);
+
+    girlfriend.dispose();
+    geometry.dispose();
+    (hitbox.material as THREE.Material).dispose();
 });

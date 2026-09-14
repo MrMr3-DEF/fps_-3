@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PLAYER_MAX_HP } from './config.js';
 import type { PointerLockControls } from './pointerLockControls.js';
 import type { Particle } from './particles.js';
+import { createGogglesFailureState, resetGogglesFailure, type GogglesFailureState } from './gogglesFailure.js';
 
 export interface PeerLike {
     id: string;
@@ -115,6 +116,7 @@ export interface GameState {
     isScoped: boolean;
     rightClickActive: boolean;
     keyCActive: boolean;
+    gogglesFailure: GogglesFailureState;
     baseSensitivity: number;
     hoverFuel: number;
     isShiftDown: boolean;
@@ -205,6 +207,7 @@ export const state: GameState = {
     isScoped: false,
     rightClickActive: false,
     keyCActive: false,
+    gogglesFailure: createGogglesFailureState(),
     baseSensitivity: 1.0,
     hoverFuel: 1.0,
     isShiftDown: false,
@@ -239,4 +242,5 @@ export function resetMatchStats() {
     state.score = 0;
     state.kills = 0;
     state.deaths = 0;
+    resetGogglesFailure(state.gogglesFailure);
 }

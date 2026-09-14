@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { TownBuilding } from './town.js';
 import { PLAYER_HEIGHT } from './config.js';
 import { state } from './state.js';
+import { obstacleData } from './userDataTypes.js';
 
 /** The lobby creator is the host; joined players only see the idle character. */
 export function canUseGothChat(session: { isMultiplayer: boolean; isHost: boolean }): boolean {
@@ -16,6 +17,8 @@ export const GOTH_INTERACTION_RANGE = 4;
 export const GOTH_MODEL_HEIGHT = 3.3 * 1.08;
 export const GOTH_FACE_HEIGHT = GOTH_MODEL_HEIGHT * 0.9;
 export const GOTH_CONVERSATION_DISTANCE = 3.2;
+export const GOTH_HITBOX_WIDTH = 1.1;
+export const GOTH_HITBOX_DEPTH = 0.8;
 
 /** Fit the supplied asset uniformly and keep the soles on the placement plane. */
 export function fitGothModel(model: THREE.Object3D): void {
@@ -188,6 +191,8 @@ function disposeModel(model: THREE.Object3D): void {
 
 export class GothGirlfriend {
     readonly group = new THREE.Group();
+    /** Fixed gameplay proxy; intentionally independent of the animated GLB. */
+    readonly hitbox: THREE.Mesh;
     animator: GothAnimator | null = null;
     loadError = false;
     private disposed = false;
@@ -201,6 +206,20 @@ export class GothGirlfriend {
         this.group.name = 'Goth girlfriend';
         this.group.position.copy(placement.position);
         this.group.rotation.y = placement.yaw;
+        this.hitbox = new THREE.Mesh(
+            new THREE.BoxGeometry(GOTH_HITBOX_WIDTH, GOTH_MODEL_HEIGHT, GOTH_HITBOX_DEPTH),
+            new THREE.MeshBasicMaterial(),
+        );
+        this.hitbox.name = 'town-goth-girlfriend-hitbox';
+        this.hitbox.position.copy(placement.position);
+        this.hitbox.position.y += GOTH_MODEL_HEIGHT / 2;
+        this.hitbox.visible = false;
+        Object.assign(obstacleData(this.hitbox), {
+            height: GOTH_MODEL_HEIGHT,
+            halfW: GOTH_HITBOX_WIDTH / 2,
+            halfD: GOTH_HITBOX_DEPTH / 2,
+            halfH: GOTH_MODEL_HEIGHT / 2,
+        });
         // Soft interior fill keeps her dark outfit readable under the house's roof.
         const fill = new THREE.PointLight(0xdac7ef, 9, 9, 2);
         fill.position.set(0, 2.8, 2);
@@ -244,7 +263,7 @@ export class GothGirlfriend {
         this.ray.set(camera.position, this.direction);
         this.ray.far = distance;
         // Collision proxies are deliberately invisible but still raycastable.
-        return this.ray.intersectObjects(obstacles, false).length === 0;
+        return this.ray.intersectObjects(obstacles, false).every(hit => hit.object === this.hitbox);
     }
 
     interact(camera: THREE.Camera, obstacles: THREE.Object3D[]): boolean {

@@ -1315,6 +1315,15 @@ function createTown(): void {
         if (typeof window !== 'undefined') {
             gothGirlfriend = new GothGirlfriend(building);
             state.scene!.add(gothGirlfriend.group);
+            addWorldObject(gothGirlfriend.hitbox);
+            state.obstacles.push(gothGirlfriend.hitbox);
+            const hitbox = obstacleData(gothGirlfriend.hitbox);
+            obstacleHash.insert(
+                gothGirlfriend.hitbox.position.x,
+                gothGirlfriend.hitbox.position.z,
+                Math.max(hitbox.halfW, hitbox.halfD),
+                gothGirlfriend.hitbox,
+            );
             void gothGirlfriend.load();
         }
         const decor = createGothHouseDecor(building);

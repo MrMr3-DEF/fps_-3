@@ -11,9 +11,9 @@
     <!-- Prevent favicon 404/500 requests in browser console -->
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
-  <script type="module" crossorigin src="/assets/index-Ca1gc5tl.js"></script>
+  <script type="module" crossorigin src="/assets/index-BZbvCz_5.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-KSpX7Nd2.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-C9qzN-6q.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-CFEmCZ81.css">
 </head>
 
 <body>
@@ -132,6 +132,21 @@
                         <input type="checkbox" id="setting-fps" checked>
                         <span class="settings-value" id="setting-fps-value">On</span>
                     </div>
+                    <div class="settings-row">
+                        <div class="settings-label-with-info">
+                            <label for="setting-photosensitivity">Photosensitivity Mode</label>
+                            <span class="settings-info">
+                                <button type="button" class="settings-info-button"
+                                    aria-label="About photosensitivity mode"
+                                    aria-describedby="photosensitivity-tooltip">i</button>
+                                <span class="settings-tooltip" id="photosensitivity-tooltip" role="tooltip">
+                                    Uses safer alternatives for certain flashing, flickering, or rapidly changing visual effects.
+                                </span>
+                            </span>
+                        </div>
+                        <input type="checkbox" id="setting-photosensitivity">
+                        <span class="settings-value" id="setting-photosensitivity-value">Off</span>
+                    </div>
                 </div>
                 <div class="menu-actions">
                     <button class="menu-btn secondary" id="btn-settings-reset">Reset</button>
@@ -241,6 +256,7 @@
     </div>
     <div id="crosshair"></div>
     <div id="goggles-scope">
+        <div class="goggles-tv-noise" aria-hidden="true"></div>
         <div class="goggles-scanlines"></div>
         <div id="goggles-target-layer" aria-hidden="true"></div>
         <div class="goggles-dot"></div>
