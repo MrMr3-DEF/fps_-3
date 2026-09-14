@@ -38,6 +38,10 @@
     <script type="module">
         import * as THREE from 'three';
         import { SmartGogglesHud } from '/src/smartGoggles.ts';
+        import { MOON_MEAN_DISTANCE_KM, SUN_MEAN_DISTANCE_KM } from '/src/dayNightCycle.ts';
+
+        const previewParams = new URLSearchParams(location.search);
+        const celestialPreview = previewParams.has('celestial-preview');
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x07131b);
@@ -115,14 +119,41 @@
         anomalyHitbox.visible = false;
         scene.add(anomalyHitbox);
         const anomaly = { hitbox: anomalyHitbox };
+        const celestialGeometry = new THREE.SphereGeometry(1, 24, 12);
+        const sunPreview = new THREE.Mesh(
+            celestialGeometry,
+            new THREE.MeshBasicMaterial({ color: 0xfff0b0, toneMapped: false }),
+        );
+        sunPreview.position.set(25, 22, -150);
+        sunPreview.scale.setScalar(6);
+        sunPreview.visible = celestialPreview;
+        scene.add(sunPreview);
+        const moonPreview = new THREE.Mesh(
+            celestialGeometry,
+            new THREE.MeshBasicMaterial({ color: 0xdce6ff, toneMapped: false }),
+        );
+        moonPreview.position.set(-22, 10, -135);
+        moonPreview.scale.setScalar(5);
+        moonPreview.visible = celestialPreview;
+        scene.add(moonPreview);
+        const celestialTargets = [
+            { key: 'sun', mesh: sunPreview, distanceKm: SUN_MEAN_DISTANCE_KM },
+            { key: 'moon', mesh: moonPreview, distanceKm: MOON_MEAN_DISTANCE_KM },
+        ];
+        if (celestialPreview) {
+            targets.forEach(target => { target.visible = false; });
+            peerMesh.visible = false;
+            anomalyVisual.visible = false;
+            anomalyHitbox.visible = false;
+        }
         const hud = new SmartGogglesHud(document.getElementById('goggles-target-layer'));
         const previewStartedAt = performance.now();
-        const previewParams = new URLSearchParams(location.search);
         const panDuringElimination = previewParams.has('elimination-pan');
         const brickPreview = previewParams.has('brick-preview');
         const photosensitivePreview = previewParams.has('photosensitive');
         const gogglesScope = document.getElementById('goggles-scope');
         const previewNote = document.getElementById('preview-note');
+        if (celestialPreview) previewNote.textContent = 'SMART GOGGLES · CELESTIAL DISTANCE PREVIEW';
         gogglesScope.classList.toggle('is-photosensitivity-mode', photosensitivePreview);
         let eliminationPlayed = false;
         let brickAnimationStarted = false;
@@ -169,7 +200,17 @@
             targets[2].position.x = Math.sin(seconds * 0.48) * 85;
 
             camera.updateMatrixWorld(true);
-            hud.update(camera, camera.position, camera.position, targets, peers, true, now, anomaly);
+            hud.update(
+                camera,
+                camera.position,
+                camera.position,
+                celestialPreview ? [] : targets,
+                celestialPreview ? {} : peers,
+                true,
+                now,
+                celestialPreview ? null : anomaly,
+                celestialTargets,
+            );
             renderer.render(scene, camera);
             requestAnimationFrame(frame);
         }

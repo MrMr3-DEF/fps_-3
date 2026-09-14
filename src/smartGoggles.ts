@@ -18,6 +18,7 @@ import {
 } from './smartGogglesPeerMath.js';
 import { targetData } from './userDataTypes.js';
 import { queryObstaclesAlongSegment } from './world.js';
+import type { CelestialScanTarget } from './dayNightCycle.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CORNER_SIZE = 15;
@@ -39,6 +40,12 @@ const CORRUPTED_HEALTH_FRAMES = [
     'HEALTH // / ??',
     'HEALTH ?# / //',
 ] as const;
+const CORRUPTED_IDENTIFIER_FRAMES = [
+    '██████████',
+    '???//???//',
+    '[REDACTED]',
+    '██?█//?███',
+] as const;
 
 export type SmartGogglesObstacleQuery = (
     startX: number,
@@ -50,7 +57,7 @@ export type SmartGogglesObstacleQuery = (
 
 type LockPhase = 'entering' | 'tracking' | 'leaving' | 'eliminated';
 type ReadoutMode = 'facts' | 'warning';
-type TargetVariant = 'enemy' | 'anomaly';
+type TargetVariant = 'enemy' | 'anomaly' | 'celestial';
 
 export interface SmartGogglesPeerTarget {
     mesh: THREE.Group;
@@ -72,6 +79,7 @@ interface TargetLockRecord {
     killMark: SVGSVGElement;
     path: SVGPathElement;
     label: HTMLDivElement;
+    identifier: HTMLSpanElement;
     distanceFact: HTMLSpanElement;
     healthFact: HTMLSpanElement;
     warning: HTMLSpanElement;
@@ -86,6 +94,7 @@ interface TargetLockRecord {
     removeAt: number;
     lastDistanceText: string;
     lastHealthText: string;
+    lastIdentifierText: string;
     readoutMode: ReadoutMode | null;
     typeStartedAt: number;
 }
@@ -159,7 +168,7 @@ function padBounds(bounds: ScreenBounds): void {
 
 function setFactVisibility(record: TargetLockRecord, outOfRange: boolean): void {
     record.distanceFact.hidden = outOfRange;
-    record.healthFact.hidden = outOfRange;
+    record.healthFact.hidden = outOfRange || record.root.classList.contains('is-celestial');
     record.warning.hidden = !outOfRange;
     record.root.classList.toggle('is-out-of-range', outOfRange);
 }
@@ -254,6 +263,7 @@ export class SmartGogglesHud {
         enabled: boolean,
         now = performance.now(),
         anomalyTarget: SmartGogglesAnomalyTarget | null = null,
+        celestialTargets: readonly CelestialScanTarget[] = [],
     ): void {
         this.anomalyDetectedThisFrame = false;
         if (!enabled) {
@@ -339,6 +349,7 @@ export class SmartGogglesHud {
                 targetKey,
                 targetRevision,
                 'enemy',
+                'Enemy',
                 projectionBounds,
                 _bodyCenter,
                 localSphere.radius * data.bodyMesh.matrixWorld.getMaxScaleOnAxis(),
@@ -393,6 +404,7 @@ export class SmartGogglesHud {
                 targetKey,
                 0,
                 'enemy',
+                'Enemy',
                 projectionBounds,
                 _bodyCenter,
                 stablePeerSphere.radius * peer.mesh.matrixWorld.getMaxScaleOnAxis(),
@@ -438,6 +450,9 @@ export class SmartGogglesHud {
                         targetKey,
                         0,
                         'anomaly',
+                        CORRUPTED_IDENTIFIER_FRAMES[
+                            this.reducedMotion ? 0 : Math.floor(now / 72) % CORRUPTED_IDENTIFIER_FRAMES.length
+                        ],
                         projectionBounds,
                         _bodyCenter,
                         localSphere.radius * hitbox.matrixWorld.getMaxScaleOnAxis(),
@@ -452,6 +467,57 @@ export class SmartGogglesHud {
                     this.anomalyDetectedThisFrame = true;
                 }
             }
+        }
+
+        for (const celestial of celestialTargets) {
+            const mesh = celestial.mesh;
+            if (!mesh.visible) continue;
+            const geometry = mesh.geometry;
+            if (!geometry.boundingBox) geometry.computeBoundingBox();
+            if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+            const localBox = geometry.boundingBox;
+            const localSphere = geometry.boundingSphere;
+            if (!localBox || !localSphere) continue;
+
+            mesh.updateWorldMatrix(true, false);
+            if (!_cameraFrustum.intersectsObject(mesh) || !hasLineOfSightToOrientedBox(
+                camera.position,
+                localBox,
+                mesh.matrixWorld,
+                queryObstaclesAlongSegment,
+                _enemyOccluders,
+                mesh,
+            )) continue;
+
+            const targetKey = `celestial:${celestial.key}`;
+            const record = this.records.get(targetKey);
+            const projectionBounds = record?.bounds ?? createScreenBounds();
+            if (!projectStableTargetSphereToScreen(
+                localSphere,
+                mesh.matrixWorld,
+                camera,
+                viewportWidth,
+                viewportHeight,
+                projectionBounds,
+            )) continue;
+
+            _bodyCenter.copy(localSphere.center).applyMatrix4(mesh.matrixWorld);
+            this.trackTarget(
+                targetKey,
+                0,
+                'celestial',
+                celestial.key,
+                projectionBounds,
+                _bodyCenter,
+                localSphere.radius * mesh.matrixWorld.getMaxScaleOnAxis(),
+                celestial.distanceKm,
+                0,
+                0,
+                0,
+                viewportWidth,
+                viewportHeight,
+                now,
+            );
         }
 
         for (const [targetKey, record] of this.records) {
@@ -477,6 +543,7 @@ export class SmartGogglesHud {
         targetKey: string,
         targetRevision: number,
         variant: TargetVariant,
+        identifierText: string,
         bounds: ScreenBounds,
         worldPosition: THREE.Vector3,
         worldRadius: number,
@@ -500,6 +567,7 @@ export class SmartGogglesHud {
         }
 
         record.seenFrame = this.frame;
+        record.lastIdentifierText = identifierText;
         record.lastWorldPosition.copy(worldPosition);
         record.lastWorldRadius = worldRadius;
         padBounds(record.bounds);
@@ -521,17 +589,22 @@ export class SmartGogglesHud {
         if (record.readoutMode !== readoutMode) {
             record.readoutMode = readoutMode;
             record.typeStartedAt = now + TYPE_START_DELAY_MS;
+            record.identifier.textContent = '';
             record.distanceFact.textContent = '';
             record.healthFact.textContent = '';
             record.warning.textContent = '';
         }
         if (!outOfRange) {
-            record.lastDistanceText = `DISTANCE ${Math.round(centerDistance)} M`;
-            record.lastHealthText = variant === 'anomaly'
-                ? CORRUPTED_HEALTH_FRAMES[
-                    this.reducedMotion ? 0 : Math.floor(now / 72) % CORRUPTED_HEALTH_FRAMES.length
-                ]
-                : `HEALTH ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
+            record.lastDistanceText = variant === 'celestial'
+                ? `DISTANCE ${Math.round(centerDistance).toLocaleString('en-US')} KM`
+                : `DISTANCE ${Math.round(centerDistance)} M`;
+            record.lastHealthText = variant === 'celestial'
+                ? ''
+                : variant === 'anomaly'
+                    ? CORRUPTED_HEALTH_FRAMES[
+                        this.reducedMotion ? 0 : Math.floor(now / 72) % CORRUPTED_HEALTH_FRAMES.length
+                    ]
+                    : `HEALTH ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
         }
         this.updateTypedReadout(record, now);
 
@@ -549,18 +622,24 @@ export class SmartGogglesHud {
         const characterBudget = this.reducedMotion
             ? Number.POSITIVE_INFINITY
             : Math.max(0, Math.floor((now - record.typeStartedAt) / TYPE_CHARACTER_MS));
+        const visibleIdentifier = record.lastIdentifierText.slice(0, characterBudget);
+        if (record.identifier.textContent !== visibleIdentifier) record.identifier.textContent = visibleIdentifier;
+        const readoutBudget = Math.max(
+            0,
+            characterBudget - record.lastIdentifierText.length - TYPE_LINE_PAUSE_CHARACTERS,
+        );
 
         if (record.readoutMode === 'warning') {
             const warningText = 'OUT OF RANGE';
-            const visibleWarning = warningText.slice(0, characterBudget);
+            const visibleWarning = warningText.slice(0, readoutBudget);
             if (record.warning.textContent !== visibleWarning) record.warning.textContent = visibleWarning;
             return;
         }
 
-        const visibleDistance = record.lastDistanceText.slice(0, characterBudget);
+        const visibleDistance = record.lastDistanceText.slice(0, readoutBudget);
         const healthBudget = Math.max(
             0,
-            characterBudget - record.lastDistanceText.length - TYPE_LINE_PAUSE_CHARACTERS,
+            readoutBudget - record.lastDistanceText.length - TYPE_LINE_PAUSE_CHARACTERS,
         );
         const visibleHealth = record.lastHealthText.slice(0, healthBudget);
         if (record.distanceFact.textContent !== visibleDistance) record.distanceFact.textContent = visibleDistance;
@@ -589,6 +668,7 @@ export class SmartGogglesHud {
         root.className = 'goggles-target-lock';
         root.dataset.targetKey = targetKey;
         root.classList.toggle('is-anomalous', variant === 'anomaly');
+        root.classList.toggle('is-celestial', variant === 'celestial');
 
         const cornerClasses = ['tl', 'tr', 'bl', 'br'] as const;
         const corners = cornerClasses.map((cornerName) => {
@@ -620,16 +700,20 @@ export class SmartGogglesHud {
 
         const label = document.createElement('div');
         label.className = 'goggles-target-label';
+        const identifier = document.createElement('span');
+        identifier.className = 'goggles-target-identifier';
+        identifier.classList.toggle('is-corrupted', variant === 'anomaly');
         const panel = document.createElement('div');
         panel.className = 'goggles-target-label-panel';
         const distanceFact = this.createFact();
         const healthFact = this.createFact();
         healthFact.classList.toggle('is-corrupted', variant === 'anomaly');
+        healthFact.hidden = variant === 'celestial';
         const warning = document.createElement('span');
         warning.className = 'goggles-target-warning';
         warning.hidden = true;
         panel.append(distanceFact, healthFact, warning);
-        label.appendChild(panel);
+        label.append(identifier, panel);
         root.appendChild(label);
         this.layer.appendChild(root);
 
@@ -640,6 +724,7 @@ export class SmartGogglesHud {
             killMark,
             path,
             label,
+            identifier,
             distanceFact,
             healthFact,
             warning,
@@ -654,6 +739,7 @@ export class SmartGogglesHud {
             removeAt: Infinity,
             lastDistanceText: '',
             lastHealthText: '',
+            lastIdentifierText: '',
             readoutMode: null,
             typeStartedAt: now + TYPE_START_DELAY_MS,
         };

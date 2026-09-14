@@ -4,6 +4,14 @@ import { MAP_HALF_SIZE, MAX_PILLAR_HEIGHT } from './config.js';
 export const DAY_DURATION_SECONDS = 5 * 60;
 export const NIGHT_DURATION_SECONDS = 3 * 60;
 export const DAY_NIGHT_CYCLE_SECONDS = DAY_DURATION_SECONDS + NIGHT_DURATION_SECONDS;
+export const SUN_MEAN_DISTANCE_KM = 149_600_000;
+export const MOON_MEAN_DISTANCE_KM = 384_400;
+
+export interface CelestialScanTarget {
+    key: 'sun' | 'moon';
+    mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+    distanceKm: number;
+}
 
 export interface DayNightPhase {
     phase: 'day' | 'night';
@@ -58,6 +66,7 @@ function smoothstep(min: number, max: number, value: number): number {
 export class DayNightCycle {
     readonly sunLight: THREE.DirectionalLight;
     readonly moonLight: THREE.DirectionalLight;
+    readonly celestialScanTargets: readonly CelestialScanTarget[];
 
     private readonly scene: THREE.Scene;
     private readonly ambientLight: THREE.AmbientLight;
@@ -108,6 +117,11 @@ export class DayNightCycle {
         }));
         this.moonMesh.name = 'moon';
         this.moonMesh.scale.setScalar(25);
+
+        this.celestialScanTargets = [
+            { key: 'sun', mesh: this.sunMesh, distanceKm: SUN_MEAN_DISTANCE_KM },
+            { key: 'moon', mesh: this.moonMesh, distanceKm: MOON_MEAN_DISTANCE_KM },
+        ];
 
         scene.add(this.ambientLight, this.sunLight, this.moonLight, this.sunMesh, this.moonMesh);
         this.update(0, new THREE.Vector3());

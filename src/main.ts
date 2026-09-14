@@ -4,6 +4,7 @@ import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setupMobileControls } from './mobileControls.js';
 import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
+import { getEscapePauseAction } from './pauseShortcut.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
 import { PointerLockControls } from './pointerLockControls.js';
@@ -574,6 +575,20 @@ function setupInputListeners(): void {
         if (e.repeat || gothChat?.isOpen) return;
 
         switch (e.code) {
+            case 'Escape':
+                if (!state.controls) break;
+                const pauseAction = getEscapePauseAction(e.code, {
+                    isPlaying: state.isPlaying,
+                    isAlive: state.playerHp > 0,
+                    isInputActive: isInputActive(),
+                    isPauseMenuVisible: UI.panelPause?.style.display === 'flex',
+                });
+                if (pauseAction) {
+                    e.preventDefault?.();
+                    if (pauseAction === 'pause') endInput();
+                    else beginInput();
+                }
+                break;
             case 'KeyW': state.moveForward = true; break;
             case 'KeyA': state.moveLeft = true; break;
             case 'KeyS': state.moveBackward = true; break;
@@ -1469,6 +1484,7 @@ export function animate(): void {
                 Boolean(gogglesHudReady && state.isPlaying && state.playerHp > 0 && isInputActive()),
                 time,
                 gothGirlfriend?.animator ? gothGirlfriend : null,
+                dayNightCycle?.celestialScanTargets,
             );
             const gogglesBrickedThisFrame = updateGogglesFailureScan(
                 state.gogglesFailure,

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import {
     DAY_DURATION_SECONDS,
     DAY_NIGHT_CYCLE_SECONDS,
+    MOON_MEAN_DISTANCE_KM,
     NIGHT_DURATION_SECONDS,
+    SUN_MEAN_DISTANCE_KM,
     getDayNightPhase,
 } from '../src/dayNightCycle.ts';
 import { getGasLanternFlicker } from '../src/world.ts';
@@ -18,6 +20,11 @@ test('day lasts five minutes and night lasts three minutes', () => {
     assert.equal(getDayNightPhase(DAY_DURATION_SECONDS).phase, 'night');
     assert.equal(getDayNightPhase(DAY_NIGHT_CYCLE_SECONDS - 0.001).phase, 'night');
     assert.equal(getDayNightPhase(DAY_NIGHT_CYCLE_SECONDS).phase, 'day');
+});
+
+test('celestial scans report rounded mean distances from Earth', () => {
+    assert.equal(SUN_MEAN_DISTANCE_KM, 149_600_000);
+    assert.equal(MOON_MEAN_DISTANCE_KM, 384_400);
 });
 
 test('sun and moon each cross their sky arc from horizon to peak to horizon', () => {

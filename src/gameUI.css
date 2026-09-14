@@ -625,13 +625,21 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 .goggles-target-lock {
-    --goggles-lock-color: #55e7ff;
+    --goggles-lock-color: #ff9f43;
     position: absolute;
     inset: 0;
     color: var(--goggles-lock-color);
     opacity: 0;
     transition: opacity 45ms ease-out, color 100ms ease-out;
     will-change: opacity;
+}
+
+.goggles-target-lock.is-celestial {
+    --goggles-lock-color: #55e7ff;
+}
+
+.goggles-target-lock.is-anomalous {
+    --goggles-lock-color: #f5f7fa;
 }
 
 .goggles-target-lock.is-active {
@@ -777,6 +785,35 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     color: currentColor;
 }
 
+.goggles-target-identifier {
+    position: absolute;
+    top: 0;
+    left: 0;
+    color: currentColor;
+    font: 800 15px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.075em;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateY(calc(-100% - 7px));
+    text-shadow: 0 0 5px currentColor;
+    transition: opacity 70ms 295ms ease-out;
+}
+
+.goggles-target-lock.is-left .goggles-target-identifier {
+    right: 0;
+    left: auto;
+    text-align: right;
+}
+
+.goggles-target-lock.is-active .goggles-target-identifier {
+    opacity: 0.96;
+}
+
+.goggles-target-lock.is-leaving .goggles-target-identifier {
+    opacity: 0;
+    transition-delay: 0ms;
+}
+
 .goggles-target-label-panel {
     box-sizing: border-box;
     display: flex;
@@ -819,12 +856,17 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     background: rgba(48, 5, 10, 0.62);
 }
 
+.goggles-target-lock.is-celestial .goggles-target-label-panel {
+    min-height: 0;
+}
+
 .goggles-target-fact,
 .goggles-target-warning {
     min-height: 1.18em;
 }
 
-.goggles-target-fact.is-corrupted {
+.goggles-target-fact.is-corrupted,
+.goggles-target-identifier.is-corrupted {
     animation: goggles-target-corrupted-health 190ms steps(1, end) infinite;
     will-change: transform, text-shadow;
 }
@@ -931,6 +973,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     .goggles-target-killmark,
     .goggles-target-killmark path,
     .goggles-target-leader path,
+    .goggles-target-identifier,
     .goggles-target-label-panel {
         transition-duration: 1ms !important;
         transition-delay: 0ms !important;
@@ -941,7 +984,8 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     }
 
     .goggles-target-lock.is-anomalous.is-active,
-    .goggles-target-fact.is-corrupted {
+    .goggles-target-fact.is-corrupted,
+    .goggles-target-identifier.is-corrupted {
         animation: none;
     }
 
