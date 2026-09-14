@@ -33,6 +33,8 @@ const TWILIGHT_AMBIENT = new THREE.Color(0x8a5e52);
 const NIGHT_AMBIENT = new THREE.Color(0x4c5d82);
 const SUN_NOON = new THREE.Color(0xffffff);
 const SUN_HORIZON = new THREE.Color(0xffa46b);
+const CELESTIAL_HORIZON_DIP = 0.045;
+const CELESTIAL_SKY_DISTANCE = 1200;
 
 function positiveModulo(value: number, modulus: number): number {
     return ((value % modulus) + modulus) % modulus;
@@ -62,6 +64,14 @@ function smoothstep(min: number, max: number, value: number): number {
     return normalized * normalized * (3 - 2 * normalized);
 }
 
+/**
+ * Extends an otherwise horizon-to-horizon arc just far enough below the ground
+ * plane for the whole celestial disc to clear the horizon at each phase edge.
+ */
+export function getCelestialOrbitalElevation(elevation: number): number {
+    return elevation * (1 + CELESTIAL_HORIZON_DIP) - CELESTIAL_HORIZON_DIP;
+}
+
 /** Owns the scene lighting and visible sun/moon for one continuous eight-minute cycle. */
 export class DayNightCycle {
     readonly sunLight: THREE.DirectionalLight;
@@ -86,8 +96,7 @@ export class DayNightCycle {
         this.ambientLight = new THREE.AmbientLight(DAY_AMBIENT, 1);
 
         this.sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
-        this.sunLight.castShadow = options.shadows;
-        this.sunLight.shadow.mapSize.set(options.shadowMapSize, options.shadowMapSize);
+        this.applySettings(options);
         this.sunLight.shadow.camera.near = 0.5;
         this.sunLight.shadow.camera.far = MAP_HALF_SIZE * 3.2;
         const shadowExtent = Math.SQRT2 * MAP_HALF_SIZE + MAX_PILLAR_HEIGHT;
@@ -127,28 +136,54 @@ export class DayNightCycle {
         this.update(0, new THREE.Vector3());
     }
 
+    applySettings(options: DayNightCycleOptions): void {
+        const shadow = this.sunLight.shadow;
+        const mapSizeChanged = shadow.mapSize.x !== options.shadowMapSize ||
+            shadow.mapSize.y !== options.shadowMapSize;
+
+        if (mapSizeChanged) {
+            // Three.js only allocates a new render target when the old one is absent.
+            shadow.map?.dispose();
+            shadow.map = null;
+            shadow.mapPass?.dispose();
+            shadow.mapPass = null;
+            shadow.mapSize.set(options.shadowMapSize, options.shadowMapSize);
+        }
+
+        this.sunLight.castShadow = options.shadows;
+        shadow.needsUpdate = options.shadows;
+    }
+
     update(deltaSeconds: number, observerPosition: THREE.Vector3): number {
         this.elapsedSeconds = positiveModulo(this.elapsedSeconds + Math.max(0, deltaSeconds), DAY_NIGHT_CYCLE_SECONDS);
         const state = getDayNightPhase(this.elapsedSeconds);
         const lightDistance = MAP_HALF_SIZE * 0.75;
-        const skyDistance = 1200;
         const x = -Math.cos(state.phaseProgress * Math.PI);
-        const y = Math.max(0.035, state.elevation);
+        const y = getCelestialOrbitalElevation(state.elevation);
         const z = state.phase === 'day' ? -0.22 : 0.18;
         this.directionScratch.set(x, y, z).normalize();
 
         if (state.phase === 'day') {
-            const daylight = smoothstep(0, 0.5, state.elevation);
-            this.skyColor.copy(TWILIGHT_SKY).lerp(DAY_SKY, daylight);
-            this.colorScratch.copy(TWILIGHT_AMBIENT).lerp(DAY_AMBIENT, daylight);
+            const sunGlow = smoothstep(-CELESTIAL_HORIZON_DIP, 0.04, y);
+            const daylight = smoothstep(0, 0.5, y);
+            this.skyColor.copy(NIGHT_SKY).lerp(TWILIGHT_SKY, sunGlow).lerp(DAY_SKY, daylight);
+            this.colorScratch.copy(NIGHT_AMBIENT).lerp(TWILIGHT_AMBIENT, sunGlow).lerp(DAY_AMBIENT, daylight);
             this.ambientLight.color.copy(this.colorScratch);
-            this.ambientLight.intensity = THREE.MathUtils.lerp(0.65, 1, daylight);
+            this.ambientLight.intensity = THREE.MathUtils.lerp(
+                THREE.MathUtils.lerp(0.35, 0.65, sunGlow),
+                1,
+                daylight,
+            );
 
             this.sunLight.color.copy(SUN_HORIZON).lerp(SUN_NOON, daylight);
-            this.sunLight.intensity = THREE.MathUtils.lerp(0.12, 1.2, daylight);
+            this.sunLight.intensity = THREE.MathUtils.lerp(
+                THREE.MathUtils.lerp(0, 0.12, sunGlow),
+                1.2,
+                daylight,
+            );
             this.sunLight.position.copy(this.directionScratch).multiplyScalar(lightDistance);
             this.sunLight.visible = true;
-            this.sunMesh.position.copy(observerPosition).addScaledVector(this.directionScratch, skyDistance);
+            this.sunMesh.position.copy(observerPosition).addScaledVector(this.directionScratch, CELESTIAL_SKY_DISTANCE);
             this.sunMesh.visible = true;
 
             this.moonLight.visible = false;
@@ -157,18 +192,16 @@ export class DayNightCycle {
             if (this.scene.fog) this.scene.fog.color.copy(this.skyColor);
             return 1 - daylight;
         } else {
-            const moonlight = smoothstep(0, 0.7, state.elevation);
-            const edgeDistance = Math.min(state.phaseProgress, 1 - state.phaseProgress);
-            const twilight = 1 - smoothstep(0, 0.12, edgeDistance);
-            this.skyColor.copy(NIGHT_SKY).lerp(MOONLIT_SKY, moonlight * 0.45).lerp(TWILIGHT_SKY, twilight);
-            this.colorScratch.copy(NIGHT_AMBIENT).lerp(TWILIGHT_AMBIENT, twilight * 0.45);
+            const moonlight = smoothstep(-CELESTIAL_HORIZON_DIP, 0.7, y);
+            this.skyColor.copy(NIGHT_SKY).lerp(MOONLIT_SKY, moonlight * 0.45);
+            this.colorScratch.copy(NIGHT_AMBIENT);
             this.ambientLight.color.copy(this.colorScratch);
-            this.ambientLight.intensity = 0.35 + moonlight * 0.15 + twilight * 0.2;
+            this.ambientLight.intensity = 0.35 + moonlight * 0.15;
 
-            this.moonLight.intensity = 0.08 + moonlight * 0.3;
+            this.moonLight.intensity = moonlight * 0.38;
             this.moonLight.position.copy(this.directionScratch).multiplyScalar(lightDistance);
             this.moonLight.visible = true;
-            this.moonMesh.position.copy(observerPosition).addScaledVector(this.directionScratch, skyDistance);
+            this.moonMesh.position.copy(observerPosition).addScaledVector(this.directionScratch, CELESTIAL_SKY_DISTANCE);
             this.moonMesh.visible = true;
 
             this.sunLight.visible = false;

@@ -6,8 +6,11 @@ import {
     MOON_MEAN_DISTANCE_KM,
     NIGHT_DURATION_SECONDS,
     SUN_MEAN_DISTANCE_KM,
+    DayNightCycle,
+    getCelestialOrbitalElevation,
     getDayNightPhase,
 } from '../src/dayNightCycle.ts';
+import * as THREE from 'three';
 import { getGasLanternFlicker } from '../src/world.ts';
 
 test('day lasts five minutes and night lasts three minutes', () => {
@@ -41,6 +44,30 @@ test('sun and moon each cross their sky arc from horizon to peak to horizon', ()
     assert.ok(moonrise.elevation < 0.001);
     assert.ok(Math.abs(midnight.elevation - 1) < 1e-12);
     assert.ok(moonset.elevation < 0.001);
+});
+
+test('celestial arcs begin and end fully below the horizon', () => {
+    assert.ok(getCelestialOrbitalElevation(0) < 0);
+    assert.ok(Math.abs(getCelestialOrbitalElevation(1) - 1) < 1e-12);
+
+    const scene = new THREE.Scene();
+    const cycle = new DayNightCycle(scene, { shadows: false, shadowMapSize: 1024 });
+    const observer = new THREE.Vector3(0, 10, 0);
+    const sun = cycle.celestialScanTargets.find((target) => target.key === 'sun')!.mesh;
+    const moon = cycle.celestialScanTargets.find((target) => target.key === 'moon')!.mesh;
+
+    cycle.update(DAY_DURATION_SECONDS - 0.001, observer);
+    assert.equal(sun.visible, true);
+    assert.ok(sun.position.y + sun.scale.y < observer.y);
+
+    const nightStrength = cycle.update(0.001, observer);
+    assert.equal(sun.visible, false);
+    assert.equal(moon.visible, true);
+    assert.ok(moon.position.y + moon.scale.y < observer.y);
+    assert.equal(cycle.moonLight.intensity, 0);
+    assert.equal(nightStrength, 1);
+
+    cycle.dispose();
 });
 
 test('cycle calculations wrap cleanly in either direction', () => {

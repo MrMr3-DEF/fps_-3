@@ -1057,7 +1057,9 @@ function resetPendingSettings(): void {
 function applyPendingSettings(): void {
     Object.assign(userSettings, pendingSettings);
     saveUserSettings();
-    window.location.reload();
+    applyLiveSettings();
+    syncSettingsControls();
+    if (userSettings.downloadWebLLMImmediately) gothChat?.preload();
 }
 
 function updatePendingSettings(mutator: (settings: UserSettings) => void): void {
@@ -1081,6 +1083,11 @@ function applyLiveSettings(): void {
     if (state.renderer) {
         applyRendererSettings(state.renderer);
     }
+
+    dayNightCycle?.applySettings({
+        shadows: userSettings.shadows,
+        shadowMapSize: userSettings.shadowQuality === 'high' ? 2048 : 1024,
+    });
 
     setFpsVisible(userSettings.showFps && isInputActive() && !state.isScoped);
 
