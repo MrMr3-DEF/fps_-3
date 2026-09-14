@@ -4,10 +4,10 @@ import * as THREE from 'three';
 import {
     collectVisiblePeerMeshes,
     distanceToVisiblePeerMeshes,
-    projectVisiblePeerMeshesToScreen,
+    getStablePeerSphere,
     someVisiblePeerMeshBounds,
 } from '../src/smartGogglesPeerMath.ts';
-import { createScreenBounds } from '../src/smartGogglesMath.ts';
+import { createScreenBounds, projectStableTargetSphereToScreen } from '../src/smartGogglesMath.ts';
 
 const near = (actual: number, expected: number, epsilon = 1e-7) => {
     assert.ok(Math.abs(actual - expected) <= epsilon, `${actual} != ${expected}`);
@@ -26,28 +26,37 @@ function boxAt(x: number, y: number, z: number, size = 2): THREE.Mesh {
     return mesh;
 }
 
-test('projects the union of visible peer meshes while excluding name sprites and hidden branches', () => {
+test('caches one maximum peer envelope across child animation, equipment and root yaw', () => {
     const peer = new THREE.Group();
-    peer.add(boxAt(-2, 0, -10), boxAt(2, 0, -10));
+    peer.position.z = -10;
+    const left = boxAt(-2, 0, 0);
+    peer.add(left, boxAt(2, 0, 0));
 
     const hiddenWeapon = new THREE.Group();
     hiddenWeapon.visible = false;
-    hiddenWeapon.add(boxAt(0, 0, -4, 20));
+    hiddenWeapon.add(boxAt(0, 3, 0));
     peer.add(hiddenWeapon);
 
     const nameTag = new THREE.Sprite();
-    nameTag.position.set(0, 8, -10);
+    nameTag.position.set(0, 80, 0);
     nameTag.scale.set(100, 100, 1);
     peer.add(nameTag);
 
-    const bounds = createScreenBounds();
-    assert.equal(projectVisiblePeerMeshesToScreen(peer, camera(), 200, 200, bounds), true);
-    near(bounds.left, 100 - 100 / 3);
-    near(bounds.right, 100 + 100 / 3);
-    near(bounds.top, 100 - 100 / 9);
-    near(bounds.bottom, 100 + 100 / 9);
-    near(bounds.width, 200 / 3);
-    near(bounds.height, 200 / 9);
+    const sphere = getStablePeerSphere(peer);
+    assert.ok(sphere);
+    assert.deepEqual(sphere.center, new THREE.Vector3(0, 1.5, 0));
+    near(sphere.radius, Math.sqrt(16.25));
+
+    const initialBounds = createScreenBounds();
+    assert.equal(projectStableTargetSphereToScreen(sphere, peer.matrixWorld, camera(), 200, 200, initialBounds), true);
+
+    left.rotation.set(0.7, 1.2, 0.3);
+    hiddenWeapon.visible = true;
+    peer.rotation.y = 1.1;
+    assert.equal(getStablePeerSphere(peer), sphere);
+    const animatedBounds = createScreenBounds();
+    assert.equal(projectStableTargetSphereToScreen(sphere, peer.matrixWorld, camera(), 200, 200, animatedBounds), true);
+    assert.deepEqual(animatedBounds, initialBounds);
 });
 
 test('returns distance to the nearest visible mesh bound and respects inherited visibility', () => {
@@ -67,9 +76,6 @@ test('returns distance to the nearest visible mesh bound and respects inherited 
 
     peer.visible = false;
     assert.equal(distanceToVisiblePeerMeshes(new THREE.Vector3(), peer), Number.POSITIVE_INFINITY);
-    const bounds = createScreenBounds();
-    assert.equal(projectVisiblePeerMeshesToScreen(peer, camera(), 200, 200, bounds), false);
-    assert.deepEqual(bounds, createScreenBounds());
 });
 
 test('ignores meshes whose material is hidden', () => {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { ShotLedger, spreadDirection, acceptDeath, acceptLifeUpdate } from '../src/shotAuthority.ts';
 import { segmentAabbHitT } from '../src/gameplayMath.ts';
-import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS } from '../src/config.ts';
+import { BULLET_TRAVEL_DISTANCE, PROJECTILE_SPEED, WEAPON_STATS } from '../src/config.ts';
 import type { FirePacket, WeaponName } from '../src/networkTypes.ts';
 const fire=(weapon:WeaponName,shotId=1):FirePacket=>({type:'fire',weapon,shotId,spreadSeed:42,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}});
 test('each weapon enforces millisecond cooldowns and rejects duplicate shots',()=>{
@@ -37,6 +37,7 @@ test('exact pellet consumption rejects replays, wrong damage and impossible trav
 });
 test('host authority applies the sniper range to every weapon',()=>{
     const weapons=['PISTOL','SHOTGUN','AR','SNIPER','MINIGUN'] as WeaponName[];
+    const boundaryArrivalAt=1000+BULLET_TRAVEL_DISTANCE/PROJECTILE_SPEED*1000;
     const ledgerFor=(weapon:WeaponName)=>{
         const ledger=new ShotLedger();
         if(weapon==='MINIGUN') ledger.updateTrigger(true,0);
@@ -47,8 +48,8 @@ test('host authority applies the sniper range to every weapon',()=>{
         const direction=spreadDirection(new THREE.Vector3(0,0,-1),42,0,WEAPON_STATS[weapon].spread);
         const boundary=new THREE.Vector3(0,2,0).addScaledVector(direction,BULLET_TRAVEL_DISTANCE);
         const beyond=new THREE.Vector3(0,2,0).addScaledVector(direction,BULLET_TRAVEL_DISTANCE+1);
-        assert.ok(ledgerFor(weapon).consume(1,0,boundary,0,WEAPON_STATS[weapon].damage,2500,()=>false),`${weapon} boundary`);
-        assert.equal(ledgerFor(weapon).consume(1,0,beyond,0,WEAPON_STATS[weapon].damage,2500,()=>false),false,`${weapon} beyond`);
+        assert.ok(ledgerFor(weapon).consume(1,0,boundary,0,WEAPON_STATS[weapon].damage,boundaryArrivalAt,()=>false),`${weapon} boundary`);
+        assert.equal(ledgerFor(weapon).consume(1,0,beyond,0,WEAPON_STATS[weapon].damage,boundaryArrivalAt,()=>false),false,`${weapon} beyond`);
     }
 });
 test('host authority starts simulated shots at the projectile muzzle offset',()=>{

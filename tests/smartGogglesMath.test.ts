@@ -7,7 +7,7 @@ import {
     createSmartGogglesCalloutLayout,
     distanceToOrientedBox,
     layoutSmartGogglesCallout,
-    projectOrientedBoxToScreen,
+    projectStableTargetSphereToScreen,
     type ScreenBounds,
 } from '../src/smartGogglesMath.ts';
 
@@ -29,32 +29,40 @@ function box(halfSize = 1): THREE.Box3 {
     );
 }
 
-function visibleBounds(localBox: THREE.Box3, matrix: THREE.Matrix4): ScreenBounds {
+function visibleBounds(localSphere: THREE.Sphere, matrix: THREE.Matrix4): ScreenBounds {
     const bounds = createScreenBounds();
-    assert.ok(projectOrientedBoxToScreen(localBox, matrix, camera(), 200, 200, bounds));
+    assert.ok(projectStableTargetSphereToScreen(localSphere, matrix, camera(), 200, 200, bounds));
     return bounds;
 }
 
-test('projects a centered oriented box into screen-pixel bounds', () => {
-    const bounds = visibleBounds(box(), new THREE.Matrix4().makeTranslation(0, 0, -10));
-    // The nearest z face determines the silhouette: +/-1 at z=-9 with a 90° FOV.
-    near(bounds.left, 100 - 100 / 9);
-    near(bounds.right, 100 + 100 / 9);
-    near(bounds.top, 100 - 100 / 9);
-    near(bounds.bottom, 100 + 100 / 9);
-    near(bounds.width, 200 / 9);
-    near(bounds.height, 200 / 9);
+test('stable maximum envelope does not jiggle when a cube spins', () => {
+    const maximumCubeEnvelope = new THREE.Sphere(new THREE.Vector3(), Math.sqrt(3));
+    const stationary = new THREE.Matrix4().makeTranslation(0, 0, -10);
+    const spinning = new THREE.Matrix4().compose(
+        new THREE.Vector3(0, 0, -10),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0.8, 1.1, 0.4)),
+        new THREE.Vector3(1, 1, 1),
+    );
+    const stationaryBounds = visibleBounds(maximumCubeEnvelope, stationary);
+    const spinningBounds = visibleBounds(maximumCubeEnvelope, spinning);
+    const halfSize = 100 * Math.sqrt(3) / Math.sqrt(100 - 3);
+    near(stationaryBounds.left, 100 - halfSize);
+    near(stationaryBounds.right, 100 + halfSize);
+    near(stationaryBounds.width, halfSize * 2);
+    assert.deepEqual(spinningBounds, stationaryBounds);
 });
 
-test('clips a partially offscreen box and rejects a fully offscreen box', () => {
-    const partial = visibleBounds(box(), new THREE.Matrix4().makeTranslation(9.5, 0, -10));
-    assert.ok(partial.left > 170);
-    near(partial.right, 200);
-    assert.ok(partial.width > 0);
+test('keeps a partially offscreen envelope full-size and rejects it once fully outside', () => {
+    const envelope = new THREE.Sphere(new THREE.Vector3(), 1);
+    const centered = visibleBounds(envelope, new THREE.Matrix4().makeTranslation(0, 0, -10));
+    const partial = visibleBounds(envelope, new THREE.Matrix4().makeTranslation(10, 0, -10));
+    assert.ok(partial.left < 200);
+    assert.ok(partial.right > 200);
+    near(partial.width, centered.width * Math.sqrt(99 / 199));
 
     const outside = createScreenBounds();
-    assert.equal(projectOrientedBoxToScreen(
-        box(),
+    assert.equal(projectStableTargetSphereToScreen(
+        envelope,
         new THREE.Matrix4().makeTranslation(30, 0, -10),
         camera(),
         200,
@@ -64,10 +72,11 @@ test('clips a partially offscreen box and rejects a fully offscreen box', () => 
     assert.deepEqual(outside, createScreenBounds());
 });
 
-test('rejects boxes behind the camera and safely clips a near-plane crossing', () => {
+test('rejects envelopes behind the camera and safely handles a near-plane crossing', () => {
+    const envelope = new THREE.Sphere(new THREE.Vector3(), 1);
     const behind = createScreenBounds();
-    assert.equal(projectOrientedBoxToScreen(
-        box(),
+    assert.equal(projectStableTargetSphereToScreen(
+        envelope,
         new THREE.Matrix4().makeTranslation(0, 0, 10),
         camera(),
         200,
@@ -75,10 +84,13 @@ test('rejects boxes behind the camera and safely clips a near-plane crossing', (
         behind,
     ), false);
 
-    const nearPlane = visibleBounds(box(0.15), new THREE.Matrix4().makeTranslation(0, 0, -0.2));
+    const nearPlane = visibleBounds(
+        new THREE.Sphere(new THREE.Vector3(), 0.15),
+        new THREE.Matrix4().makeTranslation(0, 0, -0.2),
+    );
     for (const value of Object.values(nearPlane)) assert.ok(Number.isFinite(value));
-    assert.ok(nearPlane.left >= 0 && nearPlane.top >= 0);
-    assert.ok(nearPlane.right <= 200 && nearPlane.bottom <= 200);
+    assert.ok(nearPlane.left < 0 && nearPlane.top < 0);
+    assert.ok(nearPlane.right > 200 && nearPlane.bottom > 200);
     assert.ok(nearPlane.width > 0 && nearPlane.height > 0);
 });
 
@@ -162,9 +174,9 @@ test('computes world distance to a translated, rotated and uniformly scaled box'
 });
 
 test('range classification follows the exact shared endpoint', () => {
-    const limit = 500;
-    assert.equal(classifyOutOfRange(499.999, limit), false);
-    assert.equal(classifyOutOfRange(500, limit), false);
-    assert.equal(classifyOutOfRange(500.001, limit), true);
+    const limit = 700;
+    assert.equal(classifyOutOfRange(699.999, limit), false);
+    assert.equal(classifyOutOfRange(700, limit), false);
+    assert.equal(classifyOutOfRange(700.001, limit), true);
     assert.equal(classifyOutOfRange(Number.NaN, limit), true);
 });

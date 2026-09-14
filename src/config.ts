@@ -33,11 +33,11 @@ export const ENEMY_COUNT = 64;
 export const HOOK_MAX_RANGE = 300.0;
 
 export const SWITCH_DURATION = 0.15;
-export const BULLET_TRAVEL_DISTANCE = 500;
+export const BULLET_TRAVEL_DISTANCE = 700;
 export const PROJECTILE_SPEED = 350;
 // Projectile lifetime remains a defensive timeout. Travel range is enforced
 // independently so a long frame cannot move a bullet beyond its maximum reach.
-export const PROJECTILE_LIFETIME = 2.0;
+export const PROJECTILE_LIFETIME = 2.5;
 export const MAX_PROJECTILES = 220;
 export const PROJECTILE_RADIUS = 0.07;
 // Cap a stalled animation frame so physics and projectiles cannot skip through

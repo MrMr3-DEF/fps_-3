@@ -6,14 +6,14 @@ import {
     createSmartGogglesCalloutLayout,
     distanceToOrientedBox,
     layoutSmartGogglesCallout,
-    projectOrientedBoxToScreen,
+    projectStableTargetSphereToScreen,
     type ScreenBounds,
     type SmartGogglesCalloutLayout,
 } from './smartGogglesMath.js';
 import {
     collectVisiblePeerMeshes,
     distanceToVisiblePeerMeshes,
-    projectVisiblePeerMeshesToScreen,
+    getStablePeerSphere,
     someVisiblePeerMeshBounds,
 } from './smartGogglesPeerMath.js';
 import { targetData } from './userDataTypes.js';
@@ -118,20 +118,20 @@ function setCornerGeometry(
     corner.style.setProperty('--goggles-collapse-y', `${(centerY - y - CORNER_SIZE / 2).toFixed(1)}px`);
 }
 
-function expandAndClampBounds(bounds: ScreenBounds, viewportWidth: number, viewportHeight: number): void {
-    bounds.left = Math.max(2, bounds.left - BOX_PADDING);
-    bounds.top = Math.max(2, bounds.top - BOX_PADDING);
-    bounds.right = Math.min(viewportWidth - 2, bounds.right + BOX_PADDING);
-    bounds.bottom = Math.min(viewportHeight - 2, bounds.bottom + BOX_PADDING);
+function padBounds(bounds: ScreenBounds): void {
+    bounds.left -= BOX_PADDING;
+    bounds.top -= BOX_PADDING;
+    bounds.right += BOX_PADDING;
+    bounds.bottom += BOX_PADDING;
 
-    if (bounds.right - bounds.left < MIN_BOX_SIZE && viewportWidth >= MIN_BOX_SIZE + 4) {
+    if (bounds.right - bounds.left < MIN_BOX_SIZE) {
         const center = (bounds.left + bounds.right) / 2;
-        bounds.left = THREE.MathUtils.clamp(center - MIN_BOX_SIZE / 2, 2, viewportWidth - 2 - MIN_BOX_SIZE);
+        bounds.left = center - MIN_BOX_SIZE / 2;
         bounds.right = bounds.left + MIN_BOX_SIZE;
     }
-    if (bounds.bottom - bounds.top < MIN_BOX_SIZE && viewportHeight >= MIN_BOX_SIZE + 4) {
+    if (bounds.bottom - bounds.top < MIN_BOX_SIZE) {
         const center = (bounds.top + bounds.bottom) / 2;
-        bounds.top = THREE.MathUtils.clamp(center - MIN_BOX_SIZE / 2, 2, viewportHeight - 2 - MIN_BOX_SIZE);
+        bounds.top = center - MIN_BOX_SIZE / 2;
         bounds.bottom = bounds.top + MIN_BOX_SIZE;
     }
     bounds.width = Math.max(0, bounds.right - bounds.left);
@@ -208,12 +208,14 @@ export class SmartGogglesHud {
 
             const geometry = data.bodyMesh.geometry;
             if (!geometry.boundingBox) geometry.computeBoundingBox();
+            if (!geometry.boundingSphere) geometry.computeBoundingSphere();
             const localBox = geometry.boundingBox;
-            if (!localBox) continue;
+            const localSphere = geometry.boundingSphere;
+            if (!localBox || !localSphere) continue;
 
             data.bodyMesh.updateWorldMatrix(true, false);
             if (!_cameraFrustum.intersectsObject(data.bodyMesh)) continue;
-            _bodyCenter.set(0, 0, 0).applyMatrix4(data.bodyMesh.matrixWorld);
+            _bodyCenter.copy(localSphere.center).applyMatrix4(data.bodyMesh.matrixWorld);
             if (!hasLineOfSightToOrientedBox(
                 camera.position,
                 localBox,
@@ -226,8 +228,8 @@ export class SmartGogglesHud {
             const targetKey = `npc:${data.index}`;
             const record = this.records.get(targetKey);
             const projectionBounds = record?.bounds ?? createScreenBounds();
-            if (!projectOrientedBoxToScreen(
-                localBox,
+            if (!projectStableTargetSphereToScreen(
+                localSphere,
                 data.bodyMesh.matrixWorld,
                 camera,
                 viewportWidth,
@@ -260,8 +262,10 @@ export class SmartGogglesHud {
             const targetKey = `peer:${peerId}`;
             const record = this.records.get(targetKey);
             const projectionBounds = record?.bounds ?? createScreenBounds();
-            if (!projectVisiblePeerMeshesToScreen(
-                peer.mesh,
+            const stablePeerSphere = getStablePeerSphere(peer.mesh);
+            if (!stablePeerSphere || !projectStableTargetSphereToScreen(
+                stablePeerSphere,
+                peer.mesh.matrixWorld,
                 camera,
                 viewportWidth,
                 viewportHeight,
@@ -334,7 +338,7 @@ export class SmartGogglesHud {
 
         record.seenFrame = this.frame;
         record.lastWorldPosition.copy(worldPosition);
-        expandAndClampBounds(record.bounds, viewportWidth, viewportHeight);
+        padBounds(record.bounds);
         layoutSmartGogglesCallout(
             record.bounds,
             viewportWidth,

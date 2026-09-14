@@ -21,7 +21,7 @@ test('projectile budget can cover the preallocated pool', () => {
 });
 
 test('bullet range matches the sniper and remains shorter than the safety timeout', () => {
-    assert.equal(BULLET_TRAVEL_DISTANCE, 500);
-    assert.equal(PROJECTILE_LIFETIME, 2);
+    assert.equal(BULLET_TRAVEL_DISTANCE, 700);
+    assert.equal(PROJECTILE_LIFETIME, 2.5);
     assert.ok(PROJECTILE_SPEED * PROJECTILE_LIFETIME > BULLET_TRAVEL_DISTANCE);
 });

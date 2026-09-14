@@ -1,27 +1,12 @@
 import * as THREE from 'three';
-import {
-    distanceToOrientedBox,
-    projectOrientedBoxToScreen,
-    type ScreenBounds,
-} from './smartGogglesMath.js';
+import { distanceToOrientedBox } from './smartGogglesMath.js';
 
-const _meshBounds = {
-    left: 0,
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: 0,
-    height: 0,
-} satisfies ScreenBounds;
-
-function clearBounds(bounds: ScreenBounds): void {
-    bounds.left = 0;
-    bounds.top = 0;
-    bounds.right = 0;
-    bounds.bottom = 0;
-    bounds.width = 0;
-    bounds.height = 0;
-}
+const _stablePeerSpheres = new WeakMap<THREE.Object3D, THREE.Sphere>();
+const _peerRootInverse = new THREE.Matrix4();
+const _meshToPeerRoot = new THREE.Matrix4();
+const _peerLocalBounds = new THREE.Box3();
+const _transformedMeshBounds = new THREE.Box3();
+const _peerEnvelopeCorner = new THREE.Vector3();
 
 function visibleMeshGeometry(object: THREE.Object3D): THREE.BufferGeometry | null {
     const mesh = object as THREE.Mesh;
@@ -65,50 +50,49 @@ export function someVisiblePeerMeshBounds(
 }
 
 /**
- * Project the union of the rendered mesh bounds beneath a remote-player root.
- * `traverseVisible` excludes hidden weapon branches and respects every ancestor's
- * visibility. Sprite name tags are excluded because only Mesh nodes contribute.
+ * Build and cache one maximum root-local envelope for a peer avatar. Hidden
+ * weapon branches are included so switching equipment or animating children
+ * cannot resize the goggles frame; sprites such as name tags have no geometry
+ * and are naturally excluded.
  */
-export function projectVisiblePeerMeshesToScreen(
-    peerRoot: THREE.Object3D,
-    camera: THREE.PerspectiveCamera,
-    viewportWidth: number,
-    viewportHeight: number,
-    out: ScreenBounds,
-): boolean {
-    clearBounds(out);
+export function getStablePeerSphere(peerRoot: THREE.Object3D): THREE.Sphere | null {
+    const cached = _stablePeerSpheres.get(peerRoot);
+    if (cached) {
+        peerRoot.updateWorldMatrix(true, false);
+        return cached;
+    }
+
     peerRoot.updateWorldMatrix(true, true);
+    const determinant = peerRoot.matrixWorld.determinant();
+    if (!Number.isFinite(determinant) || Math.abs(determinant) <= Number.EPSILON) return null;
 
-    let found = false;
-    peerRoot.traverseVisible((object) => {
+    _peerRootInverse.copy(peerRoot.matrixWorld).invert();
+    _peerLocalBounds.makeEmpty();
+    peerRoot.traverse((object) => {
         const geometry = visibleMeshGeometry(object);
-        if (!geometry?.boundingBox || !projectOrientedBoxToScreen(
-            geometry.boundingBox,
-            object.matrixWorld,
-            camera,
-            viewportWidth,
-            viewportHeight,
-            _meshBounds,
-        )) return;
-
-        if (!found) {
-            out.left = _meshBounds.left;
-            out.top = _meshBounds.top;
-            out.right = _meshBounds.right;
-            out.bottom = _meshBounds.bottom;
-            found = true;
-        } else {
-            out.left = Math.min(out.left, _meshBounds.left);
-            out.top = Math.min(out.top, _meshBounds.top);
-            out.right = Math.max(out.right, _meshBounds.right);
-            out.bottom = Math.max(out.bottom, _meshBounds.bottom);
-        }
+        if (!geometry?.boundingBox) return;
+        _meshToPeerRoot.multiplyMatrices(_peerRootInverse, object.matrixWorld);
+        _transformedMeshBounds.copy(geometry.boundingBox).applyMatrix4(_meshToPeerRoot);
+        _peerLocalBounds.union(_transformedMeshBounds);
     });
+    if (_peerLocalBounds.isEmpty()) return null;
 
-    if (!found) return false;
-    out.width = out.right - out.left;
-    out.height = out.bottom - out.top;
-    return true;
+    // Root x/z is the stable lock point. Only the vertical midpoint comes from
+    // the model, so avatar yaw cannot orbit an asymmetric held weapon around it.
+    const sphere = new THREE.Sphere(
+        new THREE.Vector3(0, (_peerLocalBounds.min.y + _peerLocalBounds.max.y) * 0.5, 0),
+        0,
+    );
+    for (let i = 0; i < 8; i++) {
+        _peerEnvelopeCorner.set(
+            (i & 1) === 0 ? _peerLocalBounds.min.x : _peerLocalBounds.max.x,
+            (i & 2) === 0 ? _peerLocalBounds.min.y : _peerLocalBounds.max.y,
+            (i & 4) === 0 ? _peerLocalBounds.min.z : _peerLocalBounds.max.z,
+        );
+        sphere.radius = Math.max(sphere.radius, sphere.center.distanceTo(_peerEnvelopeCorner));
+    }
+    _stablePeerSpheres.set(peerRoot, sphere);
+    return sphere;
 }
 
 /** Return the shortest world-space distance to any rendered peer mesh bound. */

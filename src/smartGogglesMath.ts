@@ -47,34 +47,13 @@ export const DEFAULT_SMART_GOGGLES_CALLOUT_OPTIONS: Readonly<SmartGogglesCallout
 
 const EPSILON = 1e-9;
 
-// Corner order uses the low bit for x, the middle bit for y and the high bit
-// for z. These edges cover both the target box and the camera frustum.
-const BOX_EDGES: ReadonlyArray<readonly [number, number]> = [
-    [0, 1], [2, 3], [4, 5], [6, 7],
-    [0, 2], [1, 3], [4, 6], [5, 7],
-    [0, 4], [1, 5], [2, 6], [3, 7],
-];
-
-const _viewProjection = new THREE.Matrix4();
-const _modelViewProjection = new THREE.Matrix4();
-const _inverseModelViewProjection = new THREE.Matrix4();
 const _inverseWorld = new THREE.Matrix4();
-const _boxClipCorners = Array.from({ length: 8 }, () => new THREE.Vector4());
-const _frustumLocalCorners = Array.from({ length: 8 }, () => new THREE.Vector4());
-const _clippedStart = new THREE.Vector4();
-const _clippedEnd = new THREE.Vector4();
 const _localPoint = new THREE.Vector3();
 const _closestLocalPoint = new THREE.Vector3();
 const _closestWorldPoint = new THREE.Vector3();
-
-const _clipInterval = { min: 0, max: 1 };
-const _screenAccumulator = {
-    minX: Number.POSITIVE_INFINITY,
-    minY: Number.POSITIVE_INFINITY,
-    maxX: Number.NEGATIVE_INFINITY,
-    maxY: Number.NEGATIVE_INFINITY,
-    count: 0,
-};
+const _stableWorldCenter = new THREE.Vector3();
+const _stableCameraCenter = new THREE.Vector3();
+const _stableProjectedCenter = new THREE.Vector3();
 
 export function createScreenBounds(): ScreenBounds {
     return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
@@ -102,206 +81,68 @@ function clearBounds(out: ScreenBounds): void {
     out.height = 0;
 }
 
-function resetScreenAccumulator(): void {
-    _screenAccumulator.minX = Number.POSITIVE_INFINITY;
-    _screenAccumulator.minY = Number.POSITIVE_INFINITY;
-    _screenAccumulator.maxX = Number.NEGATIVE_INFINITY;
-    _screenAccumulator.maxY = Number.NEGATIVE_INFINITY;
-    _screenAccumulator.count = 0;
-}
-
-function includeClipPoint(point: THREE.Vector4, viewportWidth: number, viewportHeight: number): void {
-    if (!Number.isFinite(point.w) || point.w <= EPSILON) return;
-
-    const ndcX = THREE.MathUtils.clamp(point.x / point.w, -1, 1);
-    const ndcY = THREE.MathUtils.clamp(point.y / point.w, -1, 1);
-    if (!Number.isFinite(ndcX) || !Number.isFinite(ndcY)) return;
-
-    const screenX = (ndcX * 0.5 + 0.5) * viewportWidth;
-    const screenY = (0.5 - ndcY * 0.5) * viewportHeight;
-    _screenAccumulator.minX = Math.min(_screenAccumulator.minX, screenX);
-    _screenAccumulator.minY = Math.min(_screenAccumulator.minY, screenY);
-    _screenAccumulator.maxX = Math.max(_screenAccumulator.maxX, screenX);
-    _screenAccumulator.maxY = Math.max(_screenAccumulator.maxY, screenY);
-    _screenAccumulator.count++;
-}
-
-function clipAgainstHalfSpace(valueAtStart: number, valueDelta: number): boolean {
-    if (Math.abs(valueDelta) <= EPSILON) return valueAtStart >= -EPSILON;
-
-    const crossing = -valueAtStart / valueDelta;
-    if (valueDelta > 0) {
-        _clipInterval.min = Math.max(_clipInterval.min, crossing);
-    } else {
-        _clipInterval.max = Math.min(_clipInterval.max, crossing);
-    }
-    return _clipInterval.min <= _clipInterval.max + EPSILON;
-}
-
-/** Clip a homogeneous segment to Three.js' WebGL clip volume. */
-function clipClipSpaceSegment(
-    start: THREE.Vector4,
-    end: THREE.Vector4,
-    outStart: THREE.Vector4,
-    outEnd: THREE.Vector4,
-): boolean {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dz = end.z - start.z;
-    const dw = end.w - start.w;
-    _clipInterval.min = 0;
-    _clipInterval.max = 1;
-
-    if (!clipAgainstHalfSpace(start.x + start.w, dx + dw) ||
-        !clipAgainstHalfSpace(start.w - start.x, dw - dx) ||
-        !clipAgainstHalfSpace(start.y + start.w, dy + dw) ||
-        !clipAgainstHalfSpace(start.w - start.y, dw - dy) ||
-        !clipAgainstHalfSpace(start.z + start.w, dz + dw) ||
-        !clipAgainstHalfSpace(start.w - start.z, dw - dz)) {
-        return false;
-    }
-
-    const min = THREE.MathUtils.clamp(_clipInterval.min, 0, 1);
-    const max = THREE.MathUtils.clamp(_clipInterval.max, 0, 1);
-    outStart.set(start.x + dx * min, start.y + dy * min, start.z + dz * min, start.w + dw * min);
-    outEnd.set(start.x + dx * max, start.y + dy * max, start.z + dz * max, start.w + dw * max);
-    return outStart.w > EPSILON || outEnd.w > EPSILON;
-}
-
-/** Clip a local-space segment to an axis-aligned local box. */
-function clipLocalSegmentToBox(
-    start: THREE.Vector4,
-    end: THREE.Vector4,
-    box: THREE.Box3,
-    outStart: THREE.Vector4,
-    outEnd: THREE.Vector4,
-): boolean {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const dz = end.z - start.z;
-    _clipInterval.min = 0;
-    _clipInterval.max = 1;
-
-    if (!clipAgainstHalfSpace(start.x - box.min.x, dx) ||
-        !clipAgainstHalfSpace(box.max.x - start.x, -dx) ||
-        !clipAgainstHalfSpace(start.y - box.min.y, dy) ||
-        !clipAgainstHalfSpace(box.max.y - start.y, -dy) ||
-        !clipAgainstHalfSpace(start.z - box.min.z, dz) ||
-        !clipAgainstHalfSpace(box.max.z - start.z, -dz)) {
-        return false;
-    }
-
-    const min = THREE.MathUtils.clamp(_clipInterval.min, 0, 1);
-    const max = THREE.MathUtils.clamp(_clipInterval.max, 0, 1);
-    outStart.set(start.x + dx * min, start.y + dy * min, start.z + dz * min, 1);
-    outEnd.set(start.x + dx * max, start.y + dy * max, start.z + dz * max, 1);
-    return true;
-}
-
-function setBoxClipCorners(box: THREE.Box3, transform: THREE.Matrix4): void {
-    for (let i = 0; i < 8; i++) {
-        _boxClipCorners[i].set(
-            (i & 1) === 0 ? box.min.x : box.max.x,
-            (i & 2) === 0 ? box.min.y : box.max.y,
-            (i & 4) === 0 ? box.min.z : box.max.z,
-            1,
-        ).applyMatrix4(transform);
-    }
-}
-
-function setFrustumLocalCorners(inverseTransform: THREE.Matrix4): boolean {
-    for (let i = 0; i < 8; i++) {
-        const point = _frustumLocalCorners[i].set(
-            (i & 1) === 0 ? -1 : 1,
-            (i & 2) === 0 ? -1 : 1,
-            (i & 4) === 0 ? -1 : 1,
-            1,
-        ).applyMatrix4(inverseTransform);
-        if (!Number.isFinite(point.w) || Math.abs(point.w) <= EPSILON) return false;
-        point.multiplyScalar(1 / point.w);
-        point.w = 1;
-    }
-    return true;
-}
-
 /**
- * Projects the visible intersection of an oriented local box and the camera
- * frustum into clipped viewport-pixel bounds. Returns false when no part of the
- * box is visible. Both box and frustum edges are clipped, so near-plane cuts
- * and cases where the frustum lies inside a large box remain well-defined. The
- * caller must update the camera's world matrix once before projecting a batch.
+ * Project one fixed maximum target envelope into a square screen-space frame.
+ * Its center follows the target, while its size is derived only from camera
+ * distance, FOV and object scale. Local or world rotation therefore cannot make
+ * the frame pulse around a spinning or animated model.
+ *
+ * Bounds deliberately remain unclipped. The overlay layer clips them at the
+ * viewport edge, so a partially departing target keeps the same frame size
+ * until the complete envelope leaves the goggles.
  */
-export function projectOrientedBoxToScreen(
-    localBox: THREE.Box3,
+export function projectStableTargetSphereToScreen(
+    localSphere: THREE.Sphere,
     worldMatrix: THREE.Matrix4,
     camera: THREE.PerspectiveCamera,
     viewportWidth: number,
     viewportHeight: number,
     out: ScreenBounds,
 ): boolean {
-    if (localBox.isEmpty() || !Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight) ||
+    if (localSphere.isEmpty() || !Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight) ||
         viewportWidth <= 0 || viewportHeight <= 0) {
         clearBounds(out);
         return false;
     }
 
-    _viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    _modelViewProjection.multiplyMatrices(_viewProjection, worldMatrix);
-    const determinant = _modelViewProjection.determinant();
-    if (!Number.isFinite(determinant) || Math.abs(determinant) <= EPSILON) {
+    _stableWorldCenter.copy(localSphere.center).applyMatrix4(worldMatrix);
+    const worldRadius = localSphere.radius * worldMatrix.getMaxScaleOnAxis();
+    _stableCameraCenter.copy(_stableWorldCenter).applyMatrix4(camera.matrixWorldInverse);
+    const depth = -_stableCameraCenter.z;
+    const distance = _stableCameraCenter.length();
+    if (!Number.isFinite(worldRadius) || worldRadius < 0 || !Number.isFinite(distance) ||
+        depth <= EPSILON || depth + worldRadius < camera.near || depth - worldRadius > camera.far) {
         clearBounds(out);
         return false;
     }
 
-    resetScreenAccumulator();
-    setBoxClipCorners(localBox, _modelViewProjection);
-
-    // Box edges contribute vertices when the target lies in or crosses the
-    // frustum, including intersections with the near plane and screen edges.
-    for (let i = 0; i < BOX_EDGES.length; i++) {
-        const edge = BOX_EDGES[i];
-        if (!clipClipSpaceSegment(
-            _boxClipCorners[edge[0]],
-            _boxClipCorners[edge[1]],
-            _clippedStart,
-            _clippedEnd,
-        )) continue;
-        includeClipPoint(_clippedStart, viewportWidth, viewportHeight);
-        includeClipPoint(_clippedEnd, viewportWidth, viewportHeight);
-    }
-
-    // Frustum edges supply the complementary intersection vertices for a box
-    // whose faces cover a viewport edge without any box corner being visible.
-    _inverseModelViewProjection.copy(_modelViewProjection).invert();
-    if (setFrustumLocalCorners(_inverseModelViewProjection)) {
-        for (let i = 0; i < BOX_EDGES.length; i++) {
-            const edge = BOX_EDGES[i];
-            if (!clipLocalSegmentToBox(
-                _frustumLocalCorners[edge[0]],
-                _frustumLocalCorners[edge[1]],
-                localBox,
-                _clippedStart,
-                _clippedEnd,
-            )) continue;
-            _clippedStart.applyMatrix4(_modelViewProjection);
-            _clippedEnd.applyMatrix4(_modelViewProjection);
-            includeClipPoint(_clippedStart, viewportWidth, viewportHeight);
-            includeClipPoint(_clippedEnd, viewportWidth, viewportHeight);
-        }
-    }
-
-    if (_screenAccumulator.count === 0) {
+    _stableProjectedCenter.copy(_stableWorldCenter).project(camera);
+    const centerX = (_stableProjectedCenter.x * 0.5 + 0.5) * viewportWidth;
+    const centerY = (0.5 - _stableProjectedCenter.y * 0.5) * viewportHeight;
+    const focalPixels = Math.max(
+        Math.abs(camera.projectionMatrix.elements[0]) * viewportWidth * 0.5,
+        Math.abs(camera.projectionMatrix.elements[5]) * viewportHeight * 0.5,
+    );
+    const tangentDistance = Math.sqrt(Math.max(EPSILON, distance * distance - worldRadius * worldRadius));
+    const halfSize = worldRadius >= distance
+        ? Math.max(viewportWidth, viewportHeight)
+        : focalPixels * worldRadius / tangentDistance;
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerY) || !Number.isFinite(halfSize)) {
         clearBounds(out);
         return false;
     }
 
-    out.left = THREE.MathUtils.clamp(_screenAccumulator.minX, 0, viewportWidth);
-    out.top = THREE.MathUtils.clamp(_screenAccumulator.minY, 0, viewportHeight);
-    out.right = THREE.MathUtils.clamp(_screenAccumulator.maxX, 0, viewportWidth);
-    out.bottom = THREE.MathUtils.clamp(_screenAccumulator.maxY, 0, viewportHeight);
-    out.width = Math.max(0, out.right - out.left);
-    out.height = Math.max(0, out.bottom - out.top);
-    return out.width > EPSILON && out.height > EPSILON;
+    out.left = centerX - halfSize;
+    out.top = centerY - halfSize;
+    out.right = centerX + halfSize;
+    out.bottom = centerY + halfSize;
+    out.width = halfSize * 2;
+    out.height = halfSize * 2;
+    if (out.right <= 0 || out.left >= viewportWidth || out.bottom <= 0 || out.top >= viewportHeight) {
+        clearBounds(out);
+        return false;
+    }
+    return true;
 }
 
 /**
