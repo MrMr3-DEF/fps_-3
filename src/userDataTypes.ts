@@ -6,6 +6,8 @@ export interface TargetUserData {
     hp: number;
     scale: number;
     color: number;
+    /** Increments when this reusable target instance is eliminated. */
+    eliminationRevision: number;
     bodyMesh: THREE.Mesh;
     healthBarFg: THREE.Mesh;
     healthBarGroup: THREE.Group;

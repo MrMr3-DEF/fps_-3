@@ -30,6 +30,7 @@ const TYPE_START_DELAY_MS = 310;
 const TYPE_CHARACTER_MS = 8;
 const TYPE_LINE_PAUSE_CHARACTERS = 2;
 const EXIT_DURATION_MS = 180;
+const ELIMINATION_DURATION_MS = 540;
 const TELEPORT_DISTANCE_SQ = 40 * 40;
 const OCCLUSION_SURFACE_EPSILON = 0.02;
 
@@ -41,7 +42,7 @@ export type SmartGogglesObstacleQuery = (
     out: THREE.Object3D[],
 ) => THREE.Object3D[];
 
-type LockPhase = 'entering' | 'tracking' | 'leaving';
+type LockPhase = 'entering' | 'tracking' | 'leaving' | 'eliminated';
 type ReadoutMode = 'facts' | 'warning';
 
 export interface SmartGogglesPeerTarget {
@@ -56,6 +57,7 @@ interface TargetLockRecord {
     targetKey: string;
     root: HTMLDivElement;
     corners: [HTMLDivElement, HTMLDivElement, HTMLDivElement, HTMLDivElement];
+    killMark: SVGSVGElement;
     path: SVGPathElement;
     label: HTMLDivElement;
     distanceFact: HTMLSpanElement;
@@ -64,6 +66,7 @@ interface TargetLockRecord {
     bounds: ScreenBounds;
     layout: SmartGogglesCalloutLayout;
     lastWorldPosition: THREE.Vector3;
+    targetRevision: number;
     phase: LockPhase;
     seenFrame: number;
     activateAt: number;
@@ -203,6 +206,13 @@ export class SmartGogglesHud {
         for (let index = 0; index < targets.length; index++) {
             const target = targets[index];
             const data = targetData(target);
+            const targetKey = `npc:${data.index}`;
+            const targetRevision = data.eliminationRevision ?? 0;
+            const previousRecord = this.records.get(targetKey);
+            if (previousRecord && previousRecord.targetRevision !== targetRevision) {
+                this.eliminate(previousRecord, now);
+                this.records.delete(targetKey);
+            }
             this.hideWorldHealthBar(data.healthBarGroup);
             if (!target.visible || !data.bodyMesh?.visible) continue;
 
@@ -225,7 +235,6 @@ export class SmartGogglesHud {
                 data.bodyMesh,
             )) continue;
 
-            const targetKey = `npc:${data.index}`;
             const record = this.records.get(targetKey);
             const projectionBounds = record?.bounds ?? createScreenBounds();
             if (!projectStableTargetSphereToScreen(
@@ -244,6 +253,7 @@ export class SmartGogglesHud {
             );
             this.trackTarget(
                 targetKey,
+                targetRevision,
                 projectionBounds,
                 _bodyCenter,
                 playerPosition.distanceTo(_bodyCenter),
@@ -257,9 +267,17 @@ export class SmartGogglesHud {
         }
 
         for (const [peerId, peer] of Object.entries(peers)) {
-            if (!peer.mesh.visible || peer.hp <= 0) continue;
-
             const targetKey = `peer:${peerId}`;
+            if (peer.hp <= 0) {
+                const previousRecord = this.records.get(targetKey);
+                if (previousRecord) {
+                    this.eliminate(previousRecord, now);
+                    this.records.delete(targetKey);
+                }
+                continue;
+            }
+            if (!peer.mesh.visible) continue;
+
             const record = this.records.get(targetKey);
             const projectionBounds = record?.bounds ?? createScreenBounds();
             const stablePeerSphere = getStablePeerSphere(peer.mesh);
@@ -286,6 +304,7 @@ export class SmartGogglesHud {
             peer.mesh.getWorldPosition(_bodyCenter);
             this.trackTarget(
                 targetKey,
+                0,
                 projectionBounds,
                 _bodyCenter,
                 playerPosition.distanceTo(_bodyCenter),
@@ -315,6 +334,7 @@ export class SmartGogglesHud {
 
     private trackTarget(
         targetKey: string,
+        targetRevision: number,
         bounds: ScreenBounds,
         worldPosition: THREE.Vector3,
         centerDistance: number,
@@ -332,7 +352,7 @@ export class SmartGogglesHud {
             record = undefined;
         }
         if (!record) {
-            record = this.createRecord(targetKey, bounds, now);
+            record = this.createRecord(targetKey, targetRevision, bounds, now);
             this.records.set(targetKey, record);
         }
 
@@ -409,7 +429,12 @@ export class SmartGogglesHud {
         this.active = false;
     }
 
-    private createRecord(targetKey: string, bounds: ScreenBounds, now: number): TargetLockRecord {
+    private createRecord(
+        targetKey: string,
+        targetRevision: number,
+        bounds: ScreenBounds,
+        now: number,
+    ): TargetLockRecord {
         const root = document.createElement('div');
         root.className = 'goggles-target-lock';
         root.dataset.targetKey = targetKey;
@@ -421,6 +446,19 @@ export class SmartGogglesHud {
             root.appendChild(corner);
             return corner;
         }) as TargetLockRecord['corners'];
+
+        const killMark = document.createElementNS(SVG_NS, 'svg');
+        killMark.classList.add('goggles-target-killmark');
+        killMark.setAttribute('viewBox', '0 0 100 100');
+        killMark.setAttribute('preserveAspectRatio', 'none');
+        killMark.setAttribute('aria-hidden', 'true');
+        for (const line of ['M 4 4 L 96 96', 'M 96 4 L 4 96']) {
+            const strike = document.createElementNS(SVG_NS, 'path');
+            strike.setAttribute('d', line);
+            strike.setAttribute('pathLength', '1');
+            killMark.appendChild(strike);
+        }
+        root.appendChild(killMark);
 
         const leader = document.createElementNS(SVG_NS, 'svg');
         leader.classList.add('goggles-target-leader');
@@ -448,6 +486,7 @@ export class SmartGogglesHud {
             targetKey,
             root,
             corners,
+            killMark,
             path,
             label,
             distanceFact,
@@ -456,6 +495,7 @@ export class SmartGogglesHud {
             bounds,
             layout: createSmartGogglesCalloutLayout(),
             lastWorldPosition: new THREE.Vector3(),
+            targetRevision,
             phase: 'entering',
             seenFrame: this.frame,
             activateAt: now + ENTER_DELAY_MS,
@@ -483,6 +523,10 @@ export class SmartGogglesHud {
         setCornerGeometry(record.corners[1], rightX, bounds.top, centerX, centerY);
         setCornerGeometry(record.corners[2], bounds.left, bottomY, centerX, centerY);
         setCornerGeometry(record.corners[3], rightX, bottomY, centerX, centerY);
+        record.killMark.style.left = `${bounds.left.toFixed(1)}px`;
+        record.killMark.style.top = `${bounds.top.toFixed(1)}px`;
+        record.killMark.style.width = `${bounds.width.toFixed(1)}px`;
+        record.killMark.style.height = `${bounds.height.toFixed(1)}px`;
 
         record.path.setAttribute(
             'd',
@@ -515,6 +559,15 @@ export class SmartGogglesHud {
         record.removeAt = now + EXIT_DURATION_MS;
         record.root.classList.remove('is-active');
         record.root.classList.add('is-leaving');
+    }
+
+    private eliminate(record: TargetLockRecord, now: number): void {
+        if (record.phase === 'eliminated') return;
+        record.phase = 'eliminated';
+        record.removeAt = now + (this.reducedMotion ? 40 : ELIMINATION_DURATION_MS);
+        record.root.classList.remove('is-leaving', 'is-out-of-range');
+        record.root.classList.add('is-active', 'is-eliminated');
+        this.retiringRecords.add(record);
     }
 
     private retire(record: TargetLockRecord, now: number): void {

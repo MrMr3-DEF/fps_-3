@@ -70,6 +70,7 @@
             group.add(healthBarGroup);
             group.userData = {
                 index, hp, maxHp, scale, color,
+                eliminationRevision: 0,
                 bodyMesh,
                 healthBarGroup,
                 healthBarFg: new THREE.Mesh(),
@@ -93,6 +94,8 @@
         scene.add(peerMesh);
         const peers = { previewPeer: { mesh: peerMesh, hp: 6, maxHp: 10 } };
         const hud = new SmartGogglesHud(document.getElementById('goggles-target-layer'));
+        const previewStartedAt = performance.now();
+        let eliminationPlayed = false;
 
         function resize() {
             camera.aspect = innerWidth / innerHeight;
@@ -103,6 +106,11 @@
 
         function frame(now) {
             const seconds = now / 1000;
+            if (!eliminationPlayed && now - previewStartedAt >= 2200) {
+                targets[0].userData.eliminationRevision++;
+                targets[0].visible = false;
+                eliminationPlayed = true;
+            }
             targets[0].children[0].rotation.set(seconds * 0.45, seconds * 0.72, 0);
             targets[1].children[0].rotation.set(seconds * 0.18, seconds * 0.34, 0);
             targets[2].children[0].rotation.set(seconds * 0.8, seconds * 1.1, 0);

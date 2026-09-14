@@ -1238,6 +1238,8 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         const target = state.targets[msg.targetIndex];
         if (target) {
             cancelHookForTarget(target);
+            const data = targetData(target);
+            data.eliminationRevision = (data.eliminationRevision ?? 0) + 1;
             const enemyColor = msg.color || 0xff4500;
             spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
 

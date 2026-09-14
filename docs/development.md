@@ -144,7 +144,7 @@ Town spawn regression checks cover distinct houses and doorway orientation acros
 
 The town viewer has Goth house and Goth interior views. Regression checks verify one goth house across 1,000 seeds, exclusion from player house assignments, clear interiors, roof collision and disposal of merged ornament geometry.
 
-`/tests/goggles-preview.html` exercises the production smart-goggles renderer without pointer lock. It includes spinning in-range and out-of-range enemies plus a moving target that crosses the field of view, making stable rotation-independent framing, bracket convergence, leader drawing, typed readouts, tracking, warning pulses, collapse, and reacquisition repeatable in the embedded browser.
+`/tests/goggles-preview.html` exercises the production smart-goggles renderer without pointer lock. It includes spinning in-range and out-of-range enemies, a moving target that crosses the field of view, and a timed elimination after 2.2 seconds. This makes stable rotation-independent framing, bracket convergence, leader drawing, typed readouts, tracking, warning pulses, kill confirmation, collapse, and reacquisition repeatable in the embedded browser.
 
 ## Goth girlfriend and local chat
 

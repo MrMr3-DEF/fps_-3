@@ -1512,6 +1512,7 @@ export function processTargetHit(targetIndex: number, damage: number): void {
     data.healthBarFg.scale.x = hpRatio;
     
     if (data.hp <= 0) {
+        data.eliminationRevision = (data.eliminationRevision ?? 0) + 1;
         const enemyColor = data.color || 0xff4500;
         spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
         
