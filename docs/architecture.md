@@ -30,16 +30,14 @@ The Worker also serves the static Vite output through its `ASSETS` binding. The 
 
 1. Register damage callbacks used by otherwise decoupled gameplay modules.
 2. Load persisted settings from `localStorage`.
-3. Create the Three.js scene, camera, renderer, lights, fog, and pointer-lock controls.
-4. Bind settings and menu actions.
-5. Bind pointer-lock state to the play, pause, HUD, and death UI.
-6. Register keyboard, pointer, wheel, resize, and unload listeners.
-7. Construct weapons, the local avatar, the procedural world, hook mesh, and projectile pool.
-8. Start the animation loop.
+3. Bind settings, menu actions, and pointer-lock lifecycle callbacks.
+4. Register keyboard, pointer, wheel, resize, and unload listeners.
+5. Construct the menu-only character/weapon preview.
+6. Start the menu animation loop.
 
-Pointer lock is the practical boundary between menu state and active game input. Locking begins or resumes play and exposes the HUD. Unlocking clears held inputs, resets the hook, and shows the appropriate pause or main panel. Multiplayer cleanup also closes WebRTC connections, destroys PeerJS state, disposes peer meshes, and best-effort releases the server-side room or session.
+The gameplay renderer does not exist while the main menu is idle. Offline Singleplayer creates the Three.js scene, camera, renderer, lights, fog, pointer-lock controls, weapons, local avatar, hook mesh, projectile pool, and a newly seeded procedural world. Multiplayer creates the same match runtime only after room verification succeeds; the host creates the synchronized seed and clients wait for its snapshot. The day/night clock remains at zero until play begins.
 
-Starting a fresh arena disposes world-owned graphics and rebuilds them. Offline matches choose a new random seed. A multiplayer host chooses a seed, and joining clients rebuild from the host's snapshot before the Join button becomes ready.
+Pointer lock is the practical boundary between menu state and active game input. Locking begins or resumes play and exposes the HUD. Unlocking clears held inputs, resets the hook, and shows the appropriate pause or main panel. Offline pause stops the complete simulation and its day/night clock; multiplayer continues simulating while its local player has the pause menu open. The offline pause menu can open and apply the shared settings panel, which returns to Pause instead of the main menu. Leaving a game disposes all match-owned objects, the world, the day/night cycle, the WebGL renderer/context, and pointer-lock controls before returning to the menu. Multiplayer cleanup also closes WebRTC connections, destroys PeerJS state, disposes peer meshes, and best-effort releases the server-side room or session. Persisted settings remain, and the local LLM may remain loaded only while its immediate-download setting is enabled.
 
 ## Module ownership
 
@@ -147,7 +145,7 @@ Player damage records the last damage time for regeneration and kill attribution
 | `1`–`5` | Select pistol, shotgun, AR, sniper, or minigun |
 | `X` | Inspect the active weapon |
 | `P` | Toggle third-person presentation |
-| `Escape` | Toggle pause; resume waits for pointer lock. If the browser requires a fresh gesture after Esc, click Resume. |
+| `Escape` | Toggle pause; offline simulation stops completely, while multiplayer continues. Resume waits for pointer lock. If the browser requires a fresh gesture after Esc, click Resume. |
 
 ## Multiplayer topology and synchronization
 

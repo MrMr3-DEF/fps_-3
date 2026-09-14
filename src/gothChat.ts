@@ -10,11 +10,16 @@ interface ChatHooks {
     onReplyStart(): void;
 }
 
+interface GothChatResetOptions {
+    preserveLoadedModel?: boolean;
+}
+
 /** Owns the conversation UI, consent gate, transcript and async request lifetime. */
 export class GothChat {
     private downloadApproval: ((approved: boolean) => void) | null = null;
     private preloadError: unknown = null;
     private preloadTask: Promise<void> | null = null;
+    private preloadGeneration = 0;
     private openingKey: string | null = null;
     private panel: HTMLElement;
     private transcript: HTMLElement;
@@ -163,20 +168,26 @@ export class GothChat {
     /** Load in the background only after the saved consent gate has been passed. */
     preload(): void {
         if (!this.consent.approved || this.preloadTask || this.engine?.ready) return;
+        const generation = ++this.preloadGeneration;
         this.preloadError = null;
         this.preloadTask = (async () => {
             const knowledge = this.knowledge ?? await loadCharacterKnowledge();
+            if (generation !== this.preloadGeneration) return;
             this.knowledge = knowledge;
             const { GothChatEngine } = await import('./gothChatEngine.js');
-            this.engine = new GothChatEngine();
-            await this.engine.load(knowledge.config, (fraction, text) => {
+            if (generation !== this.preloadGeneration) return;
+            const engine = new GothChatEngine();
+            this.engine = engine;
+            await engine.load(knowledge.config, (fraction, text) => {
                 if (!this.opened || this.downloadApproval) return;
                 this.progress.hidden = false;
                 this.progress.value = Math.min(1, Math.max(0, fraction));
                 this.status.textContent = `Loading local chat · ${Math.round(fraction * 100)}%`;
                 this.progress.title = text;
             });
+            if (generation !== this.preloadGeneration || this.engine !== engine) engine.dispose();
         })().catch(error => {
+            if (generation !== this.preloadGeneration) return;
             this.preloadError = error;
             this.engine?.dispose();
             this.engine = null;
@@ -248,11 +259,19 @@ export class GothChat {
         this.input.value = '';
     }
 
-    reset(): void {
+    reset(options: GothChatResetOptions = {}): void {
         this.close(false);
         this.cancelPending();
         this.clearConversation();
-        if (!this.preloadTask && !this.engine?.ready) {
+        if (options.preserveLoadedModel === false) {
+            this.preloadGeneration++;
+            this.engine?.dispose();
+            this.engine = null;
+            this.knowledge = null;
+            this.preloadError = null;
+            this.progress.hidden = true;
+            this.status.textContent = '';
+        } else if (!this.preloadTask && !this.engine?.ready) {
             this.engine?.dispose();
             this.engine = null;
             this.knowledge = null;

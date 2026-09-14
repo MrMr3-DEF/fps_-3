@@ -8,7 +8,7 @@ import { CHAT_CONSENT_KEY } from '../src/gothChatConsent.ts';
 const fakeEngine = `export class GothChatEngine {
   ready = false;
   async load() { globalThis.modelLoads++; await globalThis.modelGate; if (globalThis.modelFailure) throw new Error("Simulated GPU loss"); this.ready = true; }
-  dispose() { this.ready = false; }
+  dispose() { globalThis.modelDisposals++; this.ready = false; }
 }`;
 registerHooks({
     resolve(specifier, context, next) {
@@ -52,6 +52,7 @@ test('automatic loading requires consent, shares its model with chat, and settin
     let gameplayHooks = 0;
     Object.assign(globalThis, {
         modelLoads: 0,
+        modelDisposals: 0,
         window: { localStorage: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) }, addEventListener() {} },
         document: { body: new Element(), createElement: (tag: string) => tag === 'section' ? (panel = new Element()) : new Element() },
         fetch: async (url: string) => {
@@ -86,6 +87,9 @@ test('automatic loading requires consent, shares its model with chat, and settin
         await new Promise(resolve => setTimeout(resolve, 0));
         assert.equal((globalThis as unknown as { modelLoads: number }).modelLoads, 1);
         chat.close();
+        chat.reset({ preserveLoadedModel: false });
+        assert.equal((chat as unknown as { engine: unknown }).engine, null);
+        assert.equal((globalThis as unknown as { modelDisposals: number }).modelDisposals, 1);
         chat.requestDownloadApproval(value => { approval = value; });
         assert.equal(panel.querySelector('.goth-chat-notice').hidden, false, 'show the same notice even with saved approval');
         chat.close();

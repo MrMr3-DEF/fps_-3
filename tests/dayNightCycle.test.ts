@@ -68,6 +68,15 @@ test('celestial arcs begin and end fully below the horizon', () => {
     assert.equal(nightStrength, 1);
 
     cycle.dispose();
+
+    const resetCycle = new DayNightCycle(scene, { shadows: false, shadowMapSize: 1024 });
+    const resetSun = resetCycle.celestialScanTargets.find((target) => target.key === 'sun')!.mesh;
+    const resetMoon = resetCycle.celestialScanTargets.find((target) => target.key === 'moon')!.mesh;
+    assert.equal(resetSun.visible, true);
+    assert.equal(resetMoon.visible, false);
+    assert.ok(resetSun.position.y + resetSun.scale.y < 0);
+    assert.equal(resetCycle.sunLight.intensity, 0);
+    resetCycle.dispose();
 });
 
 test('cycle calculations wrap cleanly in either direction', () => {

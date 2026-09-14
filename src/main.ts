@@ -4,11 +4,11 @@ import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setupMobileControls } from './mobileControls.js';
 import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
-import { getEscapePauseAction } from './pauseShortcut.js';
+import { getEscapePauseAction, shouldPauseOfflineSimulation } from './pauseShortcut.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
 import { PointerLockControls } from './pointerLockControls.js';
-import { state, resetMatchStats } from './state.js';
+import { state, resetMatchStats, resetPlayerState } from './state.js';
 import { resetPlayerAtTownSpawn } from './playerSpawn.js';
 import { updatePowerJumpOnCastleExit } from './powerJump.js';
 import {
@@ -32,7 +32,7 @@ import {
     MAX_RENDER_DISTANCE_CHUNKS
 } from './config.js';
 import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
-import { disposeProjectiles, resetProjectiles, updateProjectiles } from './projectiles.js';
+import { disposeProjectiles, updateProjectiles } from './projectiles.js';
 import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer, updateHealthBar, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
@@ -150,6 +150,7 @@ const UI = {
     get btnJoinConnect() { return getUI<HTMLButtonElement>('btn-join-connect'); },
     get btnJoinCancel() { return getUI<HTMLElement>('btn-join-cancel'); },
     get btnPauseResume() { return getUI<HTMLElement>('btn-pause-resume'); },
+    get btnPauseSettings() { return getUI<HTMLButtonElement>('btn-pause-settings'); },
     get btnPauseLeave() { return getUI<HTMLButtonElement>('btn-pause-leave'); },
     get inputRoomCode() { return getUI<HTMLInputElement>('input-room-code'); },
     get roomCodeDisplay() { return getUI<HTMLElement>('room-code-display'); },
@@ -176,6 +177,7 @@ let smoothedGRight = 0;
 let smoothedGUp = 0;
 let roomFlowGeneration = 0;
 let copyFeedbackTimeout: number | null = null;
+let settingsOrigin: 'main' | 'pause' = 'main';
 
 const COPY_BUTTON_DEFAULT_TEXT = '📋 Copy';
 
@@ -246,11 +248,13 @@ async function beginHosting(username: string): Promise<void> {
         const code = generateRoomCode();
         if (UI.roomCodeDisplay) UI.roomCodeDisplay.innerText = code;
         if (UI.hostLobbyStatus) UI.hostLobbyStatus.innerText = 'Creating secure room...';
+        createGameRuntime();
         await hostGame(username, code, turnstileToken);
         if (generation !== roomFlowGeneration || !state.isHost || state.roomCode !== code) return;
         if (UI.btnCopyCode) UI.btnCopyCode.disabled = false;
     } catch (error) {
         if (generation !== roomFlowGeneration) return;
+        disposeGameRuntime({ disconnect: false });
         const message = errorMessage(error, 'Unable to create a secure room. Please retry.');
         if (message !== 'Room verification was cancelled.' && UI.hostLobbyStatus) {
             UI.hostLobbyStatus.innerText = message;
@@ -280,9 +284,11 @@ async function beginJoining(username: string, roomCode: string): Promise<void> {
         const turnstileToken = await joinRoomChallenge.requestToken(challengeContainer);
         if (generation !== roomFlowGeneration) return;
         joinRoomChallenge.cancel();
+        createGameRuntime();
         await joinGame(username, roomCode, turnstileToken);
     } catch (error) {
         if (generation !== roomFlowGeneration) return;
+        disposeGameRuntime({ disconnect: false });
         const message = errorMessage(error, 'Unable to join the secure room. Please retry.');
         if (message !== 'Room verification was cancelled.' && UI.joinErrorLog) {
             UI.joinErrorLog.style.color = '#ff4757';
@@ -307,6 +313,7 @@ function onWindowResize(): void {
 // Renderer and camera setup is intentionally centralized because pointer lock,
 // third-person mode and weapon attachments all share the same camera object.
 function setupRenderer(): void {
+    if (state.camera || state.scene || state.renderer || state.controls) return;
     state.camera = new THREE.PerspectiveCamera(userSettings.fov, window.innerWidth / window.innerHeight, 0.1, 1500);
 
     state.scene = new THREE.Scene();
@@ -331,11 +338,7 @@ function setupMenuListeners(): void {
     if (UI.btnPlaySp) {
         UI.btnPlaySp.addEventListener('click', (e) => {
             e.stopPropagation();
-            prepareFreshArena();
-            state.isMultiplayer = false;
-            state.isHost = false;
-            state.pendingPlay = true;
-            if (state.controls) beginInput();
+            startOfflineGame();
         });
     }
 
@@ -350,6 +353,7 @@ function setupMenuListeners(): void {
     if (UI.btnMenuSettings) {
         UI.btnMenuSettings.addEventListener('click', (e) => {
             e.stopPropagation();
+            settingsOrigin = 'main';
             resetPendingSettings();
             if (UI.panelMain) UI.panelMain.style.display = 'none';
             if (UI.panelSettings) UI.panelSettings.style.display = 'flex';
@@ -361,7 +365,10 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             resetPendingSettings();
             if (UI.panelSettings) UI.panelSettings.style.display = 'none';
-            if (UI.panelMain) UI.panelMain.style.display = 'flex';
+            const returnToPause = settingsOrigin === 'pause' && state.isPlaying && !state.isMultiplayer;
+            if (UI.panelPause) UI.panelPause.style.display = returnToPause ? 'flex' : 'none';
+            if (UI.panelMain) UI.panelMain.style.display = returnToPause ? 'none' : 'flex';
+            settingsOrigin = 'main';
         });
     }
 
@@ -412,7 +419,7 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             roomFlowGeneration++;
             hostRoomChallenge.cancel();
-            disconnectMultiplayer();
+            disposeGameRuntime();
             resetHostLobbyUi();
             if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'none';
             if (UI.panelMp) UI.panelMp.style.display = 'flex';
@@ -454,7 +461,7 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             roomFlowGeneration++;
             joinRoomChallenge.cancel();
-            disconnectMultiplayer();
+            disposeGameRuntime();
             if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'none';
             if (UI.panelMp) UI.panelMp.style.display = 'flex';
         });
@@ -488,14 +495,21 @@ function setupMenuListeners(): void {
         });
     }
 
+    if (UI.btnPauseSettings) {
+        UI.btnPauseSettings.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!state.isPlaying || state.isMultiplayer || isInputActive()) return;
+            settingsOrigin = 'pause';
+            resetPendingSettings();
+            if (UI.panelPause) UI.panelPause.style.display = 'none';
+            if (UI.panelSettings) UI.panelSettings.style.display = 'flex';
+        });
+    }
+
     if (UI.btnPauseLeave) {
         UI.btnPauseLeave.addEventListener('click', (e) => {
             e.stopPropagation();
-            state.isPlaying = false;
-            if (state.isMultiplayer) {
-                disconnectMultiplayer();
-            }
-            prepareFreshArena();
+            leaveCurrentGame();
             if (UI.panelPause) UI.panelPause.style.display = 'none';
             if (UI.panelMain) UI.panelMain.style.display = 'flex';
         });
@@ -519,14 +533,7 @@ function setupMenuListeners(): void {
     if (UI.btnDeathLeave) {
         UI.btnDeathLeave.addEventListener('click', (e) => {
             e.stopPropagation();
-            state.isPlaying = false;
-            performPlayerReset();
-
-            if (state.isMultiplayer) {
-                disconnectMultiplayer();
-            }
-
-            prepareFreshArena();
+            leaveCurrentGame();
             if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
             if (UI.blocker) UI.blocker.style.display = 'flex';
             if (UI.panelPause) UI.panelPause.style.display = 'none';
@@ -758,14 +765,13 @@ function interactWithGirlfriend(trigger?: { code: string; preventDefault?: () =>
     gothChat?.open(trigger);
 }
 
-// Build scene systems after controls exist because several meshes attach to the camera.
+// Build match-owned systems after controls exist because several meshes attach to the camera.
 function setupGameSystems(): void {
     if (!state.scene || !state.controls) return;
     state.scene.add(state.controls.getObject());
 
     createAkimboGuns();
     createPlayerMesh();
-    createEnvironment();
 
     const hookGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
     hookGeo.rotateX(Math.PI / 2);
@@ -798,11 +804,27 @@ function disposeHookMesh(): void {
     state.hookMesh = null;
 }
 
-function disposeGameRuntime(): void {
-    gothChat?.reset();
+function createGameRuntime(): void {
+    if (state.scene && state.camera && state.renderer && state.controls) return;
+    if (state.scene || state.camera || state.renderer || state.controls) disposeGameRuntime();
+    setupRenderer();
+    setupGameSystems();
+    applyLiveSettings();
+    state.prevTime = performance.now();
+}
+
+interface DisposeGameRuntimeOptions {
+    disconnect?: boolean;
+}
+
+function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
+    state.isPlaying = false;
+    state.pendingPlay = false;
+    gothChat?.reset({ preserveLoadedModel: userSettings.downloadWebLLMImmediately });
     smartGoggles?.reset();
-    state.controls?.dispose();
-    disconnectMultiplayer();
+    conversationCamera.cancel();
+    chatCharacter = null;
+    if (options.disconnect !== false) disconnectMultiplayer();
     resetHook();
     disposeProjectiles();
     disposeParticles();
@@ -811,20 +833,57 @@ function disposeGameRuntime(): void {
     disposeWorld();
     dayNightCycle?.dispose();
     dayNightCycle = null;
+
+    const controls = state.controls;
+    const scene = state.scene;
+    const renderer = state.renderer;
+    controls?.dispose();
+    scene?.clear();
+    if (renderer) {
+        renderer.renderLists.dispose();
+        renderer.dispose();
+        renderer.forceContextLoss();
+        renderer.domElement.remove();
+    }
+    state.controls = null;
+    state.camera = null;
+    state.scene = null;
+    state.renderer = null;
+
+    resetPlayerState();
+    resetMatchStats();
+    state.activeWeaponName = 'PISTOL';
+    state.desiredWeaponName = 'PISTOL';
+    state.nextWeaponName = null;
+    state.switchState = 'IDLE';
+    state.switchTimer = 0;
+    state.isThirdPerson = false;
+    state.prevTime = performance.now();
+    lastFov = -1;
+    lastScopedState = null;
+    syncHudCounters();
 }
 
-function prepareFreshArena(): void {
-    gothChat?.reset();
-    smartGoggles?.reset();
-    chatCharacter = null;
-    resetHook();
-    resetProjectiles();
-    disposeParticles();
-    disposeWorld();
+function startOfflineGame(): void {
+    disposeGameRuntime();
+    settingsOrigin = 'main';
+    createGameRuntime();
+    state.isMultiplayer = false;
+    state.isHost = false;
     createEnvironment();
     performPlayerReset(true);
     syncGogglesFailureVisuals();
     state.prevTime = performance.now();
+    state.pendingPlay = true;
+    beginInput();
+}
+
+function leaveCurrentGame(): void {
+    state.isPlaying = false;
+    state.pendingPlay = false;
+    settingsOrigin = 'main';
+    endInput();
+    disposeGameRuntime();
 }
 
 function performPlayerReset(resetMatch = false): void {
@@ -1060,6 +1119,7 @@ function applyPendingSettings(): void {
     applyLiveSettings();
     syncSettingsControls();
     if (userSettings.downloadWebLLMImmediately) gothChat?.preload();
+    else gothChat?.reset({ preserveLoadedModel: false });
 }
 
 function updatePendingSettings(mutator: (settings: UserSettings) => void): void {
@@ -1185,7 +1245,6 @@ function setupSettingsControls(): void {
 export function init(): void {
     setDamageHandlers(processTargetHit, takePlayerDamage);
     loadUserSettings();
-    setupRenderer();
     setupSettingsControls();
     applyLiveSettings();
     if (UI.gogglesTargetLayer) smartGoggles = new SmartGogglesHud(UI.gogglesTargetLayer);
@@ -1219,98 +1278,98 @@ export function init(): void {
     if (userSettings.downloadWebLLMImmediately) gothChat.preload();
 
     // Desktop pointer lock and touch sessions share the play/pause/death UI lifecycle.
-    if (state.controls) {
-        onInputStarted(() => {
-            if (state.pendingPlay) {
-                state.isPlaying = true;
-                state.pendingPlay = false;
-                if (state.controls) spawnLightBeam(state.controls.getObject().position);
-            }
-            if (UI.blocker) UI.blocker.style.display = 'none';
+    // The callbacks are registered before match controls exist; beginInput binds
+    // whichever freshly-created controls belong to the current match.
+    onInputStarted(() => {
+        if (state.pendingPlay) {
+            state.isPlaying = true;
+            state.pendingPlay = false;
+            if (state.controls) spawnLightBeam(state.controls.getObject().position);
+        }
+        if (UI.blocker) UI.blocker.style.display = 'none';
+        if (UI.panelPause) UI.panelPause.style.display = 'none';
+        if (UI.healthContainer) UI.healthContainer.style.display = 'block';
+        if (UI.reloadContainer) UI.reloadContainer.style.display = 'block';
+        if (UI.hoverContainer) UI.hoverContainer.style.display = 'block';
+
+        if (UI.pvpStats) {
+            UI.pvpStats.style.display = state.isMultiplayer ? 'block' : 'none';
+        }
+
+        if (UI.crosshair) UI.crosshair.style.display = 'block';
+        if (UI.ui) UI.ui.style.display = 'flex';
+        setFpsVisible(userSettings.showFps);
+
+        document.body.focus();
+        if (state.renderer && state.renderer.domElement) {
+            state.renderer.domElement.tabIndex = 1;
+            state.renderer.domElement.focus();
+        }
+    });
+
+    onInputEnded(() => {
+        const isDead = UI.deathOverlay?.style.display === 'flex';
+        if (UI.blocker) UI.blocker.style.display = gothChat?.isOpen || isDead ? 'none' : 'flex';
+        state.moveForward = false;
+        state.moveBackward = false;
+        state.moveLeft = false;
+        state.moveRight = false;
+        state.isShiftDown = false;
+        state.isHovering = false;
+        state.isMouseDown = false;
+        state.isScoped = false;
+        state.rightClickActive = false;
+        state.keyCActive = false;
+        middleMouseChordActive = false;
+        smartGoggles?.reset();
+        setAccelerometerVisible(false);
+        cancelInspect();
+        if (UI.healthContainer) UI.healthContainer.style.display = 'none';
+        if (UI.reloadContainer) UI.reloadContainer.style.display = 'none';
+        if (UI.hoverContainer) UI.hoverContainer.style.display = 'none';
+        if (UI.hoverBadge) UI.hoverBadge.style.display = 'none';
+
+        if (UI.panelMain) UI.panelMain.style.display = 'none';
+        if (UI.panelSettings) UI.panelSettings.style.display = 'none';
+        if (UI.panelMp) UI.panelMp.style.display = 'none';
+        if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'none';
+        if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'none';
+
+        if (gothChat?.isOpen) {
             if (UI.panelPause) UI.panelPause.style.display = 'none';
-            if (UI.healthContainer) UI.healthContainer.style.display = 'block';
-            if (UI.reloadContainer) UI.reloadContainer.style.display = 'block';
-            if (UI.hoverContainer) UI.hoverContainer.style.display = 'block';
-
-            if (UI.pvpStats) {
-                UI.pvpStats.style.display = state.isMultiplayer ? 'block' : 'none';
+            if (UI.crosshair) UI.crosshair.style.display = 'none';
+            gothChat.focus();
+            return;
+        }
+        if (state.isPlaying) {
+            if (UI.panelPause) {
+                UI.panelPause.style.display = isDead ? 'none' : 'flex';
             }
+            if (UI.btnPauseSettings) UI.btnPauseSettings.hidden = state.isMultiplayer || isDead;
 
-            if (UI.crosshair) UI.crosshair.style.display = 'block';
-            if (UI.ui) UI.ui.style.display = 'flex';
-            setFpsVisible(userSettings.showFps);
-
-            document.body.focus();
-            if (state.renderer && state.renderer.domElement) {
-                state.renderer.domElement.tabIndex = 1;
-                state.renderer.domElement.focus();
-            }
-        });
-
-        onInputEnded(() => {
-            const isDead = UI.deathOverlay?.style.display === 'flex';
-            if (UI.blocker) UI.blocker.style.display = gothChat?.isOpen || isDead ? 'none' : 'flex';
-            state.moveForward = false;
-            state.moveBackward = false;
-            state.moveLeft = false;
-            state.moveRight = false;
-            state.isShiftDown = false;
-            state.isHovering = false;
-            state.isMouseDown = false;
-            state.isScoped = false;
-            state.rightClickActive = false;
-            state.keyCActive = false;
-            middleMouseChordActive = false;
-            smartGoggles?.reset();
-            setAccelerometerVisible(false);
-            cancelInspect();
-            if (UI.healthContainer) UI.healthContainer.style.display = 'none';
-            if (UI.reloadContainer) UI.reloadContainer.style.display = 'none';
-            if (UI.hoverContainer) UI.hoverContainer.style.display = 'none';
-            if (UI.hoverBadge) UI.hoverBadge.style.display = 'none';
-
-            if (UI.panelMain) UI.panelMain.style.display = 'none';
-            if (UI.panelSettings) UI.panelSettings.style.display = 'none';
-            if (UI.panelMp) UI.panelMp.style.display = 'none';
-            if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'none';
-            if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'none';
-
-            if (gothChat?.isOpen) {
-                if (UI.panelPause) UI.panelPause.style.display = 'none';
-                if (UI.crosshair) UI.crosshair.style.display = 'none';
-                gothChat.focus();
-                return;
-            }
-            if (state.isPlaying) {
-                if (UI.panelPause) {
-                    UI.panelPause.style.display = isDead ? 'none' : 'flex';
-                }
-                
-                if (state.isMultiplayer) {
-                    if (UI.pauseLobbyInfo) UI.pauseLobbyInfo.style.display = isDead ? 'none' : 'inline';
-                    if (UI.pauseRoomCode) UI.pauseRoomCode.innerText = state.roomCode || '-'.repeat(ROOM_CODE_LENGTH);
-                    if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Lobby';
-                } else {
-                    if (UI.pauseLobbyInfo) UI.pauseLobbyInfo.style.display = 'none';
-                    if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Game';
-                }
+            if (state.isMultiplayer) {
+                if (UI.pauseLobbyInfo) UI.pauseLobbyInfo.style.display = isDead ? 'none' : 'inline';
+                if (UI.pauseRoomCode) UI.pauseRoomCode.innerText = state.roomCode || '-'.repeat(ROOM_CODE_LENGTH);
+                if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Lobby';
             } else {
-                if (UI.panelPause) UI.panelPause.style.display = 'none';
-                if (UI.panelMain) UI.panelMain.style.display = 'flex';
-                
-                if (state.isMultiplayer) {
-                    disconnectMultiplayer();
-                }
+                if (UI.pauseLobbyInfo) UI.pauseLobbyInfo.style.display = 'none';
+                if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Game';
             }
+        } else {
+            if (UI.panelPause) UI.panelPause.style.display = 'none';
+            if (UI.panelMain) UI.panelMain.style.display = 'flex';
 
-            resetHook();
-        });
-    }
+            if (state.isMultiplayer) {
+                disconnectMultiplayer();
+            }
+        }
+
+        resetHook();
+    });
 
     setupInputListeners();
-    setupGameSystems();
     setupMainMenu();
-    window.addEventListener('beforeunload', disposeGameRuntime, { once: true });
+    window.addEventListener('beforeunload', () => disposeGameRuntime(), { once: true });
 
     animate();
 }
@@ -1323,10 +1382,23 @@ export function animate(): void {
 
     const time = performance.now();
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
+    if (!state.scene || !state.camera || !state.renderer || !state.controls) {
+        state.prevTime = time;
+        return;
+    }
+    if (shouldPauseOfflineSimulation({
+        isPlaying: state.isPlaying,
+        isMultiplayer: state.isMultiplayer,
+        isInputActive: isInputActive(),
+        isConversationOpen: gothChat?.isOpen ?? false,
+    })) {
+        state.prevTime = time;
+        return;
+    }
     finishGogglesShutdown(state.gogglesFailure, time);
     refreshScopedState();
     syncGogglesFailureVisuals();
-    const lanternStrength = state.camera ? dayNightCycle?.update(delta, state.camera.position) ?? 0 : 0;
+    const lanternStrength = dayNightCycle?.update(state.isPlaying ? delta : 0, state.camera.position) ?? 0;
     if (state.camera) {
         updateTownLanterns(time / 1000, lanternStrength);
         updateLavaLights(time / 1000, state.camera.position, lanternStrength, userSettings.lavaGlow);
