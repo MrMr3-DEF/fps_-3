@@ -978,9 +978,12 @@ function createFakeBillboards(): void {
 
     for (let i = 0; i < FAKE_PILLAR_COUNT; i++) {
         const angle = worldRandom() * Math.PI * 2;
-        const radius = (MAP_SIZE / 2) + 20 + worldRandom() * 700;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
+        const directionX = Math.cos(angle);
+        const directionZ = Math.sin(angle);
+        const borderRadius = (MAP_SIZE / 2) / Math.max(Math.abs(directionX), Math.abs(directionZ));
+        const radius = borderRadius + 20 + worldRandom() * 700;
+        const x = directionX * radius;
+        const z = directionZ * radius;
         const height = 20 + worldRandom() * (MAX_PILLAR_HEIGHT - 20);
 
         const mesh = new THREE.Mesh(fakePillarGeo, fakePillarMat);
