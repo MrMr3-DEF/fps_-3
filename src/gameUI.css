@@ -558,7 +558,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     opacity: 0.72;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' seed='8' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E");
     background-size: 180px 180px;
-    filter: contrast(145%) brightness(0.82);
+    filter: contrast(145%) brightness(1);
     animation: goggles-tv-static 135ms steps(1, end) infinite;
     will-change: background-position;
 }
