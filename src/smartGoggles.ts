@@ -452,10 +452,9 @@ export class SmartGogglesHud {
         killMark.setAttribute('viewBox', '0 0 100 100');
         killMark.setAttribute('preserveAspectRatio', 'none');
         killMark.setAttribute('aria-hidden', 'true');
-        for (const line of ['M 4 4 L 96 96', 'M 96 4 L 4 96']) {
+        for (const line of ['M 22 22 L 78 78', 'M 78 22 L 22 78']) {
             const strike = document.createElementNS(SVG_NS, 'path');
             strike.setAttribute('d', line);
-            strike.setAttribute('pathLength', '1');
             killMark.appendChild(strike);
         }
         root.appendChild(killMark);
