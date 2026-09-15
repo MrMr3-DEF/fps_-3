@@ -58,10 +58,15 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(cb.sent.find(p=>p.type==='update').username,'Pilot');
         assert.equal(state.peers['peer-a'].hp,7);
         assert.equal(state.peers['peer-a'].maxHp,PLAYER_MAX_HP);
+        assert.equal(state.peers['peer-a'].username,'Pilot');
         assert.equal(state.peers['peer-b'].hp,PLAYER_MAX_HP);
+        assert.equal(state.peers['peer-b'].username,'Other');
         ca.emit('data',{type:'fire',weapon:'SNIPER',shotId:1,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1},hitPoint:{x:4000,y:4000,z:-4000}});
         const relayedFire=cb.sent.find(p=>p.type==='fire'&&p.senderPeerId==='peer-a');
         assert.deepEqual(relayedFire.hitPoint,{x:0,y:2,z:-BULLET_TRAVEL_DISTANCE},'host clamps and aligns relayed sniper beams');
+        ca.emit('data',{type:'player_hit',shotId:1,pelletIndex:0,targetPeerId:'peer-b',damage:10,attackerName:'Forged'});
+        assert.equal(state.peers['peer-b'].hp,0,'host applies validated damage to its remote health state');
+        assert.ok(ca.sent.some(p=>p.type==='player_hit'&&p.targetPeerId==='peer-b'),'shooter receives validated health changes');
         state.playerHp=6;state.playerMaxHp=PLAYER_MAX_HP;sendLocalState(true);
         const hostUpdate=ca.sent.filter(p=>p.type==='update').at(-1);
         assert.equal(hostUpdate.hp,6);assert.equal(hostUpdate.maxHp,PLAYER_MAX_HP);

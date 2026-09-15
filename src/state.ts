@@ -21,6 +21,8 @@ export interface DataConnectionLike {
 }
 
 export interface PeerData {
+    /** Verified lobby identity used by world labels and smart-goggles scans. */
+    username: string;
     mesh: THREE.Group;
     targetPosition: THREE.Vector3;
     targetYaw: number;

@@ -1067,7 +1067,10 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         msg = authorized;
         if (!state.isPlaying) return;
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
-            broadcastToAll(msg, fromPeerId);
+            // The shooter also receives validated player hits so its copy of the
+            // victim's health changes immediately. Ordinary self-originated
+            // movement/fire events still do not need to echo back.
+            broadcastToAll(msg, msg.type === 'player_hit' ? null : fromPeerId);
         }
     } else {
         if (!isExpectedHost(fromPeerId)) return;
@@ -1100,6 +1103,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
 
         peerData.hp = msg.hp;
         peerData.maxHp = msg.maxHp;
+        peerData.username = msg.username;
 
         if (msg.bodyColor !== undefined) setBeanColor(peerData.mesh, msg.bodyColor);
         _targetPos.set(msg.pos.x, msg.pos.y - PEER_Y_OFFSET, msg.pos.z);
@@ -1263,6 +1267,9 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
     } else if (msg.type === 'player_hit') {
         const targetPeer = state.peers[msg.targetPeerId];
         if (targetPeer) {
+            // Apply the host-validated hit on every observer immediately. The
+            // victim's following update packet reconciles this predicted value.
+            targetPeer.hp = THREE.MathUtils.clamp(targetPeer.hp - msg.damage, 0, targetPeer.maxHp);
             flashPeerMesh(targetPeer, 0xff3333, 150);
         }
         if (state.peer && msg.targetPeerId === state.peer.id) {
@@ -1562,6 +1569,7 @@ function createPeerBean(username: string): PeerData {
     peerGroup.scale.set(1.5, 1.5, 1.5);
 
     return {
+        username,
         mesh: peerGroup,
         targetPosition: peerGroup.position.clone(),
         targetYaw: 0,

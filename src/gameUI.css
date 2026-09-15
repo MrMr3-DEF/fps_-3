@@ -638,6 +638,10 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     --goggles-lock-color: #55e7ff;
 }
 
+.goggles-target-lock.is-peer {
+    --goggles-lock-color: #f5f7fa;
+}
+
 .goggles-target-lock.is-anomalous {
     --goggles-lock-color: #f5f7fa;
 }

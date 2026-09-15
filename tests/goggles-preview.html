@@ -97,7 +97,7 @@
         peerHead.position.y = 1.45;
         peerMesh.add(peerBody, peerHead);
         scene.add(peerMesh);
-        const peers = { previewPeer: { mesh: peerMesh, hp: 6, maxHp: 10 } };
+        const peers = { previewPeer: { username: 'Pilot', mesh: peerMesh, hp: 6, maxHp: 10 } };
         const anomalyVisual = new THREE.Group();
         anomalyVisual.position.set(-25, 0, -82);
         const anomalyMaterial = new THREE.MeshStandardMaterial({

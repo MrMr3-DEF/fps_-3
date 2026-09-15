@@ -60,9 +60,10 @@ export type SmartGogglesObstacleQuery = (
 
 type LockPhase = 'entering' | 'tracking' | 'leaving' | 'eliminated';
 type ReadoutMode = 'facts' | 'warning';
-type TargetVariant = 'enemy' | 'anomaly' | 'celestial';
+type TargetVariant = 'enemy' | 'peer' | 'anomaly' | 'celestial';
 
 export interface SmartGogglesPeerTarget {
+    username: string;
     mesh: THREE.Group;
     hp: number;
     maxHp: number;
@@ -417,8 +418,8 @@ export class SmartGogglesHud {
             this.trackTarget(
                 targetKey,
                 0,
-                'enemy',
-                'Enemy',
+                'peer',
+                peer.username,
                 projectionBounds,
                 _bodyCenter,
                 stablePeerSphere.radius * peer.mesh.matrixWorld.getMaxScaleOnAxis(),
@@ -600,7 +601,7 @@ export class SmartGogglesHud {
         );
         this.updateGeometry(record);
 
-        const outOfRange = variant === 'enemy' && classifyOutOfRange(
+        const outOfRange = (variant === 'enemy' || variant === 'peer') && classifyOutOfRange(
             reachableDistance,
             BULLET_TRAVEL_DISTANCE,
         );
@@ -685,6 +686,7 @@ export class SmartGogglesHud {
         const root = document.createElement('div');
         root.className = 'goggles-target-lock';
         root.dataset.targetKey = targetKey;
+        root.classList.toggle('is-peer', variant === 'peer');
         root.classList.toggle('is-anomalous', variant === 'anomaly');
         root.classList.toggle('is-celestial', variant === 'celestial');
 
