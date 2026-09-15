@@ -39,7 +39,7 @@ export interface PeerData {
     lastUpdateTime?: number;
     lastRemoteExhaustTime?: number;
     hookLine: THREE.Mesh | null;
-    /** Locally predicted health, periodically reconciled by peer state packets. */
+    /** Last confirmed victim health, shared by combat targeting and C inspection. */
     hp: number;
     maxHp: number;
     lastDamageTime: number;

@@ -72,12 +72,14 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         state.peers['peer-a'].lastDamageTime=performance.now()-REGEN_DELAY_MS-1;
         state.peers['peer-a'].regenTimer=0.99;
         updateRemotePeers(0.02);
-        assert.equal(state.peers['peer-a'].hp,8,'remote health regenerates locally between state packets');
+        assert.equal(state.peers['peer-a'].hp,7,'inspection must not invent health regeneration');
         ca.emit('data',{type:'fire',weapon:'SNIPER',shotId:1,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1},hitPoint:{x:4000,y:4000,z:-4000}});
         const relayedFire=cb.sent.find(p=>p.type==='fire'&&p.senderPeerId==='peer-a');
         assert.deepEqual(relayedFire.hitPoint,{x:0,y:2,z:-BULLET_TRAVEL_DISTANCE},'host clamps and aligns relayed sniper beams');
         ca.emit('data',{type:'player_hit',targetLifeId:0,shotId:1,pelletIndex:0,targetPeerId:'peer-b',damage:10,attackerName:'Forged'});
-        assert.equal(state.peers['peer-b'].hp,0,'host applies validated damage to its remote health state');
+        assert.equal(state.peers['peer-b'].hp,PLAYER_MAX_HP,'health waits for victim confirmation');
+        cb.emit('data',{...update('Other'),hp:0,isDead:true});
+        assert.equal(state.peers['peer-b'].hp,0,'inspection displays confirmed victim health');
         assert.equal(state.peers['peer-b'].regenTimer,0,'confirmed damage restarts the remote regen clock');
         assert.ok(ca.sent.some(p=>p.type==='player_hit'&&p.targetPeerId==='peer-b'),'shooter receives validated health changes');
         state.playerHp=6;state.playerMaxHp=PLAYER_MAX_HP;sendLocalState(true);
@@ -88,7 +90,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(ca.sent.filter(p=>p.type==='update').at(-1).hp,0,'outbound health is clamped to its validated range');
         state.playerHp=PLAYER_MAX_HP;
         broadcastToAll({type:'player_hit',targetLifeId:0,shotId:1,pelletIndex:0,targetPeerId:'peer-a',damage:10,attackerName:'Host'});
-        assert.equal(state.peers['peer-a'].hp,0,'host-fired hits update the host goggles health too');
+        assert.equal(state.peers['peer-a'].hp,7,'host inspection waits for the victim instead of predicting health');
         const death={type:'player_died' as const,lifeId:0,cause:'player' as const,killerPeerId:host.id,killerName:'Host',victimName:'Pilot',victimPeerId:'peer-a'};
         ca.emit('data',death);assert.equal(state.kills,1);ca.emit('data',death);assert.equal(state.kills,1);
         assert.equal(authorizeClientPacket('peer-a',{type:'fire',weapon:'SNIPER',shotId:2,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}}),null);
@@ -100,6 +102,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         const cc=new Connection('peer-new',{admissionToken:replacement.admissionToken});
         host.emit('connection',cc);await tick();await tick();
         assert.equal(cc.sent[1].gameStarted,true,'late join snapshot carries match start');
+        assert.ok(cc.sent.some(p=>p.type==='update'&&p.username==='Host'),'late join receives the host avatar without waiting for a render frame');
         assert.equal(cc.sent[1].spawnHouseSlot,1,'reuse the departed house without shifting the remaining player');
         assert.equal(cb.sent.filter(p=>p.type==='world_snapshot').length,1);
         disconnectMultiplayer();state.scene=null;

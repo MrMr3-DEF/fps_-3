@@ -1,3 +1,4 @@
+import { pack, unpack } from 'peerjs-js-binarypack';
 export class Connection {
     peer: string;
     metadata: unknown;
@@ -7,7 +8,11 @@ export class Connection {
     constructor(peer: string, metadata: unknown = {}) { this.peer = peer; this.metadata = metadata; }
     on(event: string, cb: (...args:any[])=>void) { const list=this.handlers.get(event)??[];list.push(cb);this.handlers.set(event,list); }
     emit(event:string,...args:any[]) { for(const cb of this.handlers.get(event)??[])cb(...args); }
-    send(packet:unknown) { this.sent.push(structuredClone(packet)); }
+    send(packet:unknown) {
+        const encoded = pack(packet as any);
+        if (encoded instanceof Promise) throw new Error('Game packets must encode synchronously.');
+        this.sent.push(unpack(encoded));
+    }
     close() { if(!this.open)return;this.open=false;this.emit('close'); }
 }
 export class Peer {

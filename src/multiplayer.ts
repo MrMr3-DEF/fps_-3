@@ -30,7 +30,6 @@ import {
     MAP_HALF_SIZE,
     PEER_Y_OFFSET,
     HIT_FLASH_DURATION_MS,
-    REGEN_DELAY_MS,
     WEAPON_STATS,
     BULLET_TRAVEL_DISTANCE,
     MAX_PROJECTILES
@@ -174,22 +173,12 @@ function getCachedUsername(): string {
     return cachedUsername;
 }
 
-function applyConfirmedPeerDamage(peerData: PeerData, damage: number, now: number): void {
-    peerData.hp = THREE.MathUtils.clamp(peerData.hp - damage, 0, peerData.maxHp);
-    peerData.lastDamageTime = now;
-    peerData.regenTimer = 0;
-}
-
 export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | null = null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     if (state.isHost && packet.type === 'player_hit' && !packet.senderPeerId) {
         const now = performance.now();
         packet = { ...packet, senderPeerId: state.peer?.id, attackerName: getCachedUsername() };
         if (state.peer) lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: state.peer.id, at: now });
-        // Host-originated packets do not loop back through handlePeerMessage.
-        // Update the host's own remote-player record before sending the event.
-        const targetPeer = state.peers[packet.targetPeerId];
-        if (targetPeer) applyConfirmedPeerDamage(targetPeer, packet.damage, now);
     }
     if (state.isHost && packet.type === 'player_died' && !packet.senderPeerId) {
         const latest = state.peer ? lastDamageByVictim.get(state.peer.id) : null;
@@ -834,6 +823,9 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
             state.connections.push(conn);
             conn.send({ type: 'admission', proof: result.admissionProof });
             sendWorldSnapshot(conn, slot);
+            // A late join must see the host even when its render loop is paused
+            // or browser-throttled. Do not wait for the next animation frame.
+            sendLocalState(true);
             const status = DOM.hostLobbyStatus();
             if (status) status.innerText = `Waiting for players (${state.connections.length + 1}/${MAX_PLAYERS})...`;
         } catch { if (current()) conn.close(); }
@@ -1332,13 +1324,13 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
     } else if (msg.type === 'player_hit') {
         const targetPeer = state.peers[msg.targetPeerId];
         if (targetPeer && targetPeer.lifeId === msg.targetLifeId) {
-            // Apply the host-validated hit on every observer immediately. The
-            // victim's following update packet reconciles this predicted value.
-            applyConfirmedPeerDamage(targetPeer, msg.damage, performance.now());
             flashPeerMesh(targetPeer, 0xff3333, 150);
         }
         if (state.peer && msg.targetPeerId === state.peer.id && msg.targetLifeId === state.lifeId) {
             takePlayerDamage(msg.damage, msg.attackerName, senderId);
+            // The victim owns health. Publish the result immediately so combat,
+            // all observers and the C inspection read exactly the same value.
+            sendLocalState(true);
         }
     } else if (msg.type === 'player_died') {
         const victimPeer = state.peers[msg.victimPeerId || senderId];
@@ -1488,7 +1480,8 @@ export function sendLocalState(force = false): void {
         isHovering: state.isHovering,
         hp: snapshot.hp,
         maxHp: snapshot.maxHp,
-        dayNightElapsedSeconds: state.isHost ? state.dayNightElapsedSeconds : undefined,
+        // BinaryPack encodes explicit undefined as null; omit host-only fields.
+        ...(state.isHost ? { dayNightElapsedSeconds: state.dayNightElapsedSeconds } : {}),
         hoverKeys: state.isHovering ? {
             w: state.moveForward,
             s: state.moveBackward,
@@ -1505,27 +1498,12 @@ export function updateRemotePeers(delta: number): void {
 
     const peerIds = state.peerIds;
     const alpha = 1 - Math.exp(-14 * delta);
-    const now = performance.now();
-
     for (let i = 0; i < peerIds.length; i++) {
         const peerData = state.peers[peerIds[i]];
         if (!peerData) continue;
 
-        // Confirmed damage is applied when its packet arrives. Between ordinary
-        // state packets, mirror the victim's four-second delay and 1 HP/s regen
-        // locally so goggles remain live without introducing a health stream.
-        if (peerData.hp > 0 && peerData.hp < peerData.maxHp &&
-            now - peerData.lastDamageTime >= REGEN_DELAY_MS) {
-            peerData.regenTimer += delta;
-            const recoveredHp = Math.floor(peerData.regenTimer);
-            if (recoveredHp > 0) {
-                peerData.hp = Math.min(peerData.maxHp, peerData.hp + recoveredHp);
-                peerData.regenTimer -= recoveredHp;
-            }
-        } else {
-            peerData.regenTimer = 0;
-        }
-
+        // Health is replicated by the victim. Predicting regeneration here can
+        // resurrect a stale health value and makes inspection disagree with combat.
         peerData.mesh.position.lerp(peerData.targetPosition, alpha);
 
         const currentYaw = peerData.mesh.rotation.y;
