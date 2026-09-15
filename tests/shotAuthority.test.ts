@@ -85,3 +85,16 @@ test('death is consumed once per life and revival requires the next life',()=>{
     assert.ok(acceptDeath(life,4));
     assert.equal(new ShotLedger().record(fire('SNIPER'),1000,true),false);
 });
+
+test('minigun retains barrel spin across a brief trigger release, then cools down', () => {
+    const ledger = new ShotLedger();
+    ledger.updateTrigger(true, 0);
+    assert.ok(ledger.record(fire('MINIGUN', 1), 3000, false));
+    ledger.updateTrigger(false, 3100);
+    ledger.updateTrigger(true, 3200);
+    assert.ok(ledger.record(fire('MINIGUN', 2), 3200, false), 'warm barrels can resume without a fresh spinup');
+    assert.ok(ledger.record(fire('MINIGUN', 3), 3270, false), 'cadence retains the decayed ramp');
+    ledger.updateTrigger(false, 3300);
+    ledger.updateTrigger(true, 6000);
+    assert.equal(ledger.record(fire('MINIGUN', 4), 6000, false), false, 'cold barrels require spinup');
+});

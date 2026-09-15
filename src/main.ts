@@ -31,7 +31,7 @@ import {
     BORDER_PULSE_DISTANCE,
     MAX_RENDER_DISTANCE_CHUNKS
 } from './config.js';
-import { spawnParticles, updateParticles, spawnLightBeam, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
+import { spawnParticles, updateParticles, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
 import { disposeProjectiles, updateProjectiles } from './projectiles.js';
 import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer, updateHealthBar, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
@@ -41,6 +41,8 @@ import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLav
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
+    startHostMatch,
+    onMultiplayerStarted,
     disconnectMultiplayer,
     broadcastLocalJump,
     generateRoomCode,
@@ -106,7 +108,6 @@ const UI = {
     get deathOverlay() { return getUI<HTMLElement>('death-overlay'); },
     get hoverBadge() { return getUI<HTMLElement>('hover-badge'); },
     get worldBorderOverlay() { return getUI<HTMLElement>('world-border-overlay'); },
-    get inputUsername() { return getUI<HTMLInputElement>('input-username'); },
     get sensSlider() { return getUI<HTMLInputElement>('sensitivity'); },
     get sensValue() { return getUI<HTMLElement>('sens-value'); },
     get settingFov() { return getUI<HTMLInputElement>('setting-fov'); },
@@ -186,20 +187,6 @@ const joinRoomChallenge = new RoomAccessChallenge('join-room');
 
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
-
-function validateUsername(username: string | null): string | null {
-    if (!username) {
-        return 'Username cannot be empty!';
-    }
-    if (username.length > 10) {
-        return 'Username must be 10 characters or less!';
-    }
-    const lettersOnly = /^[A-Za-z]+$/;
-    if (!lettersOnly.test(username)) {
-        return 'Username must contain letters only!';
-    }
-    return null;
-}
 
 function validateRoomCode(code: string): string | null {
     if (code.length !== ROOM_CODE_LENGTH) {
@@ -399,18 +386,10 @@ function setupMenuListeners(): void {
     if (UI.btnMpHostView) {
         UI.btnMpHostView.addEventListener('click', (e) => {
             e.stopPropagation();
-            const username = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
-            const nameError = validateUsername(username);
-
-            if (nameError) {
-                if (UI.mpNameError) UI.mpNameError.innerText = nameError;
-                return;
-            }
-
             if (UI.mpNameError) UI.mpNameError.innerText = '';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'flex';
-            void beginHosting(username);
+            void beginHosting('Guest1');
         });
     }
 
@@ -429,22 +408,13 @@ function setupMenuListeners(): void {
     if (UI.btnHostStart) {
         UI.btnHostStart.addEventListener('click', (e) => {
             e.stopPropagation();
-            state.pendingPlay = true;
-            if (state.controls) beginInput();
+            if (startHostMatch() && state.controls) beginInput();
         });
     }
 
     if (UI.btnMpJoinView) {
         UI.btnMpJoinView.addEventListener('click', (e) => {
             e.stopPropagation();
-            const username = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
-            const nameError = validateUsername(username);
-
-            if (nameError) {
-                if (UI.mpNameError) UI.mpNameError.innerText = nameError;
-                return;
-            }
-
             if (UI.mpNameError) UI.mpNameError.innerText = '';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'flex';
@@ -470,13 +440,6 @@ function setupMenuListeners(): void {
     if (UI.btnJoinConnect) {
         UI.btnJoinConnect.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (UI.btnJoinConnect && UI.btnJoinConnect.dataset.connected === 'true') {
-                state.pendingPlay = true;
-                if (state.controls) beginInput();
-                return;
-            }
-
-            const username = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
             const code = UI.inputRoomCode ? UI.inputRoomCode.value.trim().toUpperCase() : '';
 
             const roomCodeError = validateRoomCode(code);
@@ -484,7 +447,7 @@ function setupMenuListeners(): void {
                 if (UI.joinErrorLog) UI.joinErrorLog.innerText = roomCodeError;
                 return;
             }
-            void beginJoining(username, code);
+            void beginJoining('Guest', code);
         });
     }
 
@@ -519,7 +482,6 @@ function setupMenuListeners(): void {
         UI.btnDeathRespawn.addEventListener('click', (e) => {
             e.stopPropagation();
             performPlayerReset();
-            if (state.controls) spawnLightBeam(state.controls.getObject().position);
 
             if (state.isThirdPerson && state.playerMesh) {
                 state.playerMesh.visible = true;
@@ -1280,11 +1242,25 @@ export function init(): void {
     // Desktop pointer lock and touch sessions share the play/pause/death UI lifecycle.
     // The callbacks are registered before match controls exist; beginInput binds
     // whichever freshly-created controls belong to the current match.
+    onMultiplayerStarted(() => {
+        // Network start cannot acquire desktop pointer lock without a user gesture.
+        // Spawn and replicate immediately; the overlay only enables local controls.
+        for (const panel of [UI.panelMain, UI.panelMp, UI.panelHostWaiting, UI.panelJoinRoom]) {
+            if (panel) panel.style.display = 'none';
+        }
+        if (UI.blocker) UI.blocker.style.display = 'flex';
+        if (UI.panelPause) UI.panelPause.style.display = 'flex';
+        if (UI.btnPauseResume) UI.btnPauseResume.innerText = 'Click to play';
+        if (UI.btnPauseSettings) UI.btnPauseSettings.hidden = true;
+        if (UI.pauseLobbyInfo) UI.pauseLobbyInfo.style.display = 'inline';
+        if (UI.pauseRoomCode) UI.pauseRoomCode.innerText = state.roomCode ?? '';
+        if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Lobby';
+    });
     onInputStarted(() => {
+        if (UI.btnPauseResume) UI.btnPauseResume.innerText = 'Resume';
         if (state.pendingPlay) {
             state.isPlaying = true;
             state.pendingPlay = false;
-            if (state.controls) spawnLightBeam(state.controls.getObject().position);
         }
         if (UI.blocker) UI.blocker.style.display = 'none';
         if (UI.panelPause) UI.panelPause.style.display = 'none';
@@ -1459,7 +1435,7 @@ export function animate(): void {
     updateHook(delta);
     updateRemotePeers(delta);
 
-    const attackerName = UI.inputUsername ? UI.inputUsername.value.trim() || 'Guest' : 'Guest';
+    const attackerName = state.username;
     updateProjectiles(delta, attackerName);
 
     updateTargets(delta);
@@ -1615,7 +1591,8 @@ export function animate(): void {
 export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {
     if (!state.isPlaying || state.playerHp <= 0) return;
 
-    state.playerHp -= damage;
+    state.playerHp = Math.max(0, state.playerHp - damage);
+    state.regenTimer = 0;
     state.lastDamageTime = performance.now();
 
     if (state.controls) {
@@ -1632,7 +1609,7 @@ export function takePlayerDamage(damage: number, attackerName: string, attackerP
         state.deaths++;
         if (UI.deaths) UI.deaths.innerText = state.deaths.toString();
 
-        const myName = UI.inputUsername ? UI.inputUsername.value.trim() : 'Guest';
+        const myName = state.username;
         const victimName = myName || 'Guest';
         broadcastPlayerDeath(victimName, attackerName, attackerPeerId ?? null);
     }

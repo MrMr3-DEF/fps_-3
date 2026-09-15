@@ -62,6 +62,13 @@ export class TurnRoomStateMachine {
         if (path === '/create-session') {
             if (!validSession(body) || !future(body.expiresAt)) return json({ error: 'Invalid room session.' }, 400);
             const sessions = Object.values(record.sessions);
+            // Guest is an allocation request; reservations are serialized with admission.
+            if (body.username === 'Guest') {
+                let number = 2;
+                while (sessions.some(s => s.username === `Guest${number}`)) number++;
+                if (number > this.maxPlayers) return json({ error: 'Room is full.' }, 409);
+                body.username = `Guest${number}`;
+            }
             if (sessions.some(s => usernameKey(s.username) === usernameKey(body.username as string))) return json({ error: 'That username is already in this lobby. Choose another name.' }, 409);
             if (sessions.some(s => s.peerId === body.peerId)) return json({ error: 'Peer is already in this lobby.' }, 409);
             if (sessions.length >= this.maxPlayers) return json({ error: 'Room is full.' }, 409);

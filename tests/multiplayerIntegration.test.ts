@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed } from '../src/world.ts';
 import { state } from '../src/state.ts';
-import { hostGame, joinGame, disconnectMultiplayer, broadcastToAll, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
+import { hostGame, joinGame, disconnectMultiplayer, broadcastToAll, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
 import { BULLET_TRAVEL_DISTANCE, PLAYER_MAX_HP, REGEN_DELAY_MS } from '../src/config.ts';
 import { Peer, Connection } from './fakePeer.ts';
 import worker, { TurnRateLimiter } from '../src/worker.ts';
@@ -55,9 +55,15 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(state.connections.length,2);assert.equal(ca.sent[0].proof,a.admissionProof);assert.equal(ca.sent[1].type,'world_snapshot');
         assert.equal(ca.sent[1].spawnHouseSlot,1);assert.equal(cb.sent[1].spawnHouseSlot,2);
         assert.equal(ca.sent[1].dayNightElapsedSeconds,137.25);
-        state.scene=new THREE.Scene();state.isPlaying=true;
+        state.scene=new THREE.Scene();
+        ca.emit('data',update('Forged'));
+        assert.equal(state.peerIds.length,0,'waiting clients cannot enter gameplay');
+        assert.equal(ca.sent[1].gameStarted,false);
+        assert.equal(startHostMatch(),true);
+        assert.equal(startHostMatch(),false,'start is idempotent');
+        assert.equal(ca.sent.filter(p=>p.type==='start_game').length,1);
         ca.emit('data',{...update('Forged'),hp:7,maxHp:PLAYER_MAX_HP});cb.emit('data',update('Other'));
-        assert.equal(cb.sent.find(p=>p.type==='update').username,'Pilot');
+        assert.equal(cb.sent.find(p=>p.type==='update'&&p.senderPeerId==='peer-a').username,'Pilot');
         assert.equal(state.peers['peer-a'].hp,7);
         assert.equal(state.peers['peer-a'].maxHp,PLAYER_MAX_HP);
         assert.equal(state.peers['peer-a'].username,'Pilot');
@@ -70,7 +76,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         ca.emit('data',{type:'fire',weapon:'SNIPER',shotId:1,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1},hitPoint:{x:4000,y:4000,z:-4000}});
         const relayedFire=cb.sent.find(p=>p.type==='fire'&&p.senderPeerId==='peer-a');
         assert.deepEqual(relayedFire.hitPoint,{x:0,y:2,z:-BULLET_TRAVEL_DISTANCE},'host clamps and aligns relayed sniper beams');
-        ca.emit('data',{type:'player_hit',shotId:1,pelletIndex:0,targetPeerId:'peer-b',damage:10,attackerName:'Forged'});
+        ca.emit('data',{type:'player_hit',targetLifeId:0,shotId:1,pelletIndex:0,targetPeerId:'peer-b',damage:10,attackerName:'Forged'});
         assert.equal(state.peers['peer-b'].hp,0,'host applies validated damage to its remote health state');
         assert.equal(state.peers['peer-b'].regenTimer,0,'confirmed damage restarts the remote regen clock');
         assert.ok(ca.sent.some(p=>p.type==='player_hit'&&p.targetPeerId==='peer-b'),'shooter receives validated health changes');
@@ -81,7 +87,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         state.playerHp=-4;sendLocalState(true);
         assert.equal(ca.sent.filter(p=>p.type==='update').at(-1).hp,0,'outbound health is clamped to its validated range');
         state.playerHp=PLAYER_MAX_HP;
-        broadcastToAll({type:'player_hit',shotId:1,pelletIndex:0,targetPeerId:'peer-a',damage:10,attackerName:'Host'});
+        broadcastToAll({type:'player_hit',targetLifeId:0,shotId:1,pelletIndex:0,targetPeerId:'peer-a',damage:10,attackerName:'Host'});
         assert.equal(state.peers['peer-a'].hp,0,'host-fired hits update the host goggles health too');
         const death={type:'player_died' as const,lifeId:0,cause:'player' as const,killerPeerId:host.id,killerName:'Host',victimName:'Pilot',victimPeerId:'peer-a'};
         ca.emit('data',death);assert.equal(state.kills,1);ca.emit('data',death);assert.equal(state.kills,1);
@@ -93,6 +99,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         const replacement=await registerTurnSession('ABCDEFGH','join-room','pilot','peer-new');
         const cc=new Connection('peer-new',{admissionToken:replacement.admissionToken});
         host.emit('connection',cc);await tick();await tick();
+        assert.equal(cc.sent[1].gameStarted,true,'late join snapshot carries match start');
         assert.equal(cc.sent[1].spawnHouseSlot,1,'reuse the departed house without shifting the remaining player');
         assert.equal(cb.sent.filter(p=>p.type==='world_snapshot').length,1);
         disconnectMultiplayer();state.scene=null;
@@ -110,11 +117,11 @@ test('client rejects host without proof and applies kills while waiting to play'
     const host=await response.json() as any;
     try{
         await joinGame('Pilot','ABCDEFGH','join-room');let peer=Peer.latest;peer.emit('open',peer.id);let conn=peer.connections['testfps-room-ABCDEFGH'][0];
-        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:0,targets:[]});assert.equal(state.isMultiplayer,false);
+        conn.emit('data',{type:'world_snapshot',gameStarted:false,username:'Guest3',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:0,targets:[]});assert.equal(state.isMultiplayer,false);
         await joinGame('Pilot','ABCDEFGH','join-room');peer=Peer.latest;peer.emit('open',peer.id);conn=peer.connections['testfps-room-ABCDEFGH'][0];
         const admitted=await fetch('/api/room-admissions/ABCDEFGH',{method:'POST',headers:{Authorization:`Bearer ${host.closeToken}`},body:JSON.stringify({peerId:peer.id,admissionToken:(conn.metadata as any).admissionToken})});
         const admission=await admitted.json() as any;conn.emit('data',{type:'admission',proof:admission.admissionProof});
-        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:42,targets:[]});
+        conn.emit('data',{type:'world_snapshot',gameStarted:false,username:'Guest3',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:42,targets:[]});
         assert.equal(state.isPlaying,false);
         assert.equal(state.dayNightElapsedSeconds,42);
         assert.equal(state.dayNightSyncImmediate,true);
@@ -123,7 +130,7 @@ test('client rejects host without proof and applies kills while waiting to play'
         const spawn=getTownSpawn(1,'house',2);
         assert.deepEqual(state.camera!.position.toArray(),[spawn.x,2,spawn.z]);
         state.camera!.position.x+=3;
-        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:1,seed:99,score:0,dayNightElapsedSeconds:0,targets:[]});
+        conn.emit('data',{type:'world_snapshot',gameStarted:false,username:'Guest3',spawnHouseSlot:1,seed:99,score:0,dayNightElapsedSeconds:0,targets:[]});
         assert.equal(state.camera!.position.x,spawn.x+3,'duplicate snapshots cannot teleport an existing player');
         const target=new THREE.Group();target.userData={scale:1,index:0,bodyMesh:new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial()),healthBarFg:new THREE.Mesh(),healthBarGroup:new THREE.Group()};state.targets=[target];
         state.hookState='FIRING';state.hookIsEnemy=true;state.hookWillHit=true;state.hookTargetEnemy=target;
@@ -133,6 +140,21 @@ test('client rejects host without proof and applies kills while waiting to play'
         assert.equal(state.hookState,'IDLE');assert.equal(state.hookTargetEnemy,null);
         assert.equal(state.score,7);assert.equal(target.position.x,50);assert.equal(target.userData.hp,3);
         state.targets=[];
+        state.scene=new THREE.Scene();
+        conn.emit('data',{type:'start_game'});
+        assert.equal(state.isPlaying,true,'host starts a client without pointer lock');
+        assert.equal(state.username,'Guest3');
+        const life=state.lifeId;
+        conn.emit('data',{type:'start_game'});
+        assert.equal(state.lifeId,life,'duplicate start never respawns');
+        conn.emit('data',update('Host'));
+        conn.emit('data',{type:'player_died',lifeId:0,cause:'lava',killerPeerId:null,victimName:'Host',killerName:'Lava'});
+        conn.emit('data',update('Host'));
+        assert.equal(state.peers[conn.peer].mesh.visible,false,'queued living updates cannot resurrect a dead avatar');
+        conn.emit('data',update('Host',1));
+        assert.equal(state.peers[conn.peer].mesh.visible,true);
+        conn.emit('data',{type:'player_hit',targetLifeId:0,shotId:3,pelletIndex:0,targetPeerId:conn.peer,damage:10,attackerName:'Guest2'});
+        assert.equal(state.peers[conn.peer].hp,PLAYER_MAX_HP,'late damage cannot harm a new life');
     }finally{disconnectMultiplayer();}
 });
 

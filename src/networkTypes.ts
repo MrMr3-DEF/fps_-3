@@ -79,6 +79,7 @@ export interface PlayerHitPacket {
     pelletIndex: number;
     senderPeerId?: string;
     targetPeerId: string;
+    targetLifeId: number;
     damage: number;
     attackerName: string;
 }
@@ -117,6 +118,8 @@ export interface TargetStatePacket extends TargetState {
 /** Sent by the host as soon as a client data channel opens. */
 export interface WorldSnapshotPacket {
     type: 'world_snapshot';
+    gameStarted: boolean;
+    username: string;
     senderPeerId?: string;
     seed: number;
     spawnHouseSlot: number;
@@ -128,6 +131,7 @@ export interface WorldSnapshotPacket {
 export interface PeerLeftPacket { type: 'peer_left'; peerId: string; senderPeerId?: string; }
 
 export type NetworkPacket =
+    | { type: 'start_game'; senderPeerId?: string }
     | PeerLeftPacket
     | UpdatePacket
     | FirePacket
@@ -242,7 +246,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 ? value as unknown as KillTargetPacket : null;
 
         case 'player_hit':
-            return isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, 4) && isPeerId(value.targetPeerId) && isFiniteNumber(value.damage, 0.01, 100) &&
+            return isInteger(value.targetLifeId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, 4) && isPeerId(value.targetPeerId) && isFiniteNumber(value.damage, 0.01, 100) &&
                 isUsername(value.attackerName) ? value as unknown as PlayerHitPacket : null;
 
         case 'player_died':
@@ -251,6 +255,9 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 (value.killerName === 'Lava' || isUsername(value.killerName)) &&
                 (value.victimPeerId === undefined || isPeerId(value.victimPeerId))
                 ? value as unknown as PlayerDiedPacket : null;
+
+        case 'start_game':
+            return value as unknown as NetworkPacket;
 
         case 'peer_left':
             return isPeerId(value.peerId) ? value as unknown as PeerLeftPacket : null;
@@ -262,7 +269,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
             return isTargetState(value) ? value as unknown as TargetStatePacket : null;
 
         case 'world_snapshot':
-            if (!isInteger(value.seed, 0, 0xffffffff) || !isInteger(value.score, 0, Number.MAX_SAFE_INTEGER) ||
+            if (typeof value.gameStarted !== 'boolean' || !isUsername(value.username) || !isInteger(value.seed, 0, 0xffffffff) || !isInteger(value.score, 0, Number.MAX_SAFE_INTEGER) ||
                 !isInteger(value.spawnHouseSlot, 1, MAX_PLAYERS - 1) ||
                 !isFiniteNumber(value.dayNightElapsedSeconds, 0, MAX_DAY_NIGHT_ELAPSED_SECONDS) ||
                 !Array.isArray(value.targets) || value.targets.length > MAX_TARGETS_IN_SNAPSHOT ||

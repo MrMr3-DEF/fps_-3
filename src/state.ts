@@ -21,6 +21,8 @@ export interface DataConnectionLike {
 }
 
 export interface PeerData {
+    lifeId?: number;
+    deathReported?: boolean;
     /** Verified lobby identity used by world labels and smart-goggles scans. */
     username: string;
     mesh: THREE.Group;
@@ -45,6 +47,7 @@ export interface PeerData {
 }
 
 export interface GameState {
+    username: string;
     moveForward: boolean;
     moveBackward: boolean;
     moveLeft: boolean;
@@ -132,6 +135,7 @@ export interface GameState {
 }
 
 export const state: GameState = {
+    username: 'Guest1',
     // Input flags consumed by the physics loop.
     moveForward: false,
     moveBackward: false,

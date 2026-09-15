@@ -8,7 +8,7 @@ import { isCapability, isUsername } from './roomIdentity.js';
 import * as THREE from 'three';
 import { state, resetPlayerState, resetMatchStats, type DataConnectionLike, type PeerData } from './state.js';
 import { placePlayerAtTownSpawn } from './playerSpawn.js';
-import { disposeParticles, spawnParticles, createLaserBeam, spawnLightBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
+import { disposeParticles, spawnParticles, createLaserBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
 import {
     generateWorldSeed,
     getWorldSeed,
@@ -100,7 +100,6 @@ export interface PeerJSConfig {
 
 // Lazily cached menu/HUD elements touched by networking callbacks.
 const UI = {
-    inputUsername: null as HTMLInputElement | null,
     hostLobbyStatus: null as HTMLElement | null,
     btnHostStart: null as HTMLButtonElement | null,
     joinErrorLog: null as HTMLElement | null,
@@ -114,7 +113,6 @@ const UI = {
 };
 
 const DOM = {
-    inputUsername: () => (UI.inputUsername || (UI.inputUsername = document.getElementById('input-username') as HTMLInputElement | null)),
     hostLobbyStatus: () => (UI.hostLobbyStatus || (UI.hostLobbyStatus = document.getElementById('host-lobby-status'))),
     btnHostStart: () => (UI.btnHostStart || (UI.btnHostStart = document.getElementById('btn-host-start') as HTMLButtonElement | null)),
     joinErrorLog: () => (UI.joinErrorLog || (UI.joinErrorLog = document.getElementById('join-error-log'))),
@@ -127,13 +125,32 @@ const DOM = {
     crosshair: () => (UI.crosshair || (UI.crosshair = document.getElementById('crosshair'))),
 };
 
-let cachedUsername = 'Guest';
+let cachedUsername = 'Guest1';
+const matchStartListeners = new Set<() => void>();
+export function onMultiplayerStarted(listener: () => void): void { matchStartListeners.add(listener); }
+
+function enterMultiplayerMatch(): void {
+    if (state.isPlaying) return;
+    state.isPlaying = true;
+    state.pendingPlay = false;
+    state.prevTime = performance.now();
+    sendLocalState(true);
+    for (const listener of matchStartListeners) listener();
+}
+
+export function startHostMatch(): boolean {
+    if (!state.isMultiplayer || !state.isHost || !state.peer || state.isPlaying) return false;
+    broadcastToAll({ type: 'start_game' });
+    enterMultiplayerMatch();
+    return true;
+}
 
 // Slot zero belongs to the host. Keep assignments stable when other peers leave.
 const spawnHouseSlots = new Map<string, number>();
 
 function setCachedUsername(username: string): void {
-    cachedUsername = username.trim() || 'Guest';
+    cachedUsername = username.trim() || 'Guest1';
+    state.username = cachedUsername;
 }
 
 // Secure rooms supply their own short-lived STUN/TURN configuration. There is
@@ -319,11 +336,11 @@ function setJoinReady(ready: boolean, message?: string): void {
 
     const btnJoinConnect = DOM.btnJoinConnect();
     if (!btnJoinConnect) return;
-    btnJoinConnect.disabled = !ready;
+    btnJoinConnect.disabled = true;
     if (ready) {
-        btnJoinConnect.innerText = 'Join Game';
+        btnJoinConnect.innerText = 'Waiting for host…';
         btnJoinConnect.style.background = 'linear-gradient(135deg, #2ed573, #26af5f)';
-        btnJoinConnect.dataset.connected = 'true';
+        btnJoinConnect.removeAttribute('data-connected');
     } else {
         btnJoinConnect.innerText = 'Synchronizing world...';
         btnJoinConnect.style.background = '';
@@ -389,6 +406,8 @@ function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): vo
     }
     const packet: WorldSnapshotPacket = {
         type: 'world_snapshot',
+        gameStarted: state.isPlaying,
+        username: admittedNames.get(conn.peer)!,
         senderPeerId: state.peer?.id,
         seed: getWorldSeed(),
         spawnHouseSlot,
@@ -431,7 +450,9 @@ function applyWorldSnapshot(packet: WorldSnapshotPacket): void {
     setScore(packet.score);
     clientWorldSynchronized = true;
     clearWorldSyncTimeout();
-    setJoinReady(true, 'World synchronized. Ready to join!');
+    setCachedUsername(packet.username);
+    setJoinReady(true, `You are ${packet.username}. Waiting for the host to start the game…`);
+    if (packet.gameStarted) enterMultiplayerMatch();
 }
 
 function isExpectedHost(fromPeerId: string): boolean {
@@ -1015,7 +1036,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     if (packet.type === 'player_hit') {
         const targetsHost = packet.targetPeerId === state.peer?.id;
         const targetPosition = getPeerHitPosition(packet.targetPeerId);
-        if (packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition ||
+        if (packet.targetLifeId !== (targetsHost ? state.lifeId : getPeerRuntime(packet.targetPeerId)?.lifeId)) return null;
+        if ((targetsHost ? state.playerHp <= 0 : getPeerRuntime(packet.targetPeerId)?.wasDead !== false) || packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition ||
             !runtime.shots.consume(packet.shotId, packet.pelletIndex, targetPosition, PLAYER_HIT_RANGE + 0.8, packet.damage, now, shotIsBlocked) || !allowHit(runtime, now)) return null;
         lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: fromPeerId, at: now });
         return { ...packet, senderPeerId: fromPeerId, attackerName: runtime.username };
@@ -1029,8 +1051,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             if (!latestDamage || now - latestDamage.at > 10000) return null;
             killerPeerId = latestDamage.attackerPeerId;
             const name = killerPeerId === state.peer?.id ? getCachedUsername() : admittedNames.get(killerPeerId);
-            if (!name) return null;
-            killerName = name;
+            // A killer leaving before the death report must not block the victim's next life.
+            killerName = name ?? 'Guest';
         }
         if (!acceptDeath(runtime, packet.lifeId)) return null;
         runtime.shots.reset();
@@ -1083,6 +1105,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
 
     let msg: NetworkPacket = parsed;
     if (state.isHost) {
+        if (!state.isPlaying) return;
         const authorized = authorizeClientPacket(fromPeerId, parsed);
         if (!authorized) return;
         msg = authorized;
@@ -1095,6 +1118,10 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         }
     } else {
         if (!isExpectedHost(fromPeerId)) return;
+        if (msg.type === 'start_game') {
+            if (clientWorldSynchronized) enterMultiplayerMatch();
+            return;
+        }
         if (msg.type === 'peer_left') { removePeer(msg.peerId); return; }
         if (msg.type === 'world_snapshot') {
             if (clientWorldSynchronized) return;
@@ -1128,6 +1155,12 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             justJoined = true;
         }
 
+        // Relayed movement may have been queued before a death notification.
+        // It must not resurrect the old life or overwrite a newer spawn.
+        if (peerData.lifeId !== undefined && (msg.lifeId < peerData.lifeId ||
+            (msg.lifeId === peerData.lifeId && peerData.deathReported && !msg.isDead))) return;
+        if (msg.lifeId !== peerData.lifeId) peerData.deathReported = false;
+        peerData.lifeId = msg.lifeId;
         const previousHp = peerData.hp;
         peerData.hp = msg.hp;
         peerData.maxHp = msg.maxHp;
@@ -1154,7 +1187,6 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         } else {
             if (justJoined) {
                 peerData.mesh.visible = true;
-                spawnLightBeam(peerData.mesh.position);
             } else if (peerData.mesh.visible === false) {
                 // A new life starts at a spawn, not along an interpolation path
                 // from the previous death position. This also gives the HUD one
@@ -1162,7 +1194,6 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
                 peerData.mesh.position.copy(peerData.targetPosition);
                 peerData.mesh.rotation.y = msg.yaw;
                 peerData.mesh.visible = true;
-                spawnLightBeam(peerData.mesh.position);
             }
 
             if (msg.isHovering) {
@@ -1225,7 +1256,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             peerData.minigunMesh.userData.barrels.rotation.z += spinSpeed * dt;
         }
 
-        if (msg.hookState !== 'IDLE' && msg.hookPos) {
+        if (!msg.isDead && msg.hookState !== 'IDLE' && msg.hookPos) {
             if (!peerData.hookLine) {
                 peerData.hookLine = new THREE.Mesh(SHARED_HOOK_GEO, SHARED_HOOK_MAT);
                 peerData.hookLine.castShadow = true;
@@ -1300,21 +1331,26 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         }
     } else if (msg.type === 'player_hit') {
         const targetPeer = state.peers[msg.targetPeerId];
-        if (targetPeer) {
+        if (targetPeer && targetPeer.lifeId === msg.targetLifeId) {
             // Apply the host-validated hit on every observer immediately. The
             // victim's following update packet reconciles this predicted value.
             applyConfirmedPeerDamage(targetPeer, msg.damage, performance.now());
             flashPeerMesh(targetPeer, 0xff3333, 150);
         }
-        if (state.peer && msg.targetPeerId === state.peer.id) {
+        if (state.peer && msg.targetPeerId === state.peer.id && msg.targetLifeId === state.lifeId) {
             takePlayerDamage(msg.damage, msg.attackerName, senderId);
         }
     } else if (msg.type === 'player_died') {
         const victimPeer = state.peers[msg.victimPeerId || senderId];
+        if (victimPeer && victimPeer.lifeId !== undefined && msg.lifeId < victimPeer.lifeId) return;
+        if (victimPeer?.deathReported && msg.lifeId === victimPeer.lifeId) return;
         if (victimPeer && victimPeer.mesh) {
+            victimPeer.lifeId = msg.lifeId;
+            victimPeer.deathReported = true;
             victimPeer.hp = 0;
             spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
             victimPeer.mesh.visible = false;
+            if (victimPeer.hookLine) victimPeer.hookLine.visible = false;
         }
 
         if (msg.cause === 'player' && msg.killerPeerId === state.peer?.id) {

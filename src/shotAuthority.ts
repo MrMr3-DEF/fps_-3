@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS } from './config.js';
+import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM } from './config.js';
 import { segmentSphereHitT } from './gameplayMath.js';
 import type { FirePacket, WeaponName } from './networkTypes.js';
 
@@ -16,20 +16,27 @@ export class ShotLedger {
     private shots = new Map<number, Shot>();
     private lastFireAt = -Infinity;
     private lastShotId = -1;
-    private triggerStartedAt = 0;
+    private triggerUpdatedAt: number | null = null;
+    private triggerRampMs = 0;
     private triggerHeld = false;
     updateTrigger(held: boolean, now: number): void {
-        if (held && !this.triggerHeld) this.triggerStartedAt = now;
+        if (this.triggerUpdatedAt !== null) {
+            const elapsed = Math.max(0, now - this.triggerUpdatedAt);
+            this.triggerRampMs = THREE.MathUtils.clamp(this.triggerRampMs + elapsed * (this.triggerHeld ? 1 : -2),
+                0, MINIGUN_RAMP_TIME * 1000);
+        }
+        this.triggerUpdatedAt = now;
         this.triggerHeld = held;
     }
-    reset(): void { this.shots.clear(); this.lastFireAt = -Infinity; this.triggerHeld = false; }
+    reset(): void { this.shots.clear(); this.lastFireAt = -Infinity; this.triggerHeld = false; this.triggerRampMs = 0; this.triggerUpdatedAt = null; }
     record(packet: FirePacket, now: number, dead: boolean): boolean {
         const stats = WEAPON_STATS[packet.weapon];
         let interval = stats.fireRate * 1000;
         if (packet.weapon === 'MINIGUN') {
-            if (!this.triggerHeld || now - this.triggerStartedAt < 300) return false;
-            const t = Math.min(1, (now - this.triggerStartedAt) / 3000);
-            interval = 60_000 / (50 + 950 * t);
+            this.updateTrigger(this.triggerHeld, now);
+            if (!this.triggerHeld || this.triggerRampMs < MINIGUN_SHOOT_DELAY * 1000) return false;
+            const t = this.triggerRampMs / (MINIGUN_RAMP_TIME * 1000);
+            interval = 60_000 / (MINIGUN_MIN_RPM + (MINIGUN_MAX_RPM - MINIGUN_MIN_RPM) * t);
         }
         // A small fixed jitter allowance cannot multiply the permitted cadence.
         if (dead || packet.shotId <= this.lastShotId || now - this.lastFireAt < interval - Math.min(15, interval * 0.1)) return false;

@@ -87,7 +87,7 @@ function releaseShockwaveMaterial(mat: THREE.MeshBasicMaterial): void {
     }
 }
 
-export type ParticleKind = 'spark' | 'sniper-trail' | 'shockwave' | 'lightbeam' | 'rocket-flame' | 'maneuvering';
+export type ParticleKind = 'spark' | 'sniper-trail' | 'shockwave' | 'rocket-flame' | 'maneuvering';
 
 export interface Particle {
     kind: ParticleKind;
@@ -105,14 +105,6 @@ export interface Particle {
     color?: number;
     targetScale?: number;
 }
-
-const SHARED_BEAM_GEO = new THREE.CylinderGeometry(2.5, 2.5, 120, 16);
-const SHARED_BEAM_MAT = new THREE.MeshBasicMaterial({
-    color: 0x00aaff,
-    transparent: true,
-    opacity: 0.8,
-    side: THREE.DoubleSide
-});
 
 function isBoxParticle(kind: ParticleKind): boolean {
     return kind === 'spark' || kind === 'rocket-flame' || kind === 'maneuvering';
@@ -209,27 +201,6 @@ export function createLaserBeam(startPos: THREE.Vector3, endPos: THREE.Vector3, 
     });
 }
 
-export function spawnLightBeam(position: THREE.Vector3): void {
-    if (availableParticleSlots() <= 0 || !state.scene) return;
-
-    const beamHeight = 120;
-    const beam = new THREE.Mesh(SHARED_BEAM_GEO, SHARED_BEAM_MAT);
-    beam.position.set(position.x, beamHeight / 2, position.z);
-
-    state.scene.add(beam);
-
-    const maxLife = 1.2;
-    state.activeParticles.push({
-        mesh: beam,
-        kind: 'lightbeam',
-        life: maxLife,
-        maxLife
-    });
-
-    _instancePosition.set(position.x, 0.5, position.z);
-    spawnParticles(_instancePosition, 0x00aaff, 20, 14.0, 0.4, -6.0);
-}
-
 function releaseMeshParticle(p: Particle): void {
     if (!p.mesh || !state.scene) return;
 
@@ -312,9 +283,7 @@ export function updateParticles(delta: number): void {
             const currentScale = 1.0 + (p.targetScale! - 1.0) * (1.0 - ratio);
             p.mesh.scale.setScalar(currentScale);
             (p.mesh.material as THREE.MeshBasicMaterial).opacity = ratio * 0.7;
-        } else if (p.mesh && p.kind === 'lightbeam') {
-            p.mesh.scale.x = ratio;
-            p.mesh.scale.z = ratio;
+
         }
     }
 

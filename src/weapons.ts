@@ -1,3 +1,5 @@
+import { segmentSphereHitT } from './gameplayMath.js';
+import { PLAYER_HIT_RANGE } from './config.js';
 import { characterColor } from './appearance.js';
 import { isInputActive } from './inputSession.js';
 import { spreadDirection } from './shotAuthority.js';
@@ -56,7 +58,6 @@ const SHARED_GEOMETRIES = new Set<THREE.BufferGeometry>([
     SHARED_VISOR_GEO,
     SHARED_VISOR_STRIP_GEO
 ]);
-let inputUsernameEl: HTMLInputElement | null = null;
 
 export function isSharedGeometry(geometry: THREE.BufferGeometry): boolean {
     return SHARED_GEOMETRIES.has(geometry);
@@ -520,14 +521,13 @@ export function fireProjectile(): void {
             for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
                 const peerData = state.peers[peerId];
-                if (peerData && peerData.mesh) {
-                    const peerHits = _raycaster.intersectObject(peerData.mesh, true);
-                    if (peerHits.length > 0) {
-                        const dist = peerHits[0].distance;
-                        if (dist < closestPeerDist) {
-                            closestPeerDist = dist;
-                            pvpPeerId = peerId;
-                        }
+                if (peerData?.mesh.visible && peerData.hp > 0) {
+                    // Use the same body hit volume as bullets; labels and guns are not hitboxes.
+                    const hit = segmentSphereHitT(barrelWorldPosition, _rayEnd, peerData.mesh.position,
+                        PLAYER_HIT_RANGE + PROJECTILE_RADIUS);
+                    if (hit !== null && hit * BULLET_TRAVEL_DISTANCE < closestPeerDist) {
+                        closestPeerDist = hit * BULLET_TRAVEL_DISTANCE;
+                        pvpPeerId = peerId;
                     }
                 }
             }
@@ -574,11 +574,11 @@ export function fireProjectile(): void {
             broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed);
             sniperFireBroadcast = true;
 
-            if (!inputUsernameEl) inputUsernameEl = document.getElementById('input-username') as HTMLInputElement | null;
-            const attackerName = inputUsernameEl ? inputUsernameEl.value.trim() || 'Guest' : 'Guest';
+            const attackerName = state.username;
             const packet: PlayerHitPacket = {
                 type: 'player_hit', shotId, pelletIndex: 0,
                 targetPeerId: pvpPeerId,
+                targetLifeId: peerData?.lifeId ?? 0,
                 damage: stats.damage,
                 attackerName: attackerName
             };

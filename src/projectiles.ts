@@ -31,7 +31,7 @@ function broadcastHitTarget(targetIndex: number, damage: number, shotId: number,
     broadcastToAll({ type: 'hit_target', targetIndex, damage, shotId, pelletIndex } satisfies HitTargetPacket);
 }
 function broadcastPlayerHit(peerId: string, damage: number, attackerName: string, shotId: number, pelletIndex: number): void {
-    broadcastToAll({ type: 'player_hit', targetPeerId: peerId, damage, attackerName, shotId, pelletIndex } satisfies PlayerHitPacket);
+    broadcastToAll({ type: 'player_hit', targetPeerId: peerId, targetLifeId: state.peers[peerId]?.lifeId ?? 0, damage, attackerName, shotId, pelletIndex } satisfies PlayerHitPacket);
 }
 
 function retireProjectile(index: number, projectile: THREE.Object3D): void {
@@ -145,7 +145,7 @@ export function updateProjectiles(delta: number, attackerName: string): void {
             for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
                 const peerData = state.peers[peerId];
-                if (peerData?.mesh && peerData.mesh.visible) {
+                if (peerData?.mesh && peerData.mesh.visible && peerData.hp > 0) {
                     const hitT = segmentSphereHitT(
                         _segmentStart,
                         _segmentEnd,

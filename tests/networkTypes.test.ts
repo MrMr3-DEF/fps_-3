@@ -48,7 +48,7 @@ test('network parser rejects malformed vectors and unsupported weapons', () => {
 
 test('network parser bounds target snapshots and validates target state', () => {
     const snapshot = parseNetworkPacket({
-        type: 'world_snapshot',
+        type: 'world_snapshot', gameStarted: false, username: 'Guest3',
         spawnHouseSlot: 1,
         seed: 42,
         score: 3,
@@ -65,7 +65,7 @@ test('network parser bounds target snapshots and validates target state', () => 
     assert.equal(snapshot?.type, 'world_snapshot');
 
     assert.equal(parseNetworkPacket({
-        type: 'world_snapshot',
+        type: 'world_snapshot', gameStarted: false, username: 'Guest3',
         spawnHouseSlot: 1,
         seed: -1,
         score: 0,
@@ -91,7 +91,7 @@ test('avatar colors accept only optional 24-bit integers', () => {
 });
 
 test('world snapshots require a valid client house assignment', () => {
-    const snapshot = { type: 'world_snapshot', seed: 42, score: 0, dayNightElapsedSeconds: 0, targets: [] };
+    const snapshot = { type: 'world_snapshot', gameStarted: false, username: 'Guest3', seed: 42, score: 0, dayNightElapsedSeconds: 0, targets: [] };
     for (const spawnHouseSlot of [undefined, null, -1, 0, 1.5, 5, '2']) {
         assert.equal(parseNetworkPacket({ ...snapshot, spawnHouseSlot }), null);
     }
@@ -106,6 +106,14 @@ test('network parser validates synchronized day/night clocks', () => {
         assert.equal(parseNetworkPacket({ ...validUpdate, dayNightElapsedSeconds }), null);
     }
     assert.equal(parseNetworkPacket({
-        type: 'world_snapshot', spawnHouseSlot: 1, seed: 42, score: 0, targets: [],
+        type: 'world_snapshot', gameStarted: false, username: 'Guest3', spawnHouseSlot: 1, seed: 42, score: 0, targets: [],
     }), null);
+});
+
+test('player hits require the victim life to prevent damage leaking across respawns', () => {
+    const hit = { type: 'player_hit', shotId: 1, pelletIndex: 0, targetPeerId: 'peer-a', damage: 1, attackerName: 'Guest2' };
+    for (const targetLifeId of [undefined, -1, 0.5, '1']) {
+        assert.equal(parseNetworkPacket({ ...hit, targetLifeId }), null);
+    }
+    assert.equal(parseNetworkPacket({ ...hit, targetLifeId: 7 })?.type, 'player_hit');
 });

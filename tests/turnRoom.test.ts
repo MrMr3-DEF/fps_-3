@@ -110,3 +110,17 @@ test('expired relay lease does not free an admitted player name while room is al
     await call(room,'/heartbeat',{closeToken:cap('X'),expiresAt:now+1800_000,peerIds:[]});
     assert.equal((await call(room,'/claim-credential',{turnSessionToken:cap('h'),ip:'127.0.0.1'})).status,200);
 });
+
+test('concurrent guest reservations assign Guest2 through Guest5 and reuse a released name', async () => {
+    const storage = new MemoryStorage();
+    const room = new TurnRoomStateMachine({ storage }, 5);
+    assert.equal((await call(room, '/register', { ...fields('h', 'Guest1'), closeToken: cap('X'),
+        expiresAt: Date.now() + 1800_000, sessionExpiresAt: Date.now() + 300_000 })).status, 201);
+    const responses = await Promise.all(['a', 'b', 'c', 'd'].map(c => call(room, '/create-session', fields(c, 'Guest'))));
+    assert.ok(responses.every(r => r.status === 201));
+    const sessions = (await storage.get<any>('room')).sessions;
+    assert.deepEqual(Object.values(sessions).map((s: any) => s.username).sort(), ['Guest1', 'Guest2', 'Guest3', 'Guest4', 'Guest5']);
+    await call(room, '/release-session', { turnSessionToken: cap('b') });
+    assert.equal((await call(room, '/create-session', fields('e', 'Guest'))).status, 201);
+    assert.equal((await storage.get<any>('room')).sessions[cap('e')].username, sessions[cap('b')].username);
+});
