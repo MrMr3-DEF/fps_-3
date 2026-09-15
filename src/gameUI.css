@@ -871,6 +871,10 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     will-change: transform, text-shadow;
 }
 
+.goggles-target-identifier.is-corrupted {
+    --goggles-corrupt-y: calc(-100% - 7px);
+}
+
 @keyframes goggles-target-warning {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.72; }
@@ -925,9 +929,18 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 @keyframes goggles-target-corrupted-health {
-    0%, 38%, 100% { transform: translateX(0); text-shadow: 0 0 5px currentColor; }
-    39% { transform: translateX(2px); text-shadow: -2px 0 #ff59ca, 2px 0 #55e7ff; }
-    61% { transform: translateX(-1px); text-shadow: 2px 0 #ff59ca, -1px 0 #55e7ff; }
+    0%, 38%, 100% {
+        transform: translate(0, var(--goggles-corrupt-y, 0));
+        text-shadow: 0 0 5px currentColor;
+    }
+    39% {
+        transform: translate(2px, var(--goggles-corrupt-y, 0));
+        text-shadow: -2px 0 #ff59ca, 2px 0 #55e7ff;
+    }
+    61% {
+        transform: translate(-1px, var(--goggles-corrupt-y, 0));
+        text-shadow: 2px 0 #ff59ca, -1px 0 #55e7ff;
+    }
 }
 
 @keyframes goggles-tv-off {
