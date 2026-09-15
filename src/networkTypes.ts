@@ -36,6 +36,8 @@ export interface UpdatePacket {
     hoverKeys: HoverKeysPacket | null;
     hp: number;
     maxHp: number;
+    /** Present only on host-originated updates. */
+    dayNightElapsedSeconds?: number;
 }
 
 export interface FirePacket {
@@ -119,6 +121,7 @@ export interface WorldSnapshotPacket {
     seed: number;
     spawnHouseSlot: number;
     score: number;
+    dayNightElapsedSeconds: number;
     targets: TargetState[];
 }
 
@@ -138,6 +141,7 @@ export type NetworkPacket =
 
 const MAX_PACKET_POSITION = 5000;
 const MAX_TARGETS_IN_SNAPSHOT = 512;
+const MAX_DAY_NIGHT_ELAPSED_SECONDS = 24 * 60 * 60;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
@@ -209,6 +213,11 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 typeof value.isHovering !== 'boolean' ||
                 !(value.hookPos === null || isVec3(value.hookPos)) ||
                 !(value.hoverKeys === null || isHoverKeys(value.hoverKeys)) ||
+                !(value.dayNightElapsedSeconds === undefined || isFiniteNumber(
+                    value.dayNightElapsedSeconds,
+                    0,
+                    MAX_DAY_NIGHT_ELAPSED_SECONDS,
+                )) ||
                 !isPlayerHealth(value)) return null;
             return value as unknown as UpdatePacket;
 
@@ -255,6 +264,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
         case 'world_snapshot':
             if (!isInteger(value.seed, 0, 0xffffffff) || !isInteger(value.score, 0, Number.MAX_SAFE_INTEGER) ||
                 !isInteger(value.spawnHouseSlot, 1, MAX_PLAYERS - 1) ||
+                !isFiniteNumber(value.dayNightElapsedSeconds, 0, MAX_DAY_NIGHT_ELAPSED_SECONDS) ||
                 !Array.isArray(value.targets) || value.targets.length > MAX_TARGETS_IN_SNAPSHOT ||
                 !value.targets.every(isTargetState)) return null;
             return value as unknown as WorldSnapshotPacket;

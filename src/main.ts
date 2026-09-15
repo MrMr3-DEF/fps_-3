@@ -1398,7 +1398,21 @@ export function animate(): void {
     finishGogglesShutdown(state.gogglesFailure, time);
     refreshScopedState();
     syncGogglesFailureVisuals();
-    const lanternStrength = dayNightCycle?.update(state.isPlaying ? delta : 0, state.camera.position) ?? 0;
+    if (dayNightCycle && state.dayNightSyncPending) {
+        dayNightCycle.synchronizeElapsedSeconds(
+            state.dayNightElapsedSeconds,
+            state.dayNightSyncImmediate,
+        );
+        state.dayNightSyncPending = false;
+        state.dayNightSyncImmediate = false;
+    }
+    // A multiplayer room owns one continuous clock, including while an
+    // individual player is still in the lobby or has released mouse capture.
+    const lanternStrength = dayNightCycle?.update(
+        state.isPlaying || state.isMultiplayer ? delta : 0,
+        state.camera.position,
+    ) ?? 0;
+    if (dayNightCycle) state.dayNightElapsedSeconds = dayNightCycle.elapsedTimeSeconds;
     if (state.camera) {
         updateTownLanterns(time / 1000, lanternStrength);
         updateLavaLights(time / 1000, state.camera.position, lanternStrength, userSettings.lavaGlow);

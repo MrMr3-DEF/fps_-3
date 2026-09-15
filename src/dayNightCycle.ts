@@ -88,6 +88,10 @@ export class DayNightCycle {
     private readonly directionScratch = new THREE.Vector3();
     private elapsedSeconds = 0;
 
+    get elapsedTimeSeconds(): number {
+        return this.elapsedSeconds;
+    }
+
     constructor(scene: THREE.Scene, options: DayNightCycleOptions) {
         this.scene = scene;
         this.skyColor = scene.background instanceof THREE.Color ? scene.background : new THREE.Color();
@@ -152,6 +156,17 @@ export class DayNightCycle {
 
         this.sunLight.castShadow = options.shadows;
         shadow.needsUpdate = options.shadows;
+    }
+
+    /** Align to the host clock, ignoring tiny packet-latency differences. */
+    synchronizeElapsedSeconds(elapsedSeconds: number, immediate = false): void {
+        if (!Number.isFinite(elapsedSeconds)) return;
+        const target = positiveModulo(elapsedSeconds, DAY_NIGHT_CYCLE_SECONDS);
+        const difference = positiveModulo(
+            target - this.elapsedSeconds + DAY_NIGHT_CYCLE_SECONDS / 2,
+            DAY_NIGHT_CYCLE_SECONDS,
+        ) - DAY_NIGHT_CYCLE_SECONDS / 2;
+        if (immediate || Math.abs(difference) > 0.25) this.elapsedSeconds = target;
     }
 
     update(deltaSeconds: number, observerPosition: THREE.Vector3): number {

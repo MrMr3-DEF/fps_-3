@@ -43,6 +43,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
     state.camera=new THREE.PerspectiveCamera();state.controls={getObject:()=>state.camera,unlock:()=>{}} as any;
     try {
         await hostGame('Host','ABCDEFGH','create-room');const host=Peer.latest;
+        state.dayNightElapsedSeconds=137.25;
         const hostSpawn=getTownSpawn(getWorldSeed(),'house');
         assert.deepEqual(state.camera!.position.toArray(),[hostSpawn.x,2,hostSpawn.z]);
         const denied=new Connection('intruder');host.emit('connection',denied);await tick();assert.equal(denied.open,false);assert.equal(denied.sent.length,0);
@@ -53,6 +54,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         host.emit('connection',ca);host.emit('connection',cb);await tick();await tick();
         assert.equal(state.connections.length,2);assert.equal(ca.sent[0].proof,a.admissionProof);assert.equal(ca.sent[1].type,'world_snapshot');
         assert.equal(ca.sent[1].spawnHouseSlot,1);assert.equal(cb.sent[1].spawnHouseSlot,2);
+        assert.equal(ca.sent[1].dayNightElapsedSeconds,137.25);
         state.scene=new THREE.Scene();state.isPlaying=true;
         ca.emit('data',{...update('Forged'),hp:7,maxHp:PLAYER_MAX_HP});cb.emit('data',update('Other'));
         assert.equal(cb.sent.find(p=>p.type==='update').username,'Pilot');
@@ -75,10 +77,12 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         state.playerHp=6;state.playerMaxHp=PLAYER_MAX_HP;sendLocalState(true);
         const hostUpdate=ca.sent.filter(p=>p.type==='update').at(-1);
         assert.equal(hostUpdate.hp,6);assert.equal(hostUpdate.maxHp,PLAYER_MAX_HP);
+        assert.equal(hostUpdate.dayNightElapsedSeconds,137.25,'host state packets carry the room clock');
         state.playerHp=-4;sendLocalState(true);
         assert.equal(ca.sent.filter(p=>p.type==='update').at(-1).hp,0,'outbound health is clamped to its validated range');
         state.playerHp=PLAYER_MAX_HP;
         broadcastToAll({type:'player_hit',shotId:1,pelletIndex:0,targetPeerId:'peer-a',damage:10,attackerName:'Host'});
+        assert.equal(state.peers['peer-a'].hp,0,'host-fired hits update the host goggles health too');
         const death={type:'player_died' as const,lifeId:0,cause:'player' as const,killerPeerId:host.id,killerName:'Host',victimName:'Pilot',victimPeerId:'peer-a'};
         ca.emit('data',death);assert.equal(state.kills,1);ca.emit('data',death);assert.equal(state.kills,1);
         assert.equal(authorizeClientPacket('peer-a',{type:'fire',weapon:'SNIPER',shotId:2,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}}),null);
@@ -106,16 +110,20 @@ test('client rejects host without proof and applies kills while waiting to play'
     const host=await response.json() as any;
     try{
         await joinGame('Pilot','ABCDEFGH','join-room');let peer=Peer.latest;peer.emit('open',peer.id);let conn=peer.connections['testfps-room-ABCDEFGH'][0];
-        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,targets:[]});assert.equal(state.isMultiplayer,false);
+        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:0,targets:[]});assert.equal(state.isMultiplayer,false);
         await joinGame('Pilot','ABCDEFGH','join-room');peer=Peer.latest;peer.emit('open',peer.id);conn=peer.connections['testfps-room-ABCDEFGH'][0];
         const admitted=await fetch('/api/room-admissions/ABCDEFGH',{method:'POST',headers:{Authorization:`Bearer ${host.closeToken}`},body:JSON.stringify({peerId:peer.id,admissionToken:(conn.metadata as any).admissionToken})});
         const admission=await admitted.json() as any;conn.emit('data',{type:'admission',proof:admission.admissionProof});
-        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,targets:[]});
+        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:42,targets:[]});
         assert.equal(state.isPlaying,false);
+        assert.equal(state.dayNightElapsedSeconds,42);
+        assert.equal(state.dayNightSyncImmediate,true);
+        conn.emit('data',{...update('Host'),dayNightElapsedSeconds:57});
+        assert.equal(state.dayNightElapsedSeconds,57,'host clock keeps synchronizing while this client is in its lobby');
         const spawn=getTownSpawn(1,'house',2);
         assert.deepEqual(state.camera!.position.toArray(),[spawn.x,2,spawn.z]);
         state.camera!.position.x+=3;
-        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:1,seed:99,score:0,targets:[]});
+        conn.emit('data',{type:'world_snapshot',spawnHouseSlot:1,seed:99,score:0,dayNightElapsedSeconds:0,targets:[]});
         assert.equal(state.camera!.position.x,spawn.x+3,'duplicate snapshots cannot teleport an existing player');
         const target=new THREE.Group();target.userData={scale:1,index:0,bodyMesh:new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial()),healthBarFg:new THREE.Mesh(),healthBarGroup:new THREE.Group()};state.targets=[target];
         state.hookState='FIRING';state.hookIsEnemy=true;state.hookWillHit=true;state.hookTargetEnemy=target;
@@ -126,6 +134,19 @@ test('client rejects host without proof and applies kills while waiting to play'
         assert.equal(state.score,7);assert.equal(target.position.x,50);assert.equal(target.userData.hp,3);
         state.targets=[];
     }finally{disconnectMultiplayer();}
+});
+
+test('room creation rate limit allows ten attempts per half hour',async()=>{
+    backend();
+    const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const create=async(index:number)=>{
+        const room=alphabet[index].repeat(8);
+        return fetch('/api/rooms',{method:'POST',body:JSON.stringify({
+            room,turnstileToken:'create-room',username:'Host',peerId:`testfps-room-${room}`,
+        })});
+    };
+    for(let index=0;index<10;index++)assert.equal((await create(index)).status,201);
+    assert.equal((await create(10)).status,429);
 });
 
 test('unopened PeerJS channel timeout frees host lobby capacity even without a close event',async(t)=>{

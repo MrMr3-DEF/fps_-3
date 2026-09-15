@@ -75,6 +75,10 @@ export interface GameState {
     connections: DataConnectionLike[];
     peers: Record<string, PeerData>;
     peerIds: string[];
+    /** Host-authoritative room clock mirrored by the local day/night cycle. */
+    dayNightElapsedSeconds: number;
+    dayNightSyncPending: boolean;
+    dayNightSyncImmediate: boolean;
 
     targets: THREE.Group[];
     obstacles: THREE.Object3D[];
@@ -162,6 +166,9 @@ export const state: GameState = {
     connections: [],
     peers: {},
     peerIds: [],
+    dayNightElapsedSeconds: 0,
+    dayNightSyncPending: false,
+    dayNightSyncImmediate: false,
 
     // Scene object registries used by update loops and collision checks.
     targets: [],

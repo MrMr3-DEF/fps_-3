@@ -52,6 +52,7 @@ test('network parser bounds target snapshots and validates target state', () => 
         spawnHouseSlot: 1,
         seed: 42,
         score: 3,
+        dayNightElapsedSeconds: 123.5,
         targets: [{
             targetIndex: 0,
             position: { x: 1, y: 2, z: 3 },
@@ -68,6 +69,7 @@ test('network parser bounds target snapshots and validates target state', () => 
         spawnHouseSlot: 1,
         seed: -1,
         score: 0,
+        dayNightElapsedSeconds: 0,
         targets: []
     }), null);
 });
@@ -89,11 +91,21 @@ test('avatar colors accept only optional 24-bit integers', () => {
 });
 
 test('world snapshots require a valid client house assignment', () => {
-    const snapshot = { type: 'world_snapshot', seed: 42, score: 0, targets: [] };
+    const snapshot = { type: 'world_snapshot', seed: 42, score: 0, dayNightElapsedSeconds: 0, targets: [] };
     for (const spawnHouseSlot of [undefined, null, -1, 0, 1.5, 5, '2']) {
         assert.equal(parseNetworkPacket({ ...snapshot, spawnHouseSlot }), null);
     }
     for (const spawnHouseSlot of [1, 2, 3, 4]) {
         assert.equal(parseNetworkPacket({ ...snapshot, spawnHouseSlot })?.type, 'world_snapshot');
     }
+});
+
+test('network parser validates synchronized day/night clocks', () => {
+    assert.equal(parseNetworkPacket({ ...validUpdate, dayNightElapsedSeconds: 42.5 })?.type, 'update');
+    for (const dayNightElapsedSeconds of [-1, Number.NaN, Infinity, '42']) {
+        assert.equal(parseNetworkPacket({ ...validUpdate, dayNightElapsedSeconds }), null);
+    }
+    assert.equal(parseNetworkPacket({
+        type: 'world_snapshot', spawnHouseSlot: 1, seed: 42, score: 0, targets: [],
+    }), null);
 });

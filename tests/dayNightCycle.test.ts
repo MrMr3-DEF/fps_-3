@@ -84,6 +84,20 @@ test('cycle calculations wrap cleanly in either direction', () => {
     assert.equal(getDayNightPhase(-1).phase, 'night');
 });
 
+test('room clock synchronization snaps large drift and ignores network jitter', () => {
+    const scene = new THREE.Scene();
+    const cycle = new DayNightCycle(scene, { shadows: false, shadowMapSize: 1024 });
+    const observer = new THREE.Vector3();
+    cycle.update(30, observer);
+    cycle.synchronizeElapsedSeconds(30.1);
+    assert.equal(cycle.elapsedTimeSeconds, 30, 'sub-quarter-second latency does not rewind the sky');
+    cycle.synchronizeElapsedSeconds(90);
+    assert.equal(cycle.elapsedTimeSeconds, 90, 'meaningful drift follows the host');
+    cycle.synchronizeElapsedSeconds(12, true);
+    assert.equal(cycle.elapsedTimeSeconds, 12, 'join snapshots apply immediately');
+    cycle.dispose();
+});
+
 test('gas lantern flicker stays subtle and deterministic', () => {
     const samples = Array.from({ length: 240 }, (_, index) => getGasLanternFlicker(index / 60, 2.3));
     assert.deepEqual(samples, Array.from({ length: 240 }, (_, index) => getGasLanternFlicker(index / 60, 2.3)));

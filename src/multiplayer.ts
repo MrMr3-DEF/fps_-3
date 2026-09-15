@@ -157,11 +157,22 @@ function getCachedUsername(): string {
     return cachedUsername;
 }
 
+function applyConfirmedPeerDamage(peerData: PeerData, damage: number, now: number): void {
+    peerData.hp = THREE.MathUtils.clamp(peerData.hp - damage, 0, peerData.maxHp);
+    peerData.lastDamageTime = now;
+    peerData.regenTimer = 0;
+}
+
 export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | null = null): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     if (state.isHost && packet.type === 'player_hit' && !packet.senderPeerId) {
+        const now = performance.now();
         packet = { ...packet, senderPeerId: state.peer?.id, attackerName: getCachedUsername() };
-        if (state.peer) lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: state.peer.id, at: performance.now() });
+        if (state.peer) lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: state.peer.id, at: now });
+        // Host-originated packets do not loop back through handlePeerMessage.
+        // Update the host's own remote-player record before sending the event.
+        const targetPeer = state.peers[packet.targetPeerId];
+        if (targetPeer) applyConfirmedPeerDamage(targetPeer, packet.damage, now);
     }
     if (state.isHost && packet.type === 'player_died' && !packet.senderPeerId) {
         const latest = state.peer ? lastDamageByVictim.get(state.peer.id) : null;
@@ -382,6 +393,7 @@ function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): vo
         seed: getWorldSeed(),
         spawnHouseSlot,
         score: state.score,
+        dayNightElapsedSeconds: state.dayNightElapsedSeconds,
         targets
     };
     try {
@@ -408,6 +420,9 @@ function syncHostTargetStates(): void {
 
 function applyWorldSnapshot(packet: WorldSnapshotPacket): void {
     rebuildEnvironmentWithSeed(packet.seed);
+    state.dayNightElapsedSeconds = packet.dayNightElapsedSeconds;
+    state.dayNightSyncPending = true;
+    state.dayNightSyncImmediate = true;
     placePlayerAtTownSpawn(packet.seed, 'house', packet.spawnHouseSlot);
     for (const target of packet.targets) {
         applyTargetState(target);
@@ -462,6 +477,9 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
     setCachedUsername(username);
     targetStateFingerprints.clear();
     resetLocalMatch();
+    state.dayNightElapsedSeconds = 0;
+    state.dayNightSyncPending = true;
+    state.dayNightSyncImmediate = true;
 
     const hostPeerId = getHostPeerId()!;
     const hostStatus = DOM.hostLobbyStatus();
@@ -657,6 +675,8 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean } =
     lastSentTime = 0;
     lastForceSendTime = 0;
     clientWorldSynchronized = false;
+    state.dayNightSyncPending = false;
+    state.dayNightSyncImmediate = false;
     targetStateFingerprints.clear();
     peerRuntime.clear();
     pendingConnectionPeers.clear();
@@ -1085,6 +1105,12 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             if (applyTargetState(msg)) rebuildTargetHash();
             return;
         }
+        if (msg.type === 'update' &&
+            (msg.senderPeerId === undefined || msg.senderPeerId === getHostPeerId()) &&
+            msg.dayNightElapsedSeconds !== undefined) {
+            state.dayNightElapsedSeconds = msg.dayNightElapsedSeconds;
+            state.dayNightSyncPending = true;
+        }
         if (!clientWorldSynchronized || (!state.isPlaying && msg.type !== 'kill_target')) return;
     }
 
@@ -1277,9 +1303,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         if (targetPeer) {
             // Apply the host-validated hit on every observer immediately. The
             // victim's following update packet reconciles this predicted value.
-            targetPeer.hp = THREE.MathUtils.clamp(targetPeer.hp - msg.damage, 0, targetPeer.maxHp);
-            targetPeer.lastDamageTime = performance.now();
-            targetPeer.regenTimer = 0;
+            applyConfirmedPeerDamage(targetPeer, msg.damage, performance.now());
             flashPeerMesh(targetPeer, 0xff3333, 150);
         }
         if (state.peer && msg.targetPeerId === state.peer.id) {
@@ -1428,6 +1452,7 @@ export function sendLocalState(force = false): void {
         isHovering: state.isHovering,
         hp: snapshot.hp,
         maxHp: snapshot.maxHp,
+        dayNightElapsedSeconds: state.isHost ? state.dayNightElapsedSeconds : undefined,
         hoverKeys: state.isHovering ? {
             w: state.moveForward,
             s: state.moveBackward,
