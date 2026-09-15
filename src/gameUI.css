@@ -20,7 +20,7 @@ button { border-radius: var(--control-radius); }
 #title { color: #182d40; font-size: clamp(30px, 4.8vw, 68px); text-align: left; letter-spacing: -2px; margin: 0 0 32px; }
 .menu-eyebrow { color: #4088a4; font: 700 11px system-ui; letter-spacing: 3px; margin: 0 0 12px; }
 #panel-main { display: flex; flex-direction: column; align-items: stretch; max-width: 460px; }
-.menu-btn { cursor: pointer; font-weight: bold; border: 1px solid transparent; box-shadow: none; background: #087da8; color: white; min-height: 46px; margin: 0 0 12px; padding: 13px 22px; font-size: 16px; text-align: left; transition: background 150ms; }
+.menu-btn { appearance: none; box-sizing: border-box; border-radius: var(--control-radius); font-family: inherit; line-height: 20px; cursor: pointer; font-weight: bold; border: 1px solid transparent; box-shadow: none; background: #087da8; color: white; min-height: 46px; margin: 0 0 12px; padding: 12px 22px; font-size: 16px; text-align: left; transition: background 150ms; }
 .menu-btn:hover { background: #056a90; }
 .menu-btn.secondary { color: #233c50; background: #dce5ec; border-color: #cedbe4; }
 .menu-btn.secondary:hover { background: #cbdce7; }
@@ -43,9 +43,9 @@ body button:focus-visible, #character-color:focus-visible { outline: 3px solid #
 #character-color { width: 34px; height: 32px; padding: 0; background: none; border: 0; cursor: pointer; }
 #color-value { font: 11px monospace; color: #60798a; }
 #legal-links { position: absolute; z-index: 11; display: flex; gap: 14px; align-items: center; left: clamp(24px, 5vw, 80px); right: auto; bottom: max(12px, env(safe-area-inset-bottom)); font-size: 11px; }
-.weapon-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
-.weapon-tabs button { background: #dce5ec; border: 1px solid #c5d5e0; color: #34546b; padding: 10px 12px; cursor: pointer; font-size: 12px; }
-.weapon-tabs button[aria-pressed="true"] { background: #087da8; color: white; border-color: #087da8; }
+.weapon-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 20px; }
+.weapon-tabs button { margin: 0; }
+.weapon-tabs .menu-btn[aria-pressed="true"] { background: #087da8; color: white; border-color: #087da8; }
 #weapon-specs { background: #ffffffa8; border: 1px solid #d1dfe8; padding: 20px; margin-bottom: 18px; border-radius: 4px; }
 #weapon-specs h3 { font-size: 25px; margin: 0 0 8px; color: #254256; }
 #weapon-specs p { font-size: 13px; color: #647d8e; line-height: 1.5; }
@@ -215,7 +215,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 #mp-name-error { min-height: 18px; margin-bottom: 8px; }
 .room-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 10px 0; }
 #room-code-display { font-size: 36px; font-weight: bold; color: var(--menu-accent); letter-spacing: 2px; }
-#btn-copy-code { margin: 0; font-size: 14px; }
+#btn-copy-code { margin: 0; }
 #host-lobby-status, #pause-lobby-info { color: #687d8c; font-size: 15px; }
 #pause-lobby-info { margin-bottom: 15px; }
 #pause-room-code { color: var(--menu-accent); font-size: 20px; letter-spacing: 1px; }
@@ -334,10 +334,8 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     position: absolute;
     top: 50%;
     left: 50%;
-    width: 12px;
-    height: 12px;
-    border: 2px solid var(--accent-pink);
-    border-radius: 50%;
+    width: 112px;
+    height: 112px;
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 5;
@@ -824,7 +822,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     flex-direction: column;
     align-items: var(--goggles-label-align, flex-start);
     gap: 2px;
-    min-height: 42px;
+    min-height: 21px; margin: 0 0 16px;
     padding: 5px 8px 6px;
     background: linear-gradient(90deg, rgba(3, 24, 34, 0.82), rgba(3, 24, 34, 0.28));
     color: currentColor;
@@ -1096,3 +1094,73 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .touch-device #npc-interaction { pointer-events: auto; touch-action: manipulation; cursor: pointer; min-height: 44px; margin: 0; }
 .touch-device #npc-interaction:active { background: #dce8f0; }
 #npc-interaction:focus-visible { outline: 2px solid #087da8; outline-offset: 3px; }
+
+/* Categorized settings retain one shared draft and Apply footer. */
+#blocker:has(#panel-settings[style*="flex"]) #character-panel { display: none; }
+#instructions:has(#panel-settings[style*="flex"]) { padding: clamp(20px, 4vw, 52px); display: flex; flex-direction: column; overflow: hidden; }
+#panel-settings { max-width: 920px; width: 100%; margin: 0 auto; flex: 1; min-height: 0; }
+#panel-settings > h2, #panel-settings > .settings-tabs, #panel-settings > .menu-actions { flex-shrink: 0; }
+.settings-tabs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.settings-tabs button { flex: 1 1 auto; margin: 0; text-align: center; }
+.settings-tabs .menu-btn[aria-selected="true"] { background: #087da8; border-color: #087da8; color: white; }
+#panel-settings .settings-container { border: 1px solid #d4e0e8; border-radius: var(--control-radius); background: #f8fafc; padding: clamp(16px, 3vw, 28px); margin-top: 18px; flex: 1; min-height: 0; overflow-y: auto; }
+.settings-page[hidden] { display: none; }
+.settings-page h3 { margin: 0; color: #243e51; font-size: 21px; }
+.settings-page .settings-row { padding: 13px 0; margin: 0; border-top: 1px solid #e3eaf0; grid-template-columns: minmax(130px, 1fr) minmax(100px, 240px) 56px; }
+.settings-page select { padding: 9px; border: 1px solid #cbd8e1; border-radius: 4px; background: white; color: #233c50; font: inherit; width: 100%; }
+.settings-page input:focus-visible, .settings-page select:focus-visible { outline: 2px solid #087da8; outline-offset: 4px; }
+.settings-page input:disabled { opacity: .35; }
+.settings-page input[type="color"] { width: 60px; height: 34px; padding: 3px; background: white; border: 1px solid #cbd8e1; cursor: pointer; }
+#panel-settings > .menu-actions { padding: 14px 0 0; margin-top: 0; background: #ecf1f5; }
+#btn-settings-back { margin-left: auto; }
+.keybind-list { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; margin-bottom: 22px; }
+.keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #e3eaf0; color: #425d70; font-size: 14px; }
+.keybind-row button { min-width: 112px; max-width: 180px; margin: 0; text-align: center; }
+.keybind-row .menu-btn.is-listening { background: #087da8; border-color: #087da8; color: white; }
+.binding-status { color: #496b80; font-size: 13px; line-height: 1.6; min-height: 21px; margin: 0 0 16px; }
+.crosshair-preview { position: relative; display: grid; place-items: center; height: 180px; border-radius: var(--control-radius); margin-bottom: 20px; background: radial-gradient(ellipse at 70% 25%, #617b91, #1b3040); overflow: hidden; }
+#crosshair-preview-reticle { width: 112px; height: 112px; }
+@media (max-width: 600px) {
+    .keybind-list { grid-template-columns: 1fr; }
+    .settings-page .settings-row { grid-template-columns: minmax(90px, 1fr) minmax(70px, 1fr) 44px; gap: 8px; font-size: 13px; }
+    .settings-page .settings-value { min-width: 0; }
+    .settings-tooltip { width: min(250px, 65vw); left: 0; transform: none; }
+    .settings-info:hover .settings-tooltip, .settings-info:focus-within .settings-tooltip { transform: none; }
+}
+
+#instructions:has(#panel-settings[style*="flex"]) > #title { font-size: 30px; letter-spacing: -1px; max-width: 920px; width: 100%; flex-shrink: 0; margin: 0 auto 22px; }
+.crosshair-editor { display: grid; grid-template-columns: .7fr 1.3fr; gap: 24px; margin-bottom: 20px; }
+.crosshair-editor .crosshair-preview { height: 260px; position: sticky; top: 16px; }
+.crosshair-editor .settings-row { grid-template-columns: minmax(90px, 1fr) minmax(80px, 160px) 46px; gap: 10px; }
+.crosshair-editor .settings-value { min-width: 0; }
+@media (max-width: 700px) {
+    .crosshair-editor { grid-template-columns: 1fr; gap: 0; }
+    .crosshair-editor .crosshair-preview { position: relative; top: 0; height: 140px; }
+}
+
+.settings-page > .settings-row:first-child, .crosshair-editor .settings-row:first-child { border-top: 0; }
+#panel-settings .menu-actions .menu-btn, .settings-page > .menu-btn { min-width: 112px; }
+#panel-settings .menu-actions .menu-btn { text-align: center; }
+#character-color, .settings-page input[type="color"] { appearance: none; box-sizing: border-box; border: 1px solid #cedbe4; border-radius: var(--control-radius); padding: 4px; background: #dce5ec; }
+#character-color::-webkit-color-swatch-wrapper, .settings-page input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+#character-color::-webkit-color-swatch, .settings-page input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
+
+.settings-tabs .menu-btn[aria-selected="true"]:hover, .weapon-tabs .menu-btn[aria-pressed="true"]:hover, .keybind-row .menu-btn.is-listening:hover { background: #056a90; }
+@media (max-width: 600px) {
+    #panel-settings .menu-actions { gap: 8px; }
+    #panel-settings .menu-actions .menu-btn { min-width: 0; flex: 1; }
+}
+/* Keep help text inside the scrollable settings panel, including its first row. */
+.settings-page .settings-row { position: relative; }
+.settings-page .settings-info { position: static; }
+.settings-page .settings-tooltip { top: calc(100% + 4px); bottom: auto; left: 0; width: 290px; max-width: calc(100% - 26px); transform: none; }
+.settings-page .settings-tooltip::after { top: auto; bottom: 100%; left: 20px; border-top-color: transparent; border-bottom-color: rgba(32, 38, 50, 0.97); }
+
+#btn-mp-back { align-self: flex-start; min-width: 112px; text-align: center; }
+.crosshair-dropdown { margin-top: 12px; }
+.crosshair-dropdown > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; list-style: none; }
+.crosshair-dropdown > summary::-webkit-details-marker { display: none; }
+.crosshair-dropdown > summary::after { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
+.crosshair-dropdown[open] > summary::after { transform: rotate(225deg); }
+.crosshair-dropdown > summary:focus-visible { outline: 3px solid #078ab7; outline-offset: 3px; }
+.crosshair-layer-controls { padding: 4px 0 0; }

@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import { DEFAULT_FOV, MAX_PARTICLES, MAX_RENDER_DISTANCE_CHUNKS, SCOPED_FOV } from './config.js';
 
+import { DEFAULT_KEYBINDS, DEFAULT_CROSSHAIR, readKeybinds, readCrosshair, type Keybinds, type CrosshairSettings } from './controlSettings.js';
+
 const STORAGE_KEY = 'testfps-settings-v1';
 export type ShadowQuality = 'low' | 'high';
 
 export interface UserSettings {
+    keybinds: Keybinds;
+    crosshair: CrosshairSettings;
     sensitivity: number;
     fov: number;
     scopedFov: number;
@@ -20,6 +24,8 @@ export interface UserSettings {
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
+    keybinds: { ...DEFAULT_KEYBINDS },
+    crosshair: { ...DEFAULT_CROSSHAIR },
     sensitivity: 1.0,
     fov: DEFAULT_FOV,
     scopedFov: SCOPED_FOV,
@@ -34,7 +40,11 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     downloadWebLLMImmediately: false,
 };
 
-export const userSettings: UserSettings = { ...DEFAULT_USER_SETTINGS };
+export function cloneSettings(settings: UserSettings): UserSettings {
+    return { ...settings, keybinds: { ...settings.keybinds }, crosshair: { ...settings.crosshair } };
+}
+
+export const userSettings: UserSettings = cloneSettings(DEFAULT_USER_SETTINGS);
 
 function clamp(value: number, min: number, max: number): number {
     if (!Number.isFinite(value)) return min;
@@ -54,6 +64,8 @@ export function loadUserSettings(): UserSettings {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             const parsed = JSON.parse(raw) as Partial<UserSettings>;
+            userSettings.keybinds = readKeybinds(parsed.keybinds);
+            userSettings.crosshair = readCrosshair(parsed.crosshair);
             userSettings.sensitivity = clamp(parsed.sensitivity ?? DEFAULT_USER_SETTINGS.sensitivity, 0.1, 3.0);
             userSettings.fov = clamp(parsed.fov ?? DEFAULT_USER_SETTINGS.fov, 55, 105);
             userSettings.scopedFov = clamp(parsed.scopedFov ?? DEFAULT_USER_SETTINGS.scopedFov, 8, 35);

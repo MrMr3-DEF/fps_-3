@@ -20,7 +20,7 @@ export function setupMainMenu(): void {
     const tabs = arsenal.querySelector('.weapon-tabs')!;
     let selectedWeapon = 'PISTOL';
     for (const [name, stats] of Object.entries(WEAPON_STATS)) {
-        const button = document.createElement('button'); button.textContent = labels[name]; tabs.append(button);
+        const button = document.createElement('button'); button.className = 'menu-btn secondary'; button.textContent = labels[name]; tabs.append(button);
         button.onclick = () => {
             selectedWeapon = name;
             for (const tab of tabs.querySelectorAll('button')) tab.setAttribute('aria-pressed', String(tab === button));

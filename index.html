@@ -7,7 +7,7 @@
     <meta name="description"
         content="A fast-paced 3D browser FPS with multiplayer support, grappling hooks, and multiple weapon classes.">
     <meta name="theme-color" content="#ecf1f5">
-    <title>Totally epic arena FPS</title>
+    <title>FPS Arena</title>
     <!-- Prevent favicon 404/500 requests in browser console -->
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
@@ -21,7 +21,7 @@
     <div id="blocker">
         <div id="instructions">
             <h1 id="title">
-                FPS ARENA :3</h1>
+                FPS Arena</h1>
 
             <!-- Panel 1: Main Selection Menu -->
             <div id="panel-main">
@@ -46,7 +46,7 @@
                 <h2>Weapons</h2>
                 <div class="weapon-tabs" aria-label="Choose a weapon"></div>
                 <article id="weapon-specs"></article>
-                <button class="menu-btn secondary">Back to Main Menu</button>
+                <button class="menu-btn secondary">Back</button>
             </div>
 
             <div id="panel-settings" class="menu-panel">
@@ -148,7 +148,7 @@
                     </div>
                 </div>
                 <div class="menu-actions">
-                    <button class="menu-btn secondary" id="btn-settings-reset">Reset</button>
+                    <button class="menu-btn secondary" id="btn-settings-reset">Reset all settings</button>
                     <button class="menu-btn" id="btn-settings-apply">Apply</button>
                     <button class="menu-btn" id="btn-settings-back">Back</button>
                 </div>
@@ -156,8 +156,7 @@
 
             <!-- Panel 2: Multiplayer Dashboard -->
             <div id="panel-mp" class="menu-panel">
-                <h2>Multiplayer Setup</h2><br />
-                <p class="menu-caption">Players are assigned Guest1–Guest5. The host starts the game for everyone.</p>
+                <h2>Multiplayer</h2><br />
                 <span id="mp-name-error"></span>
 
                 <div class="menu-actions">
@@ -165,16 +164,16 @@
                     <button class="menu-btn secondary" id="btn-mp-join-view">Join Game</button>
                 </div>
                 <br />
-                <button class="menu-btn secondary" id="btn-mp-back">Back to Main Menu</button>
+                <button class="menu-btn secondary" id="btn-mp-back">Back</button>
             </div>
 
             <!-- Panel 3: Host Waiting Lobby -->
             <div id="panel-host-waiting" class="menu-panel">
                 <h2>Host Game</h2><br />
-                <span class="menu-caption">Your room code is:</span>
+                <span class="menu-caption">Room code</span>
                 <div class="room-code-row">
                     <span id="room-code-display">--------</span>
-                    <button id="btn-copy-code" class="menu-btn" disabled title="Copy room code">📋 Copy</button>
+                    <button id="btn-copy-code" class="menu-btn" disabled title="Copy room code">Copy</button>
                 </div>
                 <span id="host-lobby-status">Creating room...</span><br />
                 <div id="turnstile-host-challenge"></div>
@@ -200,7 +199,7 @@
 
             <!-- Panel 5: Pause Menu -->
             <div id="panel-pause" class="menu-panel">
-                <h2>PAUSE</h2><br />
+                <h2>Paused</h2><br />
                 <span id="pause-lobby-info">
                     Lobby Code: <strong id="pause-room-code">--------</strong>
                 </span>

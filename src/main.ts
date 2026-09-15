@@ -1,3 +1,5 @@
+import { setupSettingsMenu } from './settingsMenu.js';
+import { gameplayCode, keyLabel, crosshairSvg } from './controlSettings.js';
 import { updateHealthRegen } from './healthRegen.js';
 import { GothChat } from './gothChat.js';
 import { ConversationCamera } from './conversationCamera.js';
@@ -52,7 +54,7 @@ import {
     broadcastTargetKill,
     updateRemotePeers
 } from './multiplayer.js';
-import { applyRendererSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
+import { applyRendererSettings, cloneSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
 import { targetData } from './userDataTypes.js';
 import type { PlayerDiedPacket } from './networkTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
@@ -174,7 +176,8 @@ const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
 
 let lastFov = -1;
 let lastScopedState: boolean | null = null;
-let pendingSettings: UserSettings = { ...userSettings };
+let pendingSettings: UserSettings = cloneSettings(userSettings);
+let syncSettingsMenu: ((settings: UserSettings) => void) | undefined;
 let middleMouseChordActive = false;
 let motionHudInitialized = false;
 let smoothedGRight = 0;
@@ -183,7 +186,7 @@ let roomFlowGeneration = 0;
 let copyFeedbackTimeout: number | null = null;
 let settingsOrigin: 'main' | 'pause' = 'main';
 
-const COPY_BUTTON_DEFAULT_TEXT = '📋 Copy';
+const COPY_BUTTON_DEFAULT_TEXT = 'Copy';
 
 const hostRoomChallenge = new RoomAccessChallenge('create-room');
 const joinRoomChallenge = new RoomAccessChallenge('join-room');
@@ -365,7 +368,7 @@ function setupMenuListeners(): void {
     if (UI.btnSettingsReset) {
         UI.btnSettingsReset.addEventListener('click', (e) => {
             e.stopPropagation();
-            pendingSettings = { ...DEFAULT_USER_SETTINGS };
+            pendingSettings = cloneSettings(DEFAULT_USER_SETTINGS);
             syncSettingsControls();
         });
     }
@@ -521,7 +524,7 @@ function setupMenuListeners(): void {
             try {
                 if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
                 await navigator.clipboard.writeText(code);
-                button.textContent = '✅ Copied';
+                button.textContent = 'Copied';
                 if (copyFeedbackTimeout !== null) window.clearTimeout(copyFeedbackTimeout);
                 copyFeedbackTimeout = window.setTimeout(() => {
                     const currentButton = UI.btnCopyCode;
@@ -543,12 +546,14 @@ function setupMenuListeners(): void {
 function setupInputListeners(): void {
     // Reacquire after key release so Escape cannot immediately unlock the new session.
     let resumeOnEscapeUp = false;
-    const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }) => {
+    const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }, code = e.code) => {
         // Movement state is already held between key events; repeated keydown
         // events must not toggle hook/view/weapon actions multiple times.
         if (e.repeat || gothChat?.isOpen) return;
+        if (code !== 'Escape' && !isInputActive()) return;
+        if (code && code !== 'Escape') e.preventDefault?.();
 
-        switch (e.code) {
+        switch (code) {
             case 'Escape':
                 if (!state.controls) break;
                 const pauseAction = getEscapePauseAction(e.code, {
@@ -664,8 +669,8 @@ function setupInputListeners(): void {
         }
     };
 
-    const onKeyUp = (e: Pick<KeyboardEvent, 'code'> & { preventDefault?: () => void }) => {
-        switch (e.code) {
+    const onKeyUp = (e: Pick<KeyboardEvent, 'code'> & { preventDefault?: () => void }, code = e.code) => {
+        switch (code) {
             case 'Escape':
                 if (!resumeOnEscapeUp) break;
                 resumeOnEscapeUp = false;
@@ -709,8 +714,8 @@ function setupInputListeners(): void {
     document.getElementById('powerjump-toggle')?.addEventListener('click', () => {
         if (isInputActive()) state.powerJumpEnabled = !state.powerJumpEnabled;
     });
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('keydown', e => onKeyDown(e, gameplayCode(e.code, userSettings.keybinds)));
+    window.addEventListener('keyup', e => onKeyUp(e, gameplayCode(e.code, userSettings.keybinds)));
 
     // Mouse down/up fires for every button transition, including pressing Aim
     // while Fire remains held. Pointer down/up only covers the first/last button.
@@ -1037,7 +1042,9 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.shadowQuality === b.shadowQuality &&
         a.showFps === b.showFps &&
         a.photosensitivityMode === b.photosensitivityMode &&
-        a.downloadWebLLMImmediately === b.downloadWebLLMImmediately;
+        a.downloadWebLLMImmediately === b.downloadWebLLMImmediately &&
+        JSON.stringify(a.keybinds) === JSON.stringify(b.keybinds) &&
+        JSON.stringify(a.crosshair) === JSON.stringify(b.crosshair);
 }
 
 function updateApplyButton(): void {
@@ -1073,16 +1080,17 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     setCheckboxLabel(UI.settingFpsValue, settings.showFps);
     if (UI.settingPhotosensitivity) UI.settingPhotosensitivity.checked = settings.photosensitivityMode;
     setCheckboxLabel(UI.settingPhotosensitivityValue, settings.photosensitivityMode);
+    syncSettingsMenu?.(settings);
     updateApplyButton();
 }
 
 function resetPendingSettings(): void {
-    pendingSettings = { ...userSettings };
+    pendingSettings = cloneSettings(userSettings);
     syncSettingsControls();
 }
 
 function applyPendingSettings(): void {
-    Object.assign(userSettings, pendingSettings);
+    Object.assign(userSettings, cloneSettings(pendingSettings));
     saveUserSettings();
     applyLiveSettings();
     syncSettingsControls();
@@ -1096,6 +1104,7 @@ function updatePendingSettings(mutator: (settings: UserSettings) => void): void 
 }
 
 function applyLiveSettings(): void {
+    if (UI.crosshair) UI.crosshair.innerHTML = crosshairSvg(userSettings.crosshair);
     state.baseSensitivity = userSettings.sensitivity;
 
     if (state.camera) {
@@ -1123,6 +1132,7 @@ function applyLiveSettings(): void {
 }
 
 function setupSettingsControls(): void {
+    syncSettingsMenu = setupSettingsMenu(() => pendingSettings, updatePendingSettings);
     resetPendingSettings();
 
     UI.sensSlider?.addEventListener('input', (e) => {
@@ -1454,7 +1464,7 @@ export function animate(): void {
         interactionPrompt.hidden = !nearby;
         if (nearby) interactionPrompt.textContent = gothGirlfriend?.animator?.gesture
             ? 'Goth girlfriend · ' + gothGirlfriend.animator.gesture
-            : touchMode ? 'Tap to talk to goth girlfriend' : '[F] Talk to goth girlfriend';
+            : touchMode ? 'Tap to talk to goth girlfriend' : `[${keyLabel(userSettings.keybinds.interact)}] Talk to goth girlfriend`;
     }
 
     updateParticles(delta);
