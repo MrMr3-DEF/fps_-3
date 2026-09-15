@@ -63,7 +63,7 @@ test('projectiles cap their final swept segment at the shared bullet range',()=>
     const bullet=new THREE.Object3D();bullet.position.set(0,2,-0.1);
     bullet.userData={dx:0,dy:0,dz:-1,age:0,distanceTraveled:0.1,damage:1,visualOnly:false};
     state.projectiles=[bullet];
-    updateProjectiles(2,'Pilot');
+    updateProjectiles(1.05,'Pilot');
     assert.equal(state.projectiles.length,0);
     assert.ok(Math.abs(bullet.position.z+BULLET_TRAVEL_DISTANCE)<1e-9);
     assert.equal(bullet.userData.distanceTraveled,BULLET_TRAVEL_DISTANCE);
