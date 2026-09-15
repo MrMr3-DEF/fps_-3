@@ -60,7 +60,7 @@ export class GothChat {
                     <li><strong>A download on first use.</strong> Enabling chat downloads model files (roughly 1.8 GB with the default Hermes 3 3B model) from Hugging Face and MLC’s hosting. These hosts receive normal connection information, such as your IP address. Running the model uses your device’s GPU and memory.</li>
                     <li><strong>You control when it starts.</strong> Messages stay in this page’s memory while chat is open. Closing chat clears the conversation. Model files may remain cached. Approval is saved in this browser; clearing site data removes it.</li>
                 </ul>
-                <p class="goth-chat-legal">Site information: <a href="https://luigismansion.de/impressum" target="_blank" rel="noopener noreferrer">Impressum</a> · <a href="https://luigismansion.de/datenschutz" target="_blank" rel="noopener noreferrer">Datenschutz</a></p>
+                <p class="goth-chat-legal">Site information: <a href="https://luigi.host/impressum" target="_blank" rel="noopener noreferrer">Impressum</a> · <a href="https://luigi.host/datenschutz" target="_blank" rel="noopener noreferrer">Datenschutz</a></p>
                 <div class="goth-chat-notice-actions"><button type="button" data-action="decline">Not now</button><button type="button" data-action="approve">I understand — enable AI chat</button></div>
                 <p class="goth-chat-notice-footnote">Chat stays off until you approve. Esc returns to the game.</p>
             </div>

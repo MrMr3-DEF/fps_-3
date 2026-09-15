@@ -34,7 +34,7 @@ The Worker enables multiplayer only when every required value is present and `DI
 | `TURN_KEY_API_TOKEN` | Secret | Token used by the Worker to generate ICE servers |
 | `DISABLE_TURN` | Optional variable | Set to the exact string `true` to disable multiplayer immediately |
 
-`wrangler.toml` currently contains the production Turnstile site key and `fps.luigismansion.de` hostname. The TURN key ID may remain a Wrangler secret; Worker bindings expose variables and secrets through the same `env` interface, so the code does not require it to be public.
+`wrangler.toml` currently contains the production Turnstile site key and `fps.luigi.host` hostname. The TURN key ID may remain a Wrangler secret; Worker bindings expose variables and secrets through the same `env` interface, so the code does not require it to be public.
 
 Set or rotate secrets without committing their values:
 

@@ -25,7 +25,7 @@ Each document owns a distinct subject so information has one canonical location:
 | Multiplayer transport | PeerJS signalling plus WebRTC data channels using short-lived Cloudflare STUN/TURN credentials |
 | Human verification | Cloudflare Turnstile for room creation and joining |
 | Tests | Node's built-in test runner against TypeScript source |
-| Production host | `fps.luigismansion.de` in the checked-in Worker configuration |
+| Production host | `fps.luigi.host` in the checked-in Worker configuration |
 
 The browser entry point is `src/main.ts`; the Worker entry point is `src/worker.ts`. `src/config.ts` is the canonical location for gameplay constants, limits, weapon statistics, and world-density settings.
 

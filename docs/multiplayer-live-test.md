@@ -1,6 +1,6 @@
 # Deployed multiplayer smoke test — 5 September 2026
 
-Tested https://fps.luigismansion.de/ against the deployed Worker, with real Turnstile and PeerJS connections. The deployed client bundle was `index-VhCzF5Kt.js`.
+Tested https://fps.luigi.host/ against the deployed Worker, with real Turnstile and PeerJS connections. The deployed client bundle was `index-VhCzF5Kt.js`.
 
 ## Passed
 
