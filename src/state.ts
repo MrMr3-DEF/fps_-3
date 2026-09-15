@@ -47,6 +47,8 @@ export interface PeerData {
 }
 
 export interface GameState {
+    /** Last local regeneration update, independent of rendered frames. */
+    regenUpdatedAt: number;
     username: string;
     moveForward: boolean;
     moveBackward: boolean;
@@ -135,6 +137,7 @@ export interface GameState {
 }
 
 export const state: GameState = {
+    regenUpdatedAt: performance.now(),
     username: 'Guest1',
     // Input flags consumed by the physics loop.
     moveForward: false,
@@ -230,6 +233,7 @@ export const state: GameState = {
 };
 
 export function resetPlayerState() {
+    state.regenUpdatedAt = performance.now();
     state.lifeId++;
     state.lastDamageTime = 0;
     state.regenTimer = 0;

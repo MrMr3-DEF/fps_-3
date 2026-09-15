@@ -39,7 +39,11 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
         assert.equal((await call(1, 'state')).peers[host.peerId].hp, 9, 'guest inspection agrees with host health');
         assert.deepEqual(await call(0, 'inspect'), ['HEALTH 9 / 10']);
         assert.deepEqual(await call(1, 'inspect'), ['HEALTH 9 / 10']);
-        await call(1, 'recover'); await flush();
+        await call(0, 'pauseTime', { duration: 5000 }); await flush();
+        assert.equal((await call(0, 'state')).hp, 10, 'host regenerates with no rendered frames or mouse capture');
+        assert.deepEqual(await call(1, 'inspect'), ['HEALTH 10 / 10']);
+        await call(1, 'pauseTime', { duration: 5000 }); await flush();
+        assert.equal((await call(1, 'state')).hp, 10, 'guest regenerates with no rendered frames or mouse capture');
         assert.deepEqual(await call(0, 'inspect'), ['HEALTH 10 / 10'], 'C updates on confirmed regeneration');
         for (const weapon of ['AR', 'SHOTGUN', 'MINIGUN', 'SNIPER']) {
             for (const shooter of [0, 1]) {

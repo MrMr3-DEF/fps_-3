@@ -1,3 +1,4 @@
+import { updateHealthRegen } from './healthRegen.js';
 import { GothChat } from './gothChat.js';
 import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
@@ -23,7 +24,6 @@ import {
     FOV_LERP_SPEED,
     PLAYER_RADIUS,
     WEAPON_STATS,
-    REGEN_DELAY_MS,
     MAX_FRAME_DELTA,
     ROOM_CODE_LENGTH,
     MAP_HALF_SIZE,
@@ -1708,26 +1708,6 @@ export function checkLavaDamage(): void {
                 takePlayerDamage(LAVA_DAMAGE_PER_TICK, 'Lava');
             }
         }
-    }
-}
-
-export function updateHealthRegen(delta: number): void {
-    if (!state.isPlaying || state.playerHp <= 0 || state.playerHp >= state.playerMaxHp) {
-        state.regenTimer = 0;
-        return;
-    }
-
-    const now = performance.now();
-    if (now - state.lastDamageTime >= REGEN_DELAY_MS) {
-        state.regenTimer += delta;
-        if (state.regenTimer >= 1.0) {
-            state.playerHp = Math.min(state.playerMaxHp, state.playerHp + 1);
-            state.regenTimer -= 1.0;
-
-            updateHealthBar((state.playerHp / state.playerMaxHp) * 100);
-        }
-    } else {
-        state.regenTimer = 0;
     }
 }
 

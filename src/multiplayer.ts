@@ -1,3 +1,4 @@
+import { updateHealthRegen } from './healthRegen.js';
 import { cancelHookForTarget } from './hookLifecycle.js';
 import { characterColor } from './appearance.js';
 import { endInput } from './inputSession.js';
@@ -125,6 +126,7 @@ const DOM = {
 };
 
 let cachedUsername = 'Guest1';
+let healthInterval: ReturnType<typeof setInterval> | null = null;
 const matchStartListeners = new Set<() => void>();
 export function onMultiplayerStarted(listener: () => void): void { matchStartListeners.add(listener); }
 
@@ -133,6 +135,11 @@ function enterMultiplayerMatch(): void {
     state.isPlaying = true;
     state.pendingPlay = false;
     state.prevTime = performance.now();
+    // requestAnimationFrame can stop in a paused/background tab. This timer
+    // catches healing up from elapsed time and publishes only confirmed changes.
+    healthInterval = setInterval(() => {
+        if (state.isMultiplayer && state.isPlaying && updateHealthRegen(0)) sendLocalState(true);
+    }, 250);
     sendLocalState(true);
     for (const listener of matchStartListeners) listener();
 }
@@ -653,6 +660,8 @@ export async function joinGame(username: string, roomCode: string, turnstileToke
 export function disconnectMultiplayer(options: { preserveJoinError?: boolean } = {}): void {
     if (disconnecting) return;
     disconnecting = true;
+    if (healthInterval) clearInterval(healthInterval);
+    healthInterval = null;
     const roomToRelease = state.roomCode;
     const wasHost = state.isHost;
     const closeToken = roomCloseToken;
@@ -1327,6 +1336,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             flashPeerMesh(targetPeer, 0xff3333, 150);
         }
         if (state.peer && msg.targetPeerId === state.peer.id && msg.targetLifeId === state.lifeId) {
+            updateHealthRegen(0);
             takePlayerDamage(msg.damage, msg.attackerName, senderId);
             // The victim owns health. Publish the result immediately so combat,
             // all observers and the C inspection read exactly the same value.

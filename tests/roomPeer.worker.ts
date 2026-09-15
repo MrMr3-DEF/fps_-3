@@ -1,3 +1,4 @@
+import { mock } from 'node:test';
 // Each worker owns a real, isolated game module graph. Only transport/auth are faked.
 import { HudElement } from './fakeHudDom.ts';
 import { SmartGogglesHud } from '../src/smartGoggles.ts';
@@ -15,6 +16,7 @@ import { Peer, Connection } from './fakePeer.ts';
     createElement: () => new HudElement(), createElementNS: () => new HudElement(),
 };
 (globalThis as any).window = { innerWidth: 1280, innerHeight: 720, matchMedia: () => ({ matches: true }) };
+mock.timers.enable({ apis: ['setInterval'] });
 let now = 1000;
 Object.defineProperty(performance, 'now', { value: () => now });
 const layer = new HudElement();
@@ -69,6 +71,7 @@ parentPort!.on('message', async ({ id, command, args }) => {
             fireProjectile();
         } else if (command === 'tick') {
             now += args.delta * 1000;
+            mock.timers.tick(args.delta * 1000);
             updateRemotePeers(args.delta);
             updateProjectiles(args.delta, state.username);
             sendLocalState(true);
@@ -78,7 +81,9 @@ parentPort!.on('message', async ({ id, command, args }) => {
             result = layer.texts().filter(text => text.startsWith('HEALTH'));
         } else if (command === 'trigger') {
             state.activeWeaponName = 'MINIGUN'; state.minigunRamp = 3; state.isMouseDown = true; sendLocalState(true);
-        } else if (command === 'recover') { state.playerHp = Math.min(10, state.playerHp + 1); sendLocalState(true);
+        } else if (command === 'pauseTime') {
+            now += args.duration;
+            mock.timers.tick(args.duration);
         } else if (command === 'respawn') { resetPlayerState(); sendLocalState(true); }
         else if (command === 'state') result = { hp: state.playerHp, lifeId: state.lifeId, isPlaying: state.isPlaying,
             peers: Object.fromEntries(Object.entries(state.peers).map(([key, p]) => [key, { hp: p.hp, lifeId: p.lifeId,
