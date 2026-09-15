@@ -4,10 +4,11 @@ import * as THREE from 'three';
 import {
     collectVisiblePeerMeshes,
     distanceToVisiblePeerMeshes,
-    getStablePeerSphere,
+    excludeFromStablePeerEnvelope,
+    getStablePeerEnvelope,
     someVisiblePeerMeshBounds,
 } from '../src/smartGogglesPeerMath.ts';
-import { createScreenBounds, projectStableTargetSphereToScreen } from '../src/smartGogglesMath.ts';
+import { createScreenBounds, projectStableTargetEnvelopeToScreen } from '../src/smartGogglesMath.ts';
 
 const near = (actual: number, expected: number, epsilon = 1e-7) => {
     assert.ok(Math.abs(actual - expected) <= epsilon, `${actual} != ${expected}`);
@@ -35,6 +36,7 @@ test('caches one maximum peer envelope across child animation, equipment and roo
     const hiddenWeapon = new THREE.Group();
     hiddenWeapon.visible = false;
     hiddenWeapon.add(boxAt(0, 3, 0));
+    excludeFromStablePeerEnvelope(hiddenWeapon);
     peer.add(hiddenWeapon);
 
     const nameTag = new THREE.Sprite();
@@ -42,20 +44,22 @@ test('caches one maximum peer envelope across child animation, equipment and roo
     nameTag.scale.set(100, 100, 1);
     peer.add(nameTag);
 
-    const sphere = getStablePeerSphere(peer);
-    assert.ok(sphere);
-    assert.deepEqual(sphere.center, new THREE.Vector3(0, 1.5, 0));
-    near(sphere.radius, Math.sqrt(16.25));
+    const envelope = getStablePeerEnvelope(peer);
+    assert.ok(envelope);
+    assert.deepEqual(envelope.center, new THREE.Vector3(0, 0, 0));
+    near(envelope.halfWidth, Math.sqrt(10));
+    near(envelope.halfHeight, 1);
 
     const initialBounds = createScreenBounds();
-    assert.equal(projectStableTargetSphereToScreen(sphere, peer.matrixWorld, camera(), 200, 200, initialBounds), true);
+    assert.equal(projectStableTargetEnvelopeToScreen(envelope, peer.matrixWorld, camera(), 200, 200, initialBounds), true);
+    assert.ok(initialBounds.width > initialBounds.height, 'body proportions are preserved instead of becoming a square');
 
     left.rotation.set(0.7, 1.2, 0.3);
     hiddenWeapon.visible = true;
     peer.rotation.y = 1.1;
-    assert.equal(getStablePeerSphere(peer), sphere);
+    assert.equal(getStablePeerEnvelope(peer), envelope);
     const animatedBounds = createScreenBounds();
-    assert.equal(projectStableTargetSphereToScreen(sphere, peer.matrixWorld, camera(), 200, 200, animatedBounds), true);
+    assert.equal(projectStableTargetEnvelopeToScreen(envelope, peer.matrixWorld, camera(), 200, 200, animatedBounds), true);
     assert.deepEqual(animatedBounds, initialBounds);
 });
 

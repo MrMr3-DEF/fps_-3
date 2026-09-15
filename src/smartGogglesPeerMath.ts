@@ -1,12 +1,25 @@
 import * as THREE from 'three';
-import { distanceToOrientedBox } from './smartGogglesMath.js';
+import { distanceToOrientedBox, type StableTargetEnvelope } from './smartGogglesMath.js';
 
-const _stablePeerSpheres = new WeakMap<THREE.Object3D, THREE.Sphere>();
+const _stablePeerEnvelopes = new WeakMap<THREE.Object3D, StableTargetEnvelope>();
 const _peerRootInverse = new THREE.Matrix4();
 const _meshToPeerRoot = new THREE.Matrix4();
 const _peerLocalBounds = new THREE.Box3();
 const _transformedMeshBounds = new THREE.Box3();
-const _peerEnvelopeCorner = new THREE.Vector3();
+const STABLE_ENVELOPE_EXCLUDED = 'smartGogglesEnvelopeExcluded';
+
+export function excludeFromStablePeerEnvelope(object: THREE.Object3D): void {
+    object.userData[STABLE_ENVELOPE_EXCLUDED] = true;
+}
+
+function isExcludedFromStableEnvelope(object: THREE.Object3D, peerRoot: THREE.Object3D): boolean {
+    let current: THREE.Object3D | null = object;
+    while (current && current !== peerRoot) {
+        if (current.userData[STABLE_ENVELOPE_EXCLUDED] === true) return true;
+        current = current.parent;
+    }
+    return false;
+}
 
 function visibleMeshGeometry(object: THREE.Object3D): THREE.BufferGeometry | null {
     const mesh = object as THREE.Mesh;
@@ -50,13 +63,12 @@ export function someVisiblePeerMeshBounds(
 }
 
 /**
- * Build and cache one maximum root-local envelope for a peer avatar. Hidden
- * weapon branches are included so switching equipment or animating children
- * cannot resize the goggles frame; sprites such as name tags have no geometry
- * and are naturally excluded.
+ * Build and cache one maximum root-local body envelope for a peer avatar.
+ * Equipment branches are explicitly excluded and sprites have no geometry, so
+ * neither weapon switching nor child animation can resize the goggles frame.
  */
-export function getStablePeerSphere(peerRoot: THREE.Object3D): THREE.Sphere | null {
-    const cached = _stablePeerSpheres.get(peerRoot);
+export function getStablePeerEnvelope(peerRoot: THREE.Object3D): StableTargetEnvelope | null {
+    const cached = _stablePeerEnvelopes.get(peerRoot);
     if (cached) {
         peerRoot.updateWorldMatrix(true, false);
         return cached;
@@ -69,6 +81,7 @@ export function getStablePeerSphere(peerRoot: THREE.Object3D): THREE.Sphere | nu
     _peerRootInverse.copy(peerRoot.matrixWorld).invert();
     _peerLocalBounds.makeEmpty();
     peerRoot.traverse((object) => {
+        if (isExcludedFromStableEnvelope(object, peerRoot)) return;
         const geometry = visibleMeshGeometry(object);
         if (!geometry?.boundingBox) return;
         _meshToPeerRoot.multiplyMatrices(_peerRootInverse, object.matrixWorld);
@@ -77,22 +90,17 @@ export function getStablePeerSphere(peerRoot: THREE.Object3D): THREE.Sphere | nu
     });
     if (_peerLocalBounds.isEmpty()) return null;
 
-    // Root x/z is the stable lock point. Only the vertical midpoint comes from
-    // the model, so avatar yaw cannot orbit an asymmetric held weapon around it.
-    const sphere = new THREE.Sphere(
-        new THREE.Vector3(0, (_peerLocalBounds.min.y + _peerLocalBounds.max.y) * 0.5, 0),
-        0,
-    );
-    for (let i = 0; i < 8; i++) {
-        _peerEnvelopeCorner.set(
-            (i & 1) === 0 ? _peerLocalBounds.min.x : _peerLocalBounds.max.x,
-            (i & 2) === 0 ? _peerLocalBounds.min.y : _peerLocalBounds.max.y,
-            (i & 4) === 0 ? _peerLocalBounds.min.z : _peerLocalBounds.max.z,
-        );
-        sphere.radius = Math.max(sphere.radius, sphere.center.distanceTo(_peerEnvelopeCorner));
-    }
-    _stablePeerSpheres.set(peerRoot, sphere);
-    return sphere;
+    const horizontalX = Math.max(Math.abs(_peerLocalBounds.min.x), Math.abs(_peerLocalBounds.max.x));
+    const horizontalZ = Math.max(Math.abs(_peerLocalBounds.min.z), Math.abs(_peerLocalBounds.max.z));
+    const envelope: StableTargetEnvelope = {
+        // Root x/z is the stable lock point. Only the body's vertical midpoint
+        // comes from its geometry, so yaw cannot orbit an asymmetric envelope.
+        center: new THREE.Vector3(0, (_peerLocalBounds.min.y + _peerLocalBounds.max.y) * 0.5, 0),
+        halfWidth: Math.hypot(horizontalX, horizontalZ),
+        halfHeight: (_peerLocalBounds.max.y - _peerLocalBounds.min.y) * 0.5,
+    };
+    _stablePeerEnvelopes.set(peerRoot, envelope);
+    return envelope;
 }
 
 /** Return the shortest world-space distance to any rendered peer mesh bound. */

@@ -14,6 +14,12 @@ export interface ScreenPoint {
     y: number;
 }
 
+export interface StableTargetEnvelope {
+    center: THREE.Vector3;
+    halfWidth: number;
+    halfHeight: number;
+}
+
 export type CalloutHorizontalDirection = 'left' | 'right';
 export type CalloutVerticalDirection = 'up' | 'down';
 
@@ -54,6 +60,11 @@ const _closestWorldPoint = new THREE.Vector3();
 const _stableWorldCenter = new THREE.Vector3();
 const _stableCameraCenter = new THREE.Vector3();
 const _stableProjectedCenter = new THREE.Vector3();
+
+function projectedHalfSize(extent: number, distance: number, focalPixels: number, viewportSize: number): number {
+    if (extent >= distance) return viewportSize;
+    return focalPixels * extent / Math.sqrt(Math.max(EPSILON, distance * distance - extent * extent));
+}
 
 export function createScreenBounds(): ScreenBounds {
     return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
@@ -138,6 +149,73 @@ export function projectStableTargetSphereToScreen(
     out.bottom = centerY + halfSize;
     out.width = halfSize * 2;
     out.height = halfSize * 2;
+    if (out.right <= 0 || out.left >= viewportWidth || out.bottom <= 0 || out.top >= viewportHeight) {
+        clearBounds(out);
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Project a fixed upright envelope while preserving its width/height ratio.
+ * Rotation never changes the frame; only target scale, distance and FOV do.
+ */
+export function projectStableTargetEnvelopeToScreen(
+    envelope: StableTargetEnvelope,
+    worldMatrix: THREE.Matrix4,
+    camera: THREE.PerspectiveCamera,
+    viewportWidth: number,
+    viewportHeight: number,
+    out: ScreenBounds,
+): boolean {
+    if (!Number.isFinite(envelope.halfWidth) || !Number.isFinite(envelope.halfHeight) ||
+        envelope.halfWidth < 0 || envelope.halfHeight < 0 ||
+        !Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight) ||
+        viewportWidth <= 0 || viewportHeight <= 0) {
+        clearBounds(out);
+        return false;
+    }
+
+    _stableWorldCenter.copy(envelope.center).applyMatrix4(worldMatrix);
+    const worldScale = worldMatrix.getMaxScaleOnAxis();
+    const worldHalfWidth = envelope.halfWidth * worldScale;
+    const worldHalfHeight = envelope.halfHeight * worldScale;
+    const worldRadius = Math.hypot(worldHalfWidth, worldHalfHeight);
+    _stableCameraCenter.copy(_stableWorldCenter).applyMatrix4(camera.matrixWorldInverse);
+    const depth = -_stableCameraCenter.z;
+    const distance = _stableCameraCenter.length();
+    if (!Number.isFinite(worldRadius) || !Number.isFinite(distance) || depth <= EPSILON ||
+        depth + worldRadius < camera.near || depth - worldRadius > camera.far) {
+        clearBounds(out);
+        return false;
+    }
+
+    _stableProjectedCenter.copy(_stableWorldCenter).project(camera);
+    const centerX = (_stableProjectedCenter.x * 0.5 + 0.5) * viewportWidth;
+    const centerY = (0.5 - _stableProjectedCenter.y * 0.5) * viewportHeight;
+    const halfWidth = projectedHalfSize(
+        worldHalfWidth,
+        distance,
+        Math.abs(camera.projectionMatrix.elements[0]) * viewportWidth * 0.5,
+        viewportWidth,
+    );
+    const halfHeight = projectedHalfSize(
+        worldHalfHeight,
+        distance,
+        Math.abs(camera.projectionMatrix.elements[5]) * viewportHeight * 0.5,
+        viewportHeight,
+    );
+    if (![centerX, centerY, halfWidth, halfHeight].every(Number.isFinite)) {
+        clearBounds(out);
+        return false;
+    }
+
+    out.left = centerX - halfWidth;
+    out.top = centerY - halfHeight;
+    out.right = centerX + halfWidth;
+    out.bottom = centerY + halfHeight;
+    out.width = halfWidth * 2;
+    out.height = halfHeight * 2;
     if (out.right <= 0 || out.left >= viewportWidth || out.bottom <= 0 || out.top >= viewportHeight) {
         clearBounds(out);
         return false;

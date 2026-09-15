@@ -7,6 +7,7 @@ import {
     createSmartGogglesCalloutLayout,
     distanceToOrientedBox,
     layoutSmartGogglesCallout,
+    projectStableTargetEnvelopeToScreen,
     projectStableTargetSphereToScreen,
     type ScreenBounds,
 } from '../src/smartGogglesMath.ts';
@@ -50,6 +51,22 @@ test('stable maximum envelope does not jiggle when a cube spins', () => {
     near(stationaryBounds.right, 100 + halfSize);
     near(stationaryBounds.width, halfSize * 2);
     assert.deepEqual(spinningBounds, stationaryBounds);
+});
+
+test('stable rectangular envelope preserves a tall target silhouette', () => {
+    const envelope = { center: new THREE.Vector3(), halfWidth: 0.7, halfHeight: 1.8 };
+    const stationary = new THREE.Matrix4().makeTranslation(0, 0, -10);
+    const rotated = new THREE.Matrix4().compose(
+        new THREE.Vector3(0, 0, -10),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 1.2, 0)),
+        new THREE.Vector3(1, 1, 1),
+    );
+    const initial = createScreenBounds();
+    const turning = createScreenBounds();
+    assert.equal(projectStableTargetEnvelopeToScreen(envelope, stationary, camera(), 200, 200, initial), true);
+    assert.equal(projectStableTargetEnvelopeToScreen(envelope, rotated, camera(), 200, 200, turning), true);
+    assert.deepEqual(turning, initial, 'target yaw cannot resize the overlay');
+    assert.ok(initial.height > initial.width * 2, 'corners retain the target’s tall proportions');
 });
 
 test('keeps a partially offscreen envelope full-size and rejects it once fully outside', () => {

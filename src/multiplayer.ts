@@ -51,6 +51,7 @@ import {
 import { obstacleData, projectileData, targetData, type TargetUserData } from './userDataTypes.js';
 import { segmentAabbHitT } from './gameplayMath.js';
 import { clearDamagePulse, pulseDamageMaterials } from './damagePulse.js';
+import { excludeFromStablePeerEnvelope } from './smartGogglesPeerMath.js';
 import { setWeaponNetworkPort } from './weaponNetworkPort.js';
 import {
     admitRoomPeer,
@@ -1592,10 +1593,12 @@ function createPeerBean(username: string): PeerData {
     const peerGroup = buildBeanModel(0x8c7ae6, 0xff4757);
 
     const leftGun = buildGun(0x00aaff);
+    excludeFromStablePeerEnvelope(leftGun);
     leftGun.position.set(-0.7, 0.0, -0.5);
     peerGroup.add(leftGun);
 
     const rightGunContainer = new THREE.Group();
+    excludeFromStablePeerEnvelope(rightGunContainer);
     rightGunContainer.position.set(0.7, 0.0, -0.5);
     peerGroup.add(rightGunContainer);
 

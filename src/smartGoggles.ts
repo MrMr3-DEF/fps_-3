@@ -6,14 +6,16 @@ import {
     createSmartGogglesCalloutLayout,
     distanceToOrientedBox,
     layoutSmartGogglesCallout,
+    projectStableTargetEnvelopeToScreen,
     projectStableTargetSphereToScreen,
     type ScreenBounds,
+    type StableTargetEnvelope,
     type SmartGogglesCalloutLayout,
 } from './smartGogglesMath.js';
 import {
     collectVisiblePeerMeshes,
     distanceToVisiblePeerMeshes,
-    getStablePeerSphere,
+    getStablePeerEnvelope,
     someVisiblePeerMeshBounds,
 } from './smartGogglesPeerMath.js';
 import { targetData } from './userDataTypes.js';
@@ -91,7 +93,8 @@ interface TargetLockRecord {
     bounds: ScreenBounds;
     layout: SmartGogglesCalloutLayout;
     lastWorldPosition: THREE.Vector3;
-    lastWorldRadius: number;
+    lastWorldHalfWidth: number;
+    lastWorldHalfHeight: number;
     targetRevision: number;
     phase: LockPhase;
     seenFrame: number;
@@ -108,7 +111,17 @@ const _bodyCenter = new THREE.Vector3();
 const _peerRootPosition = new THREE.Vector3();
 const _toBody = new THREE.Vector3();
 const _sightSample = new THREE.Vector3();
-const _eliminatedWorldSphere = new THREE.Sphere();
+const _envelopeSize = new THREE.Vector3();
+const _anomalyEnvelope: StableTargetEnvelope = {
+    center: new THREE.Vector3(),
+    halfWidth: 0,
+    halfHeight: 0,
+};
+const _eliminatedWorldEnvelope: StableTargetEnvelope = {
+    center: new THREE.Vector3(),
+    halfWidth: 0,
+    halfHeight: 0,
+};
 const _worldIdentity = new THREE.Matrix4();
 const _cameraFrustum = new THREE.Frustum();
 const _viewProjection = new THREE.Matrix4();
@@ -368,6 +381,7 @@ export class SmartGogglesHud {
                 projectionBounds,
                 _bodyCenter,
                 localSphere.radius * data.bodyMesh.matrixWorld.getMaxScaleOnAxis(),
+                localSphere.radius * data.bodyMesh.matrixWorld.getMaxScaleOnAxis(),
                 playerPosition.distanceTo(_bodyCenter),
                 reachableDistance,
                 data.hp,
@@ -392,9 +406,9 @@ export class SmartGogglesHud {
 
             const record = this.records.get(targetKey);
             const projectionBounds = record?.bounds ?? createScreenBounds();
-            const stablePeerSphere = getStablePeerSphere(peer.mesh);
-            if (!stablePeerSphere || !projectStableTargetSphereToScreen(
-                stablePeerSphere,
+            const stablePeerEnvelope = getStablePeerEnvelope(peer.mesh);
+            if (!stablePeerEnvelope || !projectStableTargetEnvelopeToScreen(
+                stablePeerEnvelope,
                 peer.mesh.matrixWorld,
                 camera,
                 viewportWidth,
@@ -413,8 +427,9 @@ export class SmartGogglesHud {
                 ),
             )) continue;
 
-            _bodyCenter.copy(stablePeerSphere.center).applyMatrix4(peer.mesh.matrixWorld);
+            _bodyCenter.copy(stablePeerEnvelope.center).applyMatrix4(peer.mesh.matrixWorld);
             peer.mesh.getWorldPosition(_peerRootPosition);
+            const peerWorldScale = peer.mesh.matrixWorld.getMaxScaleOnAxis();
             this.trackTarget(
                 targetKey,
                 0,
@@ -422,7 +437,8 @@ export class SmartGogglesHud {
                 peer.username,
                 projectionBounds,
                 _bodyCenter,
-                stablePeerSphere.radius * peer.mesh.matrixWorld.getMaxScaleOnAxis(),
+                stablePeerEnvelope.halfWidth * peerWorldScale,
+                stablePeerEnvelope.halfHeight * peerWorldScale,
                 playerPosition.distanceTo(_peerRootPosition),
                 distanceToVisiblePeerMeshes(weaponOrigin, peer.mesh),
                 peer.hp,
@@ -441,6 +457,10 @@ export class SmartGogglesHud {
             const localBox = geometry.boundingBox;
             const localSphere = geometry.boundingSphere;
             if (localBox && localSphere) {
+                localBox.getCenter(_anomalyEnvelope.center);
+                localBox.getSize(_envelopeSize);
+                _anomalyEnvelope.halfWidth = Math.hypot(_envelopeSize.x, _envelopeSize.z) * 0.5;
+                _anomalyEnvelope.halfHeight = _envelopeSize.y * 0.5;
                 hitbox.updateWorldMatrix(true, false);
                 const targetKey = 'anomaly:goth-girlfriend';
                 const record = this.records.get(targetKey);
@@ -452,15 +472,16 @@ export class SmartGogglesHud {
                     queryObstaclesAlongSegment,
                     _enemyOccluders,
                     hitbox,
-                ) && projectStableTargetSphereToScreen(
-                    localSphere,
+                ) && projectStableTargetEnvelopeToScreen(
+                    _anomalyEnvelope,
                     hitbox.matrixWorld,
                     camera,
                     viewportWidth,
                     viewportHeight,
                     projectionBounds,
                 )) {
-                    _bodyCenter.copy(localSphere.center).applyMatrix4(hitbox.matrixWorld);
+                    _bodyCenter.copy(_anomalyEnvelope.center).applyMatrix4(hitbox.matrixWorld);
+                    const anomalyWorldScale = hitbox.matrixWorld.getMaxScaleOnAxis();
                     this.trackTarget(
                         targetKey,
                         0,
@@ -470,7 +491,8 @@ export class SmartGogglesHud {
                         ],
                         projectionBounds,
                         _bodyCenter,
-                        localSphere.radius * hitbox.matrixWorld.getMaxScaleOnAxis(),
+                        _anomalyEnvelope.halfWidth * anomalyWorldScale,
+                        _anomalyEnvelope.halfHeight * anomalyWorldScale,
                         playerPosition.distanceTo(_bodyCenter),
                         distanceToOrientedBox(weaponOrigin, localBox, hitbox.matrixWorld),
                         0,
@@ -525,6 +547,7 @@ export class SmartGogglesHud {
                 projectionBounds,
                 _bodyCenter,
                 localSphere.radius * mesh.matrixWorld.getMaxScaleOnAxis(),
+                localSphere.radius * mesh.matrixWorld.getMaxScaleOnAxis(),
                 celestial.distanceKm,
                 0,
                 0,
@@ -561,7 +584,8 @@ export class SmartGogglesHud {
         identifierText: string,
         bounds: ScreenBounds,
         worldPosition: THREE.Vector3,
-        worldRadius: number,
+        worldHalfWidth: number,
+        worldHalfHeight: number,
         centerDistance: number,
         reachableDistance: number,
         hp: number,
@@ -584,7 +608,8 @@ export class SmartGogglesHud {
         record.seenFrame = this.frame;
         record.lastIdentifierText = identifierText;
         record.lastWorldPosition.copy(worldPosition);
-        record.lastWorldRadius = worldRadius;
+        record.lastWorldHalfWidth = worldHalfWidth;
+        record.lastWorldHalfHeight = worldHalfHeight;
         const distanceText = variant === 'celestial'
             ? formatCelestialDistance(centerDistance)
             : `DISTANCE ${Math.round(centerDistance)} M`;
@@ -752,7 +777,8 @@ export class SmartGogglesHud {
             bounds,
             layout: createSmartGogglesCalloutLayout(),
             lastWorldPosition: new THREE.Vector3(),
-            lastWorldRadius: 0,
+            lastWorldHalfWidth: 0,
+            lastWorldHalfHeight: 0,
             targetRevision,
             phase: 'entering',
             seenFrame: this.frame,
@@ -818,10 +844,11 @@ export class SmartGogglesHud {
         // camera frustum, the kill confirmation no longer belongs on screen.
         if (!_cameraFrustum.containsPoint(record.lastWorldPosition)) return false;
 
-        _eliminatedWorldSphere.center.copy(record.lastWorldPosition);
-        _eliminatedWorldSphere.radius = record.lastWorldRadius;
-        if (!projectStableTargetSphereToScreen(
-            _eliminatedWorldSphere,
+        _eliminatedWorldEnvelope.center.copy(record.lastWorldPosition);
+        _eliminatedWorldEnvelope.halfWidth = record.lastWorldHalfWidth;
+        _eliminatedWorldEnvelope.halfHeight = record.lastWorldHalfHeight;
+        if (!projectStableTargetEnvelopeToScreen(
+            _eliminatedWorldEnvelope,
             _worldIdentity,
             camera,
             viewportWidth,
