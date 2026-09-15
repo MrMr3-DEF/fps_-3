@@ -101,7 +101,7 @@ Three.js objects carry typed metadata through the accessors in `userDataTypes.ts
 6. Animate visible targets and particles.
 7. Send a multiplayer state update when required.
 8. Update border warnings, FPS, FOV/scope UI, and pointer sensitivity.
-9. Temporarily offset the camera for third person, project smart-goggles locks from that exact render pose, render, then restore the logical player position.
+9. Resolve the collision-safe over-the-shoulder camera when third person is active, project smart-goggles locks from that exact render pose, render, then restore the logical player position.
 
 Moving damage or collision work across the networking or rendering steps can change authority, visual timing, and hit positions.
 
@@ -139,7 +139,8 @@ Player damage records the last damage time for regeneration and kill attribution
 | `Space` | Jump; while grappling, release into a boosted jump |
 | `Shift` in air | Hover while fuel remains |
 | Left mouse | Fire |
-| Right mouse or hold `C` | Aim down sights |
+| Right mouse | Aim down sights |
+| Hold `C` | Aim down sights; temporarily use first person while third-person mode is active |
 | `R` | Toggle grappling hook |
 | `E` or mouse wheel | Cycle weapons |
 | `1`–`5` | Select pistol, shotgun, AR, sniper, or minigun |

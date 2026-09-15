@@ -29,15 +29,16 @@ import {
     MAP_HALF_SIZE,
     BORDER_WARN_THRESHOLD,
     BORDER_PULSE_DISTANCE,
-    MAX_RENDER_DISTANCE_CHUNKS
+    MAX_RENDER_DISTANCE_CHUNKS,
+    THIRD_PERSON_CAMERA_QUERY_RADIUS,
 } from './config.js';
 import { spawnParticles, updateParticles, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
 import { disposeProjectiles, updateProjectiles } from './projectiles.js';
 import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer, updateHealthBar, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
-import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns } from './world.js';
+import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, syncThirdPersonPresentation, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
+import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, queryObstaclesNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -64,6 +65,7 @@ import {
     resolveGogglesScopeAttempt,
     updateGogglesFailureScan,
 } from './gogglesFailure.js';
+import { resolveThirdPersonAimTarget, resolveThirdPersonCameraPosition } from './thirdPersonCamera.js';
 
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
@@ -73,15 +75,16 @@ const conversationCamera = new ConversationCamera();
 
 // Reused scratch vectors keep the hot render loop from allocating every frame.
 const _logicalCameraPos = new THREE.Vector3();
+const _logicalCameraQuaternion = new THREE.Quaternion();
+const _thirdPersonAimTarget = new THREE.Vector3();
 const _gogglesWeaponOrigin = new THREE.Vector3();
-const _tpCamDir = new THREE.Vector3();
-const _tpCamOffset = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
 const _jumpBoosterPos = new THREE.Vector3();
 const _lastMotionVelocity = new THREE.Vector3();
 const _motionAccel = new THREE.Vector3();
 const _motionRight = new THREE.Vector3();
 const _lavaCandidates: THREE.Object3D[] = [];
+const _thirdPersonObstacleCandidates: THREE.Object3D[] = [];
 
 // Lazily cache HUD/menu elements. Most code paths touch the UI every frame.
 const UI_cache: Record<string, HTMLElement | null> = {};
@@ -483,7 +486,7 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             performPlayerReset();
 
-            if (state.isThirdPerson && state.playerMesh) {
+            if (state.isThirdPersonView && state.playerMesh) {
                 state.playerMesh.visible = true;
             }
 
@@ -648,6 +651,7 @@ function setupInputListeners(): void {
             case 'KeyC':
                 if (state.controls && isInputActive()) {
                     state.keyCActive = true;
+                    syncThirdPersonPresentation();
                     refreshScopedState();
                     cancelInspect();
                 }
@@ -679,6 +683,7 @@ function setupInputListeners(): void {
             case 'KeyD': state.moveRight = false; break;
             case 'KeyC':
                 state.keyCActive = false;
+                syncThirdPersonPresentation();
                 refreshScopedState();
                 break;
             case 'ShiftLeft':
@@ -820,6 +825,7 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
     state.switchState = 'IDLE';
     state.switchTimer = 0;
     state.isThirdPerson = false;
+    state.isThirdPersonView = false;
     state.prevTime = performance.now();
     lastFov = -1;
     lastScopedState = null;
@@ -1292,6 +1298,7 @@ export function init(): void {
         state.isScoped = false;
         state.rightClickActive = false;
         state.keyCActive = false;
+        syncThirdPersonPresentation();
         middleMouseChordActive = false;
         smartGoggles?.reset();
         setAccelerometerVisible(false);
@@ -1529,14 +1536,28 @@ export function animate(): void {
                 if (state.leftGun) state.leftGun.visible = false;
                 if (state.rightGunContainer) state.rightGunContainer.visible = false;
             }
-            if (state.isThirdPerson && !gothChat?.isOpen) {
+            if (state.isThirdPersonView && !gothChat?.isOpen) {
                 logicalCameraPos = _logicalCameraPos.copy(state.camera.position);
-                
-                _tpCamDir.set(0, 0, -1).applyQuaternion(state.camera.quaternion);
-                const offsetDist = 6.0;
-                _tpCamOffset.copy(_tpCamDir).multiplyScalar(-offsetDist);
-                _tpCamOffset.y += 1.5;
-                state.camera.position.add(_tpCamOffset);
+                _logicalCameraQuaternion.copy(state.camera.quaternion);
+
+                // Pull the shoulder camera forward when nearby architecture
+                // would otherwise enter the camera or block the player view.
+                resolveThirdPersonCameraPosition(
+                    logicalCameraPos,
+                    state.camera.quaternion,
+                    queryObstaclesNear(
+                        logicalCameraPos.x,
+                        logicalCameraPos.z,
+                        THIRD_PERSON_CAMERA_QUERY_RADIUS,
+                        _thirdPersonObstacleCandidates,
+                    ),
+                    state.camera.position,
+                );
+                state.camera.lookAt(resolveThirdPersonAimTarget(
+                    logicalCameraPos,
+                    _logicalCameraQuaternion,
+                    _thirdPersonAimTarget,
+                ));
             }
 
             // Match the exact camera pose used for this draw. In third person,
@@ -1577,8 +1598,9 @@ export function animate(): void {
             if (state.playerMesh && playerVisible !== undefined) state.playerMesh.visible = playerVisible;
             if (state.leftGun && leftGunVisible !== undefined) state.leftGun.visible = leftGunVisible;
             if (state.rightGunContainer && rightGunVisible !== undefined) state.rightGunContainer.visible = rightGunVisible;
-            if (state.isThirdPerson && logicalCameraPos) {
+            if (state.isThirdPersonView && logicalCameraPos) {
                 state.camera.position.copy(logicalCameraPos);
+                state.camera.quaternion.copy(_logicalCameraQuaternion);
             }
         }
     }

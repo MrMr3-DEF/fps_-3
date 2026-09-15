@@ -22,6 +22,7 @@ import { processTargetHit } from './damage.js';
 import { queryObstaclesAlongSegment, queryTargetsAlongSegment } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { projectileData, targetData } from './userDataTypes.js';
+import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
 
 // Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
@@ -621,7 +622,7 @@ export function updateWeapons(delta: number): void {
         state.rightGunContainer.position.z += (-0.5 - state.rightGunContainer.position.z) * 15 * delta;
     }
 
-    if (state.leftGun && state.inspectState === 'IDLE' && !state.isThirdPerson) {
+    if (state.leftGun && state.inspectState === 'IDLE' && !state.isThirdPersonView) {
         if (Math.abs(state.leftGun.position.z - (-0.5)) > 0.001) {
             state.leftGun.position.z += (-0.5 - state.leftGun.position.z) * 15 * delta;
         }
@@ -705,7 +706,7 @@ export function updateWeapons(delta: number): void {
         _camEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
         state.playerMesh.rotation.y = _camEuler.y;
 
-        if (state.isThirdPerson) {
+        if (state.isThirdPersonView) {
             if (state.leftGun) state.leftGun.rotation.x = _camEuler.x;
             if (state.rightGunContainer) state.rightGunContainer.rotation.x = _camEuler.x;
         } else {
@@ -720,15 +721,15 @@ export function updateWeapons(delta: number): void {
         if (state.inspectTimer >= INSPECT_TOTAL) {
             state.inspectState = 'IDLE';
             state.inspectTimer = 0.0;
-            if (state.rightGunContainer && !state.isThirdPerson) {
+            if (state.rightGunContainer && !state.isThirdPersonView) {
                 state.rightGunContainer.position.set(0.32, -0.22, -0.5);
                 state.rightGunContainer.rotation.set(0, 0, 0);
             }
-            if (state.leftGun && !state.isThirdPerson) {
+            if (state.leftGun && !state.isThirdPersonView) {
                 state.leftGun.position.set(-0.32, -0.22, -0.5);
                 state.leftGun.rotation.set(0, 0, 0);
             }
-        } else if (!state.isThirdPerson) {
+        } else if (!state.isThirdPersonView) {
             const t = state.inspectTimer;
             const basePos       = _INSPECT_BASE_POS;
             const inspectPos    = _INSPECT_WEAPON_POS;
@@ -826,11 +827,11 @@ export function cancelInspect(): void {
     if (state.inspectState === 'INSPECTING') {
         state.inspectState = 'IDLE';
         state.inspectTimer = 0.0;
-        if (state.rightGunContainer && !state.isThirdPerson) {
+        if (state.rightGunContainer && !state.isThirdPersonView) {
             state.rightGunContainer.position.set(0.32, -0.22, -0.5);
             state.rightGunContainer.rotation.set(0, 0, 0);
         }
-        if (state.leftGun && !state.isThirdPerson) {
+        if (state.leftGun && !state.isThirdPersonView) {
             state.leftGun.position.set(-0.32, -0.22, -0.5);
             state.leftGun.rotation.set(0, 0, 0);
         }
@@ -953,10 +954,11 @@ export function disposePlayerVisuals(): void {
 
 // First-person attaches guns to the camera; third-person reparents the same
 // objects onto the avatar so weapon state stays shared.
-export function setThirdPerson(enabled: boolean): void {
-    state.isThirdPerson = enabled;
+export function syncThirdPersonPresentation(): void {
+    const enabled = shouldUseThirdPersonView(state.isThirdPerson, state.keyCActive);
+    state.isThirdPersonView = enabled;
     if (enabled) {
-        if (state.playerMesh) state.playerMesh.visible = true;
+        if (state.playerMesh) state.playerMesh.visible = state.playerHp > 0;
         if (state.playerMesh && state.leftGun && state.rightGunContainer) {
             state.playerMesh.add(state.leftGun);
             state.playerMesh.add(state.rightGunContainer);
@@ -974,4 +976,9 @@ export function setThirdPerson(enabled: boolean): void {
             state.rightGunContainer.position.set(0.32, -0.22, -0.5);
         }
     }
+}
+
+export function setThirdPerson(enabled: boolean): void {
+    state.isThirdPerson = enabled;
+    syncThirdPersonPresentation();
 }

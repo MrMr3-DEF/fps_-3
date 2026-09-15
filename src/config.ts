@@ -72,6 +72,18 @@ export const DEFAULT_FOV = 75;
 export const SCOPED_FOV = 15;
 export const FOV_LERP_SPEED = 15;
 
+// Over-the-shoulder camera framing. The camera stays to the player's right so
+// the avatar occupies the left side of the screen, as in modern third-person
+// shooters, and pulls forward before its near plane can enter world geometry.
+export const THIRD_PERSON_CAMERA_DISTANCE = 5.5;
+export const THIRD_PERSON_CAMERA_HEIGHT = 1.2;
+export const THIRD_PERSON_CAMERA_SHOULDER_OFFSET = 1.5;
+export const THIRD_PERSON_CAMERA_AIM_DISTANCE = 25;
+export const THIRD_PERSON_CAMERA_COLLISION_RADIUS = 0.25;
+export const THIRD_PERSON_CAMERA_WALL_PADDING = 0.08;
+export const THIRD_PERSON_CAMERA_QUERY_RADIUS =
+    THIRD_PERSON_CAMERA_DISTANCE + THIRD_PERSON_CAMERA_SHOULDER_OFFSET + THIRD_PERSON_CAMERA_COLLISION_RADIUS;
+
 export interface WeaponStat {
     fireRate: number;
     damage: number;

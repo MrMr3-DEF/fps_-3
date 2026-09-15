@@ -125,7 +125,10 @@ export interface GameState {
     sniperMesh: THREE.Object3D | null;
     minigunMesh: THREE.Object3D | null;
     playerMesh: THREE.Group | null;
+    /** Saved camera-mode preference toggled with P. */
     isThirdPerson: boolean;
+    /** Effective presentation after temporary first-person overrides. */
+    isThirdPersonView: boolean;
     isScoped: boolean;
     rightClickActive: boolean;
     keyCActive: boolean;
@@ -222,6 +225,7 @@ export const state: GameState = {
     minigunMesh: null,
     playerMesh: null,
     isThirdPerson: false,
+    isThirdPersonView: false,
     isScoped: false,
     rightClickActive: false,
     keyCActive: false,

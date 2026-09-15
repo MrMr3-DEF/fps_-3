@@ -43,7 +43,7 @@ export function toggleGrapplingHook(): void {
         state.hookIsEnemy = false;
         state.hookTargetEnemy = null;
 
-        if (state.leftGun && !state.isThirdPerson) {
+        if (state.leftGun && !state.isThirdPersonView) {
             state.leftGun.position.z += 0.15;
         }
 

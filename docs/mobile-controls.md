@@ -7,7 +7,7 @@ Touch controls activate on devices whose primary pointer is coarse. Desktop mous
 | Left joystick | Analog movement with a dead zone and capped diagonal speed |
 | Drag open screen space | Look around; uses the Aim Sensitivity setting and slows while aiming |
 | Hold Fire | Repeat shots at the weapon's normal fire cadence; minigun retains its spin-up |
-| Hold Aim | Aim through goggles |
+| Hold Aim | Aim through goggles; temporarily use first person while third-person view is active |
 | Jump | Jump or detach from a pulling grapple |
 | Hold Hover | Use hover thrusters in the air |
 | Grapple | Fire or release the grappling hook |
