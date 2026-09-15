@@ -30,6 +30,7 @@ import {
     MAP_HALF_SIZE,
     PEER_Y_OFFSET,
     HIT_FLASH_DURATION_MS,
+    REGEN_DELAY_MS,
     WEAPON_STATS,
     BULLET_TRAVEL_DISTANCE,
     MAX_PROJECTILES
@@ -1101,9 +1102,16 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             justJoined = true;
         }
 
+        const previousHp = peerData.hp;
         peerData.hp = msg.hp;
         peerData.maxHp = msg.maxHp;
         peerData.username = msg.username;
+        if (msg.hp < previousHp) {
+            peerData.lastDamageTime = performance.now();
+            peerData.regenTimer = 0;
+        } else if (msg.hp <= 0 || msg.hp >= msg.maxHp || previousHp <= 0) {
+            peerData.regenTimer = 0;
+        }
 
         if (msg.bodyColor !== undefined) setBeanColor(peerData.mesh, msg.bodyColor);
         _targetPos.set(msg.pos.x, msg.pos.y - PEER_Y_OFFSET, msg.pos.z);
@@ -1270,6 +1278,8 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             // Apply the host-validated hit on every observer immediately. The
             // victim's following update packet reconciles this predicted value.
             targetPeer.hp = THREE.MathUtils.clamp(targetPeer.hp - msg.damage, 0, targetPeer.maxHp);
+            targetPeer.lastDamageTime = performance.now();
+            targetPeer.regenTimer = 0;
             flashPeerMesh(targetPeer, 0xff3333, 150);
         }
         if (state.peer && msg.targetPeerId === state.peer.id) {
@@ -1434,10 +1444,26 @@ export function updateRemotePeers(delta: number): void {
 
     const peerIds = state.peerIds;
     const alpha = 1 - Math.exp(-14 * delta);
+    const now = performance.now();
 
     for (let i = 0; i < peerIds.length; i++) {
         const peerData = state.peers[peerIds[i]];
         if (!peerData) continue;
+
+        // Confirmed damage is applied when its packet arrives. Between ordinary
+        // state packets, mirror the victim's four-second delay and 1 HP/s regen
+        // locally so goggles remain live without introducing a health stream.
+        if (peerData.hp > 0 && peerData.hp < peerData.maxHp &&
+            now - peerData.lastDamageTime >= REGEN_DELAY_MS) {
+            peerData.regenTimer += delta;
+            const recoveredHp = Math.floor(peerData.regenTimer);
+            if (recoveredHp > 0) {
+                peerData.hp = Math.min(peerData.maxHp, peerData.hp + recoveredHp);
+                peerData.regenTimer -= recoveredHp;
+            }
+        } else {
+            peerData.regenTimer = 0;
+        }
 
         peerData.mesh.position.lerp(peerData.targetPosition, alpha);
 
@@ -1583,5 +1609,7 @@ function createPeerBean(username: string): PeerData {
         hookLine: null,
         hp: PLAYER_MAX_HP,
         maxHp: PLAYER_MAX_HP,
+        lastDamageTime: 0,
+        regenTimer: 0,
     };
 }
