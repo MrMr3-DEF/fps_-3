@@ -64,3 +64,11 @@ export function endInput(): void {
         emitEnded();
     } else state.controls?.unlock();
 }
+
+/** Closing an overlay does not produce another unlock event: input is already released.
+ * Restore the normal paused UI first; only a confirmed lock may hide it again.
+ */
+export function resumeInputAfterOverlay(resume: boolean): void {
+    emitEnded();
+    if (resume) beginInput();
+}

@@ -1,4 +1,4 @@
-import { TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_CLEARANCE, CHURCH_TOWER_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH } from './config.js';
+import { TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_CLEARANCE, CHURCH_TOWER_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_DEPTH, TOWN_STAIR_LANDING_Z, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH } from './config.js';
 
 export interface TownBuilding {
     kind: 'house' | 'church';
@@ -181,8 +181,9 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
         // The straight ascent enters through the west inner curb, away from gates.
         const innerEdge = side * (inner + 0.3);
         box(0, height + 0.5, innerEdge, inner * 2, 1, 0.6, 'stone', true, 'wall');
+        const landingHalfDepth = TOWN_STAIR_LANDING_DEPTH / 2;
         const intervals = side === -1
-            ? [[-inner, TOWN_STAIR_LANDING_Z - 4], [TOWN_STAIR_LANDING_Z + 4, inner]]
+            ? [[-inner, TOWN_STAIR_LANDING_Z - landingHalfDepth], [TOWN_STAIR_LANDING_Z + landingHalfDepth, inner]]
             : [[-inner, inner]];
         for (const [from, to] of intervals) {
             box(innerEdge, height + 0.5, (from + to) / 2, 0.6, 1, to - from, 'stone', true, 'wall');
@@ -224,9 +225,9 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
         const z = TOWN_STAIR_START_Z - (step + 0.5) * tread;
         box(TOWN_STAIR_X, top - rise / 2, z, width, rise, tread, 'stone', true, 'stair');
     }
-    // A slab landing meets the wall walk directly; it needs no column or bridge.
+    // A slab landing fills the complete opening and meets the wall walk directly.
     box(TOWN_STAIR_X, height - deckThickness / 2, TOWN_STAIR_LANDING_Z,
-        width, deckThickness, width, 'stone', true, 'stair');
+        width, deckThickness, TOWN_STAIR_LANDING_DEPTH, 'stone', true, 'stair');
 
     // The wall guards the inner edge. A continuous timber rail and closely
     // spaced solid posts protect the exposed edge without blocking the steps.
@@ -250,11 +251,28 @@ export function createTownBoxes(buildings: TownBuilding[]): TownBox[] {
     }
     if (steps % postEverySteps !== 0) addRailPost(height, TOWN_STAIR_START_Z - railRun);
 
-    // Continue the guard around the landing and share its first post with the flight.
-    box(railX, height + railHeight, TOWN_STAIR_LANDING_Z,
-        railThickness, railThickness, width, 'door', false, 'railing');
-    for (let offset = width / 4; offset <= width; offset += width / 4) {
-        addRailPost(height, TOWN_STAIR_START_Z - railRun - offset);
+    // Continue along the exposed side, then wrap back to the wall across the
+    // far end so walking straight off the flight meets a solid guardrail.
+    const stairTopZ = TOWN_STAIR_START_Z - railRun;
+    const landingFarEdgeZ = TOWN_STAIR_LANDING_Z - TOWN_STAIR_LANDING_DEPTH / 2;
+    const landingEndRailZ = landingFarEdgeZ + railThickness / 2;
+    const landingSideRailDepth = stairTopZ - landingEndRailZ;
+    box(railX, height + railHeight, (stairTopZ + landingEndRailZ) / 2,
+        railThickness, railThickness, landingSideRailDepth, 'door', true, 'railing');
+    const landingSidePostBays = Math.ceil(landingSideRailDepth / 1.5);
+    for (let bay = 1; bay <= landingSidePostBays; bay++) {
+        const z = stairTopZ + (landingEndRailZ - stairTopZ) * bay / landingSidePostBays;
+        addRailPost(height, z);
+    }
+
+    box(TOWN_STAIR_X, height + railHeight, landingEndRailZ,
+        width, railThickness, railThickness, 'door', true, 'railing');
+    const wallPostX = TOWN_STAIR_X - width / 2 + railThickness / 2;
+    const landingEndPostBays = 4;
+    for (let bay = 1; bay <= landingEndPostBays; bay++) {
+        const x = railX + (wallPostX - railX) * bay / landingEndPostBays;
+        box(x, height + (railHeight - postEmbed) / 2, landingEndRailZ,
+            railThickness, railHeight + postEmbed, railThickness, 'door', true, 'railing');
     }
 
     // The well is deliberately independent of the building layout and random seed.

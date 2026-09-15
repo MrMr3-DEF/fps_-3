@@ -128,7 +128,7 @@ Use the ownership table and data-flow notes in [Architecture](architecture.md) b
 
 ## Town visual checks
 
-With `npm run dev` running, open `/tests/town-preview.html` to inspect the real world generator with a chosen seed. The Aerial, Street, Doorway, Interior, Rooftop, Church, Church interior, Rampart, Stairs and Lookout buttons expose repeatable camera views and renderer draw/triangle counts. This development-only HTML fixture is outside the production Vite entry and is not included in `dist/`. Test actual match startup and HUD separately in the main game and production preview.
+With `npm run dev` running, open `/tests/town-preview.html` to inspect the real world generator with a chosen seed. The Aerial, Street, Doorway, Interior, Rooftop, Church, Church interior, Rampart, Stairs, Stair landing and Lookout buttons expose repeatable camera views and renderer draw/triangle counts. This development-only HTML fixture is outside the production Vite entry and is not included in `dist/`. Test actual match startup and HUD separately in the main game and production preview.
 
 Central-town validation (September 7, 2026): `npm run check` passes all 64 tests, including 1,000 layout seeds; `npm run build` succeeds. Browser visual checks cover aerial, doorway and interior views on seeds 0 and 42. The production bundle was smoke-tested in Safari for offline startup, pointer lock, movement, jumping and grapple input. The embedded Chromium browser renders the visual fixture but cannot acquire pointer lock in this environment. Multiplayer admission/authority remains covered by simulated integration tests; a live relay-network session was not exercised for this change.
 
@@ -136,7 +136,7 @@ The taller-wall/church follow-up adds regression coverage for exactly one church
 
 Rampart/roof polish validation: the suite now covers walking the full ascent, a complete rampart loop through all four open lookouts, descent without jumping, and roof/shell separation. The viewer also offers a Roof motion button to orbit a house at roof height while checking for flicker. The church tower is now 80% of wall height.
 
-Ground-paving regression checks cover non-overlapping tiles and exact paved area across 100 seeds, the grass cutout, floor grappling, distant ground visibility, and coplanar rampart/landing/bridge joins. The Ground motion viewer button checks streets and footpaths at changing camera angles and heights.
+Ground-paving regression checks cover non-overlapping tiles and exact paved area across 100 seeds, the grass cutout, floor grappling, distant ground visibility, and coplanar rampart/landing joins. The Ground motion viewer button checks streets and footpaths at changing camera angles and heights.
 
 Straight-ascent/well validation adds actual walking-input tests at 20–240 FPS plus variable frame times, near-limit step heights, gate clearance, deterministic well geometry, and safe spawn/detour checks. The Well viewer button shows the fixed central prop.
 

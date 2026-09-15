@@ -70,6 +70,9 @@ export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {};
     }
 
     private onLockError = (): void => {
+        // Some browsers report failure through the event without settling the
+        // returned promise. A subsequent Resume click must be allowed to retry.
+        this.pending = false;
         this.filter.reset();
     };
 

@@ -18,7 +18,8 @@ export const TOWN_STAIR_STEPS = Math.ceil(TOWN_WALL_HEIGHT / (PLAYER_STEP_HEIGHT
 // risers do not catch the player across low/high or fluctuating frame rates.
 export const TOWN_STAIR_TREAD = 0.17;
 export const TOWN_STAIR_START_Z = 60;
-export const TOWN_STAIR_LANDING_Z = TOWN_STAIR_START_Z - TOWN_STAIR_STEPS * TOWN_STAIR_TREAD - TOWN_STAIR_WIDTH / 2;
+export const TOWN_STAIR_LANDING_DEPTH = TOWN_STAIR_WIDTH + 2;
+export const TOWN_STAIR_LANDING_Z = TOWN_STAIR_START_Z - TOWN_STAIR_STEPS * TOWN_STAIR_TREAD - TOWN_STAIR_LANDING_DEPTH / 2;
 export const TOWN_CLEARANCE = 18;
 
 export const WALK_SPEED = 35.0;

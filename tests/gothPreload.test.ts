@@ -149,3 +149,63 @@ test('boolean settings preserve defaults and persist only boolean values', async
         Object.assign(globalThis, { localStorage: originalStorage });
     }
 });
+
+test('Escape after a GPU error keeps a recoverable pause UI until mouse capture succeeds in SP and MP', async () => {
+    const { PerspectiveCamera } = await import('three');
+    const { PointerLockControls } = await import('../src/pointerLockControls.ts');
+    const { state } = await import('../src/state.ts');
+    const { onInputStarted, onInputEnded, endInput, beginInput, resumeInputAfterOverlay, isInputActive } = await import('../src/inputSession.ts');
+    const { GothChat } = await import('../src/gothChat.ts');
+    const original = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+    try {
+        for (const multiplayer of [false, true]) {
+            const handlers = new Map<string, (event: any) => void>();
+            let panel = new Element();
+            Object.assign(globalThis, {
+                modelFailure: true, modelGate: undefined,
+                window: {
+                    localStorage: { getItem: () => 'accepted' },
+                    addEventListener: (name: string, callback: (event: any) => void) => handlers.set(name, callback),
+                },
+                document: { body: new Element(), createElement: (tag: string) => tag === 'section' ? (panel = new Element()) : new Element() },
+                fetch: async (url: string) => new Response(readFileSync(new URL('../public' + url, import.meta.url), 'utf8')),
+            });
+            const doc = Object.assign(new EventTarget(), {
+                pointerLockElement: null as unknown,
+                exitPointerLock() { this.pointerLockElement = null; this.dispatchEvent(new Event('pointerlockchange')); },
+            });
+            let deny = true;
+            const element = { ownerDocument: doc, requestPointerLock: async () => {
+                if (deny) throw new DOMException('Escape cannot restore capture', 'NotAllowedError');
+                doc.pointerLockElement = element; doc.dispatchEvent(new Event('pointerlockchange'));
+            } };
+            const controls = new PointerLockControls(new PerspectiveCamera(), element as unknown as HTMLElement);
+            state.controls = controls; state.isPlaying = true; state.isMultiplayer = multiplayer; state.playerHp = 10;
+            let pauseVisible = false;
+            const chat = new GothChat({ onOpen: endInput, onClose: resumeInputAfterOverlay, onReplyStart() {} });
+            onInputStarted(() => { pauseVisible = false; });
+            onInputEnded(() => { pauseVisible = !chat.isOpen; });
+            doc.pointerLockElement = element; doc.dispatchEvent(new Event('pointerlockchange'));
+            chat.open();
+            await new Promise(resolve => setImmediate(resolve));
+            assert.match(panel.querySelector('.goth-chat-status').textContent, /Simulated GPU loss/);
+            for (const type of ['keydown', 'keyup']) handlers.get(type)!({
+                type, key: 'Escape', code: 'Escape', isComposing: false, preventDefault() {}, stopImmediatePropagation() {},
+            });
+            await new Promise(resolve => setImmediate(resolve));
+            assert.equal(chat.isOpen, false);
+            assert.equal(panel.hidden, true);
+            assert.equal(isInputActive(), false);
+            assert.equal(pauseVisible, true, 'denied Escape resume leaves a visible recovery route');
+            deny = false;
+            beginInput(); // The existing Resume button.
+            await new Promise(resolve => setImmediate(resolve));
+            assert.equal(isInputActive(), true, 'retry resumes the same game without reloading');
+            assert.equal(pauseVisible, false);
+            controls.dispose();
+        }
+    } finally {
+        state.controls = null; state.isPlaying = false; state.isMultiplayer = false;
+        Object.assign(globalThis, original);
+    }
+});

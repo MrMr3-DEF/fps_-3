@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, overlapsTown } from '../src/town.ts';
-import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, CAMERA_CEILING_CLEARANCE, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT, MAP_HALF_SIZE } from '../src/config.ts';
+import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, CAMERA_CEILING_CLEARANCE, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_DEPTH, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT, MAP_HALF_SIZE } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
 import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
@@ -433,6 +433,18 @@ test('thin stone stairs cantilever from the west wall with a wooden outer railin
     const structure = boxes.filter(b => b.kind === 'stair' && b.solid);
     assert.ok(structure.every(b => b.material === 'stone'));
     assert.ok(structure.every(b => b.height <= 0.35 + 1e-10), 'no ground-based stair wedge or landing column');
+    const landing = structure.find(b => b.depth === TOWN_STAIR_LANDING_DEPTH)!;
+    const stairTopZ = TOWN_STAIR_START_Z - TOWN_STAIR_STEPS * TOWN_STAIR_TREAD;
+    assert.equal(landing.width, TOWN_STAIR_WIDTH);
+    assert.equal(landing.z, TOWN_STAIR_LANDING_Z);
+    assert.ok(Math.abs(landing.z + landing.depth / 2 - stairTopZ) < 1e-10);
+
+    const westInnerCurbX = -TOWN_HALF_SIZE + TOWN_WALL_THICKNESS / 2 - 0.3;
+    const curbSegments = boxes.filter(b => b.kind === 'wall' && b.width === 0.6 && b.height === 1 && Math.abs(b.x - westInnerCurbX) < 1e-10)
+        .sort((a, b) => a.z - b.z);
+    assert.equal(curbSegments.length, 2);
+    assert.ok(Math.abs(curbSegments[0].z + curbSegments[0].depth / 2 - (landing.z - landing.depth / 2)) < 1e-10);
+    assert.ok(Math.abs(curbSegments[1].z - curbSegments[1].depth / 2 - (landing.z + landing.depth / 2)) < 1e-10);
 
     const railing = boxes.filter(b => b.kind === 'railing');
     const slopedRails = railing.filter(b => b.rotationX !== undefined);
@@ -440,10 +452,27 @@ test('thin stone stairs cantilever from the west wall with a wooden outer railin
     assert.equal(slopedRails[0].material, 'door');
     assert.equal(slopedRails[0].solid, false);
     assert.ok(Math.abs(slopedRails[0].rotationX! - Math.atan2(TOWN_WALL_HEIGHT, TOWN_STAIR_STEPS * TOWN_STAIR_TREAD)) < 1e-10);
-    const posts = railing.filter(b => b.solid);
+    const posts = railing.filter(b => b.solid && b.height > 1);
     assert.ok(posts.length > 2);
     assert.ok(posts.every(post => post.material === 'door'));
-    assert.ok(posts.every(post => Math.abs(post.x + post.width / 2 - (TOWN_STAIR_X + TOWN_STAIR_WIDTH / 2)) < 1e-10));
+    const outerPosts = posts.filter(post => Math.abs(post.x - (TOWN_STAIR_X + TOWN_STAIR_WIDTH / 2 - post.width / 2)) < 1e-10);
+    assert.ok(outerPosts.length > 2);
+    const endRail = railing.find(b => b.solid && b.width === TOWN_STAIR_WIDTH && b.height === 0.2)!;
+    assert.ok(Math.abs(endRail.z - (landing.z - landing.depth / 2 + endRail.depth / 2)) < 1e-10);
+});
+
+test('the wrapped landing rail stops a player who continues straight after the ascent', () => {
+    setup();
+    const landingFarEdgeZ = TOWN_STAIR_LANDING_Z - TOWN_STAIR_LANDING_DEPTH / 2;
+    player(TOWN_STAIR_X, TOWN_WALL_HEIGHT + PLAYER_HEIGHT, TOWN_STAIR_LANDING_Z);
+    state.camera!.quaternion.identity();
+    state.canJump = true;
+    state.moveForward = true;
+    for (let frame = 0; frame < 120; frame++) updatePlayerPhysics(.016);
+    state.moveForward = false;
+    assert.ok(state.camera!.position.z > landingFarEdgeZ + PLAYER_RADIUS, 'end rail catches forward movement before the drop');
+    assert.equal(state.camera!.position.y, TOWN_WALL_HEIGHT + PLAYER_HEIGHT);
+    disposeWorld();
 });
 
 test('players can walk the entire stair ascent to the rampart and back down without jumping', () => {
@@ -551,7 +580,7 @@ test('near-limit straight stairs stay smooth with walking input across frame rat
     assert.ok(TOWN_WALL_HEIGHT / TOWN_STAIR_STEPS < PLAYER_STEP_HEIGHT);
     assert.ok(PLAYER_STEP_HEIGHT - TOWN_WALL_HEIGHT / TOWN_STAIR_STEPS < .001);
     assert.ok(TOWN_STAIR_STEPS * TOWN_STAIR_TREAD < 41, 'compact single flight');
-    assert.ok(TOWN_STAIR_LANDING_Z - 3 > TOWN_GATE_WIDTH / 2 + PLAYER_RADIUS, 'ascent and landing avoid the west gate');
+    assert.ok(TOWN_STAIR_LANDING_Z - TOWN_STAIR_LANDING_DEPTH / 2 > TOWN_GATE_WIDTH / 2 + PLAYER_RADIUS, 'ascent and landing avoid the west gate');
     for (const fps of [20, 24, 30, 40, 50, 60, 90, 100, 120, 144, 240, 0]) {
         player(TOWN_STAIR_X, PLAYER_HEIGHT, TOWN_STAIR_START_Z + 2);
         state.camera!.quaternion.identity();

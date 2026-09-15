@@ -71,3 +71,25 @@ test('permission errors do not trigger fallback requests', async () => {
     assert.equal(requests, 1);
     controls.dispose();
 });
+
+test('a pointerlockerror releases a stuck request so Resume can retry', async () => {
+    let requests = 0;
+    let settleFirst!: () => void;
+    const { controls, doc, element } = fixture(() => {
+        requests++;
+        if (requests === 1) return new Promise<void>(resolve => { settleFirst = resolve; });
+        doc.pointerLockElement = element;
+        doc.dispatchEvent(new Event('pointerlockchange'));
+        return Promise.resolve();
+    });
+    controls.lock();
+    doc.dispatchEvent(new Event('pointerlockerror'));
+    controls.lock();
+    await flush();
+    assert.equal(requests, 2);
+    assert.equal(controls.isLocked, true);
+    settleFirst();
+    await flush();
+    assert.equal(controls.isLocked, true, 'a late result from the failed request cannot undo recovery');
+    controls.dispose();
+});

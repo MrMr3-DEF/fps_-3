@@ -4,7 +4,7 @@ import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setupMobileControls } from './mobileControls.js';
-import { onInputStarted, onInputEnded, isInputActive, beginInput, endInput, touchMode } from './inputSession.js';
+import { onInputStarted, onInputEnded, isInputActive, resumeInputAfterOverlay, beginInput, endInput, touchMode } from './inputSession.js';
 import { getEscapePauseAction, shouldPauseOfflineSimulation } from './pauseShortcut.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
@@ -1228,11 +1228,7 @@ export function init(): void {
         onClose: resume => {
             conversationCamera.cancel();
             state.velocity.set(0, 0, 0);
-            if (state.isPlaying && state.playerHp > 0) {
-                if (UI.blocker) UI.blocker.style.display = resume ? 'none' : 'flex';
-                if (UI.panelPause) UI.panelPause.style.display = resume ? 'none' : 'flex';
-            }
-            if (resume && state.isPlaying && state.playerHp > 0) beginInput();
+            if (state.isPlaying && state.playerHp > 0) resumeInputAfterOverlay(resume);
         },
         onReplyStart: () => chatCharacter?.startTalking(),
     });
