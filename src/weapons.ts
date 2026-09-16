@@ -14,7 +14,9 @@ import {
     MINIGUN_MAX_RPM,
     MAX_PROJECTILES,
     BULLET_TRAVEL_DISTANCE,
-    PROJECTILE_RADIUS
+    PROJECTILE_RADIUS,
+    GRAPPLE_BLUE,
+    GUN_TIP_Z,
 } from './config.js';
 import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './weaponNetworkPort.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
@@ -23,6 +25,7 @@ import { queryObstaclesAlongSegment, queryTargetsAlongSegment } from './world.js
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { projectileData, targetData } from './userDataTypes.js';
 import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
+import { attachGrappleMuzzleShockwave, attachMuzzleShockwave, triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 
 // Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
@@ -35,9 +38,32 @@ const INSPECT_PAUSE1_END   = 1.0;
 const INSPECT_PHASE2_END   = 3.2;
 const INSPECT_TOTAL        = 3.8;
 
+const SHOTGUN_BARREL_LENGTH = 0.55;
+const SHOTGUN_BARREL_CENTER_Y = 0.02;
+const SHOTGUN_BARREL_CENTER_Z = -0.3;
+const AR_BARREL_LENGTH = 0.65;
+const AR_BARREL_CENTER_Y = 0.02;
+const AR_BARREL_CENTER_Z = -0.4;
+const SNIPER_BRAKE_LENGTH = 0.14;
+const SNIPER_BRAKE_CENTER_Z = -1.4;
+const MINIGUN_Y_OFFSET = -0.06;
+const MINIGUN_Z_OFFSET = 0.08;
+const MINIGUN_BARREL_GROUP_Z = MINIGUN_Z_OFFSET - 0.09;
+const MINIGUN_BARREL_LENGTH = 0.72;
+const MINIGUN_BARREL_RADIUS = 0.07;
+
+/** Exact local-space centers of the modeled muzzle planes. */
+export const WEAPON_MUZZLE_POINTS = {
+    PISTOL: [0, 0, GUN_TIP_Z],
+    SHOTGUN: [0, SHOTGUN_BARREL_CENTER_Y, SHOTGUN_BARREL_CENTER_Z - SHOTGUN_BARREL_LENGTH / 2],
+    AR: [0, AR_BARREL_CENTER_Y, AR_BARREL_CENTER_Z - AR_BARREL_LENGTH / 2],
+    SNIPER: [0, 0, SNIPER_BRAKE_CENTER_Z - SNIPER_BRAKE_LENGTH / 2],
+    MINIGUN: [0, MINIGUN_Y_OFFSET + MINIGUN_BARREL_RADIUS, MINIGUN_BARREL_GROUP_Z - MINIGUN_BARREL_LENGTH],
+} as const;
+
 export const SHARED_PROJECTILE_GEO = new THREE.SphereGeometry(PROJECTILE_RADIUS, 8, 8);
 export const SHARED_BODY_MAT = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-const SHARED_GUN_BODY_GEO = new THREE.BoxGeometry(0.07, 0.11, 0.38);
+const SHARED_GUN_BODY_GEO = new THREE.BoxGeometry(0.07, 0.11, Math.abs(GUN_TIP_Z) * 2);
 const SHARED_GUN_GRIP_GEO = new THREE.BoxGeometry(0.05, 0.16, 0.07);
 const SHARED_GUN_CORE_GEO = new THREE.BoxGeometry(0.03, 0.03, 0.36);
 const SHARED_BEAN_CYLINDER_GEO = new THREE.CylinderGeometry(0.6, 0.6, 1.0, 16);
@@ -107,7 +133,7 @@ function getWeaponOffset(name: string): number {
     return WEAPON_OFFSETS[name] ?? 0.22;
 }
 
-export const buildGun = (coreColor: number): THREE.Group => {
+export const buildGun = (coreColor: number, grappleFlash = false): THREE.Group => {
     const gunGroup = new THREE.Group();
     const bodyMat = SHARED_BODY_MAT;
     const body = new THREE.Mesh(SHARED_GUN_BODY_GEO, bodyMat);
@@ -123,6 +149,11 @@ export const buildGun = (coreColor: number): THREE.Group => {
     const core = new THREE.Mesh(SHARED_GUN_CORE_GEO, coreMat);
     core.position.set(0, 0.042, -0.04);
     gunGroup.add(core);
+    if (grappleFlash) {
+        attachGrappleMuzzleShockwave(gunGroup, WEAPON_MUZZLE_POINTS.PISTOL, GRAPPLE_BLUE);
+    } else {
+        attachMuzzleShockwave(gunGroup, WEAPON_MUZZLE_POINTS.PISTOL, coreColor, WEAPON_STATS.PISTOL.muzzleFlashSize);
+    }
     return gunGroup;
 };
 
@@ -136,16 +167,16 @@ export const buildShotgun = (): THREE.Group => {
     body.castShadow = true;
     shotgunGroup.add(body);
 
-    const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.55, 8);
+    const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, SHOTGUN_BARREL_LENGTH, 8);
     barrelGeo.rotateX(Math.PI / 2);
 
     const leftBarrel = new THREE.Mesh(barrelGeo, bodyMat);
-    leftBarrel.position.set(-0.02, 0.02, -0.3);
+    leftBarrel.position.set(-0.02, SHOTGUN_BARREL_CENTER_Y, SHOTGUN_BARREL_CENTER_Z);
     leftBarrel.castShadow = true;
     shotgunGroup.add(leftBarrel);
 
     const rightBarrel = new THREE.Mesh(barrelGeo, bodyMat);
-    rightBarrel.position.set(0.02, 0.02, -0.3);
+    rightBarrel.position.set(0.02, SHOTGUN_BARREL_CENTER_Y, SHOTGUN_BARREL_CENTER_Z);
     rightBarrel.castShadow = true;
     shotgunGroup.add(rightBarrel);
 
@@ -165,6 +196,8 @@ export const buildShotgun = (): THREE.Group => {
     core.position.set(0, 0.05, -0.05);
     shotgunGroup.add(core);
 
+    attachMuzzleShockwave(shotgunGroup, WEAPON_MUZZLE_POINTS.SHOTGUN, WEAPON_STATS.SHOTGUN.bulletColor, WEAPON_STATS.SHOTGUN.muzzleFlashSize);
+
     return shotgunGroup;
 };
 
@@ -178,10 +211,10 @@ export const buildAR = (): THREE.Group => {
     body.castShadow = true;
     arGroup.add(body);
 
-    const barrelGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.65, 8);
+    const barrelGeo = new THREE.CylinderGeometry(0.015, 0.015, AR_BARREL_LENGTH, 8);
     barrelGeo.rotateX(Math.PI / 2);
     const barrel = new THREE.Mesh(barrelGeo, bodyMat);
-    barrel.position.set(0, 0.02, -0.4);
+    barrel.position.set(0, AR_BARREL_CENTER_Y, AR_BARREL_CENTER_Z);
     barrel.castShadow = true;
     arGroup.add(barrel);
 
@@ -202,13 +235,15 @@ export const buildAR = (): THREE.Group => {
     core.position.set(0, 0.052, -0.06);
     arGroup.add(core);
 
+    attachMuzzleShockwave(arGroup, WEAPON_MUZZLE_POINTS.AR, WEAPON_STATS.AR.bulletColor, WEAPON_STATS.AR.muzzleFlashSize);
+
     return arGroup;
 };
 
 export const buildSniper = (): THREE.Group => {
     const sniperGroup = new THREE.Group();
     const bodyMat = SHARED_BODY_MAT;
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffea00 });
+    const coreMat = new THREE.MeshBasicMaterial({ color: WEAPON_STATS.SNIPER.bulletColor });
     const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
 
     const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
@@ -237,10 +272,10 @@ export const buildSniper = (): THREE.Group => {
     const brakeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.5, metalness: 0.8 });
     const ventMat = new THREE.MeshBasicMaterial({ color: 0x0a0a12 });
 
-    const brakeBodyGeo = new THREE.CylinderGeometry(0.038, 0.038, 0.14, 8);
+    const brakeBodyGeo = new THREE.CylinderGeometry(0.038, 0.038, SNIPER_BRAKE_LENGTH, 8);
     brakeBodyGeo.rotateX(Math.PI / 2);
     const brakeBody = new THREE.Mesh(brakeBodyGeo, brakeMat);
-    brakeBody.position.set(0, 0, -1.40);
+    brakeBody.position.set(0, 0, SNIPER_BRAKE_CENTER_Z);
     brakeBody.castShadow = true;
     sniperGroup.add(brakeBody);
 
@@ -292,6 +327,8 @@ export const buildSniper = (): THREE.Group => {
     lens.position.set(0, 0.09, -0.176);
     sniperGroup.add(lens);
 
+    attachMuzzleShockwave(sniperGroup, WEAPON_MUZZLE_POINTS.SNIPER, WEAPON_STATS.SNIPER.bulletColor, WEAPON_STATS.SNIPER.muzzleFlashSize);
+
     return sniperGroup;
 };
 
@@ -300,13 +337,11 @@ export const buildMinigun = (): THREE.Group => {
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5 });
     const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.3, metalness: 0.8 });
     const handleMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.7 });
-
-    const Y_OFFSET = -0.06;
-    const Z_OFFSET = 0.08;
+    const coreMat = new THREE.MeshBasicMaterial({ color: WEAPON_STATS.MINIGUN.bulletColor });
 
     const cubeGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
     const cube = new THREE.Mesh(cubeGeo, bodyMat);
-    cube.position.set(0, Y_OFFSET, Z_OFFSET);
+    cube.position.set(0, MINIGUN_Y_OFFSET, MINIGUN_Z_OFFSET);
     cube.castShadow = true;
     minigunGroup.add(cube);
 
@@ -314,14 +349,14 @@ export const buildMinigun = (): THREE.Group => {
     
     const s1Geo = new THREE.BoxGeometry(0.04, 0.12, 0.04);
     const s1 = new THREE.Mesh(s1Geo, handleMat);
-    s1.position.set(0, Y_OFFSET + 0.09, 0.07 + Z_OFFSET);
+    s1.position.set(0, MINIGUN_Y_OFFSET + 0.09, 0.07 + MINIGUN_Z_OFFSET);
     s1.castShadow = true;
     handleGroup.add(s1);
 
     const gripGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.15, 8);
     gripGeo.rotateX(Math.PI / 2);
     const grip = new THREE.Mesh(gripGeo, handleMat);
-    grip.position.set(0, Y_OFFSET + 0.15, -0.005 + Z_OFFSET);
+    grip.position.set(0, MINIGUN_Y_OFFSET + 0.15, -0.005 + MINIGUN_Z_OFFSET);
     grip.castShadow = true;
     handleGroup.add(grip);
 
@@ -329,21 +364,18 @@ export const buildMinigun = (): THREE.Group => {
 
     // Stored separately so updateWeapons can spin the barrels without walking children.
     const barrelsGroup = new THREE.Group();
-    barrelsGroup.position.set(0, Y_OFFSET, Z_OFFSET - 0.09);
+    barrelsGroup.position.set(0, MINIGUN_Y_OFFSET, MINIGUN_BARREL_GROUP_Z);
     
-    const barrelRadius = 0.07;
-    const barrelLength = 0.72;
+    const barrelLength = MINIGUN_BARREL_LENGTH;
     const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, barrelLength, 8);
     barrelGeo.rotateX(Math.PI / 2);
 
     for (let i = 0; i < 6; i++) {
         const angle = (i * Math.PI) / 3;
+        const x = Math.cos(angle) * MINIGUN_BARREL_RADIUS;
+        const y = Math.sin(angle) * MINIGUN_BARREL_RADIUS;
         const b = new THREE.Mesh(barrelGeo, barrelMat);
-        b.position.set(
-            Math.cos(angle) * barrelRadius,
-            Math.sin(angle) * barrelRadius,
-            -barrelLength / 2
-        );
+        b.position.set(x, y, -barrelLength / 2);
         b.castShadow = true;
         barrelsGroup.add(b);
     }
@@ -353,9 +385,16 @@ export const buildMinigun = (): THREE.Group => {
     bracket.position.set(0, 0, -barrelLength / 2);
     barrelsGroup.add(bracket);
 
+    const hubGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.02, 12);
+    hubGeo.rotateX(Math.PI / 2);
+    const hub = new THREE.Mesh(hubGeo, coreMat);
+    hub.position.set(0, 0, -barrelLength / 2 - 0.012);
+    barrelsGroup.add(hub);
+
     minigunGroup.add(barrelsGroup);
 
     minigunGroup.userData.barrels = barrelsGroup;
+    attachMuzzleShockwave(minigunGroup, WEAPON_MUZZLE_POINTS.MINIGUN, WEAPON_STATS.MINIGUN.bulletColor, WEAPON_STATS.MINIGUN.muzzleFlashSize);
 
     return minigunGroup;
 };
@@ -363,7 +402,7 @@ export const buildMinigun = (): THREE.Group => {
 export function createAkimboGuns(): void {
     if (!state.camera || !state.scene) return;
 
-    state.leftGun = buildGun(0x00aaff);
+    state.leftGun = buildGun(GRAPPLE_BLUE, true);
     state.leftGun.position.set(-0.32, -0.22, -0.5);
     state.camera.add(state.leftGun);
 
@@ -371,7 +410,7 @@ export function createAkimboGuns(): void {
     state.rightGunContainer.position.set(0.32, -0.22, -0.5);
     state.camera.add(state.rightGunContainer);
 
-    state.pistolMesh = buildGun(0xff0055);
+    state.pistolMesh = buildGun(WEAPON_STATS.PISTOL.bulletColor);
     state.rightGunContainer.add(state.pistolMesh);
 
     state.shotgunMesh = buildShotgun();
@@ -407,6 +446,8 @@ export function fireProjectile(): void {
 
     const stats = WEAPON_STATS[state.activeWeaponName];
     if (!stats) return;
+
+    triggerMuzzleFlash(state.rightGun);
 
     const shotId = ++nextShotId;
     const spreadSeed = crypto.getRandomValues(new Uint32Array(1))[0];
@@ -614,6 +655,9 @@ export function fireProjectile(): void {
 }
 
 export function updateWeapons(delta: number): void {
+    updateMuzzleFlash(state.leftGun, delta);
+    updateMuzzleFlash(state.rightGun, delta);
+
     if (state.fireCooldown > 0) {
         state.fireCooldown -= delta;
     }

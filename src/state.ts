@@ -3,6 +3,7 @@ import { PLAYER_MAX_HP } from './config.js';
 import type { PointerLockControls } from './pointerLockControls.js';
 import type { Particle } from './particles.js';
 import { createGogglesFailureState, resetGogglesFailure, type GogglesFailureState } from './gogglesFailure.js';
+import type { HookState } from './networkTypes.js';
 
 export interface PeerLike {
     id: string;
@@ -44,6 +45,7 @@ export interface PeerData {
     maxHp: number;
     lastDamageTime: number;
     regenTimer: number;
+    lastHookState: HookState;
 }
 
 export interface GameState {

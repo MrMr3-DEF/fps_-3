@@ -22,7 +22,9 @@ the crosshair within its category only stages defaults for that category.
   rules continue to hide the reticle when appropriate.
 
 Settings remain in `testfps-settings-v1` local storage. Older saved settings get
-new keybind and crosshair defaults. New fields are validated on load. Nested draft
+new keybind, crosshair, and enabled muzzle-flash defaults. The graphics toggle controls the
+color-matched weapon shockwaves and the grappling gun's blue energy shockwave, while the adjacent opacity slider controls
+their transparency from 0–100%. New fields are validated on load. Nested draft
 values are cloned to keep edits separate from the applied settings and defaults.
 
 Implementation: `settings.ts` handles storage and cloning, `controlSettings.ts`

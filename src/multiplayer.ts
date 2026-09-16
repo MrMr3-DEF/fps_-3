@@ -33,9 +33,11 @@ import {
     HIT_FLASH_DURATION_MS,
     WEAPON_STATS,
     BULLET_TRAVEL_DISTANCE,
-    MAX_PROJECTILES
+    MAX_PROJECTILES,
+    GRAPPLE_BLUE,
 } from './config.js';
 import { setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
+import { triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import {
     parseNetworkPacket,
     type FirePacket,
@@ -84,11 +86,7 @@ const _shotObstacleCandidates: THREE.Object3D[] = [];
 
 const SHARED_HOOK_GEO = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
 SHARED_HOOK_GEO.rotateX(Math.PI / 2);
-const SHARED_HOOK_MAT = new THREE.MeshStandardMaterial({
-    color: 0x00aaff,
-    roughness: 0.3,
-    metalness: 0.6
-});
+const SHARED_HOOK_MAT = new THREE.MeshBasicMaterial({ color: GRAPPLE_BLUE, toneMapped: false });
 
 export interface PeerJSConfig {
     debug: number;
@@ -1239,6 +1237,11 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         peerData.sniperMesh.visible = (msg.activeWeapon === 'SNIPER');
         peerData.minigunMesh.visible = (msg.activeWeapon === 'MINIGUN');
 
+        if (msg.hookState === 'FIRING' && peerData.lastHookState !== 'FIRING') {
+            triggerMuzzleFlash(peerData.leftGun);
+        }
+        peerData.lastHookState = msg.hookState;
+
         if (msg.activeWeapon === 'MINIGUN' && peerData.minigunMesh && peerData.minigunMesh.userData.barrels) {
             if (peerData.minigunRamp === undefined)      peerData.minigunRamp = 0.0;
             if (peerData.lastUpdateTime === undefined)   peerData.lastUpdateTime = performance.now();
@@ -1286,6 +1289,15 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
     } else if (msg.type === 'fire') {
         _barrelPos.set(msg.barrelPos.x, msg.barrelPos.y, msg.barrelPos.z);
         _baseFireDir.set(msg.dir.x, msg.dir.y, msg.dir.z).normalize();
+        const firingPeer = state.peers[senderId];
+        if (firingPeer) {
+            const firingWeapon = msg.weapon === 'PISTOL' ? firingPeer.pistolMesh
+                : msg.weapon === 'SHOTGUN' ? firingPeer.shotgunMesh
+                : msg.weapon === 'AR' ? firingPeer.arMesh
+                : msg.weapon === 'SNIPER' ? firingPeer.sniperMesh
+                : firingPeer.minigunMesh;
+            triggerMuzzleFlash(firingWeapon);
+        }
 
         if (msg.weapon === 'SNIPER') {
             const targetPos = _targetPos;
@@ -1521,6 +1533,12 @@ export function updateRemotePeers(delta: number): void {
         let yawDelta = peerData.targetYaw - currentYaw;
         yawDelta = Math.atan2(Math.sin(yawDelta), Math.cos(yawDelta));
         peerData.mesh.rotation.y = currentYaw + yawDelta * alpha;
+        updateMuzzleFlash(peerData.leftGun, delta);
+        updateMuzzleFlash(peerData.pistolMesh, delta);
+        updateMuzzleFlash(peerData.shotgunMesh, delta);
+        updateMuzzleFlash(peerData.arMesh, delta);
+        updateMuzzleFlash(peerData.sniperMesh, delta);
+        updateMuzzleFlash(peerData.minigunMesh, delta);
     }
 }
 
@@ -1592,7 +1610,7 @@ function createPeerBean(username: string): PeerData {
 
     const peerGroup = buildBeanModel(0x8c7ae6, 0xff4757);
 
-    const leftGun = buildGun(0x00aaff);
+    const leftGun = buildGun(GRAPPLE_BLUE, true);
     excludeFromStablePeerEnvelope(leftGun);
     leftGun.position.set(-0.7, 0.0, -0.5);
     peerGroup.add(leftGun);
@@ -1602,7 +1620,7 @@ function createPeerBean(username: string): PeerData {
     rightGunContainer.position.set(0.7, 0.0, -0.5);
     peerGroup.add(rightGunContainer);
 
-    const pistolMesh = buildGun(0xff0055);
+    const pistolMesh = buildGun(WEAPON_STATS.PISTOL.bulletColor);
     rightGunContainer.add(pistolMesh);
 
     const shotgunMesh = buildShotgun();
@@ -1659,6 +1677,7 @@ function createPeerBean(username: string): PeerData {
         sniperMesh: sniperMesh,
         minigunMesh: minigunMesh,
         hookLine: null,
+        lastHookState: 'IDLE',
         hp: PLAYER_MAX_HP,
         maxHp: PLAYER_MAX_HP,
         lastDamageTime: 0,

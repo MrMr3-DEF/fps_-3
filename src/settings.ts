@@ -17,6 +17,8 @@ export interface UserSettings {
     renderDistanceChunks: number;
     shadows: boolean;
     lavaGlow: boolean;
+    muzzleFlashes: boolean;
+    muzzleFlashOpacity: number;
     shadowQuality: ShadowQuality;
     showFps: boolean;
     photosensitivityMode: boolean;
@@ -34,6 +36,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     renderDistanceChunks: 4,
     shadows: true,
     lavaGlow: false,
+    muzzleFlashes: true,
+    muzzleFlashOpacity: 1.0,
     shadowQuality: 'low',
     showFps: true,
     photosensitivityMode: false,
@@ -74,6 +78,8 @@ export function loadUserSettings(): UserSettings {
             userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
             userSettings.lavaGlow = readBoolean(parsed.lavaGlow, DEFAULT_USER_SETTINGS.lavaGlow);
+            userSettings.muzzleFlashes = readBoolean(parsed.muzzleFlashes, DEFAULT_USER_SETTINGS.muzzleFlashes);
+            userSettings.muzzleFlashOpacity = clamp(parsed.muzzleFlashOpacity ?? DEFAULT_USER_SETTINGS.muzzleFlashOpacity, 0, 1);
             userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
             userSettings.downloadWebLLMImmediately = readBoolean(parsed.downloadWebLLMImmediately, false);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);

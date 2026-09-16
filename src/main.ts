@@ -33,6 +33,7 @@ import {
     BORDER_PULSE_DISTANCE,
     MAX_RENDER_DISTANCE_CHUNKS,
     THIRD_PERSON_CAMERA_QUERY_RADIUS,
+    GRAPPLE_BLUE,
 } from './config.js';
 import { spawnParticles, updateParticles, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
 import { disposeProjectiles, updateProjectiles } from './projectiles.js';
@@ -131,6 +132,10 @@ const UI = {
     get settingShadowsValue() { return getUI<HTMLElement>('setting-shadows-value'); },
     get settingLavaGlow() { return getUI<HTMLInputElement>('setting-lava-glow'); },
     get settingLavaGlowValue() { return getUI<HTMLElement>('setting-lava-glow-value'); },
+    get settingMuzzleFlashes() { return getUI<HTMLInputElement>('setting-muzzle-flashes'); },
+    get settingMuzzleFlashesValue() { return getUI<HTMLElement>('setting-muzzle-flashes-value'); },
+    get settingMuzzleFlashOpacity() { return getUI<HTMLInputElement>('setting-muzzle-flash-opacity'); },
+    get settingMuzzleFlashOpacityValue() { return getUI<HTMLElement>('setting-muzzle-flash-opacity-value'); },
     get settingShadowQuality() { return getUI<HTMLSelectElement>('setting-shadow-quality'); },
     get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
     get settingFpsValue() { return getUI<HTMLElement>('setting-fps-value'); },
@@ -747,11 +752,7 @@ function setupGameSystems(): void {
 
     const hookGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
     hookGeo.rotateX(Math.PI / 2);
-    const hookMat = new THREE.MeshStandardMaterial({ 
-        color: 0x00aaff,
-        roughness: 0.3,
-        metalness: 0.6
-    });
+    const hookMat = new THREE.MeshBasicMaterial({ color: GRAPPLE_BLUE, toneMapped: false });
     state.hookMesh = new THREE.Mesh(hookGeo, hookMat);
     state.hookMesh.castShadow = true;
     state.hookMesh.receiveShadow = true;
@@ -1039,6 +1040,8 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.renderDistanceChunks === b.renderDistanceChunks &&
         a.shadows === b.shadows &&
         a.lavaGlow === b.lavaGlow &&
+        a.muzzleFlashes === b.muzzleFlashes &&
+        a.muzzleFlashOpacity === b.muzzleFlashOpacity &&
         a.shadowQuality === b.shadowQuality &&
         a.showFps === b.showFps &&
         a.photosensitivityMode === b.photosensitivityMode &&
@@ -1072,6 +1075,13 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     setCheckboxLabel(UI.settingShadowsValue, settings.shadows);
     if (UI.settingLavaGlow) UI.settingLavaGlow.checked = settings.lavaGlow;
     setCheckboxLabel(UI.settingLavaGlowValue, settings.lavaGlow);
+    if (UI.settingMuzzleFlashes) UI.settingMuzzleFlashes.checked = settings.muzzleFlashes;
+    setCheckboxLabel(UI.settingMuzzleFlashesValue, settings.muzzleFlashes);
+    if (UI.settingMuzzleFlashOpacity) {
+        UI.settingMuzzleFlashOpacity.value = settings.muzzleFlashOpacity.toFixed(2);
+        UI.settingMuzzleFlashOpacity.disabled = !settings.muzzleFlashes;
+    }
+    if (UI.settingMuzzleFlashOpacityValue) UI.settingMuzzleFlashOpacityValue.innerText = formatPercent(settings.muzzleFlashOpacity);
     if (UI.settingShadowQuality) {
         UI.settingShadowQuality.value = settings.shadowQuality;
         UI.settingShadowQuality.disabled = !settings.shadows;
@@ -1198,6 +1208,19 @@ function setupSettingsControls(): void {
     UI.settingLavaGlow?.addEventListener('change', (e) => {
         updatePendingSettings((settings) => {
             settings.lavaGlow = (e.target as HTMLInputElement).checked;
+        });
+    });
+
+    UI.settingMuzzleFlashes?.addEventListener('change', (e) => {
+        updatePendingSettings((settings) => {
+            settings.muzzleFlashes = (e.target as HTMLInputElement).checked;
+        });
+    });
+
+    UI.settingMuzzleFlashOpacity?.addEventListener('input', (e) => {
+        const val = parseFloat((e.target as HTMLInputElement).value);
+        updatePendingSettings((settings) => {
+            settings.muzzleFlashOpacity = clampNumber(val, 0, 1, DEFAULT_USER_SETTINGS.muzzleFlashOpacity);
         });
     });
 

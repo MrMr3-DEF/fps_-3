@@ -10,9 +10,11 @@ import {
     HOOK_MAGNETIC_RADIUS,
     HOOK_MIN_PULL_SPEED,
     HOOK_MAX_SLINGSHOT_SPEED,
-    HOOK_SLINGSHOT_ACCEL
+    HOOK_SLINGSHOT_ACCEL,
+    GUN_TIP_Z,
 } from './config.js';
 import { queryGrappleSurfacesAlongSegment, queryTargetsNear } from './world.js';
+import { triggerMuzzleFlash } from './muzzleFlash.js';
 
 // Reused scratch values for aiming and cable placement.
 const _dirToTarget = new THREE.Vector3();
@@ -29,7 +31,7 @@ const _rayEnd = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
 const _centerScreen = new THREE.Vector2(0, 0);
 
-export const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, -0.19);
+export const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, GUN_TIP_Z);
 
 let hookBadgeEl: HTMLElement | null = null;
 
@@ -42,6 +44,7 @@ export function toggleGrapplingHook(): void {
         state.hookState = 'FIRING';
         state.hookIsEnemy = false;
         state.hookTargetEnemy = null;
+        triggerMuzzleFlash(state.leftGun);
 
         if (state.leftGun && !state.isThirdPersonView) {
             state.leftGun.position.z += 0.15;

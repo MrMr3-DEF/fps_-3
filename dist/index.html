@@ -11,7 +11,7 @@
     <!-- Prevent favicon 404/500 requests in browser console -->
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
-  <script type="module" crossorigin src="/assets/index-BnV0Sv7_.js"></script>
+  <script type="module" crossorigin src="/assets/index-BM2UfPn-.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-CywI2O9k.js">
   <link rel="stylesheet" crossorigin href="/assets/index-BqdsZgHM.css">
 </head>
@@ -119,6 +119,16 @@
                         <label for="setting-lava-glow">Lava Pool Glow</label>
                         <input type="checkbox" id="setting-lava-glow">
                         <span class="settings-value" id="setting-lava-glow-value">Off</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-muzzle-flashes">Muzzle Flashes</label>
+                        <input type="checkbox" id="setting-muzzle-flashes" checked>
+                        <span class="settings-value" id="setting-muzzle-flashes-value">On</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-muzzle-flash-opacity">Muzzle Flash Opacity</label>
+                        <input type="range" id="setting-muzzle-flash-opacity" min="0" max="1" step="0.05" value="1">
+                        <span class="settings-value" id="setting-muzzle-flash-opacity-value">100%</span>
                     </div>
                     <div class="settings-row">
                         <label for="setting-shadow-quality">Shadow Quality</label>

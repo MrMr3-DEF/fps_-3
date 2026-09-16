@@ -32,6 +32,8 @@ export const MAX_PILLAR_HEIGHT = 225.0;
 export const MAX_ENEMY_HEIGHT = 275.0;
 export const ENEMY_COUNT = 64;
 export const HOOK_MAX_RANGE = 300.0;
+export const GRAPPLE_BLUE = 0x00aaff;
+export const GUN_TIP_Z = -0.19;
 
 export const SWITCH_DURATION = 0.15;
 export const BULLET_TRAVEL_DISTANCE = 700;
@@ -91,15 +93,18 @@ export interface WeaponStat {
     recoil: number;
     spread: number;
     bulletColor: number;
+    /** Representative real-world bore diameter retained as weapon metadata. */
+    caliberMm: number;
+    muzzleFlashSize: 'small' | 'medium' | 'large';
     pellets?: number;
 }
 
 export const WEAPON_STATS: Record<string, WeaponStat> = {
-    PISTOL: { fireRate: 0.1, damage: 1, recoil: 0.08, spread: 0.002, bulletColor: 0xff0055 },
-    SHOTGUN: { fireRate: 0.6, damage: 1, recoil: 0.22, spread: 0.08, bulletColor: 0xffaa00, pellets: 5 },
-    AR: { fireRate: 0.15, damage: 1, recoil: 0.12, spread: 0.002, bulletColor: 0x00ff88 },
-    SNIPER: { fireRate: 2.0, damage: 10, recoil: 0.30, spread: 0.0, bulletColor: 0xffff00 },
-    MINIGUN: { fireRate: 0.06, damage: 1, recoil: 0.02, spread: 0.002, bulletColor: 0xff6600 },
+    PISTOL: { fireRate: 0.1, damage: 1, recoil: 0.08, spread: 0.002, bulletColor: 0xff0055, caliberMm: 9, muzzleFlashSize: 'small' },
+    SHOTGUN: { fireRate: 0.6, damage: 1, recoil: 0.22, spread: 0.08, bulletColor: 0xffaa00, caliberMm: 18.5, muzzleFlashSize: 'medium', pellets: 5 },
+    AR: { fireRate: 0.15, damage: 1, recoil: 0.12, spread: 0.002, bulletColor: 0x00ff88, caliberMm: 5.56, muzzleFlashSize: 'small' },
+    SNIPER: { fireRate: 2.0, damage: 10, recoil: 0.30, spread: 0.0, bulletColor: 0xffff00, caliberMm: 12.7, muzzleFlashSize: 'large' },
+    MINIGUN: { fireRate: 0.06, damage: 1, recoil: 0.02, spread: 0.002, bulletColor: 0xff6600, caliberMm: 7.62, muzzleFlashSize: 'small' },
 };
 
 export const LAVA_DAMAGE_TICK_MS = 500;
@@ -114,7 +119,7 @@ export const ROOM_CODE_LENGTH = 8;
 export const PEER_Y_OFFSET = 0.35;
 export const HIT_FLASH_DURATION_MS = 150;
 
-export const HOOK_SPEED = 300;
+export const HOOK_SPEED = 500;
 export const LASER_BEAM_FADE_TIME = 0.3;
 export const TARGET_HIT_RANGE_MULTIPLIER = 1.6;
 
