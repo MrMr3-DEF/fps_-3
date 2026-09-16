@@ -11,7 +11,7 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
     container.before(tabs);
     const categories = [
         ['gameplay', 'Gameplay', ['sensitivity', 'setting-fov', 'setting-scoped-fov', 'setting-webllm-download']],
-        ['graphics', 'Graphics', ['setting-render-scale', 'setting-render-distance', 'setting-particles', 'setting-shadows', 'setting-shadow-quality', 'setting-lava-glow', 'setting-muzzle-flashes', 'setting-muzzle-flash-opacity', 'setting-fps']],
+        ['graphics', 'Graphics', ['setting-render-scale', 'setting-render-distance', 'setting-particles', 'setting-shadows', 'setting-shadow-quality', 'setting-lava-glow', 'setting-muzzle-flashes', 'setting-muzzle-flash-opacity', 'setting-bullet-trails', 'setting-fps']],
         ['accessibility', 'Accessibility', ['setting-photosensitivity']],
         ['keybinds', 'Keybinds', []],
         ['crosshair', 'Crosshair', []],

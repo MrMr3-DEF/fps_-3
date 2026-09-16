@@ -51,7 +51,15 @@ export interface FirePacket {
     /** Makes multi-pellet visual replication identical on every remote peer. */
     spreadSeed: number;
     pelletCount?: number;
+    /** Optional goggles lock captured when a simulated projectile is fired. */
+    homingTarget?: HomingTargetPacket;
+    /** Shared travel threshold so every peer begins steering at the same point. */
+    homingStartDistance?: number;
 }
+
+export type HomingTargetPacket =
+    | { kind: 'npc'; targetIndex: number; targetRevision: number }
+    | { kind: 'peer'; targetPeerId: string; targetLifeId: number };
 
 export interface HitTargetPacket {
     type: 'hit_target';
@@ -169,6 +177,16 @@ function isHookState(value: unknown): value is HookState {
     return value === 'IDLE' || value === 'FIRING' || value === 'PULLING';
 }
 
+function isHomingTarget(value: unknown): value is HomingTargetPacket {
+    if (!isRecord(value)) return false;
+    if (value.kind === 'npc') {
+        return isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
+            isInteger(value.targetRevision, 0, Number.MAX_SAFE_INTEGER);
+    }
+    return value.kind === 'peer' && isPeerId(value.targetPeerId) &&
+        isInteger(value.targetLifeId, 0, Number.MAX_SAFE_INTEGER);
+}
+
 function isVec3(value: unknown): value is Vec3Packet {
     if (!isRecord(value)) return false;
     return isFiniteNumber(value.x, -MAX_PACKET_POSITION, MAX_PACKET_POSITION) &&
@@ -231,7 +249,12 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
             if (!isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) || !isWeaponName(value.weapon) || !isVec3(value.barrelPos) || !isVec3(value.dir) ||
                 !(value.hitPoint === undefined || isVec3(value.hitPoint)) ||
                 !isInteger(value.spreadSeed, 0, 0xffffffff) ||
-                !(value.pelletCount === undefined || isInteger(value.pelletCount, 1, 16))) return null;
+                !(value.pelletCount === undefined || isInteger(value.pelletCount, 1, 16)) ||
+                !(value.homingTarget === undefined || (value.weapon !== 'SNIPER' && isHomingTarget(value.homingTarget))) ||
+                !(value.homingStartDistance === undefined || (
+                    value.homingTarget !== undefined && value.weapon !== 'SNIPER' &&
+                    isFiniteNumber(value.homingStartDistance, 0, MAX_PACKET_POSITION)
+                ))) return null;
             const lengthSq = value.dir.x * value.dir.x + value.dir.y * value.dir.y + value.dir.z * value.dir.z;
             return lengthSq >= 0.25 && lengthSq <= 2.25 ? value as unknown as FirePacket : null;
         }

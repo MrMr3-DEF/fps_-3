@@ -83,6 +83,33 @@ test('network parser requires a normalized fire direction', () => {
     }), null);
 });
 
+test('fire packets accept enemy homing locks but never sniper homing', () => {
+    const fire = {
+        type: 'fire', shotId: 1, spreadSeed: 42, weapon: 'AR',
+        barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 },
+    };
+    assert.equal(parseNetworkPacket({
+        ...fire,
+        homingTarget: { kind: 'npc', targetIndex: 3, targetRevision: 2 },
+        homingStartDistance: 25,
+    })?.type, 'fire');
+    assert.equal(parseNetworkPacket({
+        ...fire,
+        homingTarget: { kind: 'peer', targetPeerId: 'peer-a', targetLifeId: 4 },
+    })?.type, 'fire');
+    assert.equal(parseNetworkPacket({
+        ...fire,
+        weapon: 'SNIPER',
+        homingTarget: { kind: 'npc', targetIndex: 3, targetRevision: 2 },
+    }), null);
+    assert.equal(parseNetworkPacket({ ...fire, homingStartDistance: 25 }), null);
+    assert.equal(parseNetworkPacket({
+        ...fire,
+        homingTarget: { kind: 'npc', targetIndex: 3, targetRevision: 2 },
+        homingStartDistance: -1,
+    }), null);
+});
+
 test('avatar colors accept only optional 24-bit integers', () => {
     assert.equal(parseNetworkPacket({ ...validUpdate, bodyColor: 0xdf5b64 })?.type, 'update');
     for (const bodyColor of [-1, 0x1000000, 1.5, '#df5b64', null]) {

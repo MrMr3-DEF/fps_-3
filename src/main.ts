@@ -56,13 +56,14 @@ import {
     updateRemotePeers
 } from './multiplayer.js';
 import { applyRendererSettings, cloneSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
+import { setProjectileTrailsEnabled } from './projectileTrails.js';
 import { targetData } from './userDataTypes.js';
 import type { PlayerDiedPacket } from './networkTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
 import { DayNightCycle } from './dayNightCycle.js';
-import { SmartGogglesHud } from './smartGoggles.js';
+import { isGogglesScanZoomReady, SmartGogglesHud } from './smartGoggles.js';
 import {
     finishGogglesShutdown,
     resolveGogglesScopeAttempt,
@@ -137,6 +138,8 @@ const UI = {
     get settingMuzzleFlashesValue() { return getUI<HTMLElement>('setting-muzzle-flashes-value'); },
     get settingMuzzleFlashOpacity() { return getUI<HTMLInputElement>('setting-muzzle-flash-opacity'); },
     get settingMuzzleFlashOpacityValue() { return getUI<HTMLElement>('setting-muzzle-flash-opacity-value'); },
+    get settingBulletTrails() { return getUI<HTMLInputElement>('setting-bullet-trails'); },
+    get settingBulletTrailsValue() { return getUI<HTMLElement>('setting-bullet-trails-value'); },
     get settingShadowQuality() { return getUI<HTMLSelectElement>('setting-shadow-quality'); },
     get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
     get settingFpsValue() { return getUI<HTMLElement>('setting-fps-value'); },
@@ -1043,6 +1046,7 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.lavaGlow === b.lavaGlow &&
         a.muzzleFlashes === b.muzzleFlashes &&
         a.muzzleFlashOpacity === b.muzzleFlashOpacity &&
+        a.bulletTrails === b.bulletTrails &&
         a.shadowQuality === b.shadowQuality &&
         a.showFps === b.showFps &&
         a.photosensitivityMode === b.photosensitivityMode &&
@@ -1083,6 +1087,8 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
         UI.settingMuzzleFlashOpacity.disabled = !settings.muzzleFlashes;
     }
     if (UI.settingMuzzleFlashOpacityValue) UI.settingMuzzleFlashOpacityValue.innerText = formatPercent(settings.muzzleFlashOpacity);
+    if (UI.settingBulletTrails) UI.settingBulletTrails.checked = settings.bulletTrails;
+    setCheckboxLabel(UI.settingBulletTrailsValue, settings.bulletTrails);
     if (UI.settingShadowQuality) {
         UI.settingShadowQuality.value = settings.shadowQuality;
         UI.settingShadowQuality.disabled = !settings.shadows;
@@ -1139,6 +1145,7 @@ function applyLiveSettings(): void {
     });
 
     setFpsVisible(userSettings.showFps && isInputActive() && !state.isScoped);
+    setProjectileTrailsEnabled(userSettings.bulletTrails);
 
     lastFov = -1;
 }
@@ -1223,6 +1230,12 @@ function setupSettingsControls(): void {
         const val = parseFloat((e.target as HTMLInputElement).value);
         updatePendingSettings((settings) => {
             settings.muzzleFlashOpacity = clampNumber(val, 0, 1, DEFAULT_USER_SETTINGS.muzzleFlashOpacity);
+        });
+    });
+
+    UI.settingBulletTrails?.addEventListener('change', (e) => {
+        updatePendingSettings((settings) => {
+            settings.bulletTrails = (e.target as HTMLInputElement).checked;
         });
     });
 
@@ -1602,10 +1615,14 @@ export function animate(): void {
             const gogglesPlayerPosition = logicalCameraPos ?? state.camera.position;
             _gogglesWeaponOrigin.copy(gogglesPlayerPosition);
             state.rightGun?.getWorldPosition(_gogglesWeaponOrigin);
-            // Let the scope zoom settle before acquiring targets. Starting the
-            // lock animation during the FOV transition makes its convergence
-            // and leader draw disappear inside the larger scope movement.
-            const gogglesAcquisitionReady = state.isScoped && state.camera.fov === userSettings.scopedFov;
+            // Begin the scan about halfway through the scope's settle time. The
+            // scan animation keeps its original pace, but no longer sits behind
+            // the slow final part of the FOV easing.
+            const gogglesAcquisitionReady = state.isScoped && isGogglesScanZoomReady(
+                state.camera.fov,
+                userSettings.fov,
+                userSettings.scopedFov,
+            );
             const gogglesHudReady = gogglesAcquisitionReady && (
                 !state.gogglesFailure.bricked || state.gogglesFailure.shutdownUntil > 0
             );

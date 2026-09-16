@@ -19,6 +19,7 @@ export interface UserSettings {
     lavaGlow: boolean;
     muzzleFlashes: boolean;
     muzzleFlashOpacity: number;
+    bulletTrails: boolean;
     shadowQuality: ShadowQuality;
     showFps: boolean;
     photosensitivityMode: boolean;
@@ -38,6 +39,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     lavaGlow: false,
     muzzleFlashes: true,
     muzzleFlashOpacity: 1.0,
+    bulletTrails: true,
     shadowQuality: 'low',
     showFps: true,
     photosensitivityMode: false,
@@ -80,6 +82,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.lavaGlow = readBoolean(parsed.lavaGlow, DEFAULT_USER_SETTINGS.lavaGlow);
             userSettings.muzzleFlashes = readBoolean(parsed.muzzleFlashes, DEFAULT_USER_SETTINGS.muzzleFlashes);
             userSettings.muzzleFlashOpacity = clamp(parsed.muzzleFlashOpacity ?? DEFAULT_USER_SETTINGS.muzzleFlashOpacity, 0, 1);
+            userSettings.bulletTrails = readBoolean(parsed.bulletTrails, DEFAULT_USER_SETTINGS.bulletTrails);
             userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
             userSettings.downloadWebLLMImmediately = readBoolean(parsed.downloadWebLLMImmediately, false);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);

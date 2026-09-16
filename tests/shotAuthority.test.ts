@@ -98,3 +98,16 @@ test('minigun retains barrel spin across a brief trigger release, then cools dow
     ledger.updateTrigger(true, 6000);
     assert.equal(ledger.record(fire('MINIGUN', 4), 6000, false), false, 'cold barrels require spinup');
 });
+
+test('an authorized homing shot can reach only its captured target', () => {
+    const packet: FirePacket = {
+        ...fire('AR'),
+        homingTarget: { kind: 'npc', targetIndex: 7, targetRevision: 3 },
+    };
+    const ledger = new ShotLedger();
+    assert.ok(ledger.record(packet, 1000, false));
+    const target = new THREE.Vector3(4, 2, -40);
+    assert.equal(ledger.consumeHomingNpc(1, 0, 8, 3, target, 1.6, 1, 1100, () => false), false);
+    assert.ok(ledger.consumeHomingNpc(1, 0, 7, 3, target, 1.6, 1, 1100, () => false));
+    assert.equal(ledger.consumeHomingNpc(1, 0, 7, 3, target, 1.6, 1, 1100, () => false), false);
+});

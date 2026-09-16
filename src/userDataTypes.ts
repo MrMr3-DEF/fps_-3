@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { ProjectileHomingTarget } from './projectileHoming.js';
 
 export interface TargetUserData {
     index: number;
@@ -30,6 +31,9 @@ export interface ProjectileUserData {
     damage?: number;
     shotId?: number;
     pelletIndex?: number;
+    homingTarget?: ProjectileHomingTarget;
+    /** Travel distance captured at fire time; steering begins after this threshold. */
+    homingStartDistance?: number;
 }
 
 export function targetData(target: THREE.Group): TargetUserData {

@@ -40,6 +40,7 @@ import { triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import {
     parseNetworkPacket,
     type FirePacket,
+    type HomingTargetPacket,
     type JumpPacket,
     type KillTargetPacket,
     type NetworkPacket,
@@ -55,6 +56,15 @@ import { clearDamagePulse, pulseDamageMaterials } from './damagePulse.js';
 import { excludeFromStablePeerEnvelope } from './smartGogglesPeerMath.js';
 import { setWeaponNetworkPort } from './weaponNetworkPort.js';
 import { flashHitmarker } from './hitmarker.js';
+import {
+    fromHomingTargetPacket,
+    isWithinHomingAimEnvelope,
+    PROJECTILE_HOMING_START_FRACTION,
+    resolveProjectileHomingTarget,
+    type ProjectileHomingTarget,
+} from './projectileHoming.js';
+import { PLAYER_HITBOX_BOUNDING_RADIUS } from './playerHitbox.js';
+import { beginProjectileTrail } from './projectileTrails.js';
 import {
     admitRoomPeer,
     departRoomPeer,
@@ -933,6 +943,42 @@ function getPeerHitYaw(peerId: string): number | null {
     return getPeerRuntime(peerId)?.yaw ?? null;
 }
 
+function authorizeHomingTarget(fromPeerId: string, packet: FirePacket): boolean {
+    const homingTarget = packet.homingTarget;
+    if (!homingTarget || packet.weapon === 'SNIPER') return !homingTarget;
+    _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
+    _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
+
+    if (homingTarget.kind === 'npc') {
+        const target = state.targets[homingTarget.targetIndex];
+        if (!target) return false;
+        const data = targetData(target);
+        if (data.hp <= 0 || (data.eliminationRevision ?? 0) !== homingTarget.targetRevision) return false;
+        return isWithinHomingAimEnvelope(
+            _barrelPos,
+            _baseFireDir,
+            target.position,
+            Math.sqrt(3) * (data.scale || 1),
+            BULLET_TRAVEL_DISTANCE,
+        );
+    }
+
+    if (homingTarget.targetPeerId === fromPeerId) return false;
+    const targetsHost = homingTarget.targetPeerId === state.peer?.id;
+    const targetRuntime = targetsHost ? null : getPeerRuntime(homingTarget.targetPeerId);
+    const targetPosition = getPeerHitPosition(homingTarget.targetPeerId);
+    if (!targetPosition || homingTarget.targetLifeId !== (targetsHost ? state.lifeId : targetRuntime?.lifeId) ||
+        (targetsHost ? state.playerHp <= 0 : targetRuntime?.wasDead !== false) ||
+        (!targetsHost && !state.peers[homingTarget.targetPeerId])) return false;
+    return isWithinHomingAimEnvelope(
+        _barrelPos,
+        _baseFireDir,
+        targetPosition,
+        PLAYER_HITBOX_BOUNDING_RADIUS,
+        BULLET_TRAVEL_DISTANCE,
+    );
+}
+
 /** Keep a reported sniper impact on its shot ray and within visual weapon range. */
 function canonicalSniperBeamEnd(
     barrelPosition: THREE.Vector3,
@@ -1008,6 +1054,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         if (!stats || packet.weapon !== runtime.activeWeapon || runtime.wasDead) return null;
         _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
         if (_barrelPos.distanceTo(runtime.position) > 5 || shotIsBlocked(runtime.position, _barrelPos)) return null;
+        if (!authorizeHomingTarget(fromPeerId, packet)) return null;
         if (!runtime.shots.record(packet, now, runtime.wasDead)) return null;
         if (packet.weapon === 'SNIPER') {
             _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
@@ -1025,7 +1072,26 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         if (!target) return null;
         const targetInfo = targetData(target);
         const targetRadius = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0);
-        if (!runtime.shots.consume(packet.shotId, packet.pelletIndex, target.position, targetRadius, packet.damage, now, shotIsBlocked)) return null;
+        const targetRevision = targetInfo.eliminationRevision ?? 0;
+        if (!runtime.shots.consumeHomingNpc(
+            packet.shotId,
+            packet.pelletIndex,
+            packet.targetIndex,
+            targetRevision,
+            target.position,
+            targetRadius,
+            packet.damage,
+            now,
+            shotIsBlocked,
+        ) && !runtime.shots.consume(
+            packet.shotId,
+            packet.pelletIndex,
+            target.position,
+            targetRadius,
+            packet.damage,
+            now,
+            shotIsBlocked,
+        )) return null;
         return { ...packet, senderPeerId: fromPeerId };
     }
 
@@ -1035,7 +1101,25 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         const targetYaw = getPeerHitYaw(packet.targetPeerId);
         if (packet.targetLifeId !== (targetsHost ? state.lifeId : getPeerRuntime(packet.targetPeerId)?.lifeId)) return null;
         if ((targetsHost ? state.playerHp <= 0 : getPeerRuntime(packet.targetPeerId)?.wasDead !== false) || packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition || targetYaw === null ||
-            !runtime.shots.consumePlayerHitbox(packet.shotId, packet.pelletIndex, targetPosition, targetYaw, packet.damage, now, shotIsBlocked)) return null;
+            (!runtime.shots.consumeHomingPeer(
+                packet.shotId,
+                packet.pelletIndex,
+                packet.targetPeerId,
+                packet.targetLifeId,
+                targetPosition,
+                PLAYER_HITBOX_BOUNDING_RADIUS,
+                packet.damage,
+                now,
+                shotIsBlocked,
+            ) && !runtime.shots.consumePlayerHitbox(
+                packet.shotId,
+                packet.pelletIndex,
+                targetPosition,
+                targetYaw,
+                packet.damage,
+                now,
+                shotIsBlocked,
+            ))) return null;
         lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: fromPeerId, at: now });
         return { ...packet, senderPeerId: fromPeerId, attackerName: runtime.username };
     }
@@ -1066,7 +1150,13 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     return null;
 }
 
-function spawnRemoteBullet(barrelPos: THREE.Vector3, direction: THREE.Vector3, color: number): void {
+function spawnRemoteBullet(
+    barrelPos: THREE.Vector3,
+    direction: THREE.Vector3,
+    color: number,
+    homingTarget: ProjectileHomingTarget | null,
+    homingStartDistance?: number,
+): void {
     if (state.projectiles.length >= MAX_PROJECTILES || !state.scene) return;
     let bullet: THREE.Mesh;
     if (state.projectilePool.length > 0) {
@@ -1086,6 +1176,16 @@ function spawnRemoteBullet(barrelPos: THREE.Vector3, direction: THREE.Vector3, c
     data.distanceTraveled = bullet.position.distanceTo(barrelPos);
     data.visualOnly = true;
     data.damage = undefined;
+    data.homingTarget = homingTarget ?? undefined;
+    data.homingStartDistance = homingTarget
+        ? homingStartDistance ?? (resolveProjectileHomingTarget(
+            homingTarget,
+            state.targets,
+            state.peers,
+            _targetPos,
+        ) ? barrelPos.distanceTo(_targetPos) * PROJECTILE_HOMING_START_FRACTION : undefined)
+        : undefined;
+    beginProjectileTrail(bullet, state.scene, color);
     state.scene.add(bullet);
     state.projectiles.push(bullet);
 }
@@ -1308,9 +1408,16 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
                 : 1;
             const fallbackSeed = (Math.floor(_barrelPos.x * 100) ^ Math.floor(_barrelPos.y * 100) ^ Math.floor(_barrelPos.z * 100)) >>> 0;
             const spreadSeed = msg.spreadSeed ?? fallbackSeed;
+            const homingTarget = fromHomingTargetPacket(msg.homingTarget, state.targets, state.peers);
             for (let pellet = 0; pellet < pelletCount; pellet++) {
                 const direction = spreadDirection(_baseFireDir, spreadSeed, pellet, stats.spread, _dir);
-                spawnRemoteBullet(_barrelPos, direction, stats.bulletColor);
+                spawnRemoteBullet(
+                    _barrelPos,
+                    direction,
+                    stats.bulletColor,
+                    homingTarget,
+                    msg.homingStartDistance,
+                );
             }
         }
     } else if (msg.type === 'kill_target') {
@@ -1537,7 +1644,15 @@ export function updateRemotePeers(delta: number): void {
     }
 }
 
-export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3, hitPoint: THREE.Vector3 | null, shotId: number, spreadSeed: number): void {
+export function broadcastLocalFire(
+    barrelPos: THREE.Vector3,
+    dir: THREE.Vector3,
+    hitPoint: THREE.Vector3 | null,
+    shotId: number,
+    spreadSeed: number,
+    homingTarget?: HomingTargetPacket,
+    homingStartDistance?: number,
+): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     sendLocalState(true);
     const weapon = getActiveWeaponName();
@@ -1547,7 +1662,9 @@ export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3,
         shotId, spreadSeed,
         weapon,
         barrelPos: { x: barrelPos.x, y: barrelPos.y, z: barrelPos.z },
-        dir: { x: dir.x, y: dir.y, z: dir.z }
+        dir: { x: dir.x, y: dir.y, z: dir.z },
+        ...(homingTarget ? { homingTarget } : {}),
+        ...(homingTarget && homingStartDistance !== undefined ? { homingStartDistance } : {}),
     };
 
     if (weapon === 'SHOTGUN') {

@@ -65,6 +65,14 @@ parentPort!.on('message', async ({ id, command, args }) => {
             state.camera!.position.set(0, 2, args.z);
             state.camera!.rotation.set(0, args.yaw, 0, 'YXZ');
             sendLocalState(true);
+        } else if (command === 'scope') {
+            state.isScoped = args.enabled;
+            state.camera!.updateMatrixWorld(true);
+            if (args.enabled) {
+                goggles.update(state.camera!, state.camera!.position, state.camera!.position, [], state.peers, true, now);
+            } else {
+                goggles.reset();
+            }
         } else if (command === 'shoot') {
             state.activeWeaponName = args.weapon;
             state.rightGun = ({ SNIPER: state.sniperMesh, PISTOL: state.pistolMesh, AR: state.arMesh, SHOTGUN: state.shotgunMesh, MINIGUN: state.minigunMesh } as any)[args.weapon];
@@ -73,6 +81,10 @@ parentPort!.on('message', async ({ id, command, args }) => {
             now += args.delta * 1000;
             mock.timers.tick(args.delta * 1000);
             updateRemotePeers(args.delta);
+            if (state.isScoped) {
+                state.camera!.updateMatrixWorld(true);
+                goggles.update(state.camera!, state.camera!.position, state.camera!.position, [], state.peers, true, now);
+            }
             updateProjectiles(args.delta, state.username);
             sendLocalState(true);
         } else if (command === 'inspect') {

@@ -1,9 +1,9 @@
 import type * as THREE from 'three';
-import type { NetworkPacket } from './networkTypes.js';
+import type { HomingTargetPacket, NetworkPacket } from './networkTypes.js';
 import type { PeerData } from './state.js';
 
 export interface WeaponNetworkPort {
-    broadcastLocalFire(barrelPos: THREE.Vector3, direction: THREE.Vector3, hitPoint: THREE.Vector3 | null, shotId: number, spreadSeed: number): void;
+    broadcastLocalFire(barrelPos: THREE.Vector3, direction: THREE.Vector3, hitPoint: THREE.Vector3 | null, shotId: number, spreadSeed: number, homingTarget?: HomingTargetPacket, homingStartDistance?: number): void;
     broadcastToAll(packet: NetworkPacket): void;
     flashPeerMesh(peerData: PeerData, color?: number, durationMs?: number): void;
 }
@@ -21,8 +21,8 @@ function getPort(): WeaponNetworkPort {
     return activePort;
 }
 
-export function broadcastLocalFire(barrelPos: THREE.Vector3, direction: THREE.Vector3, hitPoint: THREE.Vector3 | null, shotId: number, spreadSeed: number): void {
-    getPort().broadcastLocalFire(barrelPos, direction, hitPoint, shotId, spreadSeed);
+export function broadcastLocalFire(barrelPos: THREE.Vector3, direction: THREE.Vector3, hitPoint: THREE.Vector3 | null, shotId: number, spreadSeed: number, homingTarget?: HomingTargetPacket, homingStartDistance?: number): void {
+    getPort().broadcastLocalFire(barrelPos, direction, hitPoint, shotId, spreadSeed, homingTarget, homingStartDistance);
 }
 
 export function broadcastToAll(packet: NetworkPacket): void {

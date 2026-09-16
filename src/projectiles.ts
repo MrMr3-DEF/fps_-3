@@ -18,6 +18,15 @@ import { obstacleData, projectileData, targetData } from './userDataTypes.js';
 import { segmentAabbHitT, segmentSphereHitT } from './gameplayMath.js';
 import { segmentPlayerHitboxHitT } from './playerHitbox.js';
 import { flashHitmarker } from './hitmarker.js';
+import { resolveProjectileHomingTarget, steerHomingDirection } from './projectileHoming.js';
+import {
+    appendCurvedProjectileTrail,
+    appendProjectileTrail,
+    disposeProjectileTrails,
+    resetProjectileTrails,
+    retireProjectileTrail,
+    updateProjectileTrails,
+} from './projectileTrails.js';
 
 const _targetCandidates: THREE.Group[] = [];
 const _obstacleCandidates: THREE.Object3D[] = [];
@@ -27,6 +36,11 @@ const _segmentMidpoint = new THREE.Vector3();
 const _impactPoint = new THREE.Vector3();
 const _aabbMin = new THREE.Vector3();
 const _aabbMax = new THREE.Vector3();
+const _currentDirection = new THREE.Vector3();
+const _steeredDirection = new THREE.Vector3();
+const _movementDirection = new THREE.Vector3();
+const _desiredDirection = new THREE.Vector3();
+const _homingTargetPosition = new THREE.Vector3();
 
 function broadcastHitTarget(targetIndex: number, damage: number, shotId: number, pelletIndex: number): void {
     broadcastToAll({ type: 'hit_target', targetIndex, damage, shotId, pelletIndex } satisfies HitTargetPacket);
@@ -36,6 +50,7 @@ function broadcastPlayerHit(peerId: string, damage: number, attackerName: string
 }
 
 function retireProjectile(index: number, projectile: THREE.Object3D): void {
+    retireProjectileTrail(projectile);
     state.scene?.remove(projectile);
     projectile.visible = false;
     state.projectilePool.push(projectile);
@@ -44,6 +59,7 @@ function retireProjectile(index: number, projectile: THREE.Object3D): void {
 }
 
 export function updateProjectiles(delta: number, attackerName: string): void {
+    updateProjectileTrails(delta);
     const peerIds = state.isMultiplayer ? state.peerIds : [];
     const peerIdsLen = peerIds.length;
     const fallbackDamage = WEAPON_STATS[state.activeWeaponName]?.damage ?? 1;
@@ -71,10 +87,47 @@ export function updateProjectiles(delta: number, attackerName: string): void {
         const damage = data.damage ?? fallbackDamage;
 
         _segmentStart.copy(proj.position);
+        _movementDirection.set(data.dx, data.dy, data.dz).normalize();
+        let curvedTrail = false;
+        const homingStartDistance = data.homingStartDistance ?? Infinity;
+        const homingDistanceThisStep = data.distanceTraveled + stepDistance - homingStartDistance;
+        if (data.homingTarget && homingDistanceThisStep > 0) {
+            const homingPosition = resolveProjectileHomingTarget(
+                data.homingTarget,
+                state.targets,
+                state.peers,
+                _homingTargetPosition,
+            );
+            if (homingPosition) {
+                _currentDirection.copy(_movementDirection);
+                _desiredDirection.subVectors(homingPosition, _segmentStart);
+                if (_desiredDirection.lengthSq() > 0) {
+                    _desiredDirection.normalize();
+                    const homingFrameFraction = Math.min(1, homingDistanceThisStep / Math.max(stepDistance, Number.EPSILON));
+                    steerHomingDirection(
+                        _currentDirection,
+                        _desiredDirection,
+                        delta * homingFrameFraction,
+                        _steeredDirection,
+                    );
+                    // Integrating along the midpoint direction avoids moving the
+                    // whole frame at the newly turned heading. The stored end
+                    // direction becomes next frame's start direction.
+                    _movementDirection.addVectors(_currentDirection, _steeredDirection).normalize();
+                    data.dx = _steeredDirection.x;
+                    data.dy = _steeredDirection.y;
+                    data.dz = _steeredDirection.z;
+                    curvedTrail = true;
+                }
+            } else {
+                data.homingTarget = undefined;
+                data.homingStartDistance = undefined;
+            }
+        }
         _segmentEnd.set(
-            _segmentStart.x + data.dx * stepDistance,
-            _segmentStart.y + data.dy * stepDistance,
-            _segmentStart.z + data.dz * stepDistance
+            _segmentStart.x + _movementDirection.x * stepDistance,
+            _segmentStart.y + _movementDirection.y * stepDistance,
+            _segmentStart.z + _movementDirection.z * stepDistance
         );
         _segmentMidpoint.addVectors(_segmentStart, _segmentEnd).multiplyScalar(0.5);
         const travelDistance = _segmentStart.distanceTo(_segmentEnd);
@@ -204,6 +257,11 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                 data.distanceTraveled + travelDistance
             );
         }
+        if (curvedTrail) {
+            appendCurvedProjectileTrail(proj, _segmentStart, _currentDirection, _steeredDirection);
+        } else {
+            appendProjectileTrail(proj);
+        }
 
         if (projectileHit || reachesRangeLimit || data.age > PROJECTILE_LIFETIME) {
             retireProjectile(i, proj);
@@ -213,6 +271,7 @@ export function updateProjectiles(delta: number, attackerName: string): void {
 
 /** Return active projectiles to the pool when a new arena begins. */
 export function resetProjectiles(): void {
+    resetProjectileTrails();
     for (let i = 0; i < state.projectiles.length; i++) {
         const projectile = state.projectiles[i];
         state.scene?.remove(projectile);
@@ -223,6 +282,7 @@ export function resetProjectiles(): void {
 }
 
 export function disposeProjectiles(): void {
+    disposeProjectileTrails();
     const disposeProjectile = (projectile: THREE.Object3D) => {
         state.scene?.remove(projectile);
         projectile.traverse((child: any) => {

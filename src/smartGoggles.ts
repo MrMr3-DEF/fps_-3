@@ -21,6 +21,10 @@ import {
 import { targetData } from './userDataTypes.js';
 import { queryObstaclesAlongSegment } from './world.js';
 import type { CelestialScanTarget } from './dayNightCycle.js';
+import {
+    setProjectileHomingTarget,
+    type ProjectileHomingTarget,
+} from './projectileHoming.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CORNER_SIZE = 15;
@@ -32,6 +36,8 @@ const LABEL_HORIZONTAL_PADDING = 16;
 const LABEL_VIEWPORT_MARGIN = 12;
 const CALLOUT_DIAGONAL_LENGTH = 54;
 const ENTER_DELAY_MS = 16;
+const SCAN_BRACKET_DURATION_MS = 180;
+const HOMING_LOCK_DURATION_MS = 220;
 const TYPE_START_DELAY_MS = 310;
 const TYPE_CHARACTER_MS = 8;
 const TYPE_LINE_PAUSE_CHARACTERS = 2;
@@ -69,6 +75,7 @@ export interface SmartGogglesPeerTarget {
     mesh: THREE.Group;
     hp: number;
     maxHp: number;
+    lifeId?: number;
 }
 
 export type SmartGogglesPeerTargets = Readonly<Record<string, SmartGogglesPeerTarget>>;
@@ -82,6 +89,7 @@ interface TargetLockRecord {
     targetKey: string;
     root: HTMLDivElement;
     corners: [HTMLDivElement, HTMLDivElement, HTMLDivElement, HTMLDivElement];
+    homingCorners: [HTMLDivElement, HTMLDivElement, HTMLDivElement, HTMLDivElement];
     killMark: SVGSVGElement;
     path: SVGPathElement;
     label: HTMLDivElement;
@@ -99,12 +107,19 @@ interface TargetLockRecord {
     phase: LockPhase;
     seenFrame: number;
     activateAt: number;
+    scanCompleteAt: number;
     removeAt: number;
     lastDistanceText: string;
     lastHealthText: string;
     lastIdentifierText: string;
     readoutMode: ReadoutMode | null;
     typeStartedAt: number;
+}
+
+interface HomingCandidate {
+    record: TargetLockRecord;
+    target: ProjectileHomingTarget;
+    score: number;
 }
 
 const _bodyCenter = new THREE.Vector3();
@@ -131,6 +146,29 @@ const _occlusionHits: THREE.Intersection[] = [];
 const _enemyOccluders: THREE.Object3D[] = [];
 const _visiblePeerMeshes: THREE.Mesh[] = [];
 const NO_ADDITIONAL_OCCLUDERS: THREE.Object3D[] = [];
+
+export function isAimInsideScanBox(bounds: ScreenBounds, viewportWidth: number, viewportHeight: number): boolean {
+    const aimX = viewportWidth / 2;
+    const aimY = viewportHeight / 2;
+    return aimX >= bounds.left && aimX <= bounds.right && aimY >= bounds.top && aimY <= bounds.bottom;
+}
+
+/**
+ * The scope FOV eases exponentially and snaps into place once its remaining
+ * gap is small. This threshold is the FOV reached about halfway through that
+ * settle time, so the scan can begin earlier without changing either animation.
+ */
+export function isGogglesScanZoomReady(
+    currentFov: number,
+    normalFov: number,
+    scopedFov: number,
+    settleTolerance = 0.1,
+): boolean {
+    const initialGap = Math.abs(normalFov - scopedFov);
+    if (initialGap <= settleTolerance) return true;
+    const halfwayRemainingGap = Math.sqrt(initialGap * settleTolerance);
+    return Math.abs(currentFov - scopedFov) <= halfwayRemainingGap;
+}
 
 // A 3 x 3 x 3 lattice without its interior point covers face centers, edge
 // midpoints and corners. Face centers make the common case cheap; silhouette
@@ -162,6 +200,24 @@ function setCornerGeometry(
     corner.style.top = `${y.toFixed(1)}px`;
     corner.style.setProperty('--goggles-collapse-x', `${(centerX - x - CORNER_SIZE / 2).toFixed(1)}px`);
     corner.style.setProperty('--goggles-collapse-y', `${(centerY - y - CORNER_SIZE / 2).toFixed(1)}px`);
+}
+
+function setHomingCornerGeometry(
+    corner: HTMLElement,
+    centerX: number,
+    centerY: number,
+    radius: number,
+    directionX: number,
+    directionY: number,
+): void {
+    // Each red marker is an L rotated into a chevron. Keep its outer vertex on
+    // the same notional circle as the four yellow box-corner vertices.
+    const vertexOffset = Math.SQRT2 * CORNER_SIZE / 2;
+    const markerCenterRadius = Math.max(0, radius - vertexOffset);
+    const x = centerX + directionX * markerCenterRadius - CORNER_SIZE / 2;
+    const y = centerY + directionY * markerCenterRadius - CORNER_SIZE / 2;
+    corner.style.left = `${x.toFixed(1)}px`;
+    corner.style.top = `${y.toFixed(1)}px`;
 }
 
 function padBounds(bounds: ScreenBounds): void {
@@ -271,6 +327,10 @@ export class SmartGogglesHud {
     private frame = 0;
     private active = false;
     private anomalyDetectedThisFrame = false;
+    private homingAimScore = Infinity;
+    private bestHomingCandidate: HomingCandidate | null = null;
+    private homingLockKey: string | null = null;
+    private homingLockStartedAt = Infinity;
 
     constructor(layer: HTMLElement) {
         this.layer = layer;
@@ -294,6 +354,8 @@ export class SmartGogglesHud {
         celestialTargets: readonly CelestialScanTarget[] = [],
     ): void {
         this.anomalyDetectedThisFrame = false;
+        this.homingAimScore = Infinity;
+        this.bestHomingCandidate = null;
         if (!enabled) {
             if (this.active || this.records.size > 0 || this.retiringRecords.size > 0) this.reset();
             return;
@@ -373,7 +435,7 @@ export class SmartGogglesHud {
                 localBox,
                 data.bodyMesh.matrixWorld,
             );
-            this.trackTarget(
+            const trackedRecord = this.trackTarget(
                 targetKey,
                 targetRevision,
                 'enemy',
@@ -389,6 +451,19 @@ export class SmartGogglesHud {
                 viewportWidth,
                 viewportHeight,
                 now,
+            );
+            this.considerHomingTarget(
+                trackedRecord,
+                projectionBounds,
+                viewportWidth,
+                viewportHeight,
+                playerPosition.distanceTo(_bodyCenter),
+                {
+                    kind: 'npc',
+                    object: target,
+                    targetIndex: data.index,
+                    targetRevision,
+                },
             );
         }
 
@@ -430,7 +505,7 @@ export class SmartGogglesHud {
             _bodyCenter.copy(stablePeerEnvelope.center).applyMatrix4(peer.mesh.matrixWorld);
             peer.mesh.getWorldPosition(_peerRootPosition);
             const peerWorldScale = peer.mesh.matrixWorld.getMaxScaleOnAxis();
-            this.trackTarget(
+            const trackedRecord = this.trackTarget(
                 targetKey,
                 0,
                 'peer',
@@ -446,6 +521,19 @@ export class SmartGogglesHud {
                 viewportWidth,
                 viewportHeight,
                 now,
+            );
+            this.considerHomingTarget(
+                trackedRecord,
+                projectionBounds,
+                viewportWidth,
+                viewportHeight,
+                playerPosition.distanceTo(_peerRootPosition),
+                {
+                    kind: 'peer',
+                    object: peer.mesh,
+                    targetPeerId: peerId,
+                    targetLifeId: peer.lifeId ?? 0,
+                },
             );
         }
 
@@ -558,6 +646,8 @@ export class SmartGogglesHud {
             );
         }
 
+        this.updateHomingLock(now);
+
         for (const [targetKey, record] of this.records) {
             if (record.seenFrame === this.frame) continue;
             if (record.phase !== 'leaving') this.beginLeaving(record, now);
@@ -593,7 +683,7 @@ export class SmartGogglesHud {
         viewportWidth: number,
         viewportHeight: number,
         now: number,
-    ): void {
+    ): TargetLockRecord {
         let record = this.records.get(targetKey);
         if (record && record.lastWorldPosition.distanceToSquared(worldPosition) > TELEPORT_DISTANCE_SQ) {
             this.retire(record, now);
@@ -660,6 +750,7 @@ export class SmartGogglesHud {
             record.root.classList.add('is-active');
             record.phase = 'tracking';
         }
+        return record;
     }
 
     private updateTypedReadout(record: TargetLockRecord, now: number): void {
@@ -699,6 +790,71 @@ export class SmartGogglesHud {
         this.hiddenHealthBars.clear();
         this.active = false;
         this.anomalyDetectedThisFrame = false;
+        this.homingAimScore = Infinity;
+        this.bestHomingCandidate = null;
+        this.homingLockKey = null;
+        this.homingLockStartedAt = Infinity;
+        setProjectileHomingTarget(null);
+    }
+
+    private considerHomingTarget(
+        record: TargetLockRecord,
+        bounds: ScreenBounds,
+        viewportWidth: number,
+        viewportHeight: number,
+        distance: number,
+        target: ProjectileHomingTarget,
+    ): void {
+        if (!isAimInsideScanBox(bounds, viewportWidth, viewportHeight)) return;
+        const boxCenterX = (bounds.left + bounds.right) / 2;
+        const boxCenterY = (bounds.top + bounds.bottom) / 2;
+        const offsetX = boxCenterX - viewportWidth / 2;
+        const offsetY = boxCenterY - viewportHeight / 2;
+        const score = offsetX * offsetX + offsetY * offsetY + Math.max(0, distance) * 1e-6;
+        if (score >= this.homingAimScore) return;
+        this.homingAimScore = score;
+        this.bestHomingCandidate = { record, target, score };
+    }
+
+    private updateHomingLock(now: number): void {
+        const candidate = this.bestHomingCandidate;
+        const candidateKey = candidate?.record.targetKey ?? null;
+        if (candidateKey !== this.homingLockKey) {
+            this.clearHomingLockVisual();
+            this.homingLockKey = candidateKey;
+            this.homingLockStartedAt = candidate
+                ? Math.max(now, candidate.record.scanCompleteAt)
+                : Infinity;
+        }
+
+        if (!candidate) {
+            setProjectileHomingTarget(null);
+            return;
+        }
+
+        const record = candidate.record;
+        if (now < this.homingLockStartedAt) {
+            record.root.classList.remove('is-homing-locking', 'is-homing-locked');
+            setProjectileHomingTarget(null);
+            return;
+        }
+
+        const lockDuration = this.reducedMotion ? 1 : HOMING_LOCK_DURATION_MS;
+        if (now < this.homingLockStartedAt + lockDuration) {
+            record.root.classList.add('is-homing-locking');
+            record.root.classList.remove('is-homing-locked');
+            setProjectileHomingTarget(null);
+            return;
+        }
+
+        record.root.classList.remove('is-homing-locking');
+        record.root.classList.add('is-homing-locked');
+        setProjectileHomingTarget(candidate.target);
+    }
+
+    private clearHomingLockVisual(): void {
+        if (!this.homingLockKey) return;
+        this.records.get(this.homingLockKey)?.root.classList.remove('is-homing-locking', 'is-homing-locked');
     }
 
     private createRecord(
@@ -722,6 +878,13 @@ export class SmartGogglesHud {
             root.appendChild(corner);
             return corner;
         }) as TargetLockRecord['corners'];
+        const homingCornerClasses = ['top', 'right', 'bottom', 'left'] as const;
+        const homingCorners = homingCornerClasses.map((cornerName) => {
+            const corner = document.createElement('div');
+            corner.className = `goggles-homing-corner goggles-homing-corner--${cornerName}`;
+            root.appendChild(corner);
+            return corner;
+        }) as TargetLockRecord['homingCorners'];
 
         const killMark = document.createElementNS(SVG_NS, 'svg');
         killMark.classList.add('goggles-target-killmark');
@@ -766,6 +929,7 @@ export class SmartGogglesHud {
             targetKey,
             root,
             corners,
+            homingCorners,
             killMark,
             path,
             label,
@@ -783,6 +947,7 @@ export class SmartGogglesHud {
             phase: 'entering',
             seenFrame: this.frame,
             activateAt: now + ENTER_DELAY_MS,
+            scanCompleteAt: now + ENTER_DELAY_MS + (this.reducedMotion ? 1 : SCAN_BRACKET_DURATION_MS),
             removeAt: Infinity,
             lastDistanceText: '',
             lastHealthText: '',
@@ -802,12 +967,17 @@ export class SmartGogglesHud {
         const { bounds, layout } = record;
         const centerX = (bounds.left + bounds.right) / 2;
         const centerY = (bounds.top + bounds.bottom) / 2;
+        const cornerRadius = Math.hypot(bounds.width / 2, bounds.height / 2);
         const rightX = bounds.right - CORNER_SIZE;
         const bottomY = bounds.bottom - CORNER_SIZE;
         setCornerGeometry(record.corners[0], bounds.left, bounds.top, centerX, centerY);
         setCornerGeometry(record.corners[1], rightX, bounds.top, centerX, centerY);
         setCornerGeometry(record.corners[2], bounds.left, bottomY, centerX, centerY);
         setCornerGeometry(record.corners[3], rightX, bottomY, centerX, centerY);
+        setHomingCornerGeometry(record.homingCorners[0], centerX, centerY, cornerRadius, 0, -1);
+        setHomingCornerGeometry(record.homingCorners[1], centerX, centerY, cornerRadius, 1, 0);
+        setHomingCornerGeometry(record.homingCorners[2], centerX, centerY, cornerRadius, 0, 1);
+        setHomingCornerGeometry(record.homingCorners[3], centerX, centerY, cornerRadius, -1, 0);
         record.killMark.style.left = `${bounds.left.toFixed(1)}px`;
         record.killMark.style.top = `${bounds.top.toFixed(1)}px`;
         record.killMark.style.width = `${bounds.width.toFixed(1)}px`;
@@ -877,6 +1047,7 @@ export class SmartGogglesHud {
         record.phase = 'leaving';
         record.removeAt = now + EXIT_DURATION_MS;
         record.root.classList.remove('is-active');
+        record.root.classList.remove('is-homing-locking', 'is-homing-locked');
         record.root.classList.add('is-leaving');
     }
 
@@ -885,6 +1056,7 @@ export class SmartGogglesHud {
         record.phase = 'eliminated';
         record.removeAt = now + (this.reducedMotion ? 40 : ELIMINATION_DURATION_MS);
         record.root.classList.remove('is-leaving', 'is-out-of-range');
+        record.root.classList.remove('is-homing-locking', 'is-homing-locked');
         record.root.classList.add('is-active', 'is-eliminated');
         this.retiringRecords.add(record);
     }

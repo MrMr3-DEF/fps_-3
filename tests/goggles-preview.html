@@ -42,6 +42,7 @@
 
         const previewParams = new URLSearchParams(location.search);
         const celestialPreview = previewParams.has('celestial-preview');
+        const homingPreview = previewParams.has('homing-preview');
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x07131b);
@@ -150,6 +151,13 @@
             peerMesh.visible = false;
             anomalyVisual.visible = false;
             anomalyHitbox.visible = false;
+        } else if (homingPreview) {
+            targets[0].visible = false;
+            targets[1].visible = false;
+            targets[2].position.set(0, 4, -80);
+            peerMesh.visible = false;
+            anomalyVisual.visible = false;
+            anomalyHitbox.visible = false;
         }
         const hud = new SmartGogglesHud(document.getElementById('goggles-target-layer'));
         const previewStartedAt = performance.now();
@@ -159,6 +167,7 @@
         const gogglesScope = document.getElementById('goggles-scope');
         const previewNote = document.getElementById('preview-note');
         if (celestialPreview) previewNote.textContent = 'SMART GOGGLES · CELESTIAL DISTANCE PREVIEW';
+        if (homingPreview) previewNote.textContent = 'SMART GOGGLES · HOMING LOCK PREVIEW';
         gogglesScope.classList.toggle('is-photosensitivity-mode', photosensitivePreview);
         let eliminationPlayed = false;
         let brickAnimationStarted = false;
@@ -202,7 +211,7 @@
             peerMesh.rotation.y = Math.sin(seconds * 0.7) * 0.5;
             // Cross the viewport completely so acquire, edge-follow and collapse
             // can be inspected without pointer-lock support.
-            targets[2].position.x = Math.sin(seconds * 0.48) * 85;
+            if (!homingPreview) targets[2].position.x = Math.sin(seconds * 0.48) * 85;
 
             camera.updateMatrixWorld(true);
             hud.update(
@@ -213,7 +222,7 @@
                 celestialPreview ? {} : peers,
                 true,
                 now,
-                celestialPreview ? null : anomaly,
+                celestialPreview || homingPreview ? null : anomaly,
                 celestialTargets,
             );
             renderer.render(scene, camera);

@@ -26,6 +26,14 @@ import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
 import { attachGrappleMuzzleShockwave, attachMuzzleShockwave, triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import { flashHitmarker } from './hitmarker.js';
 import { segmentPlayerHitboxHitT } from './playerHitbox.js';
+import {
+    getProjectileHomingTarget,
+    PROJECTILE_HOMING_START_FRACTION,
+    resolveProjectileHomingTarget,
+    toHomingTargetPacket,
+    type ProjectileHomingTarget,
+} from './projectileHoming.js';
+import { beginProjectileTrail } from './projectileTrails.js';
 
 // Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
@@ -102,6 +110,7 @@ const _camDirection = new THREE.Vector3();
 
 const _hitPoint = new THREE.Vector3();
 const _rayEnd = new THREE.Vector3();
+const _homingTargetPosition = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
 const _targetCandidates: THREE.Group[] = [];
 const _obstacleCandidates: THREE.Object3D[] = [];
@@ -437,6 +446,51 @@ export function createAkimboGuns(): void {
 // Normal weapons spawn simulated projectiles. The sniper is hitscan so it can
 // resolve occlusion immediately and draw a beam to the exact hit point.
 let nextShotId = 0;
+const FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS = 10;
+let minigunHomingDistanceSample: {
+    target: ProjectileHomingTarget;
+    startDistance: number;
+    bulletCount: number;
+} | null = null;
+
+function isSameHomingTarget(a: ProjectileHomingTarget, b: ProjectileHomingTarget): boolean {
+    return a.kind === b.kind && a.object === b.object && (
+        a.kind === 'npc' && b.kind === 'npc'
+            ? a.targetIndex === b.targetIndex && a.targetRevision === b.targetRevision
+            : a.kind === 'peer' && b.kind === 'peer' &&
+                a.targetPeerId === b.targetPeerId && a.targetLifeId === b.targetLifeId
+    );
+}
+
+function sampleHomingStartDistance(
+    target: ProjectileHomingTarget | null,
+    barrelPosition: THREE.Vector3,
+    targetPosition: THREE.Vector3,
+): number | undefined {
+    if (!target) {
+        minigunHomingDistanceSample = null;
+        return undefined;
+    }
+    const batchSamples = state.activeWeaponName === 'MINIGUN' &&
+        state.minigunRamp >= MINIGUN_RAMP_TIME;
+    if (!batchSamples) {
+        minigunHomingDistanceSample = null;
+        return barrelPosition.distanceTo(targetPosition) * PROJECTILE_HOMING_START_FRACTION;
+    }
+    if (!minigunHomingDistanceSample ||
+        !isSameHomingTarget(minigunHomingDistanceSample.target, target) ||
+        minigunHomingDistanceSample.bulletCount >= FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS) {
+        minigunHomingDistanceSample = {
+            target,
+            startDistance: barrelPosition.distanceTo(targetPosition) * PROJECTILE_HOMING_START_FRACTION,
+            bulletCount: 1,
+        };
+    } else {
+        minigunHomingDistanceSample.bulletCount++;
+    }
+    return minigunHomingDistanceSample.startDistance;
+}
+
 export function fireProjectile(): void {
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
 
@@ -447,11 +501,28 @@ export function fireProjectile(): void {
     const stats = WEAPON_STATS[state.activeWeaponName];
     if (!stats) return;
 
+    let homingTarget: ProjectileHomingTarget | null = state.isScoped && state.activeWeaponName !== 'SNIPER'
+        ? getProjectileHomingTarget()
+        : null;
+    if (homingTarget && !resolveProjectileHomingTarget(
+        homingTarget,
+        state.targets,
+        state.peers,
+        _homingTargetPosition,
+    )) homingTarget = null;
+    const homingTargetPacket = toHomingTargetPacket(homingTarget);
+
     triggerMuzzleFlash(state.rightGun);
 
     const shotId = ++nextShotId;
     const spreadSeed = crypto.getRandomValues(new Uint32Array(1))[0];
     state.rightGunContainer.position.z += stats.recoil;
+    state.rightGun.getWorldPosition(_barrelPos);
+    const homingStartDistance = sampleHomingStartDistance(
+        homingTarget,
+        _barrelPos,
+        _homingTargetPosition,
+    );
 
     const fireSinglePellet = (spreadAmt: number, pelletIndex = 0) => {
         if (state.projectiles.length >= MAX_PROJECTILES) return;
@@ -489,6 +560,10 @@ export function fireProjectile(): void {
         data.damage = stats.damage;
         data.shotId = shotId;
         data.pelletIndex = pelletIndex;
+        data.homingTarget = homingTarget ?? undefined;
+        data.homingStartDistance = homingStartDistance;
+
+        beginProjectileTrail(projectile, state.scene!, bulletColor);
 
         state.projectiles.push(projectile);
     };
@@ -592,7 +667,7 @@ export function fireProjectile(): void {
             if (state.isMultiplayer) {
                 // Hitscan damage is resolved in this same call, so the host
                 // must see the fire intent before the target-hit packet.
-                broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed);
+                broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
                 sniperFireBroadcast = true;
                 if (!state.isHost) {
                     const packet: HitTargetPacket = {
@@ -617,7 +692,7 @@ export function fireProjectile(): void {
                 flashPeerMesh(peerData, 0xff3333, 150);
             }
 
-            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed);
+            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
             sniperFireBroadcast = true;
 
             const attackerName = state.username;
@@ -637,7 +712,7 @@ export function fireProjectile(): void {
         createLaserBeam(barrelWorldPosition, hitPoint, stats.bulletColor);
 
         if (state.isMultiplayer && !sniperFireBroadcast) {
-            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed);
+            broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
         }
 
         return;
@@ -655,7 +730,7 @@ export function fireProjectile(): void {
         state.rightGun.getWorldPosition(barrelWorldPosition);
         const camDirection = _camDirection;
         state.camera.getWorldDirection(camDirection);
-        broadcastLocalFire(barrelWorldPosition, camDirection, null, shotId, spreadSeed);
+        broadcastLocalFire(barrelWorldPosition, camDirection, null, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
     }
 }
 

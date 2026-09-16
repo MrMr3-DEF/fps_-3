@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM } from './config.js';
 import { segmentSphereHitT } from './gameplayMath.js';
 import { segmentPlayerHitboxHitT } from './playerHitbox.js';
-import type { FirePacket, WeaponName } from './networkTypes.js';
+import type { FirePacket, HomingTargetPacket, WeaponName } from './networkTypes.js';
 
 const PROJECTILE_MUZZLE_OFFSET = 0.1;
 const PROJECTILE_NETWORK_GRACE_MS = 100;
@@ -14,7 +14,14 @@ export function spreadDirection(base: THREE.Vector3, seed: number, pelletIndex: 
     const next = () => { value = (Math.imul(value, 1664525) + 1013904223) >>> 0; return value / 0x100000000 - 0.5; };
     return out.copy(base).add(new THREE.Vector3(next(), next(), next()).multiplyScalar(spread)).normalize();
 }
-interface Shot { at: number; weapon: WeaponName; origin: THREE.Vector3; directions: THREE.Vector3[]; used: Set<number>; }
+interface Shot {
+    at: number;
+    weapon: WeaponName;
+    origin: THREE.Vector3;
+    directions: THREE.Vector3[];
+    used: Set<number>;
+    homingTarget?: HomingTargetPacket;
+}
 export class ShotLedger {
     private shots = new Map<number, Shot>();
     private lastFireAt = -Infinity;
@@ -50,7 +57,10 @@ export class ShotLedger {
         const count = packet.weapon === 'SHOTGUN' ? stats.pellets! : 1;
         this.shots.set(packet.shotId, { at: now, weapon: packet.weapon,
             origin: new THREE.Vector3(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z),
-            directions: Array.from({ length: count }, (_, i) => spreadDirection(base, packet.spreadSeed, i, stats.spread)), used: new Set() });
+            directions: Array.from({ length: count }, (_, i) => spreadDirection(base, packet.spreadSeed, i, stats.spread)),
+            used: new Set(),
+            homingTarget: packet.homingTarget,
+        });
         return true;
     }
     private consumeIntersection(
@@ -89,6 +99,48 @@ export class ShotLedger {
         blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
         return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
             (start, end) => segmentPlayerHitboxHitT(start, end, target, yaw));
+    }
+    private consumeHomingTarget(
+        shotId: number,
+        pelletIndex: number,
+        target: THREE.Vector3,
+        targetRadius: number,
+        damage: number,
+        now: number,
+        blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean,
+        matches: (target: HomingTargetPacket | undefined) => boolean,
+    ): boolean {
+        const shot = this.shots.get(shotId);
+        if (!shot || !matches(shot.homingTarget) || shot.used.has(pelletIndex) ||
+            !shot.directions[pelletIndex] ||
+            now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS ||
+            damage !== WEAPON_STATS[shot.weapon].damage) return false;
+        const range = Math.min(
+            BULLET_TRAVEL_DISTANCE,
+            PROJECTILE_SPEED * ((now - shot.at + PROJECTILE_NETWORK_GRACE_MS) / 1000),
+        );
+        const start = shot.origin.clone().addScaledVector(
+            shot.directions[pelletIndex],
+            Math.min(PROJECTILE_MUZZLE_OFFSET, range),
+        );
+        if (start.distanceTo(target) > range + Math.max(0, targetRadius) + PROJECTILE_RADIUS ||
+            blocked(start, target)) return false;
+        shot.used.add(pelletIndex);
+        return true;
+    }
+    consumeHomingNpc(shotId: number, pelletIndex: number, targetIndex: number, targetRevision: number,
+        target: THREE.Vector3, targetRadius: number, damage: number, now: number,
+        blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
+        return this.consumeHomingTarget(shotId, pelletIndex, target, targetRadius, damage, now, blocked,
+            homingTarget => homingTarget?.kind === 'npc' &&
+                homingTarget.targetIndex === targetIndex && homingTarget.targetRevision === targetRevision);
+    }
+    consumeHomingPeer(shotId: number, pelletIndex: number, targetPeerId: string, targetLifeId: number,
+        target: THREE.Vector3, targetRadius: number, damage: number, now: number,
+        blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
+        return this.consumeHomingTarget(shotId, pelletIndex, target, targetRadius, damage, now, blocked,
+            homingTarget => homingTarget?.kind === 'peer' &&
+                homingTarget.targetPeerId === targetPeerId && homingTarget.targetLifeId === targetLifeId);
     }
 }
 

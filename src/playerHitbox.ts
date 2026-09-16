@@ -6,6 +6,11 @@ import { segmentAabbHitT, type Vec3Like } from './gameplayMath.js';
 // and the remote name tag.
 export const PLAYER_HITBOX_MIN = Object.freeze({ x: -0.9, y: -1.65, z: -1.107 });
 export const PLAYER_HITBOX_MAX = Object.freeze({ x: 0.9, y: 1.65, z: 0.9 });
+export const PLAYER_HITBOX_BOUNDING_RADIUS = Math.hypot(
+    (PLAYER_HITBOX_MAX.x - PLAYER_HITBOX_MIN.x) / 2,
+    (PLAYER_HITBOX_MAX.y - PLAYER_HITBOX_MIN.y) / 2,
+    (PLAYER_HITBOX_MAX.z - PLAYER_HITBOX_MIN.z) / 2,
+);
 
 const _localStart = new THREE.Vector3();
 const _localEnd = new THREE.Vector3();

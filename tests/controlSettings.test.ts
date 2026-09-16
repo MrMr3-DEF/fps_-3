@@ -76,11 +76,13 @@ test('legacy storage retains existing values and adds new defaults; new settings
         assert.equal(userSettings.shadows, false);
         assert.equal(userSettings.muzzleFlashes, true);
         assert.equal(userSettings.muzzleFlashOpacity, 1);
+        assert.equal(userSettings.bulletTrails, true);
         assert.deepEqual(userSettings.keybinds, DEFAULT_KEYBINDS);
         assert.deepEqual(userSettings.crosshair, DEFAULT_CROSSHAIR);
         userSettings.keybinds = assignKey(userSettings.keybinds, 'jump', 'KeyJ');
         userSettings.crosshair = { ...DEFAULT_CROSSHAIR, style: 'cross', color: '#00ffff' };
         userSettings.muzzleFlashOpacity = 0.35;
+        userSettings.bulletTrails = false;
         saveUserSettings();
         Object.assign(userSettings, cloneSettings(DEFAULT_USER_SETTINGS));
         loadUserSettings();
@@ -88,6 +90,7 @@ test('legacy storage retains existing values and adds new defaults; new settings
         assert.equal(userSettings.crosshair.style, 'cross');
         assert.equal(userSettings.crosshair.color, '#00ffff');
         assert.equal(userSettings.muzzleFlashOpacity, 0.35);
+        assert.equal(userSettings.bulletTrails, false);
     } finally {
         Object.assign(userSettings, previousSettings);
         if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);
