@@ -8,6 +8,9 @@ import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { rebuildTargetHash } from '../src/world.ts';
 import { BULLET_TRAVEL_DISTANCE } from '../src/config.ts';
 import { setDamageHandlers } from '../src/damage.ts';
+import { buildBeanModel } from '../src/weapons.ts';
+import { setWeaponNetworkPort } from '../src/weaponNetworkPort.ts';
+import type { NetworkPacket } from '../src/networkTypes.ts';
 (globalThis as any).document={getElementById:()=>null};
 test('50ms enemy-grapple movement stops at pillar instead of crossing it',()=>{
     state.scene=new THREE.Scene();state.camera=new THREE.PerspectiveCamera();state.camera.position.set(-5,2,0);
@@ -69,6 +72,54 @@ test('projectiles cap their final swept segment at the shared bullet range',()=>
     assert.equal(bullet.userData.distanceTraveled,BULLET_TRAVEL_DISTANCE);
     assert.equal(state.projectilePool[0],bullet);
     state.projectilePool=[];
+});
+
+test('real projectile updates hit the top and bottom of the bean cuboid', () => {
+    state.scene = new THREE.Scene();
+    state.isMultiplayer = true;
+    state.isHost = false;
+    state.obstacles = [];
+    state.targets = [];
+    rebuildTargetHash();
+    state.projectilePool = [];
+
+    const mesh = buildBeanModel(0x8c7ae6, 0xff4757);
+    mesh.scale.setScalar(1.5);
+    mesh.position.set(0, 1.65, -5);
+    state.scene.add(mesh);
+    state.peers = { remote: { mesh, hp: 10, lifeId: 4 } as any };
+    state.peerIds = ['remote'];
+
+    const packets: NetworkPacket[] = [];
+    setWeaponNetworkPort({
+        broadcastToAll: packet => packets.push(packet),
+        broadcastLocalFire: () => {},
+        flashPeerMesh: () => {},
+    });
+
+    for (const y of [0.1, 3.2]) {
+        const bullet = new THREE.Object3D();
+        bullet.position.set(0, y, 0);
+        bullet.userData = {
+            dx: 0, dy: 0, dz: -1, age: 0, distanceTraveled: 0,
+            damage: 1, visualOnly: false, shotId: packets.length + 1, pelletIndex: 0,
+        };
+        state.projectiles = [bullet];
+        updateProjectiles(0.01, 'Pilot');
+        assert.equal(state.projectiles.length, 0, `${y} height projectile is consumed by the cuboid`);
+    }
+
+    const hits = packets.filter(packet => packet.type === 'player_hit');
+    assert.equal(hits.length, 2);
+    assert.deepEqual(hits.map(packet => packet.type === 'player_hit' && packet.targetLifeId), [4, 4]);
+
+    state.projectiles = [];
+    state.projectilePool = [];
+    state.peers = {};
+    state.peerIds = [];
+    state.isMultiplayer = false;
+    state.scene = null;
+    setWeaponNetworkPort({ broadcastToAll: () => {}, broadcastLocalFire: () => {}, flashPeerMesh: () => {} });
 });
 
 test('analog movement preserves partial speed, caps diagonals and is ignored while paused', () => {
