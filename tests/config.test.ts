@@ -25,6 +25,7 @@ test('projectile budget can cover the preallocated pool', () => {
 
 test('bullet range matches the sniper and fits within the projectile lifetime', () => {
     assert.equal(BULLET_TRAVEL_DISTANCE, 700);
+    assert.equal(PROJECTILE_SPEED, 900);
     assert.equal(PROJECTILE_LIFETIME, 1.1);
     assert.ok(PROJECTILE_SPEED * PROJECTILE_LIFETIME >= BULLET_TRAVEL_DISTANCE);
 });

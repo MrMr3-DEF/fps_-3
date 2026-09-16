@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { buildBeanModel, setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, isSharedGeometry, SHARED_BODY_MAT } from './weapons.js';
 import { characterColor, saveCharacterColor } from './appearance.js';
 import { state } from './state.js';
-import { WEAPON_STATS, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY } from './config.js';
+import { WEAPON_STATS, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, PROJECTILE_SPEED } from './config.js';
 
 let renderPreview: (() => void) | undefined;
 export function updateMenuPreview(): void { renderPreview?.(); }
@@ -25,7 +25,7 @@ export function setupMainMenu(): void {
             selectedWeapon = name;
             for (const tab of tabs.querySelectorAll('button')) tab.setAttribute('aria-pressed', String(tab === button));
             const rpm = name === 'MINIGUN' ? `${MINIGUN_MIN_RPM}–${MINIGUN_MAX_RPM}` : (60 / stats.fireRate).toFixed(0);
-            const specs = [['Damage / pellet', stats.damage], ['Pellets / shot', stats.pellets ?? 1], ['Max damage / shot', stats.damage * (stats.pellets ?? 1)], ['Rounds / minute', rpm], ['Base spread', `${(Math.atan(stats.spread) * 180 / Math.PI).toFixed(2)}°`], ['Recoil', stats.recoil.toFixed(2)]];
+            const specs = [['Damage / pellet', stats.damage], ['Pellets / shot', stats.pellets ?? 1], ['Max damage / shot', stats.damage * (stats.pellets ?? 1)], ['Rounds / minute', rpm], ['Projectile speed', name === 'SNIPER' ? 'Hitscan' : `${PROJECTILE_SPEED} m/s`], ['Base spread', `${(Math.atan(stats.spread) * 180 / Math.PI).toFixed(2)}°`], ['Recoil', stats.recoil.toFixed(2)]];
             arsenal.querySelector('#weapon-specs')!.innerHTML = `<h3>${labels[name]}</h3><dl>${specs.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join('')}</dl><p class="weapon-note">${name === 'MINIGUN' ? `Spin-up delay: ${MINIGUN_SHOOT_DELAY}s · Full ramp: ${MINIGUN_RAMP_TIME}s.` : `Shot cooldown: ${stats.fireRate}s.`}</p>`;
         };
     }

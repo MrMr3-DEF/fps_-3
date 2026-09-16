@@ -6,7 +6,7 @@ The menu uses a full-window two-column layout: existing play, multiplayer, setti
 
 Suit color offers six presets and a custom color picker. `src/appearance.ts` validates and saves the selection in local storage independently of gameplay settings. The color updates the local third-person model and travels as an optional validated 24-bit `bodyColor` in multiplayer state packets. Older packets without a color remain accepted.
 
-The weapons screen derives damage, pellets, maximum damage per shot, rate, spread, recoil and cooldown from `WEAPON_STATS`. Minigun ramp and rate values use the minigun constants. No duplicate editable stat table is maintained.
+The weapons screen derives damage, pellets, maximum damage per shot, rate, spread, recoil and cooldown from `WEAPON_STATS`. It also reports the shared 900 m/s simulated-projectile speed from `PROJECTILE_SPEED`, while the sniper is labeled as hitscan. Minigun ramp and rate values use the minigun constants. No duplicate editable stat table is maintained.
 
 Validation: 45 tests, both TypeScript checks, production build and diff whitespace checks pass. Browser checks covered desktop and 821×400 touch layout, preset selection and persistence, and weapon-tab navigation including minigun values. Physical-phone usability and live multiplayer color replication remain deployment checks.
 

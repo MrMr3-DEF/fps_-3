@@ -37,10 +37,10 @@ export const GUN_TIP_Z = -0.19;
 
 export const SWITCH_DURATION = 0.15;
 export const BULLET_TRAVEL_DISTANCE = 700;
-export const PROJECTILE_SPEED = 700;
+export const PROJECTILE_SPEED = 900;
 // Projectile lifetime is a defensive timeout with a small buffer beyond the
-// one-second flight to 700 m at the current 700 m/s speed. Travel range is
-// enforced independently so a long frame cannot move a bullet too far.
+// roughly 0.78-second flight to 700 m at the current 900 m/s speed. Travel
+// range is enforced independently so a long frame cannot move a bullet too far.
 export const PROJECTILE_LIFETIME = 1.1;
 export const MAX_PROJECTILES = 220;
 export const PROJECTILE_RADIUS = 0.07;

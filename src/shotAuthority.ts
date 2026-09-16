@@ -4,6 +4,8 @@ import { segmentSphereHitT } from './gameplayMath.js';
 import type { FirePacket, WeaponName } from './networkTypes.js';
 
 const PROJECTILE_MUZZLE_OFFSET = 0.1;
+const PROJECTILE_NETWORK_GRACE_MS = 100;
+const PROJECTILE_LEDGER_GRACE_MS = 250;
 
 /** Identical spread on the shooter, host and viewers. */
 export function spreadDirection(base: THREE.Vector3, seed: number, pelletIndex: number, spread: number, out = new THREE.Vector3()): THREE.Vector3 {
@@ -42,7 +44,7 @@ export class ShotLedger {
         if (dead || packet.shotId <= this.lastShotId || now - this.lastFireAt < interval - Math.min(15, interval * 0.1)) return false;
         this.lastShotId = packet.shotId;
         this.lastFireAt = now;
-        for (const [id, shot] of this.shots) if (now - shot.at > PROJECTILE_LIFETIME * 1000 + 250) this.shots.delete(id);
+        for (const [id, shot] of this.shots) if (now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS) this.shots.delete(id);
         const base = new THREE.Vector3(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
         const count = packet.weapon === 'SHOTGUN' ? stats.pellets! : 1;
         this.shots.set(packet.shotId, { at: now, weapon: packet.weapon,
@@ -53,10 +55,10 @@ export class ShotLedger {
     consume(shotId: number, pelletIndex: number, target: THREE.Vector3, radius: number, damage: number, now: number,
         blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
         const shot = this.shots.get(shotId);
-        if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + 250 || damage !== WEAPON_STATS[shot.weapon].damage) return false;
+        if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS || damage !== WEAPON_STATS[shot.weapon].damage) return false;
         const range = shot.weapon === 'SNIPER'
             ? BULLET_TRAVEL_DISTANCE
-            : Math.min(BULLET_TRAVEL_DISTANCE, PROJECTILE_SPEED * ((now - shot.at + 100) / 1000));
+            : Math.min(BULLET_TRAVEL_DISTANCE, PROJECTILE_SPEED * ((now - shot.at + PROJECTILE_NETWORK_GRACE_MS) / 1000));
         const direction = shot.directions[pelletIndex];
         const start = shot.origin.clone();
         if (shot.weapon !== 'SNIPER') {
