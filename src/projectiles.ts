@@ -3,7 +3,6 @@ import { state } from './state.js';
 import {
     BULLET_TRAVEL_DISTANCE,
     PILLAR_WIDTH,
-    PLAYER_HIT_RANGE,
     PROJECTILE_LIFETIME,
     PROJECTILE_RADIUS,
     PROJECTILE_SPEED,
@@ -17,6 +16,7 @@ import { queryObstaclesAlongSegment, queryTargetsNear } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { obstacleData, projectileData, targetData } from './userDataTypes.js';
 import { segmentAabbHitT, segmentSphereHitT } from './gameplayMath.js';
+import { segmentPlayerHitboxHitT } from './playerHitbox.js';
 import { flashHitmarker } from './hitmarker.js';
 
 const _targetCandidates: THREE.Group[] = [];
@@ -147,11 +147,12 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                 const peerId = peerIds[j];
                 const peerData = state.peers[peerId];
                 if (peerData?.mesh && peerData.mesh.visible && peerData.hp > 0) {
-                    const hitT = segmentSphereHitT(
+                    const hitT = segmentPlayerHitboxHitT(
                         _segmentStart,
                         _segmentEnd,
                         peerData.mesh.position,
-                        PLAYER_HIT_RANGE + PROJECTILE_RADIUS
+                        peerData.mesh.rotation.y,
+                        PROJECTILE_RADIUS,
                     );
                     if (hitT !== null && hitT < closestHitT) {
                         closestHitT = hitT;

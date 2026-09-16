@@ -24,7 +24,6 @@ import {
     MAX_PLAYERS,
     PROJECTILE_RADIUS,
     TARGET_HIT_RANGE_MULTIPLIER,
-    PLAYER_HIT_RANGE,
     PLAYER_MAX_HP,
     PILLAR_WIDTH,
     ROOM_CODE_LENGTH,
@@ -235,12 +234,11 @@ const MAX_PLAYER_VERTICAL_POSITION = 600;
 interface PeerRuntimeState {
     username: string;
     position: THREE.Vector3;
+    yaw: number;
     lastUpdateAt: number;
     shots: ShotLedger;
     lifeId: number;
     deathReported: boolean;
-    hitWindowStart: number;
-    hitsInWindow: number;
     activeWeapon: WeaponName;
     wasDead: boolean;
 }
@@ -895,18 +893,6 @@ function getPeerRuntime(peerId: string): PeerRuntimeState | null {
     return peerRuntime.get(peerId) ?? null;
 }
 
-function allowHit(runtime: PeerRuntimeState, now: number): boolean {
-    // A shotgun may produce five legitimate hits in one frame. The fire-intent
-    // path check below validates geometry; this remains a burst safety cap.
-    if (now - runtime.hitWindowStart >= 200) {
-        runtime.hitWindowStart = now;
-        runtime.hitsInWindow = 0;
-    }
-    if (runtime.hitsInWindow >= 8) return false;
-    runtime.hitsInWindow++;
-    return true;
-}
-
 function shotIsBlocked(start: THREE.Vector3, end: THREE.Vector3): boolean {
     const obstacleCandidates = queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, _shotObstacleCandidates);
     for (let index = 0; index < obstacleCandidates.length; index++) {
@@ -926,7 +912,10 @@ function shotIsBlocked(start: THREE.Vector3, end: THREE.Vector3): boolean {
 function getPeerHitPosition(peerId: string): THREE.Vector3 | null {
     if (peerId === state.peer?.id) {
         const player = state.controls?.getObject();
-        return player ? _peerTargetPosition.copy(player.position) : null;
+        if (!player) return null;
+        _peerTargetPosition.copy(player.position);
+        _peerTargetPosition.y -= PEER_Y_OFFSET;
+        return _peerTargetPosition;
     }
 
     const runtime = getPeerRuntime(peerId);
@@ -934,6 +923,14 @@ function getPeerHitPosition(peerId: string): THREE.Vector3 | null {
     _peerTargetPosition.copy(runtime.position);
     _peerTargetPosition.y -= PEER_Y_OFFSET;
     return _peerTargetPosition;
+}
+
+function getPeerHitYaw(peerId: string): number | null {
+    if (peerId === state.peer?.id) {
+        if (!state.camera) return null;
+        return _stateEuler.setFromQuaternion(state.camera.quaternion, 'YXZ').y;
+    }
+    return getPeerRuntime(peerId)?.yaw ?? null;
 }
 
 /** Keep a reported sniper impact on its shot ray and within visual weapon range. */
@@ -973,12 +970,11 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             runtime = {
                 username: packet.username,
                 position: new THREE.Vector3(packet.pos.x, packet.pos.y, packet.pos.z),
+                yaw: packet.yaw,
                 lastUpdateAt: now,
                 shots: new ShotLedger(),
                 lifeId: packet.lifeId,
                 deathReported: false,
-                hitWindowStart: now,
-                hitsInWindow: 0,
                 activeWeapon: packet.activeWeapon,
                 wasDead: packet.isDead
             };
@@ -994,6 +990,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
                 return null;
             }
             runtime.position.copy(nextPosition);
+            runtime.yaw = packet.yaw;
             runtime.lastUpdateAt = now;
             runtime.username = packet.username;
             runtime.activeWeapon = packet.activeWeapon;
@@ -1028,16 +1025,17 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         if (!target) return null;
         const targetInfo = targetData(target);
         const targetRadius = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0);
-        if (!runtime.shots.consume(packet.shotId, packet.pelletIndex, target.position, targetRadius, packet.damage, now, shotIsBlocked) || !allowHit(runtime, now)) return null;
+        if (!runtime.shots.consume(packet.shotId, packet.pelletIndex, target.position, targetRadius, packet.damage, now, shotIsBlocked)) return null;
         return { ...packet, senderPeerId: fromPeerId };
     }
 
     if (packet.type === 'player_hit') {
         const targetsHost = packet.targetPeerId === state.peer?.id;
         const targetPosition = getPeerHitPosition(packet.targetPeerId);
+        const targetYaw = getPeerHitYaw(packet.targetPeerId);
         if (packet.targetLifeId !== (targetsHost ? state.lifeId : getPeerRuntime(packet.targetPeerId)?.lifeId)) return null;
-        if ((targetsHost ? state.playerHp <= 0 : getPeerRuntime(packet.targetPeerId)?.wasDead !== false) || packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition ||
-            !runtime.shots.consume(packet.shotId, packet.pelletIndex, targetPosition, PLAYER_HIT_RANGE + 0.8, packet.damage, now, shotIsBlocked) || !allowHit(runtime, now)) return null;
+        if ((targetsHost ? state.playerHp <= 0 : getPeerRuntime(packet.targetPeerId)?.wasDead !== false) || packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition || targetYaw === null ||
+            !runtime.shots.consumePlayerHitbox(packet.shotId, packet.pelletIndex, targetPosition, targetYaw, packet.damage, now, shotIsBlocked)) return null;
         lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: fromPeerId, at: now });
         return { ...packet, senderPeerId: fromPeerId, attackerName: runtime.username };
     }

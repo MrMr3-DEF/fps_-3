@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM } from './config.js';
 import { segmentSphereHitT } from './gameplayMath.js';
+import { segmentPlayerHitboxHitT } from './playerHitbox.js';
 import type { FirePacket, WeaponName } from './networkTypes.js';
 
 const PROJECTILE_MUZZLE_OFFSET = 0.1;
@@ -52,8 +53,14 @@ export class ShotLedger {
             directions: Array.from({ length: count }, (_, i) => spreadDirection(base, packet.spreadSeed, i, stats.spread)), used: new Set() });
         return true;
     }
-    consume(shotId: number, pelletIndex: number, target: THREE.Vector3, radius: number, damage: number, now: number,
-        blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
+    private consumeIntersection(
+        shotId: number,
+        pelletIndex: number,
+        damage: number,
+        now: number,
+        blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean,
+        intersect: (start: THREE.Vector3, end: THREE.Vector3) => number | null,
+    ): boolean {
         const shot = this.shots.get(shotId);
         if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS || damage !== WEAPON_STATS[shot.weapon].damage) return false;
         const range = shot.weapon === 'SNIPER'
@@ -68,10 +75,20 @@ export class ShotLedger {
             start.addScaledVector(direction, Math.min(PROJECTILE_MUZZLE_OFFSET, range));
         }
         const end = shot.origin.clone().addScaledVector(direction, range);
-        const hit = segmentSphereHitT(start, end, target, radius + PROJECTILE_RADIUS);
+        const hit = intersect(start, end);
         if (hit === null || blocked(start, start.clone().lerp(end, hit))) return false;
         shot.used.add(pelletIndex);
         return true;
+    }
+    consume(shotId: number, pelletIndex: number, target: THREE.Vector3, radius: number, damage: number, now: number,
+        blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
+        return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
+            (start, end) => segmentSphereHitT(start, end, target, radius + PROJECTILE_RADIUS));
+    }
+    consumePlayerHitbox(shotId: number, pelletIndex: number, target: THREE.Vector3, yaw: number, damage: number, now: number,
+        blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
+        return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
+            (start, end) => segmentPlayerHitboxHitT(start, end, target, yaw, PROJECTILE_RADIUS));
     }
 }
 

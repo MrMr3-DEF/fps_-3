@@ -70,7 +70,6 @@ export const NORMAL_JUMP_HEIGHT = PLAYER_HEIGHT * 0.9;
 export const NORMAL_JUMP_GRAVITY = BASE_GRAVITY / (1.25 * 1.25);
 export const NORMAL_JUMP_FORCE = Math.sqrt(2 * NORMAL_JUMP_GRAVITY * NORMAL_JUMP_HEIGHT);
 export const PLAYER_MAX_HP = 10;
-export const PLAYER_HIT_RANGE = 0.8;
 export const DEFAULT_FOV = 75;
 export const SCOPED_FOV = 15;
 export const FOV_LERP_SPEED = 15;

@@ -1,5 +1,3 @@
-import { segmentSphereHitT } from './gameplayMath.js';
-import { PLAYER_HIT_RANGE } from './config.js';
 import { characterColor } from './appearance.js';
 import { isInputActive } from './inputSession.js';
 import { spreadDirection } from './shotAuthority.js';
@@ -27,6 +25,7 @@ import { projectileData, targetData } from './userDataTypes.js';
 import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
 import { attachGrappleMuzzleShockwave, attachMuzzleShockwave, triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import { flashHitmarker } from './hitmarker.js';
+import { segmentPlayerHitboxHitT } from './playerHitbox.js';
 
 // Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
@@ -566,8 +565,13 @@ export function fireProjectile(): void {
                 const peerData = state.peers[peerId];
                 if (peerData?.mesh.visible && peerData.hp > 0) {
                     // Use the same body hit volume as bullets; labels and guns are not hitboxes.
-                    const hit = segmentSphereHitT(barrelWorldPosition, _rayEnd, peerData.mesh.position,
-                        PLAYER_HIT_RANGE + PROJECTILE_RADIUS);
+                    const hit = segmentPlayerHitboxHitT(
+                        barrelWorldPosition,
+                        _rayEnd,
+                        peerData.mesh.position,
+                        peerData.mesh.rotation.y,
+                        PROJECTILE_RADIUS,
+                    );
                     if (hit !== null && hit * BULLET_TRAVEL_DISTANCE < closestPeerDist) {
                         closestPeerDist = hit * BULLET_TRAVEL_DISTANCE;
                         pvpPeerId = peerId;
