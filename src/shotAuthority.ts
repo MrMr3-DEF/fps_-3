@@ -88,7 +88,7 @@ export class ShotLedger {
     consumePlayerHitbox(shotId: number, pelletIndex: number, target: THREE.Vector3, yaw: number, damage: number, now: number,
         blocked: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
         return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
-            (start, end) => segmentPlayerHitboxHitT(start, end, target, yaw, PROJECTILE_RADIUS));
+            (start, end) => segmentPlayerHitboxHitT(start, end, target, yaw));
     }
 }
 

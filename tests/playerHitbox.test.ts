@@ -48,6 +48,18 @@ test('player hitbox covers the bean from booster to head without extra side room
     ), null, 'a shot immediately outside the side misses');
 });
 
+test('empty space in the bounding cuboid corners is part of the hitbox', () => {
+    const position = new THREE.Vector3(0, 0, -10);
+    // At this height the rounded head is much narrower than the full body
+    // width. A mesh-shaped collider would miss; the requested cuboid hits.
+    assert.notEqual(segmentPlayerHitboxHitT(
+        new THREE.Vector3(0.85, 1.6, 0),
+        new THREE.Vector3(0.85, 1.6, -20),
+        position,
+        0,
+    ), null);
+});
+
 test('player hitbox rotates with the bean', () => {
     const position = new THREE.Vector3(3, 2, -8);
     const yaw = Math.PI / 2;

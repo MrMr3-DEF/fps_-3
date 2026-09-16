@@ -152,7 +152,6 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                         _segmentEnd,
                         peerData.mesh.position,
                         peerData.mesh.rotation.y,
-                        PROJECTILE_RADIUS,
                     );
                     if (hitT !== null && hitT < closestHitT) {
                         closestHitT = hitT;

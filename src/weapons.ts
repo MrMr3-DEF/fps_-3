@@ -570,7 +570,6 @@ export function fireProjectile(): void {
                         _rayEnd,
                         peerData.mesh.position,
                         peerData.mesh.rotation.y,
-                        PROJECTILE_RADIUS,
                     );
                     if (hit !== null && hit * BULLET_TRAVEL_DISTANCE < closestPeerDist) {
                         closestPeerDist = hit * BULLET_TRAVEL_DISTANCE;
