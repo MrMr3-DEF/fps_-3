@@ -26,6 +26,7 @@ import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { projectileData, targetData } from './userDataTypes.js';
 import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
 import { attachGrappleMuzzleShockwave, attachMuzzleShockwave, triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
+import { flashHitmarker } from './hitmarker.js';
 
 // Inspect animation anchor poses.
 const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
@@ -625,6 +626,7 @@ export function fireProjectile(): void {
                 attackerName: attackerName
             };
             broadcastToAll(packet);
+            if (state.isHost) flashHitmarker(false);
 
             spawnParticles(hitPoint, 0x8c7ae6, 15, 12, 0.15, 12.0);
         }

@@ -15,8 +15,10 @@ the crosshair within its category only stages defaults for that category.
   with the selected action. Escape remains the pause shortcut. Shift and Ctrl
   accept either side. Mouse and touch controls keep their existing behavior.
 - **Crosshair:** ring, cross, or dot; color, size, thickness, gap, opacity,
-  shadow, and center dot. Shadow and center dot have expandable controls for
-  thickness/size, color, and opacity. Gap is available for crosses; the extra center dot
+  shadow, center dot, and hitmarker. Shadow, center dot, and hitmarker have expandable controls.
+  The hitmarker flashes four white diagonal strokes for a confirmed hit and red for a confirmed kill;
+  it can be enabled or disabled and adjusted for line length, center gap, thickness, opacity, and duration.
+  Gap is available for crosses; the extra center dot
   is unavailable for the dot style. The live preview uses the same SVG renderer
   and pixel dimensions as the applied in-game reticle. Existing scope visibility
   rules continue to hide the reticle when appropriate.

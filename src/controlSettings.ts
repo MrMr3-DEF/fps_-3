@@ -63,11 +63,19 @@ export interface CrosshairSettings {
     centerDotColor: string;
     centerDotOpacity: number;
     centerDot: boolean;
+    hitmarker: boolean;
+    hitmarkerSize: number;
+    hitmarkerGap: number;
+    hitmarkerThickness: number;
+    hitmarkerOpacity: number;
+    hitmarkerDuration: number;
 }
 export const DEFAULT_CROSSHAIR: CrosshairSettings = {
     style: 'ring', color: '#ff0055', size: 16, thickness: 2, gap: 4,
     opacity: 1, shadow: false, shadowThickness: 1, shadowColor: '#101820', shadowOpacity: 1,
     centerDot: false, centerDotSize: 6, centerDotColor: '#ff0055', centerDotOpacity: 1,
+    hitmarker: true, hitmarkerSize: 9, hitmarkerGap: 7, hitmarkerThickness: 2,
+    hitmarkerOpacity: 1, hitmarkerDuration: 140,
 };
 export function readCrosshair(value: unknown): CrosshairSettings {
     const result = { ...DEFAULT_CROSSHAIR };
@@ -77,11 +85,11 @@ export function readCrosshair(value: unknown): CrosshairSettings {
     for (const key of ['color', 'shadowColor', 'centerDotColor'] as const) {
         if (typeof data[key] === 'string' && /^#[0-9a-f]{6}$/i.test(data[key])) result[key] = data[key];
     }
-    for (const [key, min, max] of [['size', 4, 48], ['thickness', 1, 6], ['gap', 0, 16], ['opacity', 0.1, 1], ['shadowThickness', 0, 8], ['shadowOpacity', 0, 1], ['centerDotSize', 1, 24], ['centerDotOpacity', 0, 1]] as const) {
+    for (const [key, min, max] of [['size', 4, 48], ['thickness', 1, 6], ['gap', 0, 16], ['opacity', 0.1, 1], ['shadowThickness', 0, 8], ['shadowOpacity', 0, 1], ['centerDotSize', 1, 24], ['centerDotOpacity', 0, 1], ['hitmarkerSize', 3, 20], ['hitmarkerGap', 2, 20], ['hitmarkerThickness', 1, 6], ['hitmarkerOpacity', 0.1, 1], ['hitmarkerDuration', 50, 500]] as const) {
         const n = data[key];
         if (typeof n === 'number' && Number.isFinite(n)) result[key] = Math.max(min, Math.min(max, n));
     }
-    for (const key of ['shadow', 'centerDot'] as const) if (typeof data[key] === 'boolean') result[key] = data[key];
+    for (const key of ['shadow', 'centerDot', 'hitmarker'] as const) if (typeof data[key] === 'boolean') result[key] = data[key];
     // Preserve the appearance of saved reticles from before independent layers.
     if (typeof data.shadow !== 'boolean' && typeof data.outline === 'boolean') result.shadow = data.outline;
     if (data.centerDotSize === undefined) result.centerDotSize = result.thickness * 3;
@@ -113,4 +121,17 @@ export function crosshairSvg(settings: CrosshairSettings): string {
         ? `<g data-layer="center-dot" opacity="${s.centerDotOpacity}">${circle(s.centerDotSize / 2, s.centerDotColor)}</g>`
         : '';
     return `<svg xmlns="http://www.w3.org/2000/svg" width="112" height="112" viewBox="-16 -16 112 112" aria-hidden="true">${shadowLayer}<g data-layer="reticle" opacity="${s.opacity}">${main}</g>${centerLayer}</svg>`;
+}
+
+/** Four diagonal strokes around the aim point, shared by preview and HUD. */
+export function hitmarkerSvg(settings: CrosshairSettings): string {
+    const s = readCrosshair(settings);
+    const center = 56;
+    const diagonal = Math.SQRT1_2;
+    const inner = s.hitmarkerGap * diagonal;
+    const outer = (s.hitmarkerGap + s.hitmarkerSize) * diagonal;
+    const lines = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([x, y]) =>
+        `<line x1="${center + x * inner}" y1="${center + y * inner}" x2="${center + x * outer}" y2="${center + y * outer}"/>`
+    ).join('');
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="112" height="112" viewBox="0 0 112 112" aria-hidden="true"><g data-layer="hitmarker" fill="none" stroke="currentColor" stroke-width="${s.hitmarkerThickness}" stroke-linecap="square" opacity="${s.hitmarkerOpacity}">${lines}</g></svg>`;
 }

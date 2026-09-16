@@ -71,6 +71,8 @@ export interface KillTargetPacket {
     scale: number;
     hp: number;
     color: number;
+    /** Peer credited by the host; absent on packets from older builds. */
+    killerPeerId?: string | null;
 }
 
 export interface PlayerHitPacket {
@@ -242,7 +244,8 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
             return isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
                 isInteger(value.score, 0, Number.MAX_SAFE_INTEGER) &&
                 isVec3(value.newPosition) && isFiniteNumber(value.scale, 0.1, 100) &&
-                isFiniteNumber(value.hp, 1, 1000) && isInteger(value.color, 0, 0xffffff)
+                isFiniteNumber(value.hp, 1, 1000) && isInteger(value.color, 0, 0xffffff) &&
+                (value.killerPeerId === undefined || value.killerPeerId === null || isPeerId(value.killerPeerId))
                 ? value as unknown as KillTargetPacket : null;
 
         case 'player_hit':

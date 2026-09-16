@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_KEYBINDS, DEFAULT_CROSSHAIR, BIND_ACTIONS, assignKey, gameplayCode, readKeybinds, readCrosshair, crosshairSvg } from '../src/controlSettings.ts';
+import { DEFAULT_KEYBINDS, DEFAULT_CROSSHAIR, BIND_ACTIONS, assignKey, gameplayCode, readKeybinds, readCrosshair, crosshairSvg, hitmarkerSvg } from '../src/controlSettings.ts';
 import { cloneSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings } from '../src/settings.ts';
 
 test('rebinding swaps conflicts and disables the old physical key', () => {
@@ -131,4 +131,20 @@ test('invalid layer controls use defaults and safe bounds', () => {
     assert.equal(saved.centerDotSize, 1);
     assert.equal(saved.centerDotColor, DEFAULT_CROSSHAIR.centerDotColor);
     assert.equal(saved.centerDotOpacity, 1);
+});
+
+test('hitmarker settings are sanitized and render four diagonal lines', () => {
+    const settings = readCrosshair({ hitmarker: false, hitmarkerSize: 999, hitmarkerGap: -1,
+        hitmarkerThickness: 3.5, hitmarkerOpacity: 0, hitmarkerDuration: 9999 });
+    assert.equal(settings.hitmarker, false);
+    assert.equal(settings.hitmarkerSize, 20);
+    assert.equal(settings.hitmarkerGap, 2);
+    assert.equal(settings.hitmarkerThickness, 3.5);
+    assert.equal(settings.hitmarkerOpacity, 0.1);
+    assert.equal(settings.hitmarkerDuration, 500);
+    const svg = hitmarkerSvg(settings);
+    assert.equal((svg.match(/<line /g) ?? []).length, 4);
+    assert.match(svg, /stroke="currentColor"/);
+    assert.match(svg, /stroke-width="3.5"/);
+    assert.ok(!svg.includes('NaN'));
 });

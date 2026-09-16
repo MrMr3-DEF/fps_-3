@@ -55,6 +55,7 @@ import { segmentAabbHitT } from './gameplayMath.js';
 import { clearDamagePulse, pulseDamageMaterials } from './damagePulse.js';
 import { excludeFromStablePeerEnvelope } from './smartGogglesPeerMath.js';
 import { setWeaponNetworkPort } from './weaponNetworkPort.js';
+import { flashHitmarker } from './hitmarker.js';
 import {
     admitRoomPeer,
     departRoomPeer,
@@ -108,7 +109,6 @@ const UI = {
     panelMain: null as HTMLElement | null,
     score: null as HTMLElement | null,
     kills: null as HTMLElement | null,
-    crosshair: null as HTMLElement | null,
 };
 
 const DOM = {
@@ -121,7 +121,6 @@ const DOM = {
     panelMain: () => (UI.panelMain || (UI.panelMain = document.getElementById('panel-main'))),
     score: () => (UI.score || (UI.score = document.getElementById('score'))),
     kills: () => (UI.kills || (UI.kills = document.getElementById('kills'))),
-    crosshair: () => (UI.crosshair || (UI.crosshair = document.getElementById('crosshair'))),
 };
 
 let cachedUsername = 'Guest1';
@@ -1110,11 +1109,11 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         if (!authorized) return;
         msg = authorized;
         if (!state.isPlaying) return;
-        if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
+        if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'hit_target' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
             // The shooter also receives validated player hits so its copy of the
             // victim's health changes immediately. Ordinary self-originated
             // movement/fire events still do not need to echo back.
-            broadcastToAll(msg, msg.type === 'player_hit' ? null : fromPeerId);
+            broadcastToAll(msg, msg.type === 'player_hit' || msg.type === 'hit_target' ? null : fromPeerId);
         }
     } else {
         if (!isExpectedHost(fromPeerId)) return;
@@ -1337,13 +1336,19 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             });
             rebuildTargetHash();
             setScore(msg.score);
+            if (state.isPlaying && msg.killerPeerId === state.peer?.id) flashHitmarker(true);
         }
     } else if (msg.type === 'hit_target') {
         if (state.isMultiplayer && state.isHost) {
-            processTargetHit(msg.targetIndex, msg.damage);
+            processTargetHit(msg.targetIndex, msg.damage, senderId);
             syncHostTargetStates();
+        } else if (msg.senderPeerId === state.peer?.id) {
+            // The echoed packet confirms the hit; only the following host kill
+            // packet can authoritatively upgrade it from white to red.
+            flashHitmarker(false);
         }
     } else if (msg.type === 'player_hit') {
+        if (senderId === state.peer?.id && msg.targetPeerId !== state.peer?.id) flashHitmarker(false);
         const targetPeer = state.peers[msg.targetPeerId];
         if (targetPeer && targetPeer.lifeId === msg.targetLifeId) {
             flashPeerMesh(targetPeer, 0xff3333, 150);
@@ -1373,15 +1378,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             const killsEl = DOM.kills();
             if (killsEl) killsEl.innerText = state.kills.toString();
             
-            const crosshair = DOM.crosshair();
-            if (crosshair) {
-                crosshair.style.borderColor = '#00ff88';
-                crosshair.style.transform = 'translate(-50%, -50%) scale(1.5)';
-                setTimeout(() => {
-                    crosshair.style.borderColor = '#ff0055';
-                    crosshair.style.transform = 'translate(-50%, -50%) scale(1.0)';
-                }, 180);
-            }
+            flashHitmarker(true);
         }
     } else if (msg.type === 'jump') {
         const peerData = state.peers[senderId];
@@ -1566,7 +1563,7 @@ export function broadcastLocalFire(barrelPos: THREE.Vector3, dir: THREE.Vector3,
     broadcastToAll(packet);
 }
 
-export function broadcastTargetKill(targetIndex: number, score: number, newPos: THREE.Vector3, data: TargetUserData): void {
+export function broadcastTargetKill(targetIndex: number, score: number, newPos: THREE.Vector3, data: TargetUserData, killerPeerId: string | null = null): void {
     if (!state.isMultiplayer || !state.isHost || state.connections.length === 0) return;
 
     const packet: KillTargetPacket = {
@@ -1576,7 +1573,8 @@ export function broadcastTargetKill(targetIndex: number, score: number, newPos: 
         newPosition: { x: newPos.x, y: newPos.y, z: newPos.z },
         scale: data.scale,
         hp: data.hp,
-        color: data.color
+        color: data.color,
+        killerPeerId,
     };
 
     const targetState = buildTargetState(targetIndex);

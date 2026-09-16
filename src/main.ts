@@ -69,6 +69,7 @@ import {
     updateGogglesFailureScan,
 } from './gogglesFailure.js';
 import { resolveThirdPersonAimTarget, resolveThirdPersonCameraPosition } from './thirdPersonCamera.js';
+import { applyHitmarkerSettings, flashHitmarker } from './hitmarker.js';
 
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
@@ -1115,6 +1116,7 @@ function updatePendingSettings(mutator: (settings: UserSettings) => void): void 
 
 function applyLiveSettings(): void {
     if (UI.crosshair) UI.crosshair.innerHTML = crosshairSvg(userSettings.crosshair);
+    applyHitmarkerSettings();
     state.baseSensitivity = userSettings.sensitivity;
 
     if (state.camera) {
@@ -1703,11 +1705,15 @@ export function triggerDeath(): void {
 }
 
 // Host/singleplayer authority for target health. Clients ask the host to call this.
-export function processTargetHit(targetIndex: number, damage: number): void {
+export function processTargetHit(targetIndex: number, damage: number, attackerPeerId?: string): void {
     const target = state.targets[targetIndex];
     if (!target) return;
     const data = targetData(target);
-    
+    const killed = data.hp - damage <= 0;
+    if (!state.isMultiplayer || !attackerPeerId || attackerPeerId === state.peer?.id) {
+        flashHitmarker(killed);
+    }
+
     data.hp -= damage;
     const hpRatio = Math.max(0, data.hp / data.maxHp);
     data.healthBarFg.scale.x = hpRatio;
@@ -1726,7 +1732,7 @@ export function processTargetHit(targetIndex: number, damage: number): void {
         if (UI.score) UI.score.innerText = state.score.toString();
         
         if (state.isMultiplayer && state.isHost) {
-            broadcastTargetKill(targetIndex, state.score, target.position, data);
+            broadcastTargetKill(targetIndex, state.score, target.position, data, attackerPeerId ?? state.peer?.id ?? null);
         }
     }
 }

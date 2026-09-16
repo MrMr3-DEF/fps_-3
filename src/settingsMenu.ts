@@ -1,4 +1,4 @@
-import { BIND_ACTIONS, DEFAULT_KEYBINDS, DEFAULT_CROSSHAIR, assignKey, normalizeCode, isBindableCode, keyLabel, crosshairSvg, type BindAction, type CrosshairSettings } from './controlSettings.js';
+import { BIND_ACTIONS, DEFAULT_KEYBINDS, DEFAULT_CROSSHAIR, assignKey, normalizeCode, isBindableCode, keyLabel, crosshairSvg, hitmarkerSvg, type BindAction, type CrosshairSettings } from './controlSettings.js';
 import type { UserSettings } from './settings.js';
 
 export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate: (settings: UserSettings) => void) => void): (settings: UserSettings) => void {
@@ -145,7 +145,7 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
     preview.className = 'crosshair-preview';
     preview.setAttribute('role', 'img');
     preview.setAttribute('aria-label', 'Crosshair preview');
-    preview.innerHTML = '<div id="crosshair-preview-reticle"></div>';
+    preview.innerHTML = '<div id="crosshair-preview-reticle"></div><div id="crosshair-preview-hitmarker"></div>';
     const editor = document.createElement('div');
     editor.className = 'crosshair-editor';
     const crossFields = document.createElement('div');
@@ -164,10 +164,16 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
         ['centerDotSize', 'Size', 'range', 1, 24, 1],
         ['centerDotColor', 'Color', 'color', 0, 0, 0],
         ['centerDotOpacity', 'Opacity', 'range', 0, 1, 0.05],
+        ['hitmarker', 'Hitmarker', 'checkbox', 0, 0, 0],
+        ['hitmarkerSize', 'Line length', 'range', 3, 20, 1],
+        ['hitmarkerGap', 'Center gap', 'range', 2, 20, 1],
+        ['hitmarkerThickness', 'Thickness', 'range', 1, 6, 0.5],
+        ['hitmarkerOpacity', 'Opacity', 'range', 0.1, 1, 0.05],
+        ['hitmarkerDuration', 'Flash duration', 'range', 50, 500, 10],
     ] as const;
     let fieldContainer = crossFields;
     for (const [key, label, type, min, max, step] of fields) {
-        if (key === 'shadow' || key === 'centerDot') {
+        if (key === 'shadow' || key === 'centerDot' || key === 'hitmarker') {
             const dropdown = document.createElement('details');
             dropdown.className = 'crosshair-dropdown';
             const summary = document.createElement('summary');
@@ -185,7 +191,7 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
         title.textContent = type === 'checkbox' ? 'Enabled' : label;
         const input = type === 'select' ? document.createElement('select') : document.createElement('input');
         input.id = title.htmlFor;
-        const layer = key.startsWith('shadow') ? 'Shadow' : key.startsWith('centerDot') ? 'Center dot' : '';
+        const layer = key.startsWith('shadow') ? 'Shadow' : key.startsWith('centerDot') ? 'Center dot' : key.startsWith('hitmarker') ? 'Hitmarker' : '';
         if (layer) input.setAttribute('aria-label', type === 'checkbox' ? `Enable ${layer.toLowerCase()}` : `${layer} ${label.toLowerCase()}`);
         if (input instanceof HTMLSelectElement) input.innerHTML = '<option value="ring">Ring</option><option value="cross">Cross</option><option value="dot">Dot</option>';
         else {
@@ -221,9 +227,13 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
             else input.value = String(value);
             input.disabled = (key === 'gap' && settings.crosshair.style !== 'cross') ||
                 (key.startsWith('centerDot') && (settings.crosshair.style === 'dot' || (key !== 'centerDot' && !settings.crosshair.centerDot))) ||
-                (key.startsWith('shadow') && key !== 'shadow' && !settings.crosshair.shadow);
-            output.textContent = typeof value === 'boolean' ? value ? 'On' : 'Off' : key.toLowerCase().endsWith('opacity') ? `${Math.round(Number(value) * 100)}%` : typeof value === 'number' ? `${value}px` : '';
+                (key.startsWith('shadow') && key !== 'shadow' && !settings.crosshair.shadow) ||
+                (key.startsWith('hitmarker') && key !== 'hitmarker' && !settings.crosshair.hitmarker);
+            output.textContent = typeof value === 'boolean' ? value ? 'On' : 'Off' : key.toLowerCase().endsWith('opacity') ? `${Math.round(Number(value) * 100)}%` : key.toLowerCase().endsWith('duration') ? `${value}ms` : typeof value === 'number' ? `${value}px` : '';
         }
         preview.querySelector('#crosshair-preview-reticle')!.innerHTML = crosshairSvg(settings.crosshair);
+        const previewHitmarker = preview.querySelector<HTMLElement>('#crosshair-preview-hitmarker')!;
+        previewHitmarker.innerHTML = hitmarkerSvg(settings.crosshair);
+        previewHitmarker.hidden = !settings.crosshair.hitmarker;
     };
 }

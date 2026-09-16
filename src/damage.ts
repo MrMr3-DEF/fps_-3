@@ -1,4 +1,4 @@
-type TargetHitHandler = (targetIndex: number, damage: number) => void;
+type TargetHitHandler = (targetIndex: number, damage: number, attackerPeerId?: string) => void;
 type PlayerDamageHandler = (damage: number, attackerName: string, attackerPeerId?: string) => void;
 
 let targetHitHandler: TargetHitHandler | null = null;
@@ -9,9 +9,9 @@ let playerDamageHandler: PlayerDamageHandler | null = null;
  * without creating a runtime cycle. Calling before initialization is a real
  * lifecycle error, not a silently discarded hit.
  */
-export function processTargetHit(targetIndex: number, damage: number): void {
+export function processTargetHit(targetIndex: number, damage: number, attackerPeerId?: string): void {
     if (!targetHitHandler) throw new Error('Damage handlers have not been initialized.');
-    targetHitHandler(targetIndex, damage);
+    targetHitHandler(targetIndex, damage, attackerPeerId);
 }
 
 export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {

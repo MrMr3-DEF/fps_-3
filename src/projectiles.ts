@@ -17,6 +17,7 @@ import { queryObstaclesAlongSegment, queryTargetsNear } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { obstacleData, projectileData, targetData } from './userDataTypes.js';
 import { segmentAabbHitT, segmentSphereHitT } from './gameplayMath.js';
+import { flashHitmarker } from './hitmarker.js';
 
 const _targetCandidates: THREE.Group[] = [];
 const _obstacleCandidates: THREE.Object3D[] = [];
@@ -189,6 +190,7 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                     spawnParticles(_impactPoint, 0x8c7ae6, 8, 12, 0.15, 20.0);
                     flashPeerMesh(peerData, 0xff3333, 150);
                     broadcastPlayerHit(hitPeerId, damage, attackerName, data.shotId!, data.pelletIndex!);
+                    if (state.isHost) flashHitmarker(false);
                     projectileHit = true;
                 }
             } else if (hitObstacle) {
