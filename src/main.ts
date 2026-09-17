@@ -564,6 +564,15 @@ function setupInputListeners(): void {
 
         switch (code) {
             case 'Escape':
+                // Use the visible screen's button so Escape shares its cleanup and
+                // return destination. Keybind capture and chat consume Escape first.
+                const backButton = [...document.querySelectorAll<HTMLButtonElement>('[data-menu-back]')]
+                    .find(button => !button.disabled && button.getClientRects().length > 0);
+                if (backButton) {
+                    e.preventDefault?.();
+                    backButton.click();
+                    break;
+                }
                 if (!state.controls) break;
                 const pauseAction = getEscapePauseAction(e.code, {
                     isPlaying: state.isPlaying,

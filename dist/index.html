@@ -11,7 +11,7 @@
     <!-- Prevent favicon 404/500 requests in browser console -->
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
-  <script type="module" crossorigin src="/assets/index-KbM5sg4m.js"></script>
+  <script type="module" crossorigin src="/assets/index-C48UJtHp.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-BTNuZJjy.js">
   <link rel="stylesheet" crossorigin href="/assets/index-B4x5eaaE.css">
 </head>
@@ -47,7 +47,7 @@
                 <h2>Weapons</h2>
                 <div class="weapon-tabs" aria-label="Choose a weapon"></div>
                 <article id="weapon-specs"></article>
-                <button class="menu-btn secondary">Back</button>
+                <button class="menu-btn secondary" data-menu-back>Back</button>
             </div>
 
             <div id="panel-settings" class="menu-panel">
@@ -166,7 +166,7 @@
                 <div class="menu-actions">
                     <button class="menu-btn secondary" id="btn-settings-reset">Reset all settings</button>
                     <button class="menu-btn" id="btn-settings-apply">Apply</button>
-                    <button class="menu-btn" id="btn-settings-back">Back</button>
+                    <button class="menu-btn" id="btn-settings-back" data-menu-back>Back</button>
                 </div>
             </div>
 
@@ -180,7 +180,7 @@
                     <button class="menu-btn secondary" id="btn-mp-join-view">Join Game</button>
                 </div>
                 <br />
-                <button class="menu-btn secondary" id="btn-mp-back">Back</button>
+                <button class="menu-btn secondary" id="btn-mp-back" data-menu-back>Back</button>
             </div>
 
             <!-- Panel 3: Host Waiting Lobby -->
@@ -196,7 +196,7 @@
 
                 <div class="menu-actions">
                     <button class="menu-btn" id="btn-host-start">Start Game</button>
-                    <button class="menu-btn secondary" id="btn-host-cancel">Cancel</button>
+                    <button class="menu-btn secondary" id="btn-host-cancel" data-menu-back>Cancel</button>
                 </div>
             </div>
 
@@ -209,7 +209,7 @@
 
                 <div class="menu-actions">
                     <button class="menu-btn" id="btn-join-connect">Connect</button>
-                    <button class="menu-btn secondary" id="btn-join-cancel">Back</button>
+                    <button class="menu-btn secondary" id="btn-join-cancel" data-menu-back>Back</button>
                 </div>
             </div>
 
