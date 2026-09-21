@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
+import { BULLET_TRAVEL_DISTANCE } from '../src/config.ts';
 import { HudElement } from './fakeHudDom.ts';
 import { isGogglesScanZoomReady, SmartGogglesHud } from '../src/smartGoggles.ts';
 import { getProjectileHomingTarget } from '../src/projectileHoming.ts';
@@ -147,3 +148,39 @@ test('girlfriend and celestial scan boxes never become homing targets', () => {
     assert.equal(getProjectileHomingTarget(), null);
     hud.reset();
 });
+
+for (const kind of ['npc', 'peer'] as const) {
+    test(`${kind} out-of-range warnings cannot acquire a red lock and clear an existing lock`, () => {
+        const layer = new HudElement();
+        const hud = new SmartGogglesHud(layer as any);
+        const view = camera();
+        const target = enemy();
+        const targets = kind === 'npc' ? [target] : [];
+        const peers = kind === 'peer'
+            ? { remote: { mesh: target, hp: 3, maxHp: 3, username: 'Remote', lifeId: 1 } }
+            : {};
+        const key = kind === 'npc' ? 'npc:0' : 'peer:remote';
+        const update = (time: number) => hud.update(view, view.position, view.position, targets, peers, true, time);
+        target.position.z = -BULLET_TRAVEL_DISTANCE - 10;
+        target.updateMatrixWorld(true);
+        update(1000);
+        update(2000);
+        assert.equal(record(layer, key).classList.contains('is-out-of-range'), true);
+        assert.equal(record(layer, key).classList.contains('is-homing-locking'), false);
+        assert.equal(record(layer, key).classList.contains('is-homing-locked'), false);
+        assert.equal(getProjectileHomingTarget(), null);
+
+        target.position.z = -BULLET_TRAVEL_DISTANCE;
+        target.updateMatrixWorld(true);
+        update(2100);
+        update(3000);
+        assert.equal(getProjectileHomingTarget()?.object, target);
+
+        target.position.z -= 10;
+        target.updateMatrixWorld(true);
+        update(3010);
+        assert.equal(getProjectileHomingTarget(), null);
+        assert.equal(record(layer, key).classList.contains('is-homing-locked'), false);
+        hud.reset();
+    });
+}

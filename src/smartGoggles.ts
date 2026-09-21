@@ -805,6 +805,7 @@ export class SmartGogglesHud {
         distance: number,
         target: ProjectileHomingTarget,
     ): void {
+        if (record.readoutMode === 'warning') return;
         if (!isAimInsideScanBox(bounds, viewportWidth, viewportHeight)) return;
         const boxCenterX = (bounds.left + bounds.right) / 2;
         const boxCenterY = (bounds.top + bounds.bottom) / 2;

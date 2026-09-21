@@ -28,6 +28,7 @@ import { flashHitmarker } from './hitmarker.js';
 import { segmentPlayerHitboxHitT } from './playerHitbox.js';
 import {
     getProjectileHomingTarget,
+    isHomingTargetInRange,
     PROJECTILE_HOMING_START_FRACTION,
     resolveProjectileHomingTarget,
     toHomingTargetPacket,
@@ -510,7 +511,6 @@ export function fireProjectile(): void {
         state.peers,
         _homingTargetPosition,
     )) homingTarget = null;
-    const homingTargetPacket = toHomingTargetPacket(homingTarget);
 
     triggerMuzzleFlash(state.rightGun);
 
@@ -518,6 +518,10 @@ export function fireProjectile(): void {
     const spreadSeed = crypto.getRandomValues(new Uint32Array(1))[0];
     state.rightGunContainer.position.z += stats.recoil;
     state.rightGun.getWorldPosition(_barrelPos);
+    if (homingTarget && !isHomingTargetInRange(homingTarget, _barrelPos, BULLET_TRAVEL_DISTANCE)) {
+        homingTarget = null;
+    }
+    const homingTargetPacket = toHomingTargetPacket(homingTarget);
     const homingStartDistance = sampleHomingStartDistance(
         homingTarget,
         _barrelPos,

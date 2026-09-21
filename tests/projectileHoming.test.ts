@@ -5,8 +5,10 @@ import {
     PROJECTILE_HOMING_MAX_TURN_RATE,
     PROJECTILE_HOMING_START_FRACTION,
     isWithinHomingAimEnvelope,
+    isHomingTargetInRange,
     steerHomingDirection,
 } from '../src/projectileHoming.ts';
+import { BULLET_TRAVEL_DISTANCE } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { rebuildTargetHash } from '../src/world.ts';
@@ -71,8 +73,28 @@ test('projectile flies straight for one third of the firing distance before homi
     updateProjectiles(0.01, 'Pilot');
     assert.ok(bullet.userData.dx > 0, 'steering begins as the bullet crosses one third of the initial distance');
 
+    const previousHeading = bullet.userData.dx;
+    target.position.z = -BULLET_TRAVEL_DISTANCE - 10;
+    updateProjectiles(0.01, 'Pilot');
+    assert.equal(bullet.userData.homingTarget, undefined, 'unreachable moving targets lose guidance');
+    assert.equal(bullet.userData.dx, previousHeading, 'bullet continues on its last heading');
+
     resetProjectiles();
     state.targets = [];
     state.scene = null;
     rebuildTargetHash();
+});
+
+test('homing range uses the target surface and the available travel distance', () => {
+    const object = new THREE.Group();
+    const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2));
+    object.add(bodyMesh);
+    object.userData = { bodyMesh };
+    const target = { kind: 'npc' as const, object, targetIndex: 0, targetRevision: 0 };
+    object.position.z = -BULLET_TRAVEL_DISTANCE - 1;
+    assert.equal(isHomingTargetInRange(target, new THREE.Vector3(), BULLET_TRAVEL_DISTANCE), true);
+    object.position.z -= 0.01;
+    assert.equal(isHomingTargetInRange(target, new THREE.Vector3(), BULLET_TRAVEL_DISTANCE), false);
+    object.position.z = -100;
+    assert.equal(isHomingTargetInRange(target, new THREE.Vector3(), 90), false);
 });

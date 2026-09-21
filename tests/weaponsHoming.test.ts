@@ -8,7 +8,7 @@ import { resetProjectiles } from '../src/projectiles.ts';
 import { setProjectileHomingTarget } from '../src/projectileHoming.ts';
 import { setWeaponNetworkPort } from '../src/weaponNetworkPort.ts';
 import type { HomingTargetPacket } from '../src/networkTypes.ts';
-import { MINIGUN_RAMP_TIME } from '../src/config.ts';
+import { BULLET_TRAVEL_DISTANCE, MINIGUN_RAMP_TIME } from '../src/config.ts';
 
 test('scoped bullets capture the scan target and one-third-distance threshold, while sniper does not', () => {
     state.scene = new THREE.Scene();
@@ -39,6 +39,12 @@ test('scoped bullets capture the scan target and one-third-distance threshold, w
     assert.equal(projectile.homingTarget?.kind, 'npc');
     assert.ok((projectile.homingStartDistance ?? 0) > 12.5);
     assert.ok((projectile.homingStartDistance ?? Infinity) < 14.5);
+
+    resetProjectiles();
+    target.position.z = -BULLET_TRAVEL_DISTANCE - 10;
+    fireProjectile();
+    assert.equal(projectileData(state.projectiles[0]).homingTarget, undefined,
+        'a stale scan lock cannot guide a shot to an enemy that moved out of range');
 
     resetProjectiles();
     let transmittedHomingTarget: HomingTargetPacket | undefined;

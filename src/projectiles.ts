@@ -18,7 +18,7 @@ import { obstacleData, projectileData, targetData } from './userDataTypes.js';
 import { segmentAabbHitT, segmentSphereHitT } from './gameplayMath.js';
 import { segmentPlayerHitboxHitT } from './playerHitbox.js';
 import { flashHitmarker } from './hitmarker.js';
-import { resolveProjectileHomingTarget, steerHomingDirection } from './projectileHoming.js';
+import { isHomingTargetInRange, resolveProjectileHomingTarget, steerHomingDirection } from './projectileHoming.js';
 import {
     appendCurvedProjectileTrail,
     appendProjectileTrail,
@@ -89,6 +89,10 @@ export function updateProjectiles(delta: number, attackerName: string): void {
         _segmentStart.copy(proj.position);
         _movementDirection.set(data.dx, data.dy, data.dz).normalize();
         let curvedTrail = false;
+        if (data.homingTarget && !isHomingTargetInRange(data.homingTarget, _segmentStart, remainingDistance)) {
+            data.homingTarget = undefined;
+            data.homingStartDistance = undefined;
+        }
         const homingStartDistance = data.homingStartDistance ?? Infinity;
         const homingDistanceThisStep = data.distanceTraveled + stepDistance - homingStartDistance;
         if (data.homingTarget && homingDistanceThisStep > 0) {

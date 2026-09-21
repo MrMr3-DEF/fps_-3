@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { HomingTargetPacket } from './networkTypes.js';
 import { targetData } from './userDataTypes.js';
+import { classifyOutOfRange, distanceToOrientedBox } from './smartGogglesMath.js';
+import { distanceToVisiblePeerMeshes } from './smartGogglesPeerMath.js';
 
 /** Strong enough to correct a near miss, but finite so fast/close targets can escape. */
 export const PROJECTILE_HOMING_RESPONSE = 48;
@@ -33,6 +35,30 @@ export function setProjectileHomingTarget(target: ProjectileHomingTarget | null)
 
 export function getProjectileHomingTarget(): ProjectileHomingTarget | null {
     return aimedTarget;
+}
+
+/** Match the goggles' reachability check, including targets straddling the range boundary. */
+export function isHomingTargetInRange(
+    target: ProjectileHomingTarget,
+    origin: THREE.Vector3,
+    maximumRange: number,
+): boolean {
+    let distance: number;
+    if (target.kind === 'peer') {
+        distance = distanceToVisiblePeerMeshes(origin, target.object);
+    } else {
+        const body = targetData(target.object).bodyMesh;
+        if (body) {
+            body.updateWorldMatrix(true, false);
+            if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
+            distance = body.geometry.boundingBox
+                ? distanceToOrientedBox(origin, body.geometry.boundingBox, body.matrixWorld)
+                : Infinity;
+        } else {
+            distance = origin.distanceTo(target.object.position);
+        }
+    }
+    return !classifyOutOfRange(distance, maximumRange);
 }
 
 export function resolveProjectileHomingTarget(
