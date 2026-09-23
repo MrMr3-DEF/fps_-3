@@ -125,12 +125,12 @@ test('boolean settings preserve defaults and persist only boolean values', async
     Object.assign(globalThis, { localStorage: { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } } });
     try {
         assert.equal(DEFAULT_USER_SETTINGS.downloadWebLLMImmediately, false);
-        assert.equal(DEFAULT_USER_SETTINGS.lavaGlow, false);
+        assert.equal(DEFAULT_USER_SETTINGS.lavaGlow, true);
         assert.equal(DEFAULT_USER_SETTINGS.photosensitivityMode, false);
         assert.equal(DEFAULT_USER_SETTINGS.muzzleFlashes, true);
         assert.equal(DEFAULT_USER_SETTINGS.bulletTrails, true);
         assert.equal(loadUserSettings().downloadWebLLMImmediately, false);
-        assert.equal(loadUserSettings().lavaGlow, false);
+        assert.equal(loadUserSettings().lavaGlow, true);
         assert.equal(loadUserSettings().photosensitivityMode, false);
         assert.equal(loadUserSettings().muzzleFlashes, true);
         assert.equal(loadUserSettings().bulletTrails, true);
@@ -150,9 +150,11 @@ test('boolean settings preserve defaults and persist only boolean values', async
         assert.equal(loadUserSettings().photosensitivityMode, true);
         assert.equal(loadUserSettings().muzzleFlashes, false);
         assert.equal(loadUserSettings().bulletTrails, false);
+        saved = '{"lavaGlow":false}';
+        assert.equal(loadUserSettings().lavaGlow, false, 'explicitly saved off remains off');
         saved = '{"downloadWebLLMImmediately":"true","lavaGlow":"true","photosensitivityMode":"true","muzzleFlashes":"false","bulletTrails":"false"}';
         assert.equal(loadUserSettings().downloadWebLLMImmediately, false);
-        assert.equal(loadUserSettings().lavaGlow, false);
+        assert.equal(loadUserSettings().lavaGlow, true);
         assert.equal(loadUserSettings().photosensitivityMode, false);
         assert.equal(loadUserSettings().muzzleFlashes, true);
         assert.equal(loadUserSettings().bulletTrails, true);

@@ -439,8 +439,12 @@ function syncHostTargetStates(): void {
     }
 }
 
-function applyWorldSnapshot(packet: WorldSnapshotPacket): void {
-    rebuildEnvironmentWithSeed(packet.seed);
+let multiplayerWorldLoader: ((seed: number, current: () => boolean) => Promise<void>) | null = null;
+let pendingWorldPackets: { peer: string; packet: NetworkPacket }[] | null = null;
+export function setMultiplayerWorldLoader(loader: typeof multiplayerWorldLoader): void { multiplayerWorldLoader = loader; }
+
+function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void {
+    if (!prepared) rebuildEnvironmentWithSeed(packet.seed);
     state.dayNightElapsedSeconds = packet.dayNightElapsedSeconds;
     state.dayNightSyncPending = true;
     state.dayNightSyncImmediate = true;
@@ -518,7 +522,10 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
         admittedNames.set(hostPeerId, username);
         turnSessionToken = registration.turnSessionToken;
         startRoomHeartbeat(normalizedRoomCode, registration.closeToken, generation);
-        rebuildEnvironmentWithSeed(generateWorldSeed());
+        const seed = generateWorldSeed();
+        if (multiplayerWorldLoader) await multiplayerWorldLoader(seed, () => isCurrentSession(generation));
+        else rebuildEnvironmentWithSeed(seed);
+        if (!isCurrentSession(generation)) return;
         placePlayerAtTownSpawn(getWorldSeed(), 'house');
         setScore(0);
 
@@ -676,6 +683,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean } =
     turnSessionToken = null;
     stopRoomHeartbeat();
     sessionGeneration++;
+    pendingWorldPackets = null;
     if (peerStartupTimeout) clearTimeout(peerStartupTimeout);
     peerStartupTimeout = null;
     if (iceRefreshInterval) clearInterval(iceRefreshInterval);
@@ -1215,6 +1223,13 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         }
     } else {
         if (!isExpectedHost(fromPeerId)) return;
+        if (pendingWorldPackets) {
+            if (pendingWorldPackets.length >= 4096) {
+                showJoinError('World preparation received too many updates. Please retry.');
+                disconnectMultiplayer({ preserveJoinError: true });
+            } else if (msg.type !== 'world_snapshot') pendingWorldPackets.push({ peer: fromPeerId, packet: msg });
+            return;
+        }
         if (msg.type === 'start_game') {
             if (clientWorldSynchronized) enterMultiplayerMatch();
             return;
@@ -1222,7 +1237,22 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
         if (msg.type === 'peer_left') { removePeer(msg.peerId); return; }
         if (msg.type === 'world_snapshot') {
             if (clientWorldSynchronized) return;
-            applyWorldSnapshot(msg);
+            if (!multiplayerWorldLoader) { applyWorldSnapshot(msg); return; }
+            const generation = sessionGeneration;
+            const snapshot = msg;
+            pendingWorldPackets = [];
+            clearWorldSyncTimeout();
+            void multiplayerWorldLoader(snapshot.seed, () => isCurrentSession(generation)).then(() => {
+                if (!isCurrentSession(generation)) return;
+                const queued = pendingWorldPackets ?? [];
+                pendingWorldPackets = null;
+                applyWorldSnapshot(snapshot, true);
+                for (const item of queued) handlePeerMessage(item.peer, item.packet);
+            }).catch(error => {
+                if (!isCurrentSession(generation)) return;
+                showJoinError(errorMessage(error, 'Unable to prepare the world. Please retry.'));
+                disconnectMultiplayer({ preserveJoinError: true });
+            });
             return;
         }
         if (msg.type === 'target_state') {

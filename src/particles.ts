@@ -41,6 +41,20 @@ function ensureBoxParticleMesh(): THREE.InstancedMesh | null {
     return boxParticleMesh;
 }
 
+/** Allocate first-use effects while the loading screen is visible. */
+export function prepareParticleResources(): THREE.Mesh[] {
+    const box = ensureBoxParticleMesh();
+    if (!box) return [];
+    box.setColorAt(0, new THREE.Color(0xffffff));
+    while (boxParticlePool.length < getParticleLimit()) boxParticlePool.push({} as Particle);
+    while (materialPool.length < 32) materialPool.push(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true }));
+    while (shockwaveMaterialPool.length < 8) shockwaveMaterialPool.push(new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false,
+    }));
+    // Temporary representatives compile the same variants used by pooled effects.
+    return [new THREE.Mesh(SHARED_CYL_GEO, materialPool[0]), new THREE.Mesh(SHARED_RING_GEO, shockwaveMaterialPool[0])];
+}
+
 function acquireBasicMaterial(colorHex: number): THREE.MeshBasicMaterial {
     if (materialPool.length > 0) {
         const mat = materialPool.pop()!;

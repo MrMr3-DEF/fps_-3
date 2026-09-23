@@ -36,7 +36,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     particleAmount: 1.0,
     renderDistanceChunks: 4,
     shadows: true,
-    lavaGlow: false,
+    lavaGlow: true,
     muzzleFlashes: true,
     muzzleFlashOpacity: 1.0,
     bulletTrails: true,

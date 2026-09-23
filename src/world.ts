@@ -24,6 +24,7 @@ import {
     MAX_RENDER_DISTANCE_CHUNKS
 } from './config.js';
 import { SpatialHash } from './spatialHash.js';
+import { createLavaGlowTexture, getLavaDarknessStrength, LAVA_GLOW_SIZE } from './lavaGlow.js';
 import { obstacleData, targetData } from './userDataTypes.js';
 import { GothGirlfriend } from './gothGirlfriend.js';
 import { createGothHouseDecor } from './gothHouse.js';
@@ -57,16 +58,23 @@ const TOWN_LANTERN_POSITIONS = [
 ] as const;
 
 const LAVA_LIGHT_COUNT = 1;
-const LAVA_LIGHT_QUERY_RADIUS = 72;
-const LAVA_LIGHT_REASSIGN_DISTANCE_SQ = 8 * 8;
+const LAVA_LIGHT_REASSIGN_DISTANCE_SQ = 2 * 2;
 const lavaLights: THREE.PointLight[] = [];
-const lavaLightCandidates: THREE.Object3D[] = [];
+const visibleLavaPools: THREE.Object3D[] = [];
 const lavaLightAnchor = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
 let lavaLightGroup: THREE.Group | null = null;
+let lavaGlowMesh: THREE.Mesh | null = null;
+const lavaVisibleChunks = { value: new THREE.Vector3(0, 0, -1) };
+let lavaGlowMaterial: THREE.MeshBasicMaterial | null = null;
+let selectedLavaPool: THREE.Object3D | null = null;
+let litLavaPool: THREE.Object3D | null = null;
+let lavaLightFade = 0;
+let lastLavaLightTime = 0;
 
 interface ChunkedInstanceSet {
     mesh: THREE.InstancedMesh;
     matricesByChunk: Map<string, THREE.Matrix4[]>;
+    packedByChunk: Map<string, Float32Array>;
 }
 
 // Static props keep one draw call per material while their instance buffers are
@@ -262,8 +270,7 @@ function createLavaLights(): void {
     lavaLightGroup.name = 'lava-lights';
     lavaLights.length = 0;
     for (let index = 0; index < LAVA_LIGHT_COUNT; index++) {
-        const light = new THREE.PointLight(0xff4b16, 0, 42, 2);
-        light.visible = false;
+        const light = new THREE.PointLight(0xff651f, 0, 52, 2);
         light.castShadow = false;
         lavaLightGroup.add(light);
         lavaLights.push(light);
@@ -273,56 +280,82 @@ function createLavaLights(): void {
 }
 
 function refreshLavaLightPositions(observerPosition: THREE.Vector3): void {
-    const dx = observerPosition.x - lavaLightAnchor.x;
-    const dz = observerPosition.z - lavaLightAnchor.z;
-    if (dx * dx + dz * dz <= LAVA_LIGHT_REASSIGN_DISTANCE_SQ) return;
-    lavaLightAnchor.set(observerPosition.x, 0, observerPosition.z);
+    if (observerPosition.distanceToSquared(lavaLightAnchor) <= LAVA_LIGHT_REASSIGN_DISTANCE_SQ) return;
+    lavaLightAnchor.copy(observerPosition);
 
-    lavaHash.query(observerPosition.x, observerPosition.z, LAVA_LIGHT_QUERY_RADIUS, lavaLightCandidates);
-    lavaLightCandidates.sort((a, b) => {
-        const adx = a.position.x - observerPosition.x;
-        const adz = a.position.z - observerPosition.z;
-        const bdx = b.position.x - observerPosition.x;
-        const bdz = b.position.z - observerPosition.z;
-        return adx * adx + adz * adz - bdx * bdx - bdz * bdz;
-    });
-
-    const maxDistance = LAVA_LIGHT_QUERY_RADIUS + LAVA_POOL_HALF_SIZE;
-    const maxDistanceSq = maxDistance * maxDistance;
-    let assigned = 0;
-    for (let index = 0; index < lavaLightCandidates.length && assigned < lavaLights.length; index++) {
-        const candidate = lavaLightCandidates[index];
-        const candidateDx = candidate.position.x - observerPosition.x;
-        const candidateDz = candidate.position.z - observerPosition.z;
-        if (candidateDx * candidateDx + candidateDz * candidateDz > maxDistanceSq) continue;
-        const light = lavaLights[assigned++];
-        light.position.set(candidate.position.x, 1.8, candidate.position.z);
-        light.visible = true;
+    let nearest: THREE.Object3D | null = null;
+    let nearestDistanceSq = Number.POSITIVE_INFINITY;
+    for (const pool of visibleLavaPools) {
+        const distanceSq = pool.position.distanceToSquared(observerPosition);
+        if (distanceSq < nearestDistanceSq) {
+            nearest = pool;
+            nearestDistanceSq = distanceSq;
+        }
     }
-    for (; assigned < lavaLights.length; assigned++) lavaLights[assigned].visible = false;
+    // Hysteresis prevents repeated handoffs when walking along a shared edge.
+    if (nearest && selectedLavaPool &&
+        activeRenderChunks.has(getRenderChunkKey(selectedLavaPool.position.x, selectedLavaPool.position.z)) &&
+        selectedLavaPool.position.distanceToSquared(observerPosition) < nearestDistanceSq * 1.25) return;
+    selectedLavaPool = nearest;
 }
 
 export function updateLavaLights(timeSeconds: number, observerPosition: THREE.Vector3, nightStrength: number, enabled = true): void {
     if (!lavaLightGroup) return;
+    const delta = Math.max(0, Math.min(0.1, timeSeconds - lastLavaLightTime));
+    lastLavaLightTime = timeSeconds;
+    lavaLightGroup.visible = enabled;
+    const darkness = getLavaDarknessStrength(nightStrength);
+    if (lavaGlowMesh) lavaGlowMesh.visible = enabled && darkness > 0;
+    if (lavaGlowMaterial) lavaGlowMaterial.opacity = 0.55 * darkness;
     if (!enabled) {
-        for (const light of lavaLights) {
-            light.intensity = 0;
-            light.visible = false;
-        }
+        for (const light of lavaLights) light.intensity = 0;
+        lavaLightFade = 0;
         lavaLightAnchor.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
         return;
     }
     refreshLavaLightPositions(observerPosition);
-    const darkness = Math.max(0, Math.min(1, nightStrength));
-    const baseIntensity = THREE.MathUtils.lerp(22, 36, darkness);
-    for (let index = 0; index < lavaLights.length; index++) {
-        const light = lavaLights[index];
-        if (!light.visible) continue;
-        const flicker = 0.91
-            + Math.sin(timeSeconds * 3.1 + index * 1.37) * 0.055
-            + Math.sin(timeSeconds * 7.7 + index * 2.11) * 0.035;
-        light.intensity = baseIntensity * flicker;
+    // Fade out before moving the single light: no bright spot sliding across
+    // the ground and no shader recompilation as nearby pools enter/leave range.
+    if (litLavaPool !== selectedLavaPool) {
+        lavaLightFade = Math.max(0, lavaLightFade - delta * 5);
+        if (lavaLightFade === 0) litLavaPool = selectedLavaPool;
+    } else {
+        lavaLightFade = Math.min(1, lavaLightFade + delta * 4);
     }
+    for (const light of lavaLights) {
+        if (litLavaPool) light.position.set(litLavaPool.position.x, 4, litLavaPool.position.z);
+        const sourceVisible = litLavaPool && activeRenderChunks.has(getRenderChunkKey(litLavaPool.position.x, litLavaPool.position.z));
+        light.intensity = sourceVisible ? 220 * darkness * lavaLightFade : 0;
+    }
+}
+
+/** One non-overlapping ground surface avoids seams between adjacent pools. */
+function createLavaGlowMaterial(): THREE.MeshBasicMaterial {
+    const material = new THREE.MeshBasicMaterial({
+        color: 0xff6318, map: createLavaGlowTexture(state.lavaPools),
+        transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    });
+    material.onBeforeCompile = (shader) => {
+        shader.uniforms.lavaVisibleChunks = lavaVisibleChunks;
+        shader.fragmentShader = 'uniform vec3 lavaVisibleChunks;\n' + shader.fragmentShader;
+        shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+            vec4 spillData = texture2D(map, vMapUv);
+            vec2 sourceUv = (floor(vMapUv * ${material.map!.image.width.toFixed(1)}) + 0.5) / ${material.map!.image.width.toFixed(1)};
+            vec2 sourceChunk = floor(texture2D(map, sourceUv).gb * 255.0 + 0.5) - 128.0;
+            vec2 chunkDistance = abs(sourceChunk - lavaVisibleChunks.xy);
+            if (spillData.r < 0.002 || max(chunkDistance.x, chunkDistance.y) > lavaVisibleChunks.z) discard;
+            diffuseColor.a *= spillData.r;
+        `);
+        // Additive light fades to zero in fog, rather than adding the sky color.
+        shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', THREE.ShaderChunk.fog_fragment.replace(
+            'gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );',
+            'gl_FragColor.rgb *= 1.0 - fogFactor;',
+        ));
+    };
+    material.customProgramCacheKey = () => 'lava-ground-spill-v2';
+    return material;
 }
 
 function getRenderChunkKey(x: number, z: number): string {
@@ -348,7 +381,8 @@ function createChunkedInstanceSet(
 
     const instanceSet: ChunkedInstanceSet = {
         mesh,
-        matricesByChunk: new Map<string, THREE.Matrix4[]>()
+        matricesByChunk: new Map<string, THREE.Matrix4[]>(),
+        packedByChunk: new Map<string, Float32Array>()
     };
     chunkedInstanceSets.push(instanceSet);
     return instanceSet;
@@ -370,16 +404,34 @@ function refreshChunkedInstances(): void {
         let instanceIndex = 0;
 
         activeRenderChunks.forEach((key) => {
-            const matrices = instanceSet.matricesByChunk.get(key);
-            if (!matrices) return;
-            for (let i = 0; i < matrices.length; i++) {
-                instanceSet.mesh.setMatrixAt(instanceIndex++, matrices[i]);
-            }
+            const packed = instanceSet.packedByChunk.get(key);
+            if (!packed) return;
+            (instanceSet.mesh.instanceMatrix.array as Float32Array).set(packed, instanceIndex * 16);
+            instanceIndex += packed.length / 16;
         });
 
         instanceSet.mesh.count = instanceIndex;
-        instanceSet.mesh.instanceMatrix.needsUpdate = true;
+        instanceSet.mesh.instanceMatrix.clearUpdateRanges();
+        if (instanceIndex > 0) {
+            instanceSet.mesh.instanceMatrix.addUpdateRange(0, instanceIndex * 16);
+            instanceSet.mesh.instanceMatrix.needsUpdate = true;
+        }
     }
+}
+
+/** Upload full-capacity static buffers once before the first playable frame. */
+export function prepareWorldInstanceBuffers(): void {
+    for (const set of chunkedInstanceSets) {
+        let offset = 0;
+        for (const packed of set.packedByChunk.values()) {
+            (set.mesh.instanceMatrix.array as Float32Array).set(packed, offset);
+            offset += packed.length;
+        }
+        set.mesh.count = offset / 16;
+        set.mesh.instanceMatrix.clearUpdateRanges();
+        set.mesh.instanceMatrix.needsUpdate = true;
+    }
+    lastRenderChunkX = Number.NaN;
 }
 
 function addChunkedRenderObject(obj: THREE.Object3D): void {
@@ -437,6 +489,8 @@ export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChu
     lastRenderChunkX = centerX;
     lastRenderChunkZ = centerZ;
     lastRenderDistanceChunks = radius;
+    lavaVisibleChunks.value.set(centerX, centerZ, radius);
+    lavaLightAnchor.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
 
     const nextActive = new Set<string>();
 
@@ -458,6 +512,10 @@ export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChu
 
     activeRenderChunks.clear();
     nextActive.forEach((key) => activeRenderChunks.add(key));
+    visibleLavaPools.length = 0;
+    for (const pool of state.lavaPools) {
+        if (activeRenderChunks.has(getRenderChunkKey(pool.position.x, pool.position.z))) visibleLavaPools.push(pool);
+    }
     refreshChunkedInstances();
 }
 
@@ -1181,6 +1239,16 @@ function createLavaPools(): void {
             }
         }
     }
+    lavaGlowMaterial = createLavaGlowMaterial();
+    const glowGeometry = new THREE.PlaneGeometry(LAVA_GLOW_SIZE, LAVA_GLOW_SIZE);
+    glowGeometry.rotateX(-Math.PI / 2);
+    // The baked map uses increasing world Z for increasing texture V.
+    const uv = glowGeometry.getAttribute('uv');
+    for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+    lavaGlowMesh = new THREE.Mesh(glowGeometry, lavaGlowMaterial);
+    lavaGlowMesh.position.y = 0.015;
+    lavaGlowMesh.name = 'lava-ground-glow';
+    addWorldObject(lavaGlowMesh);
     createLavaLights();
 }
 
@@ -1375,22 +1443,54 @@ function createTown(): void {
     }
 }
 
+function finishStaticWorld(): void {
+    // An identity scene matrix must not force every frozen child to update.
+    state.scene!.updateMatrix();
+    state.scene!.matrixAutoUpdate = false;
+    state.scene!.updateMatrixWorld(true);
+    for (const set of chunkedInstanceSets) {
+        for (const [key, matrices] of set.matricesByChunk) {
+            const packed = new Float32Array(matrices.length * 16);
+            matrices.forEach((matrix, index) => matrix.toArray(packed, index * 16));
+            set.packedByChunk.set(key, packed);
+        }
+        set.matricesByChunk.clear();
+    }
+    // Freeze only stationary world roots. Enemy hierarchies, billboard pillars,
+    // lights, and the separately-owned animated character remain dynamic.
+    const dynamic = new Set<THREE.Object3D>([...state.targets, ...state.fakePillars]);
+    if (lavaLightGroup) dynamic.add(lavaLightGroup);
+    for (const object of worldObjects) {
+        if (dynamic.has(object) || object.name === 'town-lanterns') continue;
+        object.updateWorldMatrix(true, true);
+        object.traverse(child => {
+            child.matrixAutoUpdate = false;
+            child.matrixWorldAutoUpdate = false;
+        });
+    }
+}
+
+const WORLD_GENERATION_STAGES = [
+    createFloor, createFakeBillboards, createPillars, createLavaPools,
+    createBushes, createTown, createTownLanterns, createEnemies, finishStaticWorld,
+];
+
 export function createEnvironment(preserveSeed = false): void {
     if (!state.scene) return;
-
-    // Standalone arenas should remain fresh between matches. Multiplayer sets
-    // its seed explicitly before rebuilding, so every peer keeps the same map.
     if (!state.isMultiplayer && !preserveSeed) setWorldSeed(generateWorldSeed());
     resetWorldRandom();
+    for (const stage of WORLD_GENERATION_STAGES) stage();
+}
 
-    createFloor();
-    createFakeBillboards();
-    createPillars();
-    createLavaPools();
-    createBushes();
-    createTown();
-    createTownLanterns();
-    createEnemies();
+/** Same deterministic stage order as synchronous generation, with loading paints. */
+export async function createEnvironmentAsync(seed: number, checkpoint: () => Promise<void>): Promise<void> {
+    setWorldSeed(seed);
+    disposeWorld();
+    resetWorldRandom();
+    for (const stage of WORLD_GENERATION_STAGES) {
+        await checkpoint();
+        stage();
+    }
 }
 
 export function disposeWorld(): void {
@@ -1444,8 +1544,15 @@ export function disposeWorld(): void {
     townLanternGlassMaterial = null;
     townLanternLights.length = 0;
     lavaLightGroup = null;
+    lavaGlowMesh = null;
+    lavaGlowMaterial = null;
+    lavaVisibleChunks.value.set(0, 0, -1);
+    selectedLavaPool = null;
+    litLavaPool = null;
+    lavaLightFade = 0;
+    lastLavaLightTime = 0;
     lavaLights.length = 0;
-    lavaLightCandidates.length = 0;
+    visibleLavaPools.length = 0;
     lavaLightAnchor.set(Number.POSITIVE_INFINITY, 0, Number.POSITIVE_INFINITY);
     state.lavaPools = [];
     state.fakePillars = [];

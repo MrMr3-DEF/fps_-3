@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed } from '../src/world.ts';
 import { state } from '../src/state.ts';
-import { hostGame, joinGame, disconnectMultiplayer, broadcastToAll, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
+import { setMultiplayerWorldLoader, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
 import { BULLET_TRAVEL_DISTANCE, PLAYER_MAX_HP, REGEN_DELAY_MS } from '../src/config.ts';
 import { Peer, Connection } from './fakePeer.ts';
 import worker, { TurnRateLimiter } from '../src/worker.ts';
@@ -213,4 +213,44 @@ test('full five-player rooms assign distinct houses and reset assignments for a 
             disconnectMultiplayer();
         }
     } finally { disconnectMultiplayer(); }
+});
+
+
+test('client queues match start and clock updates while its world is preparing', async () => {
+    backend();
+    state.scene = null;
+    state.camera = new THREE.PerspectiveCamera();
+    state.controls = { getObject: () => state.camera, unlock: () => {} } as any;
+    const response = await fetch('/api/rooms', { method: 'POST', body: JSON.stringify({
+        room: 'ABCDEFGH', turnstileToken: 'create-room', username: 'Host', peerId: 'testfps-room-ABCDEFGH',
+    }) });
+    const host = await response.json() as any;
+    let finish!: () => void;
+    setMultiplayerWorldLoader(() => new Promise<void>(resolve => { finish = resolve; }));
+    try {
+        await joinGame('Pilot', 'ABCDEFGH', 'join-room');
+        const peer = Peer.latest;
+        peer.emit('open', peer.id);
+        const conn = peer.connections['testfps-room-ABCDEFGH'][0];
+        const response = await fetch('/api/room-admissions/ABCDEFGH', { method: 'POST',
+            headers: { Authorization: `Bearer ${host.closeToken}` },
+            body: JSON.stringify({ peerId: peer.id, admissionToken: (conn.metadata as any).admissionToken }),
+        });
+        const admission = await response.json() as any;
+        conn.emit('data', { type: 'admission', proof: admission.admissionProof });
+        conn.emit('data', { type: 'world_snapshot', gameStarted: false, username: 'Guest3', spawnHouseSlot: 2,
+            seed: 1, score: 0, dayNightElapsedSeconds: 42, targets: [] });
+        conn.emit('data', { type: 'start_game' });
+        conn.emit('data', { ...update('Host'), dayNightElapsedSeconds: 57 });
+        assert.equal(state.isPlaying, false);
+        state.scene = new THREE.Scene();
+        finish();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.equal(state.isPlaying, true);
+        assert.equal(state.dayNightElapsedSeconds, 57);
+    } finally {
+        setMultiplayerWorldLoader(null);
+        disconnectMultiplayer();
+        state.scene = null;
+    }
 });

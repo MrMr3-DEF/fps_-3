@@ -5,7 +5,7 @@ import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, ov
 import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, CAMERA_CEILING_CLEARANCE, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_DEPTH, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT, MAP_HALF_SIZE } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
-import { rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
+import { createEnvironmentAsync, rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
@@ -136,25 +136,55 @@ test('enemy health bars track the camera every frame without coplanar depth flic
     disposeWorld();
 });
 
-test('lava illumination follows the nearest pool with one reusable light', () => {
+test('lava illumination follows visible chunks with one reusable light and continuous ground glow', () => {
     setup();
     const lava = state.lavaPools[0];
+    updateEnvironmentVisibility(lava.position, 1);
     updateLavaLights(1, lava.position, 1);
     const group = state.scene!.getObjectByName('lava-lights')!;
     const lights = group.children.filter(child => (child as THREE.PointLight).isPointLight) as THREE.PointLight[];
+    const glow = state.scene!.getObjectByName('lava-ground-glow') as THREE.Mesh;
     assert.equal(lights.length, 1);
-    assert.ok(lights.some(light => light.visible && light.intensity > 0));
-    assert.equal(lights.filter(light => light.visible).length, 1);
+    assert.equal(glow.isMesh, true);
+    updateLavaLights(1.1, lava.position, 1);
+    const firstIntensity = lights[0].intensity;
+    updateLavaLights(1.2, lava.position, 1);
+    assert.ok(firstIntensity > 0 && lights[0].intensity > firstIntensity, 'light ramps up');
+    assert.equal(lights[0].castShadow, false, 'lava never adds shadow passes');
 
-    updateLavaLights(1.5, lava.position, 1, false);
-    assert.ok(lights.every(light => !light.visible && light.intensity === 0));
+    const nextPool = state.lavaPools.find(pool => pool.position.distanceTo(lava.position) > 150)!;
+    const oldPosition = lights[0].position.clone();
+    updateEnvironmentVisibility(nextPool.position, 1);
+    updateLavaLights(1.22, nextPool.position, 1);
+    assert.ok(lights[0].position.equals(oldPosition), 'handoff does not move a lit source');
+    for (let i = 1; i <= 12; i++) updateLavaLights(1.22 + i * 0.05, nextPool.position, 1);
+    assert.equal(lights[0].position.x, nextPool.position.x);
+    assert.equal(lights[0].position.z, nextPool.position.z);
+    assert.ok(lights[0].intensity > 0);
 
-    updateLavaLights(1.75, lava.position, 1, true);
-    assert.ok(lights.some(light => light.visible && light.intensity > 0));
+    updateLavaLights(2, nextPool.position, 1, false);
+    assert.equal(group.visible, false);
+    assert.equal(glow.visible, false);
+    assert.equal(lights[0].intensity, 0);
+    updateLavaLights(2.1, nextPool.position, 1, true);
+    assert.equal(group.visible, true);
+    assert.equal(glow.visible, true);
+    assert.ok(lights[0].intensity > 0);
 
-    updateLavaLights(2, new THREE.Vector3(0, 2, 0), 1);
-    assert.ok(lights.every(light => !light.visible), 'town remains free of wilderness lava lights');
+    updateLavaLights(2.2, nextPool.position, 0);
+    assert.equal(lights[0].intensity, 0, 'no lava illumination in daylight');
+    assert.equal(glow.visible, false);
+    updateLavaLights(2.3, nextPool.position, 0.5);
+    const twilightOpacity = (glow.material as THREE.MeshBasicMaterial).opacity;
+    updateLavaLights(2.4, nextPool.position, 1);
+    assert.ok(twilightOpacity > 0 && twilightOpacity < (glow.material as THREE.MeshBasicMaterial).opacity);
+    const outside = new THREE.Vector3(4000, 2, 4000);
+    updateEnvironmentVisibility(outside, 1);
+    updateLavaLights(2.5, outside, 1);
+    assert.equal(lights[0].intensity, 0, 'culled sources cannot cast light');
+    assert.equal(lights[0].visible, true, 'travel keeps the shader light count stable');
     disposeWorld();
+    assert.equal(glow.parent, null);
 });
 
 test('all town lanterns emit light together at night', () => {
@@ -727,4 +757,47 @@ test('each seed has one named goth house, clear access and five distinct ordinar
         disposeWorld();
         assert.equal(disposed, localGeometries.length);
     }
+});
+
+
+test('staged world generation matches synchronous geometry and freezes only static transforms', async () => {
+    setup(42);
+    const snapshot = () => ({
+        pools: state.lavaPools.map(pool => pool.position.toArray()),
+        obstacles: state.obstacles.map(object => [object.position.toArray(), object.scale.toArray()]),
+    });
+    const expected = snapshot();
+    let checkpoints = 0;
+    await createEnvironmentAsync(42, async () => { checkpoints++; });
+    assert.ok(checkpoints >= 8);
+    assert.deepEqual(snapshot(), expected);
+    const floor = state.scene!.getObjectByName('grass-floor')!;
+    assert.equal(floor.matrixAutoUpdate, false);
+    assert.equal(floor.matrixWorldAutoUpdate, false);
+    assert.equal(state.targets[0].matrixAutoUpdate, true);
+    assert.equal(state.fakePillars[0].matrixAutoUpdate, true);
+    assert.equal(state.scene!.getObjectByName('lava-lights')!.matrixAutoUpdate, true);
+    let floorUpdates = 0;
+    const originalUpdate = floor.updateMatrixWorld;
+    floor.updateMatrixWorld = function(force) { floorUpdates++; originalUpdate.call(this, force); };
+    state.scene!.updateMatrixWorld();
+    state.scene!.updateMatrixWorld();
+    assert.equal(floorUpdates, 0, 'static roots are skipped on subsequent frames');
+    disposeWorld();
+});
+
+test('packed chunk buffers reproduce the same instances when returning to a chunk', () => {
+    setup();
+    const position = new THREE.Vector3(0, 2, 0);
+    updateEnvironmentVisibility(position, 1);
+    const readInstances = () => state.scene!.children.filter(object => (object as THREE.InstancedMesh).isInstancedMesh)
+        .map(object => {
+            const mesh = object as THREE.InstancedMesh;
+            return Array.from(mesh.instanceMatrix.array.slice(0, mesh.count * 16));
+        });
+    const original = readInstances();
+    updateEnvironmentVisibility(new THREE.Vector3(650, 2, -450), 2);
+    updateEnvironmentVisibility(position, 1);
+    assert.deepEqual(readInstances(), original);
+    disposeWorld();
 });

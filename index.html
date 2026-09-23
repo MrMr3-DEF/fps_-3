@@ -16,6 +16,12 @@
 </head>
 
 <body>
+    <div id="world-loading" role="status" aria-live="polite" hidden>
+        <div class="world-loading-orbit" aria-hidden="true">
+            <span class="world-loading-sun"></span><span class="world-loading-moon"></span>
+        </div>
+        <span>Preparing your world…</span>
+    </div>
     <button type="button" id="npc-interaction" hidden aria-label="Talk to goth girlfriend"></button>
 
     <div id="blocker">
@@ -25,6 +31,7 @@
 
             <!-- Panel 1: Main Selection Menu -->
             <div id="panel-main">
+                <p id="startup-error" role="alert" hidden></p>
                 <button class="menu-btn" id="btn-play-sp">Offline Singleplayer</button>
                 <button class="menu-btn secondary" id="btn-menu-mp">Online Multiplayer</button>
                 <button class="menu-btn secondary" id="btn-menu-weapons">Weapons</button>

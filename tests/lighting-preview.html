@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Lighting inspection</title>
+<style>body{margin:0;font:14px system-ui;background:#111}canvas{display:block}nav{position:fixed;top:12px;left:12px;padding:12px;background:#15202eee;color:white;border-radius:8px}button{padding:8px}#info{margin-top:8px}</style>
+<nav><button id="lava">Lava</button><button id="town">Town</button><button id="day">Noon</button><button id="low">Low sun</button><button id="night">Night</button><button id="glow">Toggle glow</button><button id="quality">Toggle shadow quality</button><label>Render distance <input id="distance" type="range" min="1" max="16" value="4"></label><button id="motion">Toggle movement</button><div id="info"></div></nav>
+<script type="module">
+import * as THREE from 'three';
+import { state } from '/src/state.ts';
+import { rebuildEnvironmentWithSeed, updateEnvironmentVisibility, updateLavaLights } from '/src/world.ts';
+import { DayNightCycle } from '/src/dayNightCycle.ts';
+state.scene = new THREE.Scene();
+state.scene.fog = new THREE.FogExp2(0xd0dbf0, .002);
+state.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, .1, 1500);
+state.controls = { getObject: () => state.camera };
+state.isMultiplayer = false;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.append(renderer.domElement);
+const cycle = new DayNightCycle(state.scene, { shadows: true, shadowMapSize: 1024 });
+rebuildEnvironmentWithSeed(42);
+let glow = true, quality = 1024, moving = false, phase = 150;
+const center = new THREE.Vector3();
+const cameraBase = new THREE.Vector3();
+function lava() {
+    const pool = state.lavaPools[0];
+    center.copy(pool.position);
+    cameraBase.copy(center).add(new THREE.Vector3(36, 15, 36));
+}
+function town() { center.set(0, 8, -55); cameraBase.set(0, 6, 30); }
+for (const [id, fn] of Object.entries({lava, town, day: () => phase = 150, low: () => phase = 22,
+    night: () => phase = 390, glow: () => glow = !glow,
+    quality: () => { quality = quality === 1024 ? 2048 : 1024; cycle.applySettings({shadows: true, shadowMapSize: quality}); },
+    motion: () => moving = !moving})) document.getElementById(id).onclick = fn;
+lava();
+let previous = 0, average = 16;
+function frame(time) {
+    requestAnimationFrame(frame);
+    if (previous) average += (time - previous - average) * .04;
+    previous = time;
+    state.camera.position.copy(cameraBase);
+    if (moving) state.camera.position.x += Math.sin(time / 1800) * 18;
+    state.camera.lookAt(center);
+    cycle.synchronizeElapsedSeconds(phase, true);
+    const darkness = cycle.update(0, state.camera.position);
+    updateEnvironmentVisibility(state.camera.position, Number(document.getElementById('distance').value));
+    updateLavaLights(time / 1000, state.camera.position, darkness, glow);
+    renderer.render(state.scene, state.camera);
+    document.getElementById('info').textContent = `${quality}px shadows · glow ${glow ? 'on' : 'off'} · ${renderer.info.render.calls} draw calls · ${average.toFixed(1)} ms/frame (includes display/vsync)`;
+}
+requestAnimationFrame(frame);
+addEventListener('resize', () => { state.camera.aspect = innerWidth / innerHeight; state.camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script></html>

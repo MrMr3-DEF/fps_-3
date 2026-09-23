@@ -1,3 +1,5 @@
+import { cancelWorldLoading, isWorldLoading, withWorldLoading } from './worldLoading.js';
+import { prepareRenderer } from './renderPreparation.js';
 import { setupSettingsMenu } from './settingsMenu.js';
 import { gameplayCode, keyLabel, crosshairSvg } from './controlSettings.js';
 import { updateHealthRegen } from './healthRegen.js';
@@ -41,12 +43,13 @@ import { setAccelerometerVisible, setFpsText, setFpsVisible, updateAccelerometer
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, syncThirdPersonPresentation, cancelInspect, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { gothGirlfriend, createEnvironment, disposeWorld, getWorldSeed, queryLavaPoolsNear, queryObstaclesNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns } from './world.js';
+import { gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, queryLavaPoolsNear, queryObstaclesNear, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns } from './world.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
     startHostMatch,
     onMultiplayerStarted,
+    setMultiplayerWorldLoader,
     disconnectMultiplayer,
     broadcastLocalJump,
     generateRoomCode,
@@ -804,6 +807,7 @@ interface DisposeGameRuntimeOptions {
 }
 
 function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
+    cancelWorldLoading();
     state.isPlaying = false;
     state.pendingPlay = false;
     gothChat?.reset({ preserveLoadedModel: userSettings.downloadWebLLMImmediately });
@@ -851,18 +855,52 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
     syncHudCounters();
 }
 
-function startOfflineGame(): void {
+async function loadPreparedWorld(seed: number, current: () => boolean = () => true): Promise<void> {
+    const scene = state.scene;
+    await withWorldLoading(async paint => {
+        const checkpoint = async () => {
+            await paint();
+            if (state.scene !== scene || !current()) throw new DOMException('Loading cancelled', 'AbortError');
+        };
+        await createEnvironmentAsync(seed, checkpoint);
+        if (dayNightCycle) await prepareRenderer(dayNightCycle, checkpoint);
+    });
+    state.prevTime = performance.now();
+}
+
+async function startOfflineGame(): Promise<void> {
+    if (isWorldLoading) return;
+    // A denied initial pointer-lock request can be retried without regenerating.
+    if (state.pendingPlay && state.scene && !state.isMultiplayer) { beginInput(); return; }
     disposeGameRuntime();
+    const startupError = document.getElementById('startup-error');
+    if (startupError) startupError.hidden = true;
     settingsOrigin = 'main';
     createGameRuntime();
     state.isMultiplayer = false;
     state.isHost = false;
-    createEnvironment();
-    performPlayerReset(true);
-    syncGogglesFailureVisuals();
-    state.prevTime = performance.now();
+    const scene = state.scene;
+    const loading = loadPreparedWorld(generateWorldSeed());
     state.pendingPlay = true;
+    // Keep pointer lock/fullscreen in the original click gesture, before awaits.
     beginInput();
+    try {
+        await loading;
+        if (state.scene !== scene) return;
+        performPlayerReset(true);
+        syncGogglesFailureVisuals();
+        state.prevTime = performance.now();
+    } catch (error) {
+        if (state.scene !== scene) return;
+        disposeGameRuntime();
+        if (UI.blocker) UI.blocker.style.display = 'flex';
+        if (UI.panelMain) UI.panelMain.style.display = 'flex';
+        if (startupError) {
+            startupError.textContent = 'The world could not finish loading. Please try again.';
+            startupError.hidden = false;
+        }
+        console.error('Unable to prepare the arena:', error);
+    }
 }
 
 function leaveCurrentGame(): void {
@@ -1403,6 +1441,7 @@ export function init(): void {
         resetHook();
     });
 
+    setMultiplayerWorldLoader(loadPreparedWorld);
     setupInputListeners();
     setupMainMenu();
     window.addEventListener('beforeunload', () => disposeGameRuntime(), { once: true });
@@ -1414,9 +1453,10 @@ export function init(): void {
 // collisions/damage, then remote sync and rendering.
 export function animate(): void {
     requestAnimationFrame(animate);
-    updateMenuPreview();
+    if (!isWorldLoading) updateMenuPreview();
 
     const time = performance.now();
+    if (isWorldLoading) { state.prevTime = time; return; }
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
     if (!state.scene || !state.camera || !state.renderer || !state.controls) {
         state.prevTime = time;
@@ -1451,7 +1491,6 @@ export function animate(): void {
     if (dayNightCycle) state.dayNightElapsedSeconds = dayNightCycle.elapsedTimeSeconds;
     if (state.camera) {
         updateTownLanterns(time / 1000, lanternStrength);
-        updateLavaLights(time / 1000, state.camera.position, lanternStrength, userSettings.lavaGlow);
     }
 
     updateWeapons(delta);
@@ -1477,6 +1516,9 @@ export function animate(): void {
     if (state.controls) {
         updatePowerJumpOnCastleExit(state.controls.getObject().position);
         updateEnvironmentVisibility(state.controls.getObject().position, userSettings.renderDistanceChunks);
+    }
+    if (state.camera) {
+        updateLavaLights(time / 1000, state.camera.position, lanternStrength, userSettings.lavaGlow);
     }
     updateHoverBar(state.hoverFuel, state.isHovering && isInputActive());
     const jumpToggle = document.getElementById('powerjump-toggle');

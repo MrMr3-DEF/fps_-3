@@ -35,6 +35,33 @@ const SUN_NOON = new THREE.Color(0xffffff);
 const SUN_HORIZON = new THREE.Color(0xffa46b);
 const CELESTIAL_HORIZON_DIP = 0.045;
 const CELESTIAL_SKY_DISTANCE = 1200;
+const SUN_SHADOW_EXTENT = 256;
+const SUN_SHADOW_DISTANCE = 1100;
+
+// Fade the border of directional shadow maps so the camera-following coverage
+// does not end in a hard moving rectangle. Spot/point lights are unaffected.
+let shadowFadeInstalled = false;
+function installSunShadowFade(): void {
+    if (shadowFadeInstalled) return;
+    const chunk = THREE.ShaderChunk.shadowmap_pars_fragment;
+    THREE.ShaderChunk.shadowmap_pars_fragment = chunk + `
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+float getSunShadow( sampler2D map, vec2 size, float bias, float radius, vec4 coord ) {
+    vec2 uv = coord.xy / coord.w;
+    float edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5));
+    return mix(getShadow(map, size, bias, radius, coord), 1.0, smoothstep(0.38, 0.49, edge));
+}
+#endif
+`;
+    THREE.ShaderChunk.lights_fragment_begin = THREE.ShaderChunk.lights_fragment_begin.replace(
+        'getShadow( directionalShadowMap', 'getSunShadow( directionalShadowMap',
+    );
+    // Lambert materials evaluate their direct shadow in this separate chunk.
+    THREE.ShaderChunk.shadowmask_pars_fragment = THREE.ShaderChunk.shadowmask_pars_fragment.replace(
+        'getShadow( directionalShadowMap', 'getSunShadow( directionalShadowMap',
+    );
+    shadowFadeInstalled = true;
+}
 
 function positiveModulo(value: number, modulus: number): number {
     return ((value % modulus) + modulus) % modulus;
@@ -86,6 +113,9 @@ export class DayNightCycle {
     private readonly skyColor: THREE.Color;
     private readonly colorScratch = new THREE.Color();
     private readonly directionScratch = new THREE.Vector3();
+    private readonly shadowRight = new THREE.Vector3();
+    private readonly shadowUp = new THREE.Vector3();
+    private readonly shadowCenter = new THREE.Vector3();
     private elapsedSeconds = 0;
 
     get elapsedTimeSeconds(): number {
@@ -93,6 +123,7 @@ export class DayNightCycle {
     }
 
     constructor(scene: THREE.Scene, options: DayNightCycleOptions) {
+        installSunShadowFade();
         this.scene = scene;
         this.skyColor = scene.background instanceof THREE.Color ? scene.background : new THREE.Color();
         scene.background = this.skyColor;
@@ -102,14 +133,15 @@ export class DayNightCycle {
         this.sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
         this.applySettings(options);
         this.sunLight.shadow.camera.near = 0.5;
-        this.sunLight.shadow.camera.far = MAP_HALF_SIZE * 3.2;
-        const shadowExtent = Math.SQRT2 * MAP_HALF_SIZE + MAX_PILLAR_HEIGHT;
+        this.sunLight.shadow.camera.far = SUN_SHADOW_DISTANCE * 2;
+        const shadowExtent = SUN_SHADOW_EXTENT;
         this.sunLight.shadow.camera.left = -shadowExtent;
         this.sunLight.shadow.camera.right = shadowExtent;
         this.sunLight.shadow.camera.top = shadowExtent;
         this.sunLight.shadow.camera.bottom = -shadowExtent;
         this.sunLight.shadow.camera.updateProjectionMatrix();
-        this.sunLight.shadow.bias = -0.0005;
+        this.sunLight.shadow.bias = -0.00008;
+        this.sunLight.shadow.normalBias = 0.25;
 
         this.moonLight = new THREE.DirectionalLight(0x9fb7ff, 0.25);
         this.moonLight.castShadow = false;
@@ -136,7 +168,7 @@ export class DayNightCycle {
             { key: 'moon', mesh: this.moonMesh, distanceKm: MOON_MEAN_DISTANCE_KM },
         ];
 
-        scene.add(this.ambientLight, this.sunLight, this.moonLight, this.sunMesh, this.moonMesh);
+        scene.add(this.ambientLight, this.sunLight, this.sunLight.target, this.moonLight, this.sunMesh, this.moonMesh);
         this.update(0, new THREE.Vector3());
     }
 
@@ -196,7 +228,19 @@ export class DayNightCycle {
                 1.2,
                 daylight,
             );
-            this.sunLight.position.copy(this.directionScratch).multiplyScalar(lightDistance);
+            // Snap in the light's plane, not world X/Z, to keep camera motion
+            // from sliding the shadow texel grid over stationary surfaces.
+            this.shadowRight.set(0, 1, 0).cross(this.directionScratch).normalize();
+            this.shadowUp.crossVectors(this.directionScratch, this.shadowRight);
+            this.shadowCenter.copy(observerPosition);
+            this.shadowCenter.y = Math.max(MAX_PILLAR_HEIGHT * 0.25, observerPosition.y);
+            const texel = SUN_SHADOW_EXTENT * 2 / this.sunLight.shadow.mapSize.x;
+            const right = this.shadowCenter.dot(this.shadowRight);
+            const up = this.shadowCenter.dot(this.shadowUp);
+            this.shadowCenter.addScaledVector(this.shadowRight, Math.round(right / texel) * texel - right);
+            this.shadowCenter.addScaledVector(this.shadowUp, Math.round(up / texel) * texel - up);
+            this.sunLight.target.position.copy(this.shadowCenter);
+            this.sunLight.position.copy(this.shadowCenter).addScaledVector(this.directionScratch, SUN_SHADOW_DISTANCE);
             this.sunLight.visible = true;
             this.sunMesh.position.copy(observerPosition).addScaledVector(this.directionScratch, CELESTIAL_SKY_DISTANCE);
             this.sunMesh.visible = true;
@@ -228,7 +272,8 @@ export class DayNightCycle {
     }
 
     dispose(): void {
-        this.scene.remove(this.ambientLight, this.sunLight, this.moonLight, this.sunMesh, this.moonMesh);
+        this.scene.remove(this.ambientLight, this.sunLight, this.sunLight.target, this.moonLight, this.sunMesh, this.moonMesh);
+        this.sunLight.shadow.dispose();
         this.celestialGeometry.dispose();
         this.sunMesh.material.dispose();
         this.moonMesh.material.dispose();

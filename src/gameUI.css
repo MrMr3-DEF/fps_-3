@@ -1242,3 +1242,55 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .crosshair-dropdown[open] > summary::after { transform: rotate(225deg); }
 .crosshair-dropdown > summary:focus-visible { outline: 3px solid #078ab7; outline-offset: 3px; }
 .crosshair-layer-controls { padding: 4px 0 0; }
+
+/* Transform-only orbit stays on the compositor while the arena prepares. */
+#world-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 100000;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 28px;
+    background: #fff;
+    color: #68707d;
+    font: 500 14px/1.5 system-ui, sans-serif;
+    letter-spacing: .04em;
+}
+#world-loading[hidden] { display: none; }
+.world-loading-orbit {
+    position: relative;
+    width: 104px;
+    height: 104px;
+    border: 1px solid #e9edf2;
+    border-radius: 50%;
+    animation: world-loading-spin 2.4s linear infinite;
+    will-change: transform;
+}
+.world-loading-sun, .world-loading-moon {
+    position: absolute;
+    width: 30px;
+    height: 30px;
+    left: 36px;
+    border-radius: 50%;
+}
+.world-loading-sun {
+    top: -15px;
+    background: #ffcb58;
+    box-shadow: 0 0 0 5px #fff3d6, 0 0 24px #ffdf8466;
+}
+.world-loading-moon { bottom: -15px; background: #7d8ca6; overflow: hidden; }
+.world-loading-moon::after {
+    content: '';
+    position: absolute;
+    width: 29px;
+    height: 29px;
+    left: 10px;
+    top: -5px;
+    border-radius: 50%;
+    background: white;
+}
+@keyframes world-loading-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .world-loading-orbit { animation: none; }
+}
