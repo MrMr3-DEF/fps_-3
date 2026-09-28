@@ -38,8 +38,9 @@ const CELESTIAL_SKY_DISTANCE = 1200;
 const SUN_SHADOW_EXTENT = 256;
 const SUN_SHADOW_DISTANCE = 1100;
 
-// Fade the border of directional shadow maps so the camera-following coverage
-// does not end in a hard moving rectangle. Spot/point lights are unaffected.
+// This mutates Three.js shader chunks process-wide, so install it only once.
+// Fade the border of directional shadow maps so camera-following coverage does
+// not end in a hard moving rectangle. Recheck the replacements on Three upgrades.
 let shadowFadeInstalled = false;
 function installSunShadowFade(): void {
     if (shadowFadeInstalled) return;

@@ -855,6 +855,8 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
     syncHudCounters();
 }
 
+// Shared by offline start, host registration, and client snapshots. The scene
+// identity and caller's session check keep an old async load out of a new match.
 async function loadPreparedWorld(seed: number, current: () => boolean = () => true): Promise<void> {
     const scene = state.scene;
     await withWorldLoading(async paint => {
@@ -865,6 +867,7 @@ async function loadPreparedWorld(seed: number, current: () => boolean = () => tr
         await createEnvironmentAsync(seed, checkpoint);
         if (dayNightCycle) await prepareRenderer(dayNightCycle, checkpoint);
     });
+    // No simulation ran during preparation; discard that wall time before play.
     state.prevTime = performance.now();
 }
 
@@ -1687,6 +1690,7 @@ export function animate(): void {
                 time,
                 gothGirlfriend?.animator ? gothGirlfriend : null,
                 dayNightCycle?.celestialScanTargets,
+                state.activeWeaponName !== 'SNIPER',
             );
             const gogglesBrickedThisFrame = updateGogglesFailureScan(
                 state.gogglesFailure,

@@ -1,24 +1,25 @@
 # FPS Arena documentation
 
-This directory is the starting point for humans and AI agents working on FPS Arena. The project is a browser-based Three.js arena shooter with offline play and small peer-to-peer multiplayer rooms. The arena, characters, weapons, effects, UI, and textures are generated in code; there is no separate asset pipeline.
+This directory is the starting point for humans and AI agents working on FPS Arena. The project is a browser-based Three.js arena shooter with offline play and small peer-to-peer multiplayer rooms. Most arena geometry, weapons, effects, UI, and textures are generated in code. The goth character is a checked-in GLB asset.
 
 ## Documentation map
 
 Each document owns a distinct subject so information has one canonical location:
 
 - [Architecture](architecture.md) explains the runtime, module boundaries, frame loop, world generation, gameplay, and multiplayer data flow.
+- [Agent handoff](agent-handoff.md) gives a compact current-state map, lifecycle boundaries, and verification snapshot for a new contributor.
 - [Full-screen menu](main-menu.md) covers character customization and weapon specifications.
 - [Mobile controls](mobile-controls.md) covers touch input, landscape behavior and device validation.
 - [Development](development.md) covers prerequisites, local workflows, scripts, tests, CI, generated output, and change validation.
 - [Cloudflare operations](operations.md) covers deployment, bindings, TURN and Turnstile configuration, API routes, quotas, security properties, and troubleshooting.
-- [Audit resolution](audit-resolution.md) records fixes and validation for the September audit.
-- [Change backlog](to_be_changed.md) is the short, living list of known bugs and requested features. It is not a design document.
+- [Audit resolution](audit-resolution.md) records fixes and validation for the historical September audit; [Code audit](code-audit.md) is the original finding record.
+- [Follow-up validation](to_be_changed.md) is the short, living list of deployment and device checks still to perform.
 
 ## Project at a glance
 
 | Area | Implementation |
 | --- | --- |
-| Client | TypeScript, Three.js, PeerJS, DOM/CSS in `index.html` |
+| Client | TypeScript, Three.js, PeerJS, DOM in `index.html`, CSS in `src/` |
 | Build | Vite, with output committed under `dist/` |
 | Backend | Cloudflare Worker in `src/worker.ts` |
 | Stateful backend | Two SQLite-backed Durable Objects |
@@ -27,7 +28,7 @@ Each document owns a distinct subject so information has one canonical location:
 | Tests | Node's built-in test runner against TypeScript source |
 | Production host | `fps.luigi.host` in the checked-in Worker configuration |
 
-The browser entry point is `src/main.ts`; the Worker entry point is `src/worker.ts`. `src/config.ts` is the canonical location for gameplay constants, limits, weapon statistics, and world-density settings.
+The browser entry point is `src/main.ts`; the Worker entry point is `src/worker.ts`. `src/config.ts` is the canonical location for gameplay constants, limits, weapon statistics, and world-density settings. Most arena visuals and textures are generated in code; the goth character's GLB is a checked-in asset under `blender_assets/`, and character text lives in `public/npc/goth/`.
 
 ## Read before changing code
 

@@ -2,7 +2,7 @@
 #goth-chat, #goth-chat * { box-sizing: border-box; }
 #goth-chat [hidden], #goth-chat[hidden] { display: none !important; }
 body.goth-chat-open > :not(canvas):not(#goth-chat) { display: none !important; }
-#goth-chat { position: fixed; inset: 0; z-index: 150; color: #182d40; font: 15px/1.5 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: left; }
+#goth-chat { position: fixed; inset: 0; z-index: 150; color: #182d40; font: 15px/1.5 var(--ui-font); text-align: left; }
 .goth-chat-conversation { position: absolute; inset: 0; background: linear-gradient(0deg, #07121b88, transparent 24%); }
 .goth-chat-messages { position: absolute; right: 4vw; bottom: 132px; width: min(440px, 38vw); max-height: calc(100dvh - 180px); overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px 8px; scrollbar-width: thin; scrollbar-color: #cbdce699 transparent; user-select: text; }
 .goth-message { position: relative; width: fit-content; max-width: 92%; margin: 0 0 18px; padding: 12px 16px; border-radius: 4px; box-shadow: 0 3px 14px #0002; overflow-wrap: anywhere; }

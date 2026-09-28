@@ -84,8 +84,14 @@ The test suite focuses on deterministic logic and security boundaries that can r
 | `town.test.ts` | 1,000 seeded layouts, street/door clearance, real world rebuilds/disposal, hazard exclusion, collision, ceilings, rooftop edges, projectile/grapple geometry, culling and enemy placement |
 | `spatialHash.test.ts` | Radius queries, reusable outputs, clearing, segment traversal, deduplication, negative cells, grid corners |
 | `turnRoom.test.ts` | Room capacity, capability checks, credential quotas, and cleanup |
+| `worldLoading.test.ts` | Loading-overlay paint, cancellation, and replacement-screen ownership |
+| `renderPreparation.test.ts` | Temporary render objects, render target, and lighting restoration after preparation |
+| `lavaGlow.test.ts` | Baked spill coverage and night-strength transitions |
+| `dayNightCycleSettings.test.ts` | Runtime shadow settings and camera-following, stable sun shadows |
 
 Additional regression suites cover bounded streaming JSON, deterministic shot authority and life transitions, movement/collision, Worker-backed admission, case-insensitive username reservations, concurrent room mutations, departure, waiting-room synchronization, and stale callbacks. PeerJS signalling and Cloudflare upstream services are simulated in these integration tests; they do not replace a real relay-network smoke test.
+
+On 25 September 2026, `npm run check` passed both TypeScript projects and all 237 Node tests. Counts in older feature notes below describe their original validation runs; rerun the current suite for a present-day result.
 
 Keep testable logic independent of the DOM, Three.js renderer, PeerJS implementation, and Cloudflare bindings where practical. The `TurnRoomStateMachine` storage interface is an example: tests use an in-memory implementation while production supplies Durable Object storage.
 
@@ -126,11 +132,15 @@ For manual multiplayer testing, use separate browser profiles or a private windo
 
 Use the ownership table and data-flow notes in [Architecture](architecture.md) before moving responsibilities between files.
 
-## Town visual checks
+## Browser visual checks
+
+With `npm run dev` running, open `/tests/lighting-preview.html` to inspect the current sun-shadow and lava-glow behavior. It has noon, low-sun, night, shadow-quality, glow, render-distance, and camera-motion controls. Compare nearby surfaces and chunk edges at different phases; shader compilation and actual WebGL output need browser inspection in addition to Node tests. Actual match startup also exercises the loading overlay and render preparation, which this fixture does not.
+
+### Town
 
 With `npm run dev` running, open `/tests/town-preview.html` to inspect the real world generator with a chosen seed. The Aerial, Street, Doorway, Interior, Rooftop, Church, Church interior, Rampart, Stairs, Stair landing and Lookout buttons expose repeatable camera views and renderer draw/triangle counts. This development-only HTML fixture is outside the production Vite entry and is not included in `dist/`. Test actual match startup and HUD separately in the main game and production preview.
 
-Central-town validation (September 7, 2026): `npm run check` passes all 64 tests, including 1,000 layout seeds; `npm run build` succeeds. Browser visual checks cover aerial, doorway and interior views on seeds 0 and 42. The production bundle was smoke-tested in Safari for offline startup, pointer lock, movement, jumping and grapple input. The embedded Chromium browser renders the visual fixture but cannot acquire pointer lock in this environment. Multiplayer admission/authority remains covered by simulated integration tests; a live relay-network session was not exercised for this change.
+Central-town validation (September 7, 2026): the then-current check and build passed, including a 1,000-seed layout test. Browser visual checks covered aerial, doorway and interior views on seeds 0 and 42. The production bundle was smoke-tested in Safari for offline startup, pointer lock, movement, jumping and grapple input. The embedded Chromium browser rendered the visual fixture but could not acquire pointer lock in that environment. Multiplayer admission/authority was covered by simulated integration tests; a live relay-network session was not exercised for that change.
 
 The taller-wall/church follow-up adds regression coverage for exactly one church per seed, the configured church tower height, all four covered gate lintels, and the church ceiling and grapple surfaces. The 1,000-seed sweep includes church plot variation and unobstructed approaches.
 
@@ -156,7 +166,7 @@ Save character-file edits and refresh the browser to try them in a fresh convers
 
 `/tests/goth-preview.html` inspects individual rig poses; `/tests/goth-chat-preview.html` tests the actual character, chat UI, model and retriever without pointer lock. Both fixtures are excluded from the production entry. The production build includes the character's public files and the lazy-loaded WebLLM engine/worker assets. Update the generated `dist/` output with source changes.
 
-Validation for local chat: all 108 tests pass, including prompt size/Unicode handling, retrieval of actual lore, role-pair history, configuration validation, and wave-to-talk sequencing. Real WebGPU browser tests exercise model downloads, cached startup, streamed responses and character prompting. Safari gameplay verifies F-key opening, the wave, pointer-lock release/resume, zero movement/fire input while chatting, and cancelling/reopening a model load. On this Safari/GPU combination model initialization failed; the UI supports retry and reports a browser/GPU compatibility error. Successful inference was verified in the embedded Chromium preview. Model quality remains inconsistent: the tiny model sometimes answers correctly and sometimes drifts or repeats despite correct retrieval.
+Validation when local chat was implemented: the then-current tests covered prompt size/Unicode handling, retrieval of actual lore, role-pair history, configuration validation, and wave-to-talk sequencing. Real WebGPU browser tests exercised model downloads, cached startup, streamed responses and character prompting. Safari gameplay verified F-key opening, the wave, pointer-lock release/resume, zero movement/fire input while chatting, and cancelling/reopening a model load. On that Safari/GPU combination model initialization failed; the UI supports retry and reports a browser/GPU compatibility error. Successful inference was verified in the embedded Chromium preview. Model quality remains inconsistent: the tiny model sometimes answers correctly and sometimes drifts or repeats despite correct retrieval.
 
 The compiled production worker was also served with `vite preview`, loaded real model weights, and generated a correct minimal factual reply. Cancellation of an active generated reply and reopening into a fresh request were verified without browser console errors.
 

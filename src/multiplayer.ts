@@ -439,7 +439,11 @@ function syncHostTargetStates(): void {
     }
 }
 
+// main.ts owns renderer preparation; networking supplies the seed and a session
+// validity predicate without importing the client composition root.
 let multiplayerWorldLoader: ((seed: number, current: () => boolean) => Promise<void>) | null = null;
+// Preserve host packet order while a client builds its world. Apply the snapshot
+// first, then replay these updates; null means ordinary live packet handling.
 let pendingWorldPackets: { peer: string; packet: NetworkPacket }[] | null = null;
 export function setMultiplayerWorldLoader(loader: typeof multiplayerWorldLoader): void { multiplayerWorldLoader = loader; }
 
@@ -1224,6 +1228,7 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
     } else {
         if (!isExpectedHost(fromPeerId)) return;
         if (pendingWorldPackets) {
+            // Bound memory if an untrusted host sends indefinitely during load.
             if (pendingWorldPackets.length >= 4096) {
                 showJoinError('World preparation received too many updates. Please retry.');
                 disconnectMultiplayer({ preserveJoinError: true });
@@ -1786,15 +1791,18 @@ function createPeerBean(username: string): PeerData {
     canvas.width = 256;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
-    if (ctx) {
+    const drawNameTag = () => {
+        if (!ctx) return;
+        ctx.clearRect(0, 0, 256, 64);
         ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
         ctx.fillRect(0, 0, 256, 64);
-        ctx.font = 'bold 24px Segoe UI, Arial';
+        ctx.font = '700 24px "Science Gothic", sans-serif';
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
-        ctx.fillText(username, 128, 40);
-    }
-    
+        ctx.fillText(username, 128, 40, 240);
+    };
+    drawNameTag();
+
     const spriteMat = new THREE.SpriteMaterial({ 
         map: new THREE.CanvasTexture(canvas), 
         transparent: true 
@@ -1806,6 +1814,16 @@ function createPeerBean(username: string): PeerData {
 
     state.scene.add(peerGroup);
     peerGroup.scale.set(1.5, 1.5, 1.5);
+
+    // Canvas does not repaint when a web font finishes loading. Refresh only
+    // while this peer still owns the sprite and its texture.
+    if (document.fonts?.load) {
+        void document.fonts.load('700 24px "Science Gothic"', username).then(() => {
+            if (!peerGroup.parent || !spriteMat.map) return;
+            drawNameTag();
+            spriteMat.map.needsUpdate = true;
+        }).catch(() => {});
+    }
 
     return {
         username,

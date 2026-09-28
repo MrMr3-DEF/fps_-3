@@ -1,7 +1,7 @@
 let loadingGeneration = 0;
 export let isWorldLoading = false;
 
-/** Yield past a paint, including in background tabs where rAF may be suspended. */
+/** Let the overlay paint before expensive work; the timeout also advances hidden tabs. */
 export function yieldLoadingFrame(): Promise<void> {
     return new Promise(resolve => {
         const timeout = setTimeout(resolve, 60);
@@ -10,6 +10,8 @@ export function yieldLoadingFrame(): Promise<void> {
 }
 
 export function cancelWorldLoading(): void {
+    // Invalidating the generation prevents an old checkpoint/finally block from
+    // resuming work or hiding a newer match's overlay.
     loadingGeneration++;
     isWorldLoading = false;
     const overlay = document.getElementById('world-loading');
@@ -26,6 +28,8 @@ export async function withWorldLoading(work: (checkpoint: () => Promise<void>) =
         if (generation !== loadingGeneration) throw new DOMException('Loading cancelled', 'AbortError');
     };
     try {
+        // Callers also checkpoint between long generation stages; synchronous
+        // work inside a stage cannot be interrupted mid-stage.
         await checkpoint();
         await work(checkpoint);
     } finally {

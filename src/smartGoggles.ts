@@ -30,8 +30,9 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const CORNER_SIZE = 15;
 const BOX_PADDING = 6;
 const MIN_BOX_SIZE = 20;
-const LABEL_WIDTH = 168;
-const LABEL_GLYPH_WIDTH = 9.85;
+// Used only if the DOM cannot measure the full readout (for example in tests).
+const LABEL_WIDTH = 224;
+const LABEL_GLYPH_WIDTH = 14;
 const LABEL_HORIZONTAL_PADDING = 16;
 const LABEL_VIEWPORT_MARGIN = 12;
 const CALLOUT_DIAGONAL_LENGTH = 54;
@@ -93,7 +94,10 @@ interface TargetLockRecord {
     killMark: SVGSVGElement;
     path: SVGPathElement;
     label: HTMLDivElement;
+    measure: HTMLSpanElement;
     labelWidth: number;
+    naturalLabelWidth: number;
+    sizedFor: string;
     identifier: HTMLSpanElement;
     distanceFact: HTMLSpanElement;
     healthFact: HTMLSpanElement;
@@ -244,10 +248,10 @@ function formatCelestialDistance(distanceKm: number): string {
     return `DISTANCE ${Math.round(distanceKm).toLocaleString('en-US')} KM`;
 }
 
-function getCelestialLabelWidth(distanceText: string, viewportWidth: number): number {
-    const desiredWidth = Math.ceil(distanceText.length * LABEL_GLYPH_WIDTH + LABEL_HORIZONTAL_PADDING);
-    const availableWidth = Math.max(LABEL_WIDTH, viewportWidth - LABEL_VIEWPORT_MARGIN * 2);
-    return Math.min(Math.max(LABEL_WIDTH, desiredWidth), availableWidth);
+function getFallbackLabelWidth(distanceText: string, variant: TargetVariant): number {
+    return variant === 'celestial'
+        ? Math.max(LABEL_WIDTH, Math.ceil(distanceText.length * LABEL_GLYPH_WIDTH + LABEL_HORIZONTAL_PADDING))
+        : LABEL_WIDTH;
 }
 
 function setFactVisibility(record: TargetLockRecord, outOfRange: boolean): void {
@@ -352,6 +356,7 @@ export class SmartGogglesHud {
         now = performance.now(),
         anomalyTarget: SmartGogglesAnomalyTarget | null = null,
         celestialTargets: readonly CelestialScanTarget[] = [],
+        homingEnabled = true,
     ): void {
         this.anomalyDetectedThisFrame = false;
         this.homingAimScore = Infinity;
@@ -646,6 +651,9 @@ export class SmartGogglesHud {
             );
         }
 
+        // Clear the candidate through the normal lock lifecycle so switching to
+        // a hitscan weapon also cancels a pending or completed red lock.
+        if (!homingEnabled) this.bestHomingCandidate = null;
         this.updateHomingLock(now);
 
         for (const [targetKey, record] of this.records) {
@@ -703,19 +711,6 @@ export class SmartGogglesHud {
         const distanceText = variant === 'celestial'
             ? formatCelestialDistance(centerDistance)
             : `DISTANCE ${Math.round(centerDistance)} M`;
-        record.labelWidth = variant === 'celestial'
-            ? getCelestialLabelWidth(distanceText, viewportWidth)
-            : LABEL_WIDTH;
-        padBounds(record.bounds);
-        layoutSmartGogglesCallout(
-            record.bounds,
-            viewportWidth,
-            viewportHeight,
-            record.layout,
-            { labelWidth: record.labelWidth, diagonalLength: CALLOUT_DIAGONAL_LENGTH },
-        );
-        this.updateGeometry(record);
-
         const outOfRange = (variant === 'enemy' || variant === 'peer') && classifyOutOfRange(
             reachableDistance,
             BULLET_TRAVEL_DISTANCE,
@@ -740,7 +735,27 @@ export class SmartGogglesHud {
                     ]
                     : `HEALTH ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
         }
+        const fullReadout = outOfRange
+            ? 'OUT OF RANGE'
+            : `${record.lastDistanceText}\n${record.lastHealthText}`;
+        const sizingKey = `${fullReadout}:${document.fonts?.status ?? ''}`;
+        // Measure the final text before revealing any characters. The panel
+        // and leader then share one width throughout the typing animation.
+        if (record.sizedFor !== sizingKey) {
+            record.measure.textContent = fullReadout;
+            const textWidth = record.measure.getBoundingClientRect?.().width;
+            record.naturalLabelWidth = textWidth && textWidth > 0
+                ? Math.ceil(textWidth + LABEL_HORIZONTAL_PADDING)
+                : getFallbackLabelWidth(distanceText, variant);
+            record.sizedFor = sizingKey;
+        }
+        record.labelWidth = Math.min(
+            record.naturalLabelWidth,
+            Math.max(0, viewportWidth - LABEL_VIEWPORT_MARGIN * 2),
+        );
         this.updateTypedReadout(record, now);
+        padBounds(record.bounds);
+        this.layoutRecord(record, viewportWidth, viewportHeight);
 
         if (record.phase === 'leaving') {
             record.root.classList.remove('is-leaving');
@@ -914,6 +929,9 @@ export class SmartGogglesHud {
         identifier.classList.toggle('is-corrupted', variant === 'anomaly');
         const panel = document.createElement('div');
         panel.className = 'goggles-target-label-panel';
+        const measure = document.createElement('span');
+        measure.className = 'goggles-target-label-measure';
+        measure.setAttribute('aria-hidden', 'true');
         const distanceFact = this.createFact();
         const healthFact = this.createFact();
         healthFact.classList.toggle('is-corrupted', variant === 'anomaly');
@@ -921,7 +939,7 @@ export class SmartGogglesHud {
         const warning = document.createElement('span');
         warning.className = 'goggles-target-warning';
         warning.hidden = true;
-        panel.append(distanceFact, healthFact, warning);
+        panel.append(measure, distanceFact, healthFact, warning);
         label.append(identifier, panel);
         root.appendChild(label);
         this.layer.appendChild(root);
@@ -934,7 +952,10 @@ export class SmartGogglesHud {
             killMark,
             path,
             label,
+            measure,
             labelWidth: LABEL_WIDTH,
+            naturalLabelWidth: LABEL_WIDTH,
+            sizedFor: '',
             identifier,
             distanceFact,
             healthFact,
@@ -962,6 +983,30 @@ export class SmartGogglesHud {
         const fact = document.createElement('span');
         fact.className = 'goggles-target-fact';
         return fact;
+    }
+
+    private layoutRecord(record: TargetLockRecord, viewportWidth: number, viewportHeight: number): void {
+        const place = () => layoutSmartGogglesCallout(
+            record.bounds,
+            viewportWidth,
+            viewportHeight,
+            record.layout,
+            {
+                labelWidth: record.labelWidth,
+                horizontalLength: record.labelWidth,
+                diagonalLength: CALLOUT_DIAGONAL_LENGTH,
+            },
+        );
+        place();
+        // Near a viewport edge the diagonal consumes some of the available
+        // run. Let the panel wrap to that remaining length so its border and
+        // the horizontal leader still end together.
+        const lineWidth = Math.abs(record.layout.end.x - record.layout.elbow.x);
+        if (lineWidth < record.labelWidth) {
+            record.labelWidth = lineWidth;
+            place();
+        }
+        this.updateGeometry(record);
     }
 
     private updateGeometry(record: TargetLockRecord): void {
@@ -1028,14 +1073,7 @@ export class SmartGogglesHud {
         )) return false;
 
         padBounds(record.bounds);
-        layoutSmartGogglesCallout(
-            record.bounds,
-            viewportWidth,
-            viewportHeight,
-            record.layout,
-            { labelWidth: record.labelWidth, diagonalLength: CALLOUT_DIAGONAL_LENGTH },
-        );
-        this.updateGeometry(record);
+        this.layoutRecord(record, viewportWidth, viewportHeight);
         return true;
     }
 

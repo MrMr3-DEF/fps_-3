@@ -30,6 +30,8 @@ their transparency from 0–100%. Bullet Trails disables trail allocation for bo
 existing afterimages when applied. New fields are validated on load. Nested draft
 values are cloned to keep edits separate from the applied settings and defaults.
 
+Lava Pool Glow defaults to on for new settings. A saved explicit `false` stays off after reload; a missing or malformed stored value uses the default. Shadows default to on with low quality, and their quality can be changed without rebuilding the arena.
+
 Implementation: `settings.ts` handles storage and cloning, `controlSettings.ts`
 handles binding translation and reticle rendering, and `settingsMenu.ts` builds
 category navigation and the new controls. `main.ts` retains the Apply lifecycle

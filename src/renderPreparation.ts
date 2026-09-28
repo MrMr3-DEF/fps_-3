@@ -5,7 +5,7 @@ import { prepareWorldInstanceBuffers, updateEnvironmentVisibility, updateLavaLig
 import type { DayNightCycle } from './dayNightCycle.js';
 import { userSettings } from './settings.js';
 
-/** Compile actual lighting variants and upload resources behind the loading UI. */
+/** Warm WebGL resources before play and restore temporary render state on abort. */
 export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Promise<void>): Promise<void> {
     const { scene, camera, renderer } = state;
     if (!scene || !camera || !renderer) return;
@@ -43,6 +43,8 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
         }
         prepareWorldInstanceBuffers();
         // Noon, twilight (sun + lanterns), and night use different light counts.
+        // Use real scene draws because compileAsync alone need not upload all
+        // geometry/textures. Restore the authoritative phase in finally below.
         for (const phase of [150, 22, 390]) {
             await checkpoint();
             cycle.synchronizeElapsedSeconds(phase, true);

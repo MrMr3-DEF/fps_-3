@@ -22,7 +22,7 @@ Gameplay is landscape-only. Starting or resuming requests fullscreen and a lands
 ## Validation
 
 - Client and Worker TypeScript checks and production build pass.
-- 44 automated tests pass, including touch-session start/stop, portrait rejection, fullscreen rejection fallback, partial joystick speed, diagonal speed capping and paused movement suppression.
+- The then-current automated suite passed, including touch-session start/stop, portrait rejection, fullscreen rejection fallback, partial joystick speed, diagonal speed capping and paused movement suppression. For the current suite, run `npm run check`.
 - Native Chrome device emulation at 821 × 400 and 400 × 821: verified the portrait gate, landscape menu/HUD, camera dragging, weapon switching, pause/resume and fullscreen-exit pause; exercised joystick, fire and jump gestures.
 - Physical iOS/Android testing is still needed for simultaneous multi-finger input, actual orientation/fullscreen support, safe areas, sustained performance and mobile-to-desktop multiplayer. Desktop emulation does not establish these results.
 

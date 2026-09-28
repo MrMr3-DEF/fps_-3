@@ -46,6 +46,36 @@ function record(layer: HudElement, targetKey: string): HudElement {
     return result;
 }
 
+test('goggles panel and leader use the full readout width before typing starts', () => {
+    const layer = new HudElement();
+    const hud = new SmartGogglesHud(layer as any);
+    const view = camera();
+    const target = enemy();
+    hud.update(view, view.position, view.position, [target], {}, true, 1000);
+
+    const targetRecord = record(layer, 'npc:0');
+    const label = targetRecord.children.find(child => child.className === 'goggles-target-label');
+    const leader = targetRecord.children.find(child => child.classList.contains('goggles-target-leader'));
+    assert.ok(label && leader);
+    const panel = label.children[1];
+    assert.ok(panel.children[0].textContent.includes('HEALTH 3 / 3'));
+    assert.equal(panel.children[1].textContent, '');
+    assert.equal((label.style as any).width, '196px');
+
+    const leaderWidth = () => {
+        const points = [...leader.children[0].attributes.d.matchAll(/[ML] (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g)];
+        assert.equal(points.length, 3);
+        return Math.abs(Number(points[2][1]) - Number(points[1][1]));
+    };
+    assert.ok(Math.abs(leaderWidth() - 196) <= 0.1);
+
+    hud.update(view, view.position, view.position, [target], {}, true, 2000);
+    assert.ok(panel.children[1].textContent.startsWith('DISTANCE'));
+    assert.equal((label.style as any).width, '196px');
+    assert.ok(Math.abs(leaderWidth() - 196) <= 0.1);
+    hud.reset();
+});
+
 test('scan begins around halfway through scope settling rather than after exact FOV convergence', () => {
     const normalFov = 75;
     const scopedFov = 15;
@@ -181,6 +211,48 @@ for (const kind of ['npc', 'peer'] as const) {
         update(3010);
         assert.equal(getProjectileHomingTarget(), null);
         assert.equal(record(layer, key).classList.contains('is-homing-locked'), false);
+        hud.reset();
+    });
+}
+
+for (const kind of ['npc', 'peer'] as const) {
+    test(`${kind} locks clear for the sniper and reacquire after switching back`, () => {
+        const layer = new HudElement();
+        const hud = new SmartGogglesHud(layer as any);
+        const view = camera();
+        const target = enemy();
+        const targets = kind === 'npc' ? [target] : [];
+        const peers = kind === 'peer'
+            ? { remote: { mesh: target, hp: 3, maxHp: 3, username: 'Remote', lifeId: 1 } }
+            : {};
+        const key = kind === 'npc' ? 'npc:0' : 'peer:remote';
+        const update = (time: number, homingEnabled: boolean) => hud.update(
+            view, view.position, view.position, targets, peers, true, time, null, [], homingEnabled,
+        );
+        update(1000, false);
+        update(2000, false);
+        const targetRecord = record(layer, key);
+        assert.equal(getProjectileHomingTarget(), null);
+        assert.equal(targetRecord.classList.contains('is-homing-locking'), false);
+        assert.equal(targetRecord.classList.contains('is-homing-locked'), false);
+
+        update(2100, true);
+        assert.equal(targetRecord.classList.contains('is-homing-locking'), true);
+        update(2110, false);
+        assert.equal(targetRecord.classList.contains('is-homing-locking'), false);
+        assert.equal(getProjectileHomingTarget(), null);
+
+        update(2200, true);
+        update(2500, true);
+        assert.equal(getProjectileHomingTarget()?.object, target);
+        update(2510, false);
+        assert.equal(targetRecord.classList.contains('is-homing-locked'), false);
+        assert.equal(getProjectileHomingTarget(), null);
+
+        update(2600, true);
+        assert.equal(getProjectileHomingTarget(), null, 'switching back requires a fresh lock');
+        update(2900, true);
+        assert.equal(getProjectileHomingTarget()?.object, target);
         hud.reset();
     });
 }

@@ -9,6 +9,7 @@ export class HudElement {
     style = { setProperty() {} };
     clientWidth = 1280;
     clientHeight = 720;
+    attributes: Record<string, string> = {};
     private classes = new Set<string>();
     classList = {
         add: (...names: string[]) => names.forEach(name => this.classes.add(name)),
@@ -16,7 +17,8 @@ export class HudElement {
         contains: (name: string) => this.classes.has(name),
         toggle: (name: string, value: boolean) => value ? this.classes.add(name) : this.classes.delete(name),
     };
-    setAttribute() {}
+    setAttribute(name: string, value: string) { this.attributes[name] = value; }
+    getBoundingClientRect() { return { width: this.className === 'goggles-target-label-measure' ? 180 : 0 }; }
     getContext() { return null; }
     appendChild(child: HudElement) { child.parent = this; this.children.push(child); }
     append(...children: HudElement[]) { children.forEach(child => this.appendChild(child)); }

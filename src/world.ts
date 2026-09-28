@@ -419,7 +419,7 @@ function refreshChunkedInstances(): void {
     }
 }
 
-/** Upload full-capacity static buffers once before the first playable frame. */
+/** Force full-capacity buffers through WebGL before chunk culling resumes. */
 export function prepareWorldInstanceBuffers(): void {
     for (const set of chunkedInstanceSets) {
         let offset = 0;
@@ -1482,7 +1482,7 @@ export function createEnvironment(preserveSeed = false): void {
     for (const stage of WORLD_GENERATION_STAGES) stage();
 }
 
-/** Same deterministic stage order as synchronous generation, with loading paints. */
+/** Same seeded stage order as createEnvironment(), with cancellation between stages. */
 export async function createEnvironmentAsync(seed: number, checkpoint: () => Promise<void>): Promise<void> {
     setWorldSeed(seed);
     disposeWorld();
