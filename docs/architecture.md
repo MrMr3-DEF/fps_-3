@@ -161,6 +161,7 @@ Player damage records the last damage time for regeneration and kill attribution
 | `1`–`5` | Select pistol, shotgun, AR, sniper, or minigun |
 | `X` | Inspect the active weapon |
 | `P` | Toggle third-person presentation |
+| Hold `Tab` in multiplayer | Show the host-ordered player list with suit-colored pixel faces and kills/deaths |
 | `Escape` | Toggle pause; offline simulation stops completely, while multiplayer continues. Resume waits for pointer lock. If the browser requires a fresh gesture after Esc, click Resume. |
 
 ## Multiplayer topology and synchronization
@@ -176,6 +177,10 @@ client A <----> host <----> client B
 
 Clients do not connect directly to each other. The host parses and authorizes client packets, applies authoritative target changes, and relays approved presentation/gameplay messages to the other clients. The maximum room size is five sessions including the host. Names are fixed for the session and unique within the lobby regardless of capitalization. Departure releases the name; unadmitted reservations expire after five minutes. The host broadcasts `peer_left` so every client removes the departed avatar.
 
+Before play, the host also owns an ordered `lobby_roster`: host first, then admitted connections in admission order. Clients report only their validated 24-bit `lobby_color`; they cannot set identities or roster positions. The host republishes the roster after admissions, departures, and color reports. Clients queue it while preparing their world and accept it only from the expected host. The menu renders the host at center and successive guests alternating left/right and receding by row. Lobby previews reuse the animated peer scan for every other player, with a typed name and no stats panel or homing lock. Each room size has explicit callout preferences; placement avoids other names and the left menu once, then retains its corner and leader length until membership or viewport changes. Reused spawn-house slots do not alter admission order. Starting play hides the previews but retains host admission order for the held-Tab list; disconnecting clears both.
+
+During play, the host publishes a bounded `player_list` snapshot in admission order. It includes each admitted name and suit color with kills/deaths counted only from accepted `player_died` events. The host sends it on match start, admission, departure, color change, and confirmed death, so late joiners receive current scores after their world snapshot. Clients accept it only from their expected host. `src/playerList.ts` renders a pixelated front view of the bean and the held-Tab overlay; input release, window blur, pause, death, and disconnection hide it.
+
 When a client's data channel opens, the host validates its single-use, peer-bound admission ticket through the Worker using the host capability. The Worker atomically reserves usernames case-insensitively and returns a proof known independently to the client; the client rejects snapshots before that proof. After admission, the host sends a `world_snapshot` containing the seed, a validated client house slot (1–4), score, and every target state. The client prepares the seeded environment, applies the snapshot, and places the player in the assigned house before entering play. Other host packets arriving during preparation are queued and replayed after snapshot application; the queue is bounded and stale-session callbacks are ignored. Duplicate snapshots are ignored so they cannot relocate an existing player. Afterwards the host sends `target_state` packets for changed targets and `kill_target` packets for respawns and score changes. Synchronized clients apply both while waiting in the lobby as well as while playing.
 
 Local state is eligible for transmission every 33 ms. Position, view angles, hook position, and flags are quantized; unchanged state is suppressed but forced at least every 250 ms. Remote positions and yaw are exponentially interpolated.
@@ -190,6 +195,9 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 | `player_hit` | Shooter client | Applies the same fire/path checks, rejects self-hits, records attacker for death attribution, relays |
 | `player_died` | Victim client | Consumes one death per life ID, validates recent player damage, and attributes kills by peer ID with a separate lava cause |
 | `peer_left` | Host only | Removes departed avatars and hook visuals on every client |
+| `lobby_color` | Admitted client before play | Updates only that client's suit color and republishes the host-owned roster |
+| `lobby_roster` | Host only | Synchronizes the ordered waiting-room lineup, including names and suit colors |
+| `player_list` | Host only | Synchronizes the ordered active-match names, suit colors and confirmed kills/deaths |
 | `jump` | Any player | Relays as a visual event after an initial state update exists |
 | `world_snapshot` | Host only | Initializes a joining client's deterministic world |
 | `target_state` | Host only | Replicates target health and other incremental state |

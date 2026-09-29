@@ -2,6 +2,7 @@ import { updateHealthRegen } from './healthRegen.js';
 import { cancelHookForTarget } from './hookLifecycle.js';
 import { characterColor } from './appearance.js';
 import { endInput } from './inputSession.js';
+import { renderPlayerList, setPlayerListVisible } from './playerList.js';
 import { resetProjectiles } from './projectiles.js';
 import type { Peer } from 'peerjs';
 import { ShotLedger, spreadDirection, acceptLifeUpdate, acceptDeath } from './shotAuthority.js';
@@ -43,6 +44,9 @@ import {
     type HomingTargetPacket,
     type JumpPacket,
     type KillTargetPacket,
+    type LobbyPlayer,
+    type PlayerDiedPacket,
+    type PlayerListEntry,
     type NetworkPacket,
     type TargetState,
     type TargetStatePacket,
@@ -148,6 +152,7 @@ function enterMultiplayerMatch(): void {
         if (state.isMultiplayer && state.isPlaying && updateHealthRegen(0)) sendLocalState(true);
     }, 250);
     sendLocalState(true);
+    if (state.isHost) publishPlayerList();
     for (const listener of matchStartListeners) listener();
 }
 
@@ -160,6 +165,50 @@ export function startHostMatch(): boolean {
 
 // Slot zero belongs to the host. Keep assignments stable when other peers leave.
 const spawnHouseSlots = new Map<string, number>();
+
+function publishLobbyRoster(): void {
+    if (!state.isHost || !state.peer) return;
+    // Connection order is the host's admission order. Rebuild after departures
+    // so a replacement joins the end of the visible lineup, even if its house
+    // slot reuses an earlier vacancy.
+    const colors = new Map(state.lobbyPlayers.map(player => [player.peerId, player.bodyColor]));
+    const players: LobbyPlayer[] = [{ peerId: state.peer.id, username: getCachedUsername(),
+        bodyColor: Number.parseInt(characterColor.slice(1), 16) }];
+    for (const conn of state.connections) {
+        const username = admittedNames.get(conn.peer);
+        if (conn.open && username) players.push({ peerId: conn.peer, username,
+            bodyColor: colors.get(conn.peer) ?? 0x3b5998 });
+    }
+    state.lobbyPlayers = players;
+    if (state.isPlaying) publishPlayerList();
+    else broadcastToAll({ type: 'lobby_roster', players });
+}
+
+function publishPlayerList(): void {
+    if (!state.isHost || !state.isPlaying) return;
+    const scores = new Map(state.playerList.map(player => [player.peerId, player]));
+    // Admission order is stable; only the host may turn verified room members
+    // and accepted death events into the displayed match scoreboard.
+    const players: PlayerListEntry[] = state.lobbyPlayers.map(player => ({ ...player,
+        kills: scores.get(player.peerId)?.kills ?? 0,
+        deaths: scores.get(player.peerId)?.deaths ?? 0,
+    }));
+    state.playerList = players;
+    renderPlayerList();
+    if (state.playerList.length) broadcastToAll({ type: 'player_list', players: state.playerList });
+}
+
+function recordConfirmedDeath(packet: PlayerDiedPacket): void {
+    if (!state.isHost || !state.isPlaying) return;
+    const victim = state.playerList.find(player => player.peerId === packet.victimPeerId);
+    if (!victim) return;
+    victim.deaths = Math.min(1_000_000, victim.deaths + 1);
+    if (packet.killerPeerId && packet.killerPeerId !== packet.victimPeerId) {
+        const killer = state.playerList.find(player => player.peerId === packet.killerPeerId);
+        if (killer) killer.kills = Math.min(1_000_000, killer.kills + 1);
+    }
+    publishPlayerList();
+}
 
 function setCachedUsername(username: string): void {
     cachedUsername = username.trim() || 'Guest1';
@@ -188,7 +237,7 @@ function getCachedUsername(): string {
 }
 
 export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | null = null): void {
-    if (!state.isMultiplayer || state.connections.length === 0) return;
+    if (!state.isMultiplayer) return;
     if (state.isHost && packet.type === 'player_hit' && !packet.senderPeerId) {
         const now = performance.now();
         packet = { ...packet, senderPeerId: state.peer?.id, attackerName: getCachedUsername() };
@@ -214,6 +263,7 @@ export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | nu
             }
         }
     }
+    if (state.isHost && packet.type === 'player_died') recordConfirmedDeath(packet);
 }
 
 export function flashPeerMesh(peerData: PeerData, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
@@ -462,6 +512,8 @@ function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void
     clearWorldSyncTimeout();
     setCachedUsername(packet.username);
     setJoinReady(true, `You are ${packet.username}. Waiting for the host to start the game…`);
+    if (!packet.gameStarted) state.connections[0]?.send({ type: 'lobby_color',
+        bodyColor: Number.parseInt(characterColor.slice(1), 16) });
     if (packet.gameStarted) enterMultiplayerMatch();
 }
 
@@ -487,6 +539,8 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function resetLocalMatch(): void {
+    state.playerList = [];
+    setPlayerListVisible(false);
     resetHook();
     resetProjectiles();
     disposeParticles();
@@ -557,6 +611,7 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
             peerStartupTimeout = null;
             console.log('Host registered successfully on PeerJS with ID:', id);
             if (hostStatus) hostStatus.innerText = `Waiting for players (1/${MAX_PLAYERS})...`;
+            publishLobbyRoster();
             const startBtn = DOM.btnHostStart();
             if (startBtn) startBtn.style.display = 'inline-block';
         });
@@ -701,6 +756,9 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean } =
     state.isMultiplayer = false;
     state.isHost = false;
     state.isPlaying = false;
+    state.lobbyPlayers = [];
+    state.playerList = [];
+    setPlayerListVisible(false);
     state.pendingPlay = false;
     state.isMouseDown = false;
     state.moveForward = state.moveBackward = state.moveLeft = state.moveRight = false;
@@ -850,6 +908,7 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
             state.connections.push(conn);
             conn.send({ type: 'admission', proof: result.admissionProof });
             sendWorldSnapshot(conn, slot);
+            publishLobbyRoster();
             // A late join must see the host even when its render loop is paused
             // or browser-throttled. Do not wait for the next animation frame.
             sendLocalState(true);
@@ -891,6 +950,7 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
         if (state.isHost) {
             if (admitted) {
                 broadcastToAll({ type: 'peer_left', peerId: conn.peer });
+                publishLobbyRoster();
                 if (state.roomCode && roomCloseToken) void departRoomPeer(state.roomCode, roomCloseToken, conn.peer).catch(() => {});
             }
             const status = DOM.hostLobbyStatus();
@@ -1214,11 +1274,28 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
 
     let msg: NetworkPacket = parsed;
     if (state.isHost) {
+        if (msg.type === 'lobby_color') {
+            if (!state.isPlaying && isKnownClient(fromPeerId)) {
+                const player = state.lobbyPlayers.find(item => item.peerId === fromPeerId);
+                if (player && player.bodyColor !== msg.bodyColor) {
+                    player.bodyColor = msg.bodyColor;
+                    publishLobbyRoster();
+                }
+            }
+            return;
+        }
         if (!state.isPlaying) return;
         const authorized = authorizeClientPacket(fromPeerId, parsed);
         if (!authorized) return;
         msg = authorized;
         if (!state.isPlaying) return;
+        if (msg.type === 'update' && msg.bodyColor !== undefined) {
+            const player = state.lobbyPlayers.find(item => item.peerId === fromPeerId);
+            if (player && player.bodyColor !== msg.bodyColor) {
+                player.bodyColor = msg.bodyColor;
+                publishPlayerList();
+            }
+        }
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'hit_target' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
             // The shooter also receives validated player hits so its copy of the
             // victim's health changes immediately. Ordinary self-originated
@@ -1240,6 +1317,17 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             return;
         }
         if (msg.type === 'peer_left') { removePeer(msg.peerId); return; }
+        if (msg.type === 'lobby_roster') {
+            if (!state.isPlaying && msg.players[0].peerId === getHostPeerId()) state.lobbyPlayers = msg.players;
+            return;
+        }
+        if (msg.type === 'player_list') {
+            if (msg.players[0].peerId === getHostPeerId()) {
+                state.playerList = msg.players;
+                renderPlayerList();
+            }
+            return;
+        }
         if (msg.type === 'world_snapshot') {
             if (clientWorldSynchronized) return;
             if (!multiplayerWorldLoader) { applyWorldSnapshot(msg); return; }

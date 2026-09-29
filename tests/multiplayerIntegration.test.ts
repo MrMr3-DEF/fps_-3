@@ -55,6 +55,15 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(state.connections.length,2);assert.equal(ca.sent[0].proof,a.admissionProof);assert.equal(ca.sent[1].type,'world_snapshot');
         assert.equal(ca.sent[1].spawnHouseSlot,1);assert.equal(cb.sent[1].spawnHouseSlot,2);
         assert.equal(ca.sent[1].dayNightElapsedSeconds,137.25);
+        assert.deepEqual(state.lobbyPlayers.map(player => player.peerId),
+            [host.id, ...state.connections.map(connection => connection.peer)], 'host admission order owns the lineup');
+        assert.deepEqual(cb.sent.filter(packet => packet.type === 'lobby_roster').at(-1).players,
+            state.lobbyPlayers, 'every guest receives the same ordered roster');
+        ca.emit('data', { type: 'lobby_color', bodyColor: 0xdf5b64 });
+        assert.equal(state.lobbyPlayers.find(player => player.peerId === 'peer-a')?.bodyColor, 0xdf5b64);
+        assert.equal(cb.sent.filter(packet => packet.type === 'lobby_roster').at(-1).players[1].bodyColor, 0xdf5b64);
+        ca.emit('data', { type: 'lobby_roster', players: [{ peerId: 'forged', username: 'Fake', bodyColor: 0 }] });
+        assert.equal(state.lobbyPlayers[0].peerId, host.id, 'clients cannot choose the lineup');
         state.scene=new THREE.Scene();
         ca.emit('data',update('Forged'));
         assert.equal(state.peerIds.length,0,'waiting clients cannot enter gameplay');
@@ -62,6 +71,11 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(startHostMatch(),true);
         assert.equal(startHostMatch(),false,'start is idempotent');
         assert.equal(ca.sent.filter(p=>p.type==='start_game').length,1);
+        assert.deepEqual(state.playerList.map(player => [player.peerId, player.kills, player.deaths]),
+            [[host.id, 0, 0], ['peer-a', 0, 0], ['peer-b', 0, 0]], 'Tab list begins in room order');
+        assert.deepEqual(cb.sent.filter(p=>p.type==='player_list').at(-1).players, state.playerList);
+        ca.emit('data', { type: 'player_list', players: [{ peerId: 'peer-a', username: 'Fake', bodyColor: 0, kills: 99, deaths: 0 }] });
+        assert.equal(state.playerList[1].kills, 0, 'clients cannot forge scoreboard snapshots');
         ca.emit('data',{...update('Forged'),hp:7,maxHp:PLAYER_MAX_HP});cb.emit('data',update('Other'));
         assert.equal(cb.sent.find(p=>p.type==='update'&&p.senderPeerId==='peer-a').username,'Pilot');
         assert.equal(state.peers['peer-a'].hp,7);
@@ -93,15 +107,25 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(state.peers['peer-a'].hp,7,'host inspection waits for the victim instead of predicting health');
         const death={type:'player_died' as const,lifeId:0,cause:'player' as const,killerPeerId:host.id,killerName:'Host',victimName:'Pilot',victimPeerId:'peer-a'};
         ca.emit('data',death);assert.equal(state.kills,1);ca.emit('data',death);assert.equal(state.kills,1);
+        assert.deepEqual(state.playerList.map(player => [player.kills, player.deaths]),
+            [[1, 0], [0, 1], [0, 0]], 'validated death updates exactly one K/D event');
+        assert.deepEqual(cb.sent.filter(p=>p.type==='player_list').at(-1).players, state.playerList);
+        broadcastToAll({type:'player_died',lifeId:0,cause:'lava',killerPeerId:null,
+            victimName:'Host',killerName:'Lava',victimPeerId:host.id});
+        assert.deepEqual(state.playerList.map(player => [player.kills, player.deaths]),
+            [[1, 1], [0, 1], [0, 0]], 'host deaths also reach the authoritative list');
         assert.equal(authorizeClientPacket('peer-a',{type:'fire',weapon:'SNIPER',shotId:2,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}}),null);
         ca.emit('data',{...update('Forged',1),pos:{x:80,y:2,z:40}});
         assert.equal(state.peers['peer-a'].mesh.visible,true);
         assert.deepEqual(state.peers['peer-a'].mesh.position.toArray(),state.peers['peer-a'].targetPosition.toArray(),'respawns snap instead of lerping from the death site');
         ca.close();await tick();assert.ok(cb.sent.some(p=>p.type==='peer_left'&&p.peerId==='peer-a'));
+        assert.deepEqual(state.playerList.map(player => player.peerId), [host.id, 'peer-b']);
         const replacement=await registerTurnSession('ABCDEFGH','join-room','pilot','peer-new');
         const cc=new Connection('peer-new',{admissionToken:replacement.admissionToken});
         host.emit('connection',cc);await tick();await tick();
         assert.equal(cc.sent[1].gameStarted,true,'late join snapshot carries match start');
+        assert.deepEqual(cc.sent.filter(p=>p.type==='player_list').at(-1).players, state.playerList,
+            'late join sees current players and confirmed scores');
         assert.ok(cc.sent.some(p=>p.type==='update'&&p.username==='Host'),'late join receives the host avatar without waiting for a render frame');
         assert.equal(cc.sent[1].spawnHouseSlot,1,'reuse the departed house without shifting the remaining player');
         assert.equal(cb.sent.filter(p=>p.type==='world_snapshot').length,1);
@@ -128,6 +152,13 @@ test('client rejects host without proof and applies kills while waiting to play'
         assert.equal(state.isPlaying,false);
         assert.equal(state.dayNightElapsedSeconds,42);
         assert.equal(state.dayNightSyncImmediate,true);
+        assert.ok(conn.sent.some(packet => packet.type === 'lobby_color'), 'client shares its suit color while waiting');
+        const roster = { type: 'lobby_roster', players: [
+            { peerId: 'testfps-room-ABCDEFGH', username: 'Host', bodyColor: 0x3b5998 },
+            { peerId: peer.id, username: 'Guest3', bodyColor: 0xdf5b64 },
+        ] };
+        conn.emit('data', roster);
+        assert.deepEqual(state.lobbyPlayers, roster.players, 'guest uses host order');
         conn.emit('data',{...update('Host'),dayNightElapsedSeconds:57});
         assert.equal(state.dayNightElapsedSeconds,57,'host clock keeps synchronizing while this client is in its lobby');
         const spawn=getTownSpawn(1,'house',2);
@@ -146,6 +177,12 @@ test('client rejects host without proof and applies kills while waiting to play'
         state.scene=new THREE.Scene();
         conn.emit('data',{type:'start_game'});
         assert.equal(state.isPlaying,true,'host starts a client without pointer lock');
+        conn.emit('data',{type:'player_list',players:[
+            {peerId:conn.peer,username:'Host',bodyColor:0x3b5998,kills:3,deaths:0},
+            {peerId:peer.id,username:'Guest3',bodyColor:0xdf5b64,kills:1,deaths:2},
+        ]});
+        assert.deepEqual(state.playerList.map(player=>[player.username,player.kills,player.deaths]),
+            [['Host',3,0],['Guest3',1,2]],'client accepts the host scoreboard');
         assert.equal(state.username,'Guest3');
         const life=state.lifeId;
         conn.emit('data',{type:'start_game'});
@@ -210,6 +247,16 @@ test('full five-player rooms assign distinct houses and reset assignments for a 
             const seed = getWorldSeed();
             const spawns = [0, ...slots].map(slot => getTownSpawn(seed, 'house', slot));
             assert.equal(new Set(spawns.map(p => `${p.x},${p.z}`)).size, 5);
+            clients[0].close(); await tick();
+            assert.deepEqual(state.lobbyPlayers.map(player => player.peerId),
+                [host.id, 'peer-2', 'peer-3', 'peer-4']);
+            const replacement = await registerTurnSession(room, 'join-room', 'PilotE', 'peer-new');
+            const replacementConn = new Connection('peer-new', { admissionToken: replacement.admissionToken });
+            host.emit('connection', replacementConn); await tick(); await tick();
+            assert.equal(replacementConn.sent.find(packet => packet.type === 'world_snapshot').spawnHouseSlot, 1);
+            assert.deepEqual(state.lobbyPlayers.map(player => player.peerId),
+                [host.id, 'peer-2', 'peer-3', 'peer-4', 'peer-new'],
+                'rejoined player takes the end of the lineup despite reusing the vacant house');
             disconnectMultiplayer();
         }
     } finally { disconnectMultiplayer(); }

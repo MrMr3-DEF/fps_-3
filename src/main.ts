@@ -7,6 +7,7 @@ import { GothChat } from './gothChat.js';
 import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
+import { setPlayerListVisible } from './playerList.js';
 import { setupMobileControls } from './mobileControls.js';
 import { onInputStarted, onInputEnded, isInputActive, resumeInputAfterOverlay, beginInput, endInput, touchMode } from './inputSession.js';
 import { getEscapePauseAction, shouldPauseOfflineSimulation } from './pauseShortcut.js';
@@ -172,6 +173,7 @@ const UI = {
     get btnPauseLeave() { return getUI<HTMLButtonElement>('btn-pause-leave'); },
     get inputRoomCode() { return getUI<HTMLInputElement>('input-room-code'); },
     get roomCodeDisplay() { return getUI<HTMLElement>('room-code-display'); },
+    get roomCodeCopyLabel() { return getUI<HTMLElement>('room-code-copy-label'); },
     get joinErrorLog() { return getUI<HTMLElement>('join-error-log'); },
     get pauseLobbyInfo() { return getUI<HTMLElement>('pause-lobby-info'); },
     get pauseRoomCode() { return getUI<HTMLElement>('pause-room-code'); },
@@ -229,8 +231,8 @@ function resetHostLobbyUi(): void {
     }
     if (UI.btnCopyCode) {
         UI.btnCopyCode.disabled = true;
-        UI.btnCopyCode.textContent = COPY_BUTTON_DEFAULT_TEXT;
     }
+    if (UI.roomCodeCopyLabel) UI.roomCodeCopyLabel.textContent = COPY_BUTTON_DEFAULT_TEXT;
     if (UI.btnHostStart) UI.btnHostStart.style.display = 'none';
 }
 
@@ -526,6 +528,7 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             const button = UI.btnCopyCode;
             const code = state.isMultiplayer && state.isHost ? state.roomCode : null;
+            const generation = roomFlowGeneration;
 
             if (!button || !code || validateRoomCode(code)) {
                 if (button) button.disabled = true;
@@ -536,17 +539,18 @@ function setupMenuListeners(): void {
             try {
                 if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
                 await navigator.clipboard.writeText(code);
-                button.textContent = 'Copied';
+                if (generation !== roomFlowGeneration) return;
+                if (UI.roomCodeCopyLabel) UI.roomCodeCopyLabel.textContent = 'Copied';
                 if (copyFeedbackTimeout !== null) window.clearTimeout(copyFeedbackTimeout);
                 copyFeedbackTimeout = window.setTimeout(() => {
-                    const currentButton = UI.btnCopyCode;
-                    if (currentButton) currentButton.textContent = COPY_BUTTON_DEFAULT_TEXT;
+                    if (UI.roomCodeCopyLabel) UI.roomCodeCopyLabel.textContent = COPY_BUTTON_DEFAULT_TEXT;
                     copyFeedbackTimeout = null;
                 }, 1500);
             } catch {
-                button.textContent = COPY_BUTTON_DEFAULT_TEXT;
+                if (generation !== roomFlowGeneration) return;
+                if (UI.roomCodeCopyLabel) UI.roomCodeCopyLabel.textContent = COPY_BUTTON_DEFAULT_TEXT;
                 if (UI.hostLobbyStatus) {
-                    UI.hostLobbyStatus.innerText = 'Clipboard access was blocked. Select the room code and copy it manually.';
+                    UI.hostLobbyStatus.innerText = 'Clipboard access was blocked. Select the displayed code and copy it manually.';
                 }
             }
         });
@@ -559,6 +563,11 @@ function setupInputListeners(): void {
     // Reacquire after key release so Escape cannot immediately unlock the new session.
     let resumeOnEscapeUp = false;
     const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }, code = e.code) => {
+        if (e.code === 'Tab' && state.isMultiplayer && state.isPlaying && isInputActive()) {
+            e.preventDefault?.();
+            if (!gothChat?.isOpen) setPlayerListVisible(true);
+            return;
+        }
         // Movement state is already held between key events; repeated keydown
         // events must not toggle hook/view/weapon actions multiple times.
         if (e.repeat || gothChat?.isOpen) return;
@@ -691,6 +700,11 @@ function setupInputListeners(): void {
     };
 
     const onKeyUp = (e: Pick<KeyboardEvent, 'code'> & { preventDefault?: () => void }, code = e.code) => {
+        if (e.code === 'Tab') {
+            setPlayerListVisible(false);
+            if (state.isMultiplayer && state.isPlaying && isInputActive()) e.preventDefault?.();
+            return;
+        }
         switch (code) {
             case 'Escape':
                 if (!resumeOnEscapeUp) break;
@@ -737,6 +751,7 @@ function setupInputListeners(): void {
     });
     window.addEventListener('keydown', e => onKeyDown(e, gameplayCode(e.code, userSettings.keybinds)));
     window.addEventListener('keyup', e => onKeyUp(e, gameplayCode(e.code, userSettings.keybinds)));
+    window.addEventListener('blur', () => setPlayerListVisible(false));
 
     // Mouse down/up fires for every button transition, including pressing Aim
     // while Fire remains held. Pointer down/up only covers the first/last button.
@@ -907,6 +922,7 @@ async function startOfflineGame(): Promise<void> {
 }
 
 function leaveCurrentGame(): void {
+    setPlayerListVisible(false);
     state.isPlaying = false;
     state.pendingPlay = false;
     settingsOrigin = 'main';
@@ -923,7 +939,7 @@ function performPlayerReset(resetMatch = false): void {
 }
 
 function broadcastPlayerDeath(victimName: string, killerName: string, killerPeerId: string | null): void {
-    if (!state.isMultiplayer || state.connections.length === 0) return;
+    if (!state.isMultiplayer) return;
     const packet: PlayerDiedPacket = {
         type: 'player_died',
         lifeId: state.lifeId, cause: killerPeerId ? 'player' : 'lava', killerPeerId,
@@ -1384,6 +1400,7 @@ export function init(): void {
     });
 
     onInputEnded(() => {
+        setPlayerListVisible(false);
         const isDead = UI.deathOverlay?.style.display === 'flex';
         if (UI.blocker) UI.blocker.style.display = gothChat?.isOpen || isDead ? 'none' : 'flex';
         state.moveForward = false;
@@ -1741,6 +1758,7 @@ export function takePlayerDamage(damage: number, attackerName: string, attackerP
 }
 
 export function triggerDeath(): void {
+    setPlayerListVisible(false);
     gothChat?.close(false);
     smartGoggles?.reset();
     // The death overlay sits directly over the world, including when already paused.

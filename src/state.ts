@@ -3,7 +3,7 @@ import { PLAYER_MAX_HP } from './config.js';
 import type { PointerLockControls } from './pointerLockControls.js';
 import type { Particle } from './particles.js';
 import { createGogglesFailureState, resetGogglesFailure, type GogglesFailureState } from './gogglesFailure.js';
-import type { HookState } from './networkTypes.js';
+import type { HookState, LobbyPlayer, PlayerListEntry } from './networkTypes.js';
 
 export interface PeerLike {
     id: string;
@@ -82,6 +82,10 @@ export interface GameState {
     connections: DataConnectionLike[];
     peers: Record<string, PeerData>;
     peerIds: string[];
+    /** Host-ordered waiting room roster; the first entry is always the host. */
+    lobbyPlayers: LobbyPlayer[];
+    /** Host-ordered, host-confirmed PvP scoreboard for the active match. */
+    playerList: PlayerListEntry[];
     /** Host-authoritative room clock mirrored by the local day/night cycle. */
     dayNightElapsedSeconds: number;
     dayNightSyncPending: boolean;
@@ -178,6 +182,8 @@ export const state: GameState = {
     connections: [],
     peers: {},
     peerIds: [],
+    lobbyPlayers: [],
+    playerList: [],
     dayNightElapsedSeconds: 0,
     dayNightSyncPending: false,
     dayNightSyncImmediate: false,

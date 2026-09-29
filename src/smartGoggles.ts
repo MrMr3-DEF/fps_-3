@@ -5,13 +5,20 @@ import {
     createScreenBounds,
     createSmartGogglesCalloutLayout,
     distanceToOrientedBox,
+    layoutLobbyCallout,
+    placeLobbyCallout,
     layoutSmartGogglesCallout,
     projectStableTargetEnvelopeToScreen,
     projectStableTargetSphereToScreen,
+    type CalloutHorizontalDirection,
+    type CalloutVerticalDirection,
+    type CalloutLabelBox,
+    type LobbyCalloutPlan,
     type ScreenBounds,
     type StableTargetEnvelope,
     type SmartGogglesCalloutLayout,
 } from './smartGogglesMath.js';
+import { lobbyCalloutPreset } from './lobbyLineup.js';
 import {
     collectVisiblePeerMeshes,
     distanceToVisiblePeerMeshes,
@@ -39,18 +46,18 @@ const CALLOUT_DIAGONAL_LENGTH = 54;
 const ENTER_DELAY_MS = 16;
 const SCAN_BRACKET_DURATION_MS = 180;
 const HOMING_LOCK_DURATION_MS = 220;
-const TYPE_START_DELAY_MS = 310;
-const TYPE_CHARACTER_MS = 8;
-const TYPE_LINE_PAUSE_CHARACTERS = 2;
+export const SCAN_TYPE_START_DELAY_MS = 310;
+export const SCAN_TYPE_CHARACTER_MS = 8;
+export const SCAN_TYPE_LINE_PAUSE_CHARACTERS = 2;
 const EXIT_DURATION_MS = 180;
 const ELIMINATION_DURATION_MS = 540;
 const TELEPORT_DISTANCE_SQ = 40 * 40;
 const OCCLUSION_SURFACE_EPSILON = 0.02;
 const CORRUPTED_HEALTH_FRAMES = [
-    'HEALTH ?? / ##',
-    'HEALTH #? / ?#',
-    'HEALTH // / ??',
-    'HEALTH ?# / //',
+    'HEALTH: ?? / ##',
+    'HEALTH: #? / ?#',
+    'HEALTH: // / ??',
+    'HEALTH: ?# / //',
 ] as const;
 const CORRUPTED_IDENTIFIER_FRAMES = [
     '██████████',
@@ -77,6 +84,8 @@ export interface SmartGogglesPeerTarget {
     hp: number;
     maxHp: number;
     lifeId?: number;
+    /** Position in the host's waiting-room roster, including the host. */
+    lobbyOrder?: number;
 }
 
 export type SmartGogglesPeerTargets = Readonly<Record<string, SmartGogglesPeerTarget>>;
@@ -118,6 +127,8 @@ interface TargetLockRecord {
     lastIdentifierText: string;
     readoutMode: ReadoutMode | null;
     typeStartedAt: number;
+    lobbyOrder: number;
+    lobbyPlan?: LobbyCalloutPlan;
 }
 
 interface HomingCandidate {
@@ -245,7 +256,7 @@ function padBounds(bounds: ScreenBounds): void {
 }
 
 function formatCelestialDistance(distanceKm: number): string {
-    return `DISTANCE ${Math.round(distanceKm).toLocaleString('en-US')} KM`;
+    return `DISTANCE: ${Math.round(distanceKm).toLocaleString('en-US')} KM`;
 }
 
 function getFallbackLabelWidth(distanceText: string, variant: TargetVariant): number {
@@ -328,6 +339,14 @@ export class SmartGogglesHud {
     private readonly hiddenHealthBars = new Map<THREE.Object3D, boolean>();
     private readonly layer: HTMLElement;
     private readonly reducedMotion: boolean;
+    private readonly calloutDirection?: Readonly<{ horizontal: CalloutHorizontalDirection; vertical: CalloutVerticalDirection }>;
+    private readonly customPeerReadout?: HTMLElement;
+    private readonly lobbyPreview: boolean;
+    private readonly lobbyAvoidElements: readonly HTMLElement[];
+    private readonly occupiedLobbyLabels: CalloutLabelBox[] = [];
+    private lobbyTotalPlayers = 1;
+    private lobbyRosterKey = '';
+    private lobbyViewportKey = '';
     private frame = 0;
     private active = false;
     private anomalyDetectedThisFrame = false;
@@ -336,14 +355,27 @@ export class SmartGogglesHud {
     private homingLockKey: string | null = null;
     private homingLockStartedAt = Infinity;
 
-    constructor(layer: HTMLElement) {
+    constructor(layer: HTMLElement, options?: Readonly<{ horizontal?: CalloutHorizontalDirection; vertical?: CalloutVerticalDirection; customPeerReadout?: HTMLElement; lobbyPreview?: boolean; lobbyAvoidElements?: readonly HTMLElement[] }>) {
         this.layer = layer;
+        this.calloutDirection = options?.horizontal && options.vertical
+            ? { horizontal: options.horizontal, vertical: options.vertical } : undefined;
+        this.customPeerReadout = options?.customPeerReadout;
+        this.lobbyPreview = options?.lobbyPreview ?? false;
+        this.lobbyAvoidElements = options?.lobbyAvoidElements ?? [];
         this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
         ensureAnomalyTearFilters(layer);
     }
 
     get isAnomalyDetected(): boolean {
         return this.anomalyDetectedThisFrame;
+    }
+
+    configureLobby(totalPlayers: number, rosterKey: string): void {
+        if (!this.lobbyPreview) return;
+        this.lobbyTotalPlayers = totalPlayers;
+        if (rosterKey === this.lobbyRosterKey) return;
+        this.lobbyRosterKey = rosterKey;
+        for (const record of this.records.values()) record.lobbyPlan = undefined;
     }
 
     update(
@@ -368,9 +400,26 @@ export class SmartGogglesHud {
 
         this.active = true;
         this.frame++;
+        this.occupiedLobbyLabels.length = 0;
+        if (this.lobbyPreview) {
+            const layerRect = this.layer.getBoundingClientRect();
+            for (const element of this.lobbyAvoidElements) {
+                const rect = element.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                this.occupiedLobbyLabels.push({ left: rect.left - layerRect.left, top: rect.top - layerRect.top,
+                    right: rect.right - layerRect.left, bottom: rect.bottom - layerRect.top });
+            }
+        }
         const viewportWidth = this.layer.clientWidth || window.innerWidth;
         const viewportHeight = this.layer.clientHeight || window.innerHeight;
         if (viewportWidth <= 0 || viewportHeight <= 0) return;
+        if (this.lobbyPreview) {
+            const viewportKey = `${viewportWidth}:${viewportHeight}`;
+            if (viewportKey !== this.lobbyViewportKey) {
+                this.lobbyViewportKey = viewportKey;
+                for (const record of this.records.values()) record.lobbyPlan = undefined;
+            }
+        }
         _cameraFrustum.setFromProjectionMatrix(
             _viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
         );
@@ -495,7 +544,7 @@ export class SmartGogglesHud {
                 viewportHeight,
                 projectionBounds,
             )) continue;
-            if (!someVisiblePeerMeshBounds(
+            if (!this.lobbyPreview && !someVisiblePeerMeshBounds(
                 peer.mesh,
                 (localBox, worldMatrix) => hasLineOfSightToOrientedBox(
                     camera.position,
@@ -526,8 +575,9 @@ export class SmartGogglesHud {
                 viewportWidth,
                 viewportHeight,
                 now,
+                peer.lobbyOrder ?? 0,
             );
-            this.considerHomingTarget(
+            if (!this.lobbyPreview) this.considerHomingTarget(
                 trackedRecord,
                 projectionBounds,
                 viewportWidth,
@@ -691,6 +741,7 @@ export class SmartGogglesHud {
         viewportWidth: number,
         viewportHeight: number,
         now: number,
+        lobbyOrder = 0,
     ): TargetLockRecord {
         let record = this.records.get(targetKey);
         if (record && record.lastWorldPosition.distanceToSquared(worldPosition) > TELEPORT_DISTANCE_SQ) {
@@ -704,49 +755,60 @@ export class SmartGogglesHud {
         }
 
         record.seenFrame = this.frame;
+        record.lobbyOrder = lobbyOrder;
         record.lastIdentifierText = identifierText;
         record.lastWorldPosition.copy(worldPosition);
         record.lastWorldHalfWidth = worldHalfWidth;
         record.lastWorldHalfHeight = worldHalfHeight;
+        const customReadout = variant === 'peer' ? this.customPeerReadout : undefined;
+        const emptyPeerFacts = variant === 'peer' && this.lobbyPreview;
         const distanceText = variant === 'celestial'
             ? formatCelestialDistance(centerDistance)
-            : `DISTANCE ${Math.round(centerDistance)} M`;
-        const outOfRange = (variant === 'enemy' || variant === 'peer') && classifyOutOfRange(
+            : `DISTANCE: ${Math.round(centerDistance)} M`;
+        const outOfRange = !customReadout && !emptyPeerFacts && (variant === 'enemy' || variant === 'peer') && classifyOutOfRange(
             reachableDistance,
             BULLET_TRAVEL_DISTANCE,
         );
         setFactVisibility(record, outOfRange);
+        if (customReadout || emptyPeerFacts) {
+            record.distanceFact.hidden = true;
+            record.healthFact.hidden = true;
+            record.warning.hidden = true;
+        }
         const readoutMode: ReadoutMode = outOfRange ? 'warning' : 'facts';
         if (record.readoutMode !== readoutMode) {
             record.readoutMode = readoutMode;
-            record.typeStartedAt = now + TYPE_START_DELAY_MS;
+            record.typeStartedAt = now + SCAN_TYPE_START_DELAY_MS;
             record.identifier.textContent = '';
             record.distanceFact.textContent = '';
             record.healthFact.textContent = '';
             record.warning.textContent = '';
         }
         if (!outOfRange) {
-            record.lastDistanceText = distanceText;
-            record.lastHealthText = variant === 'celestial'
+            record.lastDistanceText = customReadout || emptyPeerFacts ? '' : distanceText;
+            record.lastHealthText = customReadout || emptyPeerFacts || variant === 'celestial'
                 ? ''
                 : variant === 'anomaly'
                     ? CORRUPTED_HEALTH_FRAMES[
                         this.reducedMotion ? 0 : Math.floor(now / 72) % CORRUPTED_HEALTH_FRAMES.length
                     ]
-                    : `HEALTH ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
+                    : `HEALTH: ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
         }
         const fullReadout = outOfRange
             ? 'OUT OF RANGE'
             : `${record.lastDistanceText}\n${record.lastHealthText}`;
-        const sizingKey = `${fullReadout}:${document.fonts?.status ?? ''}`;
+        const sizingKey = emptyPeerFacts ? `lobby:${identifierText}` :
+            `${customReadout ? 'custom-peer' : fullReadout}:${document.fonts?.status ?? ''}`;
         // Measure the final text before revealing any characters. The panel
         // and leader then share one width throughout the typing animation.
         if (record.sizedFor !== sizingKey) {
-            record.measure.textContent = fullReadout;
-            const textWidth = record.measure.getBoundingClientRect?.().width;
-            record.naturalLabelWidth = textWidth && textWidth > 0
-                ? Math.ceil(textWidth + LABEL_HORIZONTAL_PADDING)
-                : getFallbackLabelWidth(distanceText, variant);
+            record.measure.textContent = customReadout ? '' : emptyPeerFacts ? identifierText : fullReadout;
+            const contentWidth = (customReadout ?? record.measure).getBoundingClientRect?.().width;
+            record.naturalLabelWidth = emptyPeerFacts
+                ? Math.max(82, identifierText.length * 11 + LABEL_HORIZONTAL_PADDING)
+                : contentWidth && contentWidth > 0
+                    ? Math.ceil(contentWidth + LABEL_HORIZONTAL_PADDING)
+                    : getFallbackLabelWidth(distanceText, variant);
             record.sizedFor = sizingKey;
         }
         record.labelWidth = Math.min(
@@ -771,12 +833,12 @@ export class SmartGogglesHud {
     private updateTypedReadout(record: TargetLockRecord, now: number): void {
         const characterBudget = this.reducedMotion
             ? Number.POSITIVE_INFINITY
-            : Math.max(0, Math.floor((now - record.typeStartedAt) / TYPE_CHARACTER_MS));
+            : Math.max(0, Math.floor((now - record.typeStartedAt) / SCAN_TYPE_CHARACTER_MS));
         const visibleIdentifier = record.lastIdentifierText.slice(0, characterBudget);
         if (record.identifier.textContent !== visibleIdentifier) record.identifier.textContent = visibleIdentifier;
         const readoutBudget = Math.max(
             0,
-            characterBudget - record.lastIdentifierText.length - TYPE_LINE_PAUSE_CHARACTERS,
+            characterBudget - record.lastIdentifierText.length - SCAN_TYPE_LINE_PAUSE_CHARACTERS,
         );
 
         if (record.readoutMode === 'warning') {
@@ -789,7 +851,7 @@ export class SmartGogglesHud {
         const visibleDistance = record.lastDistanceText.slice(0, readoutBudget);
         const healthBudget = Math.max(
             0,
-            readoutBudget - record.lastDistanceText.length - TYPE_LINE_PAUSE_CHARACTERS,
+            readoutBudget - record.lastDistanceText.length - SCAN_TYPE_LINE_PAUSE_CHARACTERS,
         );
         const visibleHealth = record.lastHealthText.slice(0, healthBudget);
         if (record.distanceFact.textContent !== visibleDistance) record.distanceFact.textContent = visibleDistance;
@@ -884,6 +946,7 @@ export class SmartGogglesHud {
         root.className = 'goggles-target-lock';
         root.dataset.targetKey = targetKey;
         root.classList.toggle('is-peer', variant === 'peer');
+        root.classList.toggle('is-lobby-peer', variant === 'peer' && this.lobbyPreview);
         root.classList.toggle('is-anomalous', variant === 'anomaly');
         root.classList.toggle('is-celestial', variant === 'celestial');
 
@@ -940,7 +1003,12 @@ export class SmartGogglesHud {
         warning.className = 'goggles-target-warning';
         warning.hidden = true;
         panel.append(measure, distanceFact, healthFact, warning);
-        label.append(identifier, panel);
+        if (variant === 'peer' && this.customPeerReadout) {
+            this.customPeerReadout.hidden = false;
+            panel.append(this.customPeerReadout);
+        }
+        if (variant === 'peer' && this.lobbyPreview) label.append(measure, identifier);
+        else label.append(identifier, panel);
         root.appendChild(label);
         this.layer.appendChild(root);
 
@@ -975,7 +1043,8 @@ export class SmartGogglesHud {
             lastHealthText: '',
             lastIdentifierText: '',
             readoutMode: null,
-            typeStartedAt: now + TYPE_START_DELAY_MS,
+            typeStartedAt: now + SCAN_TYPE_START_DELAY_MS,
+            lobbyOrder: 0,
         };
     }
 
@@ -986,6 +1055,22 @@ export class SmartGogglesHud {
     }
 
     private layoutRecord(record: TargetLockRecord, viewportWidth: number, viewportHeight: number): void {
+        if (this.lobbyPreview && record.targetKey.startsWith('peer:')) {
+            let placement: { labelWidth: number; box: CalloutLabelBox };
+            if (record.lobbyPlan) placement = placeLobbyCallout(record.bounds, viewportWidth, viewportHeight,
+                record.labelWidth, record.layout, record.lobbyPlan);
+            else {
+                const selected = layoutLobbyCallout(record.bounds, viewportWidth, viewportHeight,
+                    record.labelWidth, this.occupiedLobbyLabels, record.layout,
+                    lobbyCalloutPreset(this.lobbyTotalPlayers, record.lobbyOrder));
+                record.lobbyPlan = selected.plan;
+                placement = selected;
+            }
+            record.labelWidth = placement.labelWidth;
+            this.occupiedLobbyLabels.push(placement.box);
+            this.updateGeometry(record);
+            return;
+        }
         const place = () => layoutSmartGogglesCallout(
             record.bounds,
             viewportWidth,
@@ -995,6 +1080,8 @@ export class SmartGogglesHud {
                 labelWidth: record.labelWidth,
                 horizontalLength: record.labelWidth,
                 diagonalLength: CALLOUT_DIAGONAL_LENGTH,
+                horizontal: this.calloutDirection?.horizontal,
+                vertical: this.calloutDirection?.vertical,
             },
         );
         place();

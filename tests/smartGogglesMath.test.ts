@@ -6,11 +6,33 @@ import {
     createScreenBounds,
     createSmartGogglesCalloutLayout,
     distanceToOrientedBox,
+    layoutLobbyCallout,
     layoutSmartGogglesCallout,
     projectStableTargetEnvelopeToScreen,
     projectStableTargetSphereToScreen,
     type ScreenBounds,
 } from '../src/smartGogglesMath.ts';
+
+test('lobby callouts choose free corners around other names and lower-left controls', () => {
+    const viewportWidth = 652, viewportHeight = 909;
+    const occupied = [{ left: 32, top: 566, right: 300, bottom: 875 }];
+    const targets = [
+        { left: 50, top: 344, right: 274, bottom: 590, width: 224, height: 246 },
+        { left: 378, top: 344, right: 600, bottom: 590, width: 222, height: 246 },
+        { left: 0, top: 360, right: 130, bottom: 565, width: 130, height: 205 },
+        { left: 528, top: 360, right: 652, bottom: 565, width: 124, height: 205 },
+    ];
+    const directions = new Set<string>();
+    for (const bounds of targets) {
+        const layout = createSmartGogglesCalloutLayout();
+        const { box } = layoutLobbyCallout(bounds, viewportWidth, viewportHeight, 84, occupied, layout);
+        assert.ok(occupied.every(other => box.right <= other.left || box.left >= other.right ||
+            box.bottom <= other.top || box.top >= other.bottom), 'names and controls do not overlap');
+        directions.add(`${layout.horizontal}:${layout.vertical}`);
+        occupied.push(box);
+    }
+    assert.ok(directions.size > 1, 'the scans use different corners');
+});
 
 const near = (actual: number, expected: number, epsilon = 1e-7) => {
     assert.ok(Math.abs(actual - expected) <= epsilon, `${actual} != ${expected}`);
@@ -173,6 +195,27 @@ test('callouts fan away from the screen center when both outer sides fit', () =>
     );
     assert.equal(leftTarget.horizontal, 'left');
     assert.equal(rightTarget.horizontal, 'right');
+});
+
+test('menu callout stays attached to the upper-right side while its target moves', () => {
+    const first = createSmartGogglesCalloutLayout();
+    const moved = createSmartGogglesCalloutLayout();
+    const options = { diagonalLength: 16, horizontalLength: 60, labelWidth: 60, margin: 6, horizontal: 'right' as const, vertical: 'up' as const };
+    layoutSmartGogglesCallout(
+        { left: 40, top: 60, right: 70, bottom: 100, width: 30, height: 40 },
+        240, 160, first, options,
+    );
+    layoutSmartGogglesCallout(
+        { left: 130, top: 75, right: 160, bottom: 115, width: 30, height: 40 },
+        240, 160, moved, options,
+    );
+    for (const layout of [first, moved]) {
+        assert.equal(layout.horizontal, 'right');
+        assert.equal(layout.vertical, 'up');
+        assert.ok(layout.elbow.x > layout.anchor.x);
+        assert.ok(layout.elbow.y < layout.anchor.y);
+    }
+    assert.ok(moved.labelX > first.labelX, 'attached readout follows the target');
 });
 
 test('computes world distance to a translated, rotated and uniformly scaled box', () => {

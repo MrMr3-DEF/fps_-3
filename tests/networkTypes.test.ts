@@ -2,6 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseNetworkPacket } from '../src/networkTypes.ts';
 
+test('lobby packets are bounded and reject duplicate or malformed identities and colors', () => {
+    const host = { peerId: 'testfps-room-ABCDEFGH', username: 'Host', bodyColor: 0x3b5998 };
+    assert.equal(parseNetworkPacket({ type: 'lobby_roster', players: [host] })?.type, 'lobby_roster');
+    assert.equal(parseNetworkPacket({ type: 'lobby_color', bodyColor: 0xdf5b64 })?.type, 'lobby_color');
+    for (const players of [[], Array(6).fill(host), [host, host], [{ ...host, bodyColor: -1 }],
+        [{ ...host, peerId: '../bad' }], [{ ...host, username: '<script>' }]]) {
+        assert.equal(parseNetworkPacket({ type: 'lobby_roster', players }), null);
+    }
+    assert.equal(parseNetworkPacket({ type: 'lobby_color', bodyColor: 0x1000000 }), null);
+});
+
+test('host player lists require distinct, bounded identities and K/D counters', () => {
+    const host = { peerId: 'testfps-room-ABCDEFGH', username: 'Host', bodyColor: 0x3b5998, kills: 2, deaths: 1 };
+    assert.equal(parseNetworkPacket({ type: 'player_list', players: [host] })?.type, 'player_list');
+    for (const players of [[], [host, host], Array(6).fill(host),
+        [{ ...host, kills: -1 }], [{ ...host, deaths: 1.5 }],
+        [{ ...host, bodyColor: 0x1000000 }], [{ ...host, username: '<script>' }]]) {
+        assert.equal(parseNetworkPacket({ type: 'player_list', players }), null);
+    }
+});
+
 const validUpdate = {
     type: 'update', lifeId: 0,
     username: 'Pilot',

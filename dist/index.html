@@ -12,9 +12,9 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-DdPd-G8u.js"></script>
+  <script type="module" crossorigin src="/assets/index-C5bHLHM9.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-DxHwRq2j.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-FTH7GhIX.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-DrokM5EK.css">
 </head>
 
 <body>
@@ -52,9 +52,7 @@
             </div>
 
             <div id="panel-weapons" class="menu-panel">
-                <h2>Weapons</h2>
                 <div class="weapon-tabs" aria-label="Choose a weapon"></div>
-                <article id="weapon-specs"></article>
                 <button class="menu-btn secondary" data-menu-back>Back</button>
             </div>
 
@@ -180,50 +178,39 @@
 
             <!-- Panel 2: Multiplayer Dashboard -->
             <div id="panel-mp" class="menu-panel">
-                <h2>Multiplayer</h2><br />
+                <h2>Multiplayer</h2>
                 <span id="mp-name-error"></span>
-
-                <div class="menu-actions">
-                    <button class="menu-btn" id="btn-mp-host-view">Host Game</button>
-                    <button class="menu-btn secondary" id="btn-mp-join-view">Join Game</button>
-                </div>
-                <br />
+                <button class="menu-btn" id="btn-mp-host-view">Host Game</button>
+                <button class="menu-btn secondary" id="btn-mp-join-view">Join Game</button>
                 <button class="menu-btn secondary" id="btn-mp-back" data-menu-back>Back</button>
             </div>
 
             <!-- Panel 3: Host Waiting Lobby -->
             <div id="panel-host-waiting" class="menu-panel">
-                <h2>Host Game</h2><br />
-                <span class="menu-caption">Room code</span>
-                <div class="room-code-row">
+                <h2>Host Game</h2>
+                <button type="button" id="btn-copy-code" class="menu-btn room-code-field" disabled title="Copy room code">
                     <span id="room-code-display">--------</span>
-                    <button id="btn-copy-code" class="menu-btn" disabled title="Copy room code">Copy</button>
-                </div>
-                <span id="host-lobby-status">Creating room...</span><br />
+                    <span id="room-code-copy-label" aria-live="polite">Copy</span>
+                </button>
+                <span id="host-lobby-status">Creating room...</span>
                 <div id="turnstile-host-challenge"></div>
-
-                <div class="menu-actions">
-                    <button class="menu-btn" id="btn-host-start">Start Game</button>
-                    <button class="menu-btn secondary" id="btn-host-cancel" data-menu-back>Cancel</button>
-                </div>
+                <button class="menu-btn" id="btn-host-start">Start Game</button>
+                <button class="menu-btn secondary" id="btn-host-cancel" data-menu-back>Cancel</button>
             </div>
 
             <!-- Panel 4: Join Room Menu -->
             <div id="panel-join-room" class="menu-panel">
-                <h2>Join Game</h2><br />
-                <input type="text" class="menu-input" id="input-room-code" placeholder="8-CHAR CODE" maxlength="8"><br />
-                <span id="join-error-log"></span><br />
+                <h2>Join Game</h2>
+                <input type="text" class="menu-input" id="input-room-code" aria-label="Room code" placeholder="8-CHAR CODE" maxlength="8" autocapitalize="characters" autocomplete="off" spellcheck="false">
+                <span id="join-error-log"></span>
                 <div id="turnstile-join-challenge"></div>
-
-                <div class="menu-actions">
-                    <button class="menu-btn" id="btn-join-connect">Connect</button>
-                    <button class="menu-btn secondary" id="btn-join-cancel" data-menu-back>Back</button>
-                </div>
+                <button class="menu-btn" id="btn-join-connect">Connect</button>
+                <button class="menu-btn secondary" id="btn-join-cancel" data-menu-back>Back</button>
             </div>
 
             <!-- Panel 5: Pause Menu -->
             <div id="panel-pause" class="menu-panel">
-                <h2>Paused</h2><br />
+                <h2>Paused</h2>
                 <span id="pause-lobby-info">
                     Lobby Code: <strong id="pause-room-code">--------</strong>
                 </span>
@@ -237,16 +224,26 @@
 
         </div>
         <aside id="character-panel">
-            <div class="character-heading"><h2>Character</h2></div>
             <div id="character-stage" role="img" aria-label="Preview of your playable character"></div>
-            <p class="weapon-rotate-hint" hidden>Drag to rotate</p>
-            <fieldset class="character-customize" aria-label="Suit customization">
-                <label for="character-color">Suit color</label>
-                <div class="color-options"></div>
-                <label class="custom-color">Custom <input id="character-color" type="color"></label>
-                <span id="color-value"></span>
-            </fieldset>
         </aside>
+        <div id="menu-goggles-scope">
+            <div class="goggles-scanlines" aria-hidden="true"></div>
+            <div id="menu-goggles-target-layer"></div>
+            <div id="weapon-scan-layer" hidden>
+                <article id="weapon-specs" aria-label="Weapon specifications"></article>
+            </div>
+            <div class="goggles-corner goggles-tl" aria-hidden="true"></div>
+            <div class="goggles-corner goggles-tr" aria-hidden="true"></div>
+            <div class="goggles-corner goggles-bl" aria-hidden="true"></div>
+            <div class="goggles-corner goggles-br" aria-hidden="true"></div>
+            <fieldset id="menu-character-customize" class="character-customize" aria-label="Choose character color" hidden>
+                <div class="color-options">
+                    <label class="color-picker-tile" title="Choose a custom color">
+                        <input id="character-color" type="color" aria-label="Choose a custom character color">
+                    </label>
+                </div>
+            </fieldset>
+        </div>
         <nav id="legal-links" aria-label="Legal information" onclick="event.stopPropagation();">
             <a href="https://luigi.host/impressum" target="_blank" rel="noopener noreferrer"
                 class="legal-link">Impressum</a>
@@ -288,6 +285,11 @@
         <div class="goggles-corner goggles-br"></div>
     </div>
 
+
+    <section id="player-list" hidden aria-hidden="true" aria-label="Players">
+        <div class="player-list-heading"><span>PLAYERS</span><span>K / D</span></div>
+        <div id="player-list-rows" role="list"></div>
+    </section>
 
     <div id="ui">
         <div>Targets Eliminated: <span id="score">0</span></div>

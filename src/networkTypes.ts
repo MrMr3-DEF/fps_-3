@@ -140,9 +140,20 @@ export interface WorldSnapshotPacket {
 
 export interface PeerLeftPacket { type: 'peer_left'; peerId: string; senderPeerId?: string; }
 
+export interface LobbyPlayer { peerId: string; username: string; bodyColor: number; }
+export interface LobbyRosterPacket { type: 'lobby_roster'; players: LobbyPlayer[]; senderPeerId?: string; }
+export interface LobbyColorPacket { type: 'lobby_color'; bodyColor: number; senderPeerId?: string; }
+
+export interface PlayerListEntry extends LobbyPlayer { kills: number; deaths: number; }
+/** Host-owned snapshot for the held-Tab list, including late joins. */
+export interface PlayerListPacket { type: 'player_list'; players: PlayerListEntry[]; senderPeerId?: string; }
+
 export type NetworkPacket =
     | { type: 'start_game'; senderPeerId?: string }
     | PeerLeftPacket
+    | LobbyRosterPacket
+    | LobbyColorPacket
+    | PlayerListPacket
     | UpdatePacket
     | FirePacket
     | HitTargetPacket
@@ -287,6 +298,24 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
 
         case 'peer_left':
             return isPeerId(value.peerId) ? value as unknown as PeerLeftPacket : null;
+
+        case 'lobby_color':
+            return isInteger(value.bodyColor, 0, 0xffffff) ? value as unknown as LobbyColorPacket : null;
+
+        case 'lobby_roster':
+            if (!Array.isArray(value.players) || value.players.length < 1 || value.players.length > MAX_PLAYERS ||
+                !value.players.every((player: unknown) => isRecord(player) && isPeerId(player.peerId) &&
+                    isUsername(player.username) && isInteger(player.bodyColor, 0, 0xffffff)) ||
+                new Set(value.players.map((player: LobbyPlayer) => player.peerId)).size !== value.players.length) return null;
+            return value as unknown as LobbyRosterPacket;
+
+        case 'player_list':
+            if (!Array.isArray(value.players) || value.players.length < 1 || value.players.length > MAX_PLAYERS ||
+                !value.players.every((player: unknown) => isRecord(player) && isPeerId(player.peerId) &&
+                    isUsername(player.username) && isInteger(player.bodyColor, 0, 0xffffff) &&
+                    isInteger(player.kills, 0, 1_000_000) && isInteger(player.deaths, 0, 1_000_000)) ||
+                new Set(value.players.map((player: PlayerListEntry) => player.peerId)).size !== value.players.length) return null;
+            return value as unknown as PlayerListPacket;
 
         case 'jump':
             return value as unknown as JumpPacket;

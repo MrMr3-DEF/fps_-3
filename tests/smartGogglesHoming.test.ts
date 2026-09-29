@@ -58,7 +58,8 @@ test('goggles panel and leader use the full readout width before typing starts',
     const leader = targetRecord.children.find(child => child.classList.contains('goggles-target-leader'));
     assert.ok(label && leader);
     const panel = label.children[1];
-    assert.ok(panel.children[0].textContent.includes('HEALTH 3 / 3'));
+    assert.ok(panel.children[0].textContent.includes('DISTANCE:'));
+    assert.ok(panel.children[0].textContent.includes('HEALTH: 3 / 3'));
     assert.equal(panel.children[1].textContent, '');
     assert.equal((label.style as any).width, '196px');
 
@@ -73,6 +74,54 @@ test('goggles panel and leader use the full readout width before typing starts',
     assert.ok(panel.children[1].textContent.startsWith('DISTANCE'));
     assert.equal((label.style as any).width, '196px');
     assert.ok(Math.abs(leaderWidth() - 196) <= 0.1);
+    hud.reset();
+});
+
+test('lobby peer scan retains goggles animation and name without a stats panel', () => {
+    const layer = new HudElement();
+    const hud = new SmartGogglesHud(layer as any, { lobbyPreview: true });
+    const view = camera();
+    const mesh = enemy();
+    const peers = { other: { mesh, hp: 10, maxHp: 10, username: 'Other' } };
+    hud.update(view, view.position, view.position, [], peers, true, 1000, null, [], false);
+    hud.update(view, view.position, view.position, [], peers, true, 2000, null, [], false);
+    const target = record(layer, 'peer:other');
+    assert.equal(target.classList.contains('is-active'), true);
+    assert.equal(target.classList.contains('is-lobby-peer'), true);
+    const label = target.children.find(child => child.className === 'goggles-target-label')!;
+    assert.equal(label.children.some(child => child.className === 'goggles-target-label-panel'), false);
+    assert.ok(label.texts().includes('Other'));
+    assert.equal(getProjectileHomingTarget(), null);
+    hud.reset();
+});
+
+test('lobby scan corner and leader run stay latched while an avatar moves', () => {
+    const layer = new HudElement();
+    const hud = new SmartGogglesHud(layer as any, { lobbyPreview: true });
+    hud.configureLobby(3, 'host|left|right');
+    const view = camera();
+    const mesh = enemy();
+    mesh.position.x = -1;
+    mesh.updateMatrixWorld(true);
+    const peers = { left: { mesh, hp: 10, maxHp: 10, username: 'Left', lobbyOrder: 1 } };
+    hud.update(view, view.position, view.position, [], peers, true, 1000, null, [], false);
+    const target = record(layer, 'peer:left');
+    const leader = target.children.find(child => child.classList.contains('goggles-target-leader'))!;
+    const firstPath = leader.children[0].attributes.d;
+    const firstLeft = target.classList.contains('is-left');
+    const firstUp = target.classList.contains('is-up');
+    mesh.position.x = 1;
+    mesh.position.y += 0.1;
+    mesh.updateMatrixWorld(true);
+    hud.update(view, view.position, view.position, [], peers, true, 1033, null, [], false);
+    const secondPath = leader.children[0].attributes.d;
+    assert.equal(target.classList.contains('is-left'), firstLeft);
+    assert.equal(target.classList.contains('is-up'), firstUp);
+    const segmentLength = (path: string) => {
+        const points = [...path.matchAll(/[ML] (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g)];
+        return Math.abs(Number(points[1][1]) - Number(points[0][1]));
+    };
+    assert.equal(segmentLength(secondPath), segmentLength(firstPath), 'leader run does not switch on movement');
     hud.reset();
 });
 

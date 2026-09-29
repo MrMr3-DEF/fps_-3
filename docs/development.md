@@ -136,6 +136,8 @@ Use the ownership table and data-flow notes in [Architecture](architecture.md) b
 
 With `npm run dev` running, open `/tests/lighting-preview.html` to inspect the current sun-shadow and lava-glow behavior. It has noon, low-sun, night, shadow-quality, glow, render-distance, and camera-motion controls. Compare nearby surfaces and chunk edges at different phases; shader compilation and actual WebGL output need browser inspection in addition to Node tests. Actual match startup also exercises the loading overlay and render preparation, which this fixture does not.
 
+Open `/tests/player-list-preview.html` to inspect the five-row multiplayer Tab list and its suit-colored pixel bean faces without a TURN-backed room. It uses the real list renderer and stylesheet with sample scores; input handling and host score replication still need an actual room check.
+
 ### Town
 
 With `npm run dev` running, open `/tests/town-preview.html` to inspect the real world generator with a chosen seed. The Aerial, Street, Doorway, Interior, Rooftop, Church, Church interior, Rampart, Stairs, Stair landing and Lookout buttons expose repeatable camera views and renderer draw/triangle counts. This development-only HTML fixture is outside the production Vite entry and is not included in `dist/`. Test actual match startup and HUD separately in the main game and production preview.

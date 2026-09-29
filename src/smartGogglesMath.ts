@@ -28,6 +28,9 @@ export interface SmartGogglesCalloutOptions {
     horizontalLength: number;
     labelWidth: number;
     margin: number;
+    /** Menu previews can pin a side; gameplay omits these to use available space. */
+    horizontal?: CalloutHorizontalDirection;
+    vertical?: CalloutVerticalDirection;
 }
 
 export interface SmartGogglesCalloutLayout {
@@ -42,6 +45,13 @@ export interface SmartGogglesCalloutLayout {
     labelY: number;
     /** Smart-goggles readouts always hang below their leader rule. */
     labelPlacement: 'above' | 'below';
+}
+
+export interface CalloutLabelBox { left: number; top: number; right: number; bottom: number; }
+export interface LobbyCalloutPlan {
+    horizontal: CalloutHorizontalDirection;
+    vertical: CalloutVerticalDirection;
+    diagonal: number;
 }
 
 export const DEFAULT_SMART_GOGGLES_CALLOUT_OPTIONS: Readonly<SmartGogglesCalloutOptions> = Object.freeze({
@@ -258,10 +268,10 @@ export function layoutSmartGogglesCallout(
     const outwardRoom = outwardHorizontal === 'right' ? rightRoom : leftRoom;
     const inwardRoom = outwardHorizontal === 'right' ? leftRoom : rightRoom;
     const desiredRoom = desiredDiagonal + desiredHorizontal;
-    out.horizontal = outwardRoom >= desiredRoom || outwardRoom >= inwardRoom
+    out.horizontal = options.horizontal ?? (outwardRoom >= desiredRoom || outwardRoom >= inwardRoom
         ? outwardHorizontal
-        : (outwardHorizontal === 'right' ? 'left' : 'right');
-    out.vertical = bottomRoom >= topRoom ? 'down' : 'up';
+        : (outwardHorizontal === 'right' ? 'left' : 'right'));
+    out.vertical = options.vertical ?? (bottomRoom >= topRoom ? 'down' : 'up');
 
     const horizontalSign = out.horizontal === 'right' ? 1 : -1;
     const verticalSign = out.vertical === 'down' ? 1 : -1;
@@ -290,6 +300,64 @@ export function layoutSmartGogglesCallout(
     const maximumLabelX = Math.max(margin, viewportWidth - margin - labelWidth);
     out.labelX = THREE.MathUtils.clamp(naturalLabelX, margin, maximumLabelX);
     return out;
+}
+
+/** Place a latched lobby callout; its corner and leader run never change on hover. */
+export function placeLobbyCallout(
+    bounds: ScreenBounds,
+    viewportWidth: number,
+    viewportHeight: number,
+    labelWidth: number,
+    out: SmartGogglesCalloutLayout,
+    plan: Readonly<LobbyCalloutPlan>,
+): { labelWidth: number; box: CalloutLabelBox } {
+    layoutSmartGogglesCallout(bounds, viewportWidth, viewportHeight, out,
+        { labelWidth, horizontalLength: labelWidth, diagonalLength: plan.diagonal,
+            horizontal: plan.horizontal, vertical: plan.vertical });
+    const width = Math.min(labelWidth, Math.abs(out.end.x - out.elbow.x));
+    if (width < labelWidth) layoutSmartGogglesCallout(bounds, viewportWidth, viewportHeight, out,
+        { labelWidth: width, horizontalLength: width, diagonalLength: plan.diagonal,
+            horizontal: plan.horizontal, vertical: plan.vertical });
+    return { labelWidth: width, box: { left: out.labelX, top: out.labelY - 26,
+        right: out.labelX + width, bottom: out.labelY + 6 } };
+}
+
+/** Choose once per roster layout, then keep the winner through hover frames. */
+export function layoutLobbyCallout(
+    bounds: ScreenBounds,
+    viewportWidth: number,
+    viewportHeight: number,
+    labelWidth: number,
+    occupied: readonly CalloutLabelBox[],
+    out: SmartGogglesCalloutLayout,
+    preferred?: Readonly<LobbyCalloutPlan>,
+): { labelWidth: number; box: CalloutLabelBox; plan: LobbyCalloutPlan } {
+    const scratch = createSmartGogglesCalloutLayout();
+    const outward: CalloutHorizontalDirection = (bounds.left + bounds.right) / 2 < viewportWidth / 2 ? 'left' : 'right';
+    let bestScore = Infinity;
+    let best: LobbyCalloutPlan = preferred ? { ...preferred } :
+        { horizontal: outward, vertical: 'up', diagonal: 54 };
+    for (const horizontal of [outward, outward === 'left' ? 'right' : 'left'] as const) {
+        for (const vertical of ['up', 'down'] as const) {
+            for (const diagonal of [30, 54, 78, 102, 126]) {
+                const { labelWidth: width, box } = placeLobbyCallout(bounds, viewportWidth, viewportHeight,
+                    labelWidth, scratch, { horizontal, vertical, diagonal });
+                const overlap = occupied.reduce((area, other) => area +
+                    Math.max(0, Math.min(box.right, other.right) - Math.max(box.left, other.left) + 16) *
+                    Math.max(0, Math.min(box.bottom, other.bottom) - Math.max(box.top, other.top) + 16), 0);
+                const overflow = Math.max(0, 12 - box.top) + Math.max(0, box.bottom - viewportHeight + 12);
+                const score = overlap * 10 + overflow * 100 + (labelWidth - width) * 5 +
+                    (horizontal === outward ? 0 : 1) + (preferred &&
+                        (horizontal !== preferred.horizontal || vertical !== preferred.vertical) ? 12 : 0) +
+                    Math.abs(diagonal - (preferred?.diagonal ?? 54)) * 0.1;
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = { horizontal, vertical, diagonal };
+                }
+            }
+        }
+    }
+    return { ...placeLobbyCallout(bounds, viewportWidth, viewportHeight, labelWidth, out, best), plan: best };
 }
 
 /** Return the shortest world-space distance from a point to an oriented box. */

@@ -46,14 +46,14 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
         await call(0, 'scope', { enabled: false }); await call(1, 'scope', { enabled: false });
         await call(0, 'pose', { z: 10, yaw: 0 }); await call(1, 'pose', { z: -10, yaw: Math.PI }); await flush();
         for (let i = 0; i < 5; i++) await tick();
-        assert.deepEqual(await call(0, 'inspect'), ['HEALTH 9 / 10']);
-        assert.deepEqual(await call(1, 'inspect'), ['HEALTH 9 / 10']);
+        assert.deepEqual(await call(0, 'inspect'), ['HEALTH: 9 / 10']);
+        assert.deepEqual(await call(1, 'inspect'), ['HEALTH: 9 / 10']);
         await call(0, 'pauseTime', { duration: 5000 }); await flush();
         assert.equal((await call(0, 'state')).hp, 10, 'host regenerates with no rendered frames or mouse capture');
-        assert.deepEqual(await call(1, 'inspect'), ['HEALTH 10 / 10']);
+        assert.deepEqual(await call(1, 'inspect'), ['HEALTH: 10 / 10']);
         await call(1, 'pauseTime', { duration: 5000 }); await flush();
         assert.equal((await call(1, 'state')).hp, 10, 'guest regenerates with no rendered frames or mouse capture');
-        assert.deepEqual(await call(0, 'inspect'), ['HEALTH 10 / 10'], 'C updates on confirmed regeneration');
+        assert.deepEqual(await call(0, 'inspect'), ['HEALTH: 10 / 10'], 'C updates on confirmed regeneration');
         for (const weapon of ['AR', 'SHOTGUN', 'MINIGUN', 'SNIPER']) {
             for (const shooter of [0, 1]) {
                 if (weapon === 'MINIGUN') { await call(shooter, 'trigger'); await flush(); }
@@ -71,7 +71,7 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
                 assert.ok(after.hp < before.hp, `${weapon} from player ${shooter} deals damage`);
                 const victimId = victim === 0 ? host.peerId : guest.peerId;
                 assert.equal((await call(shooter, 'state')).peers[victimId].hp, after.hp);
-                if (after.hp > 0) assert.deepEqual(await call(shooter, 'inspect'), [`HEALTH ${after.hp} / 10`]);
+                if (after.hp > 0) assert.deepEqual(await call(shooter, 'inspect'), [`HEALTH: ${after.hp} / 10`]);
                 else {
                     assert.equal((await call(shooter, 'state')).peers[victimId].visible, false);
                     await call(victim, 'respawn'); await flush();
