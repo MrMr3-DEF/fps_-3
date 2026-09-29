@@ -20,4 +20,8 @@ jobs:
       - run: npm run check
       - run: npm run build
       - name: Ensure tracked deployment assets are fresh
-        run: git diff --exit-code -- dist
+        run: |
+          if [ -n "$(git status --porcelain --untracked-files=all -- dist)" ]; then
+            git status --short -- dist
+            exit 1
+          fi

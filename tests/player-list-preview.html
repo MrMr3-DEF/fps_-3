@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Player list preview</title>
+    <link rel="stylesheet" href="/src/gameUI.css">
+</head>
+<body style="background: linear-gradient(#55afe0, #b7e4f7)">
+    <section id="player-list" hidden aria-hidden="true" aria-label="Players">
+        <div class="player-list-heading"><span>PLAYERS</span><span>K / D</span></div>
+        <div id="player-list-rows" role="list"></div>
+    </section>
+    <script type="module">
+        import { state } from '../src/state.ts';
+        import { setPlayerListVisible } from '../src/playerList.ts';
+        state.isMultiplayer = state.isPlaying = true;
+        state.peer = { id: 'host' };
+        state.playerList = [
+            { peerId: 'host', username: 'HostPlayer', bodyColor: 0x3b5998, kills: 12, deaths: 4 },
+            { peerId: 'a', username: 'CoralBean', bodyColor: 0xdf5b64, kills: 4, deaths: 6 },
+            { peerId: 'b', username: 'GreenBean', bodyColor: 0x66be8d, kills: 7, deaths: 5 },
+            { peerId: 'c', username: 'BluePilot', bodyColor: 0x4aa4df, kills: 1, deaths: 3 },
+            { peerId: 'd', username: 'GoldBean', bodyColor: 0xe0bb64, kills: 0, deaths: 2 },
+        ];
+        setPlayerListVisible(true);
+    </script>
+</body>
+</html>

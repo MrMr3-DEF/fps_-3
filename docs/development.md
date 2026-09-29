@@ -104,7 +104,7 @@ GitHub Actions runs on pushes and pull requests using Node 22. It performs:
 1. `npm ci`
 2. `npm run check`
 3. `npm run build`
-4. `git diff --exit-code -- dist`
+4. `test -z "$(git status --porcelain --untracked-files=all -- dist)"` (checks changed and newly generated assets)
 
 The last step fails when committed generated assets do not match the source. A local change is ready for CI when `npm run check` and `npm run build` both pass and `git status` shows only intended source, documentation, and regenerated bundle changes.
 

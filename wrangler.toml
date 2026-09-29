@@ -9,6 +9,7 @@ TURNSTILE_HOSTNAME = "fps.luigi.host"
 
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 
 [[durable_objects.bindings]]
 name = "TURN_RATE_LIMITER"
