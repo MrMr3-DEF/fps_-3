@@ -12,9 +12,9 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-C5bHLHM9.js"></script>
+  <script type="module" crossorigin src="/assets/index-BQdK3LHH.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-DxHwRq2j.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-DrokM5EK.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-BT9drLZ6.css">
 </head>
 
 <body>
@@ -22,7 +22,11 @@
         <div class="world-loading-orbit" aria-hidden="true">
             <span class="world-loading-sun"></span><span class="world-loading-moon"></span>
         </div>
-        <span>Preparing your world…</span>
+        <span class="world-loading-label">Preparing your world…</span>
+        <div class="world-loading-boot">
+            <span class="world-loading-boot-label">Booting...</span>
+            <div class="world-loading-boot-track"><div class="world-loading-boot-fill"></div></div>
+        </div>
     </div>
     <button type="button" id="npc-interaction" hidden aria-label="Talk to goth girlfriend"></button>
 

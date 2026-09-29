@@ -1435,6 +1435,57 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     background: white;
 }
 @keyframes world-loading-spin { to { transform: rotate(360deg); } }
+.world-loading-boot { display: none; }
+#world-loading[data-loading-mode="boot"] {
+    background: #000;
+    color: #78caff;
+}
+#world-loading[data-loading-mode="boot"] .world-loading-orbit,
+#world-loading[data-loading-mode="boot"] .world-loading-label { display: none; }
+#world-loading[data-loading-mode="boot"] .world-loading-boot {
+    display: grid;
+    justify-items: center;
+    gap: 24px;
+}
+#world-loading[data-loading-mode="boot"].boot-content-out .world-loading-boot {
+    opacity: 0;
+    transition: opacity 220ms ease-in;
+}
+#world-loading[data-loading-mode="boot"].boot-screen-out {
+    opacity: 0;
+    transition: opacity 500ms ease-out;
+}
+.world-loading-boot-label {
+    font: 700 clamp(20px, 3vw, 28px)/1.2 var(--ui-font);
+    letter-spacing: .12em;
+    animation: boot-label-breathe 3.6s ease-in-out infinite alternate;
+}
+.world-loading-boot-track {
+    width: min(360px, 76vw);
+    height: 32px;
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid #16466b;
+    background: #071523;
+    box-shadow: 0 0 18px #0879d433;
+}
+.world-loading-boot-fill {
+    width: 100%;
+    height: 100%;
+    background: #249fff;
+    box-shadow: 0 0 16px #249fff;
+    transform: scaleX(0);
+    transform-origin: left center;
+}
+.world-loading-boot-fill.boot-flashing {
+    animation: boot-bar-double-flash 360ms ease-in-out both;
+}
+@keyframes boot-bar-double-flash {
+    0%, 24%, 49%, 74%, 100% { filter: brightness(1); }
+    12%, 62% { filter: brightness(3); }
+}
+@keyframes boot-label-breathe { from { opacity: .42; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
     .world-loading-orbit { animation: none; }
+    .world-loading-boot-label { animation: none; }
 }

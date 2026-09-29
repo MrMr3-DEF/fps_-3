@@ -1,4 +1,4 @@
-import { cancelWorldLoading, isWorldLoading, withWorldLoading } from './worldLoading.js';
+import { cancelWorldLoading, isWorldLoading, isWorldReveal, withWorldLoading, type WorldLoadingMode } from './worldLoading.js';
 import { prepareRenderer } from './renderPreparation.js';
 import { setupSettingsMenu } from './settingsMenu.js';
 import { gameplayCode, keyLabel, crosshairSvg } from './controlSettings.js';
@@ -872,7 +872,12 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
 
 // Shared by offline start, host registration, and client snapshots. The scene
 // identity and caller's session check keep an old async load out of a new match.
-async function loadPreparedWorld(seed: number, current: () => boolean = () => true): Promise<void> {
+async function loadPreparedWorld(
+    seed: number,
+    current: () => boolean = () => true,
+    loadingMode: WorldLoadingMode = 'world',
+    onPrepared?: () => void,
+): Promise<void> {
     const scene = state.scene;
     await withWorldLoading(async paint => {
         const checkpoint = async () => {
@@ -881,7 +886,11 @@ async function loadPreparedWorld(seed: number, current: () => boolean = () => tr
         };
         await createEnvironmentAsync(seed, checkpoint);
         if (dayNightCycle) await prepareRenderer(dayNightCycle, checkpoint);
-    });
+        if (onPrepared) {
+            if (state.scene !== scene || !current()) throw new DOMException('Loading cancelled', 'AbortError');
+            onPrepared();
+        }
+    }, loadingMode);
     // No simulation ran during preparation; discard that wall time before play.
     state.prevTime = performance.now();
 }
@@ -898,15 +907,17 @@ async function startOfflineGame(): Promise<void> {
     state.isMultiplayer = false;
     state.isHost = false;
     const scene = state.scene;
-    const loading = loadPreparedWorld(generateWorldSeed());
+    const loading = loadPreparedWorld(generateWorldSeed(), () => true, 'boot', () => {
+        // Finish spawn and HUD state while the boot overlay is still opaque.
+        performPlayerReset(true);
+        syncGogglesFailureVisuals();
+    });
     state.pendingPlay = true;
     // Keep pointer lock/fullscreen in the original click gesture, before awaits.
     beginInput();
     try {
         await loading;
         if (state.scene !== scene) return;
-        performPlayerReset(true);
-        syncGogglesFailureVisuals();
         state.prevTime = performance.now();
     } catch (error) {
         if (state.scene !== scene) return;
@@ -1476,7 +1487,13 @@ export function animate(): void {
     if (!isWorldLoading) updateMenuPreview();
 
     const time = performance.now();
-    if (isWorldLoading) { state.prevTime = time; return; }
+    if (isWorldLoading) {
+        if (isWorldReveal && state.scene && state.camera && state.renderer) {
+            state.renderer.render(state.scene, state.camera);
+        }
+        state.prevTime = time;
+        return;
+    }
     const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
     if (!state.scene || !state.camera || !state.renderer || !state.controls) {
         state.prevTime = time;
