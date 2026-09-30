@@ -2,11 +2,15 @@ import * as THREE from 'three';
 import { DEFAULT_FOV, MAX_PARTICLES, MAX_RENDER_DISTANCE_CHUNKS, SCOPED_FOV } from './config.js';
 
 import { DEFAULT_KEYBINDS, DEFAULT_CROSSHAIR, readKeybinds, readCrosshair, type Keybinds, type CrosshairSettings } from './controlSettings.js';
+import { cloneTouchLayout, readTouchLayout, type TouchLayout, type TouchFireMode } from './mobileControlLayout.js';
 
 const STORAGE_KEY = 'testfps-settings-v1';
 export type ShadowQuality = 'low' | 'high';
 
 export interface UserSettings {
+    mobileInput: 'touch' | 'keyboard';
+    touchLayout: TouchLayout;
+    touchFireMode: TouchFireMode;
     keybinds: Keybinds;
     crosshair: CrosshairSettings;
     sensitivity: number;
@@ -27,6 +31,9 @@ export interface UserSettings {
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
+    mobileInput: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'touch' : 'keyboard',
+    touchLayout: {},
+    touchFireMode: 'joystick',
     keybinds: { ...DEFAULT_KEYBINDS },
     crosshair: { ...DEFAULT_CROSSHAIR },
     sensitivity: 1.0,
@@ -47,7 +54,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 };
 
 export function cloneSettings(settings: UserSettings): UserSettings {
-    return { ...settings, keybinds: { ...settings.keybinds }, crosshair: { ...settings.crosshair } };
+    return { ...settings, touchLayout: cloneTouchLayout(settings.touchLayout), keybinds: { ...settings.keybinds }, crosshair: { ...settings.crosshair } };
 }
 
 export const userSettings: UserSettings = cloneSettings(DEFAULT_USER_SETTINGS);
@@ -70,6 +77,10 @@ export function loadUserSettings(): UserSettings {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             const parsed = JSON.parse(raw) as Partial<UserSettings>;
+            userSettings.mobileInput = parsed.mobileInput === 'touch' || parsed.mobileInput === 'keyboard'
+                ? parsed.mobileInput : DEFAULT_USER_SETTINGS.mobileInput;
+            userSettings.touchLayout = readTouchLayout(parsed.touchLayout);
+            userSettings.touchFireMode = parsed.touchFireMode === 'button' ? 'button' : 'joystick';
             userSettings.keybinds = readKeybinds(parsed.keybinds);
             userSettings.crosshair = readCrosshair(parsed.crosshair);
             userSettings.sensitivity = clamp(parsed.sensitivity ?? DEFAULT_USER_SETTINGS.sensitivity, 0.1, 3.0);

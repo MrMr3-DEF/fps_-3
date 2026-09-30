@@ -1,14 +1,20 @@
 import { BIND_ACTIONS, DEFAULT_KEYBINDS, DEFAULT_CROSSHAIR, assignKey, normalizeCode, isBindableCode, keyLabel, crosshairSvg, hitmarkerSvg, type BindAction, type CrosshairSettings } from './controlSettings.js';
 import type { UserSettings } from './settings.js';
 
-export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate: (settings: UserSettings) => void) => void): (settings: UserSettings) => void {
+export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate: (settings: UserSettings) => void) => void, editControls: () => void): (settings: UserSettings) => void {
     const root = document.getElementById('panel-settings')!;
     const container = root.querySelector<HTMLElement>('.settings-container')!;
     const tabs = document.createElement('div');
     tabs.className = 'settings-tabs';
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', 'Settings categories');
-    container.before(tabs);
+    tabs.setAttribute('aria-orientation', 'vertical');
+    const body = document.createElement('div');
+    body.className = 'settings-body';
+    container.before(body);
+    // Sidebar and content have separate scroll areas; the shared draft's footer
+    // stays outside the content scroll area so Apply/Back remain reachable.
+    body.append(tabs, container, root.querySelector<HTMLElement>('.menu-actions')!);
     const categories = [
         ['gameplay', 'Gameplay', ['sensitivity', 'setting-fov', 'setting-scoped-fov', 'setting-webllm-download']],
         ['graphics', 'Graphics', ['setting-render-scale', 'setting-render-distance', 'setting-particles', 'setting-shadows', 'setting-shadow-quality', 'setting-lava-glow', 'setting-muzzle-flashes', 'setting-muzzle-flash-opacity', 'setting-bullet-trails', 'setting-fps']],
@@ -61,12 +67,13 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
                 tab.tabIndex = active ? 0 : -1;
             });
             panels.forEach((page, pageId) => { page.hidden = pageId !== id; });
+            container.scrollTop = 0;
         });
         button.addEventListener('keydown', e => {
             const buttons = [...tabs.querySelectorAll<HTMLButtonElement>('button')];
             let target = index;
-            if (e.key === 'ArrowRight') target = (index + 1) % buttons.length;
-            else if (e.key === 'ArrowLeft') target = (index + buttons.length - 1) % buttons.length;
+            if (e.key === 'ArrowDown') target = (index + 1) % buttons.length;
+            else if (e.key === 'ArrowUp') target = (index + buttons.length - 1) % buttons.length;
             else if (e.key === 'Home') target = 0;
             else if (e.key === 'End') target = buttons.length - 1;
             else return;
@@ -78,18 +85,50 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
     const resetPanel = panels.get('reset')!;
     const resetScope = document.createElement('p');
     resetScope.className = 'menu-caption';
-    resetScope.textContent = 'Restores all settings, including keybinds and crosshair. Select Apply to save.';
+    resetScope.textContent = 'Restores all settings, including keybinds, touch controls, and crosshair. Select Apply to save.';
     resetPanel.append(resetScope, document.getElementById('btn-settings-reset')!);
 
     const keyPanel = panels.get('keybinds')!;
+    const inputOptions = document.createElement('div');
+    inputOptions.className = 'mobile-input-options';
+    inputOptions.setAttribute('role', 'group');
+    inputOptions.setAttribute('aria-label', 'Input method');
+    for (const mode of ['touch', 'keyboard'] as const) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'menu-btn secondary';
+        button.dataset.inputMode = mode;
+        button.textContent = mode === 'touch' ? 'Touch' : 'Keyboard';
+        button.addEventListener('click', () => {
+            cancelCapture();
+            update(settings => { settings.mobileInput = mode; });
+        });
+        inputOptions.append(button);
+    }
+    keyPanel.append(inputOptions);
+    const touchOptions = document.createElement('div');
+    touchOptions.className = 'touch-settings-options';
+    const touchHelp = document.createElement('p');
+    touchHelp.className = 'menu-caption';
+    touchHelp.textContent = 'Choose where your touch controls sit and how large they are.';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'menu-btn';
+    edit.id = 'btn-edit-controls';
+    edit.textContent = 'Edit controls';
+    edit.addEventListener('click', () => { cancelCapture(); editControls(); });
+    touchOptions.append(touchHelp, edit);
+    keyPanel.append(touchOptions);
+    const keyboardOptions = document.createElement('div');
+    keyPanel.append(keyboardOptions);
     const message = document.createElement('p');
     message.className = 'binding-status';
     message.setAttribute('role', 'status');
     message.textContent = 'Select a key to rebind. Esc cancels; used keys swap.';
-    keyPanel.append(message);
+    keyboardOptions.append(message);
     const bindings = document.createElement('div');
     bindings.className = 'keybind-list';
-    keyPanel.append(bindings);
+    keyboardOptions.append(bindings);
     for (const [action, label] of BIND_ACTIONS) {
         const row = document.createElement('div');
         row.className = 'keybind-row';
@@ -138,7 +177,7 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
     resetKeys.className = 'menu-btn secondary';
     resetKeys.textContent = 'Reset keybinds';
     resetKeys.addEventListener('click', () => update(settings => { settings.keybinds = { ...DEFAULT_KEYBINDS }; }));
-    keyPanel.append(resetKeys);
+    keyboardOptions.append(resetKeys);
 
     const crossPanel = panels.get('crosshair')!;
     const preview = document.createElement('div');
@@ -214,6 +253,13 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
     resetCross.addEventListener('click', () => update(settings => { settings.crosshair = { ...DEFAULT_CROSSHAIR }; }));
     crossPanel.append(resetCross);
     return settings => {
+        const touch = settings.mobileInput === 'touch';
+        document.getElementById('settings-tab-keybinds')!.textContent = touch ? 'Controls' : 'Keybinds';
+        keyboardOptions.hidden = touch;
+        touchOptions.hidden = !touch;
+        inputOptions.querySelectorAll<HTMLButtonElement>('button').forEach(button => {
+            button.setAttribute('aria-pressed', String(button.dataset.inputMode === settings.mobileInput));
+        });
         cancelCapture();
         bindings.querySelectorAll<HTMLButtonElement>('button').forEach(button => {
             const action = button.dataset.action as BindAction;

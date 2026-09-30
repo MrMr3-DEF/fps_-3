@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { state } from '../src/state.js';
-import { beginInput, enableTouchMode, endInput, isInputActive, onInputStarted, onInputEnded, touchMove } from '../src/inputSession.js';
+import { beginInput, enableTouchMode, endInput, isInputActive, onInputStarted, onInputEnded, setTouchMode, touchMode, touchMove } from '../src/inputSession.js';
 
 test('desktop uses pointer lock; landscape touch uses the same session lifecycle without requesting it', async () => {
     let locks = 0, unlocks = 0, starts = 0, ends = 0;
@@ -62,4 +62,22 @@ test('desktop uses pointer lock; landscape touch uses the same session lifecycle
     assert.equal(starts, 3);
     assert.equal(ends, 3);
     assert.equal(unlocks, 2);
+
+    beginInput();
+    touchMove.x = 1;
+    setTouchMode(false);
+    assert.equal(touchMode, false);
+    assert.equal(isInputActive(), false, 'switching to keyboard leaves the touch session paused');
+    assert.deepEqual(touchMove, { x: 0, y: 0 });
+    assert.equal(ends, 4);
+    beginInput();
+    assert.equal(locks, 3, 'keyboard mode resumes through pointer lock');
+    controls.isLocked = true;
+    events.get('lock')?.();
+    setTouchMode(true);
+    assert.equal(isInputActive(), false, 'switching to touch releases pointer lock without resuming');
+    assert.equal(unlocks, 3);
+    assert.equal(ends, 5);
+    setTouchMode(true);
+    assert.equal(ends, 5, 'reapplying the same mode does not emit a second pause');
 });

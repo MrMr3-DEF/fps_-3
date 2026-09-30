@@ -9,6 +9,8 @@ import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setPlayerListVisible } from './playerList.js';
 import { setupMobileControls } from './mobileControls.js';
+import { MobileControlsEditor } from './mobileControlsEditor.js';
+import { cloneTouchLayout } from './mobileControlLayout.js';
 import { onInputStarted, onInputEnded, isInputActive, resumeInputAfterOverlay, beginInput, endInput, touchMode } from './inputSession.js';
 import { getEscapePauseAction, shouldPauseOfflineSimulation } from './pauseShortcut.js';
 import { broadcastToAll } from './multiplayer.js';
@@ -192,6 +194,8 @@ let lastFov = -1;
 let lastScopedState: boolean | null = null;
 let pendingSettings: UserSettings = cloneSettings(userSettings);
 let syncSettingsMenu: ((settings: UserSettings) => void) | undefined;
+let syncMobileControls: (() => void) | undefined;
+const mobileControlsEditor = new MobileControlsEditor();
 let middleMouseChordActive = false;
 let motionHudInitialized = false;
 let smoothedGRight = 0;
@@ -733,7 +737,7 @@ function setupInputListeners(): void {
         }
     };
 
-    setupMobileControls({
+    syncMobileControls = setupMobileControls({
         keyDown: code => onKeyDown({ code, repeat: false }),
         keyUp: code => onKeyUp({ code }),
         fire: held => {
@@ -1113,7 +1117,10 @@ function syncHudCounters(): void {
 }
 
 function settingsEqual(a: UserSettings, b: UserSettings): boolean {
-    return a.sensitivity === b.sensitivity &&
+    return a.mobileInput === b.mobileInput &&
+        a.touchFireMode === b.touchFireMode &&
+        JSON.stringify(a.touchLayout) === JSON.stringify(b.touchLayout) &&
+        a.sensitivity === b.sensitivity &&
         a.fov === b.fov &&
         a.scopedFov === b.scopedFov &&
         a.renderScale === b.renderScale &&
@@ -1198,6 +1205,7 @@ function updatePendingSettings(mutator: (settings: UserSettings) => void): void 
 }
 
 function applyLiveSettings(): void {
+    syncMobileControls?.();
     if (UI.crosshair) UI.crosshair.innerHTML = crosshairSvg(userSettings.crosshair);
     applyHitmarkerSettings();
     state.baseSensitivity = userSettings.sensitivity;
@@ -1228,7 +1236,18 @@ function applyLiveSettings(): void {
 }
 
 function setupSettingsControls(): void {
-    syncSettingsMenu = setupSettingsMenu(() => pendingSettings, updatePendingSettings);
+    syncSettingsMenu = setupSettingsMenu(() => pendingSettings, updatePendingSettings, () => {
+        mobileControlsEditor.open(pendingSettings.touchLayout, pendingSettings.touchFireMode, (layout, fireMode) => {
+            // Editor Save persists its layout and Fire type. Other settings retain their
+            // existing Apply/Back draft lifecycle, including the input toggle.
+            userSettings.touchLayout = cloneTouchLayout(layout);
+            pendingSettings.touchLayout = cloneTouchLayout(layout);
+            userSettings.touchFireMode = pendingSettings.touchFireMode = fireMode;
+            saveUserSettings();
+            syncMobileControls?.();
+            syncSettingsControls();
+        });
+    });
     resetPendingSettings();
 
     UI.sensSlider?.addEventListener('input', (e) => {
@@ -1484,6 +1503,10 @@ export function init(): void {
 // collisions/damage, then remote sync and rendering.
 export function animate(): void {
     requestAnimationFrame(animate);
+    if (mobileControlsEditor.isOpen) {
+        state.prevTime = performance.now();
+        return;
+    }
     if (!isWorldLoading) updateMenuPreview();
 
     const time = performance.now();
@@ -1563,6 +1586,12 @@ export function animate(): void {
         jumpToggle.hidden = !isInputActive() || state.playerHp <= 0 || state.isScoped;
         jumpToggle.setAttribute('aria-pressed', String(state.powerJumpEnabled));
         jumpToggle.textContent = state.powerJumpEnabled ? 'POWER JUMP ON' : 'POWER JUMP OFF';
+    }
+    const touchJumpToggle = document.querySelector<HTMLButtonElement>('#mobile-controls [data-control="powerJump"]');
+    if (touchJumpToggle) {
+        touchJumpToggle.hidden = state.isScoped;
+        touchJumpToggle.setAttribute('aria-pressed', String(state.powerJumpEnabled));
+        touchJumpToggle.textContent = state.powerJumpEnabled ? 'POWER JUMP ON' : 'POWER JUMP OFF';
     }
     updateLocalAccelerometer(delta);
     updateSpeedlines(state.velocity.length(), Boolean(isInputActive() && !state.isScoped && state.playerHp > 0));

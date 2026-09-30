@@ -47,7 +47,8 @@ Pointer lock is the practical boundary between menu state and active game input.
 | --- | --- |
 | `main.ts` | Composition root, renderer and UI lifecycle, input, frame loop, local health/death, lava, regeneration, world-border warning |
 | `mainMenu.ts`, `appearance.ts` | Menu preview, weapon display, and persisted suit color |
-| `inputSession.ts`, `mobileControls.ts` | Shared input activation plus touch capture, movement, and action controls |
+| `inputSession.ts`, `mobileControls.ts` | Shared input activation, selected keyboard/touch mode switching on all devices, touch capture, movement, and action controls |
+| `mobileControlLayout.ts`, `mobileControlsView.ts`, `mobileControlsEditor.ts` | Validated touch layout, shared control geometry/markup, and inactive blank sky layout editor |
 | `settingsMenu.ts`, `controlSettings.ts` | Settings UI, keybind translation, and crosshair configuration |
 | `dayNightCycle.ts` | Eight-minute sky cycle, moving sun/moon, ambient lighting, fog color, and camera-following sun shadows |
 | `config.ts` | Shared gameplay constants, world counts, network limits, weapon statistics |

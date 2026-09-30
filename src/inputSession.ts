@@ -37,7 +37,15 @@ export function onInputEnded(callback: () => void): void {
 export let touchMode = false;
 let touchPlaying = false;
 export const touchMove = { x: 0, y: 0 };
-export function enableTouchMode(): void { touchMode = true; }
+export function setTouchMode(enabled: boolean): void {
+    if (touchMode === enabled) return;
+    // A mode switch releases the previous session before changing its owner.
+    // It never starts a match or resumes a paused player as a side effect.
+    if (isInputActive()) endInput();
+    touchMove.x = touchMove.y = 0;
+    touchMode = enabled;
+}
+export function enableTouchMode(): void { setTouchMode(true); }
 export function isInputActive(): boolean {
     return touchPlaying || Boolean(state.controls?.isLocked);
 }
