@@ -12,9 +12,12 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
     const body = document.createElement('div');
     body.className = 'settings-body';
     container.before(body);
-    // Sidebar and content have separate scroll areas; the shared draft's footer
-    // stays outside the content scroll area so Apply/Back remain reachable.
-    body.append(tabs, container, root.querySelector<HTMLElement>('.menu-actions')!);
+    const sidebar = document.createElement('div');
+    sidebar.className = 'settings-sidebar';
+    // Actions sit directly below the categories. Only the tabs shrink and scroll
+    // on short screens, keeping Back or Apply/Discard reachable throughout edits.
+    sidebar.append(tabs, root.querySelector<HTMLElement>('.settings-actions')!);
+    body.append(sidebar, container);
     const categories = [
         ['gameplay', 'Gameplay', ['sensitivity', 'setting-fov', 'setting-scoped-fov', 'setting-webllm-download']],
         ['graphics', 'Graphics', ['setting-render-scale', 'setting-render-distance', 'setting-particles', 'setting-shadows', 'setting-shadow-quality', 'setting-lava-glow', 'setting-muzzle-flashes', 'setting-muzzle-flash-opacity', 'setting-bullet-trails', 'setting-fps']],

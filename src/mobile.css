@@ -65,5 +65,5 @@
 @media (orientation: portrait) {
     .touch-editor-rotate { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px; background: #0a1524; color: #e1edf8; text-align: center; }
     .touch-controls-editor .touch-editor-toolbar { z-index: 5; }
-    .touch-controls-editor [data-save] { visibility: hidden; }
+    .touch-controls-editor [data-apply] { visibility: hidden; }
 }

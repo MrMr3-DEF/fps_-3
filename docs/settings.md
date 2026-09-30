@@ -1,13 +1,17 @@
 # Settings
 
 Settings are available from the main menu and the offline pause menu. All categories
-share one draft: **Apply** saves and activates changes, **Back** discards unapplied
-changes, and **Reset all settings** in the **Reset** menu stages the defaults for every category. Resetting keybinds or
+share one draft: **Back** sits below the categories when there are no pending
+changes. Editing a setting replaces it with side-by-side **Apply** and **Discard**
+buttons. Apply saves and activates the shared draft; Discard restores the applied
+values. Either action stays in settings and restores Back. Escape follows the
+visible Discard or Back action. **Reset all settings** in the **Reset** menu stages the defaults for every category. Resetting keybinds or
 the crosshair within its category only stages defaults for that category.
 
 Categories form a vertical sidebar on the left. The sidebar and category content
-scroll independently on smaller screens, while Apply and Back remain visible below
-the content. Category buttons share the main menu's width, rounded shape, padding,
+scroll independently on smaller screens, while the action buttons remain reachable
+below the categories. There is no footer box; the content uses the full available
+height. Category and action buttons share the main menu's rounded shape, padding,
 dark translucent surface and cyan active state. Their left edge stays on the same
 horizontal anchor as the main menu buttons, and the first category aligns with the
 top edge of the settings box. The content box fits the remaining width beside the
@@ -21,7 +25,7 @@ content area's width, including stacked labels and sliders on narrow screens.
 - **Graphics:** render scale, render distance, particles, shadows and quality,
   lava glow, muzzle flashes, bullet trails, FPS counter.
 - **Accessibility:** photosensitivity mode.
-- **Reset:** global reset for every settings category. The footer contains only Apply and Back.
+- **Reset:** global reset for every settings category.
 - **Keybinds:** all existing keyboard gameplay actions. Select an action and press
   a key; Escape cancels capture. Assigning a used key swaps its previous action
   with the selected action. Escape remains the pause shortcut. Shift and Ctrl
@@ -32,8 +36,10 @@ content area's width, including stacked labels and sliders on narrow screens.
   Keyboard restores **Keybinds**. Apply saves the input method. The touch editor
   has a blank sky, draggable controls, and a 50–250% size slider for the selected control.
   Selecting Fire also provides Joystick/Button options; Joystick defaults to holding
-  to shoot and dragging to aim. Its Save immediately stores the layout and Fire type;
-  Exit asks before discarding its draft.
+  to shoot and dragging to aim. Its Apply commits the layout, Fire type, and shared
+  settings draft immediately, including the input method, while keeping the editor
+  open. Returning to settings requires no second Apply. Exit asks before discarding
+  changes made since the editor's last Apply.
   See [Mobile controls](mobile-controls.md) for the editor and input lifecycle.
 - **Crosshair:** ring, cross, or dot; color, size, thickness, gap, opacity,
   shadow, center dot, and hitmarker. Shadow, center dot, and hitmarker have expandable controls.
@@ -63,6 +69,12 @@ Category-button follow-up on September 30, 2026: native Chrome at 1728 × 918,
 924 × 412, 500 × 300, and 500 × 250 confirmed matching main-menu button widths,
 horizontal positions and styles, plus alignment with the settings box's top edge.
 The short layout retained independent tab scrolling and visible Apply/Back buttons.
+
+Sidebar-action follow-up on September 30, 2026: native Chrome at 1728 × 918,
+924 × 412, and 500 × 250 confirmed Back below the categories, side-by-side
+Apply/Discard after an edit, restored values after Discard, and Apply persistence
+across reload. Actions remain visible while short-screen categories scroll. Escape
+discards a pending draft without leaving settings; a subsequent Escape goes Back.
 
 Input-selector follow-up on September 30, 2026: native Chrome desktop showed both
 input options, renamed the category to Keybinds/Controls when switching, exposed

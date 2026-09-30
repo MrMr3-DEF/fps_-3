@@ -4,13 +4,15 @@ import { createTouchControls, applyTouchLayout, getTouchBounds } from './mobileC
 export class MobileControlsEditor {
     isOpen = false;
 
-    open(savedLayout: TouchLayout, savedFireMode: TouchFireMode, onSave: (layout: TouchLayout, fireMode: TouchFireMode) => void): void {
+    open(savedLayout: TouchLayout, savedFireMode: TouchFireMode, onApply: (layout: TouchLayout, fireMode: TouchFireMode) => void): void {
         if (this.isOpen) return;
         this.isOpen = true;
         // This preview owns DOM only. It cannot acquire game input, load a world,
         // dispatch action codes, or mutate the paused match's camera/state.
         const draft = cloneTouchLayout(savedLayout);
         let draftFireMode = savedFireMode;
+        let appliedLayout = cloneTouchLayout(savedLayout);
+        let appliedFireMode = savedFireMode;
         const lifetime = new AbortController();
         const options = { signal: lifetime.signal };
         const previousFocus = document.activeElement as HTMLElement | null;
@@ -22,7 +24,7 @@ export class MobileControlsEditor {
                 <strong>Edit controls</strong>
                 <div class="menu-actions">
                     <button type="button" class="menu-btn secondary" data-exit>Exit</button>
-                    <button type="button" class="menu-btn" data-save>Save</button>
+                    <button type="button" class="menu-btn" data-apply>Apply</button>
                 </div>
             </header>
             <p class="touch-editor-help">Drag controls to move them. Select one to resize. Tap the sky to deselect.</p>
@@ -44,7 +46,7 @@ export class MobileControlsEditor {
         const slider = sizePanel.querySelector('input')!;
         const fireTypeOptions = sizePanel.querySelector<HTMLElement>('.touch-editor-fire-mode')!;
         const exit = root.querySelector<HTMLButtonElement>('[data-exit]')!;
-        const save = root.querySelector<HTMLButtonElement>('[data-save]')!;
+        const apply = root.querySelector<HTMLButtonElement>('[data-apply]')!;
         const confirm = document.createElement('dialog');
         confirm.className = 'touch-editor-confirm';
         confirm.setAttribute('aria-labelledby', 'touch-editor-confirm-title');
@@ -97,6 +99,12 @@ export class MobileControlsEditor {
         };
         const requestExit = () => {
             releaseDrag();
+            // Applying establishes a new baseline without closing the preview.
+            // Only edits since that baseline need the leave confirmation.
+            if (draftFireMode === appliedFireMode && JSON.stringify(draft) === JSON.stringify(appliedLayout)) {
+                close();
+                return;
+            }
             if (!confirm.open) confirm.showModal();
         };
         const goBack = () => { confirm.close(); exit.focus(); };
@@ -108,7 +116,12 @@ export class MobileControlsEditor {
             sizePanel.hidden = true;
         }, options);
         exit.addEventListener('click', requestExit, options);
-        save.addEventListener('click', () => { onSave(cloneTouchLayout(draft), draftFireMode); close(); }, options);
+        apply.addEventListener('click', () => {
+            releaseDrag();
+            onApply(cloneTouchLayout(draft), draftFireMode);
+            appliedLayout = cloneTouchLayout(draft);
+            appliedFireMode = draftFireMode;
+        }, options);
         for (const button of fireTypeOptions.querySelectorAll<HTMLButtonElement>('button')) {
             button.addEventListener('click', () => {
                 releaseDrag();

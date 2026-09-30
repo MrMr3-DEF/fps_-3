@@ -65,10 +65,10 @@ button { border-radius: var(--control-radius); }
 .menu-eyebrow { color: #4088a4; font: 700 11px var(--ui-font); letter-spacing: 3px; margin: 0 0 12px; }
 #panel-main, #panel-pause, #panel-mp, #panel-host-waiting, #panel-join-room { position: absolute; left: max(var(--menu-column-left), env(safe-area-inset-left)); bottom: max(42px, calc(env(safe-area-inset-bottom) + 34px)); flex-direction: column; align-items: stretch; width: var(--menu-column-width); max-width: calc(100vw - 48px); }
 #panel-main { display: flex; }
-#panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn, #panel-settings .settings-tabs .menu-btn { background: #082a3acc; border-color: #8be9fb80; color: #effcff; backdrop-filter: blur(8px); }
-#panel-main .menu-btn:hover, #panel-pause .menu-btn:hover, #panel-mp .menu-btn:hover, #panel-host-waiting .menu-btn:hover, #panel-join-room .menu-btn:hover, #panel-settings .settings-tabs .menu-btn:hover { background: #0c5169ed; }
-#panel-main #btn-play-sp, #panel-pause #btn-pause-resume, #panel-mp #btn-mp-host-view, #panel-host-waiting #btn-host-start, #panel-join-room #btn-join-connect, #panel-settings .settings-tabs .menu-btn[aria-selected="true"] { background: #00a9d5e6; border-color: #bcf7ff; color: #062b3b; }
-#panel-main #btn-play-sp:hover, #panel-pause #btn-pause-resume:hover, #panel-mp #btn-mp-host-view:hover, #panel-host-waiting #btn-host-start:hover, #panel-join-room #btn-join-connect:hover, #panel-settings .settings-tabs .menu-btn[aria-selected="true"]:hover { background: #5fdef7; }
+#panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn, #panel-settings .settings-sidebar .menu-btn { background: #082a3acc; border-color: #8be9fb80; color: #effcff; backdrop-filter: blur(8px); }
+#panel-main .menu-btn:hover, #panel-pause .menu-btn:hover, #panel-mp .menu-btn:hover, #panel-host-waiting .menu-btn:hover, #panel-join-room .menu-btn:hover, #panel-settings .settings-sidebar .menu-btn:hover { background: #0c5169ed; }
+#panel-main #btn-play-sp, #panel-pause #btn-pause-resume, #panel-mp #btn-mp-host-view, #panel-host-waiting #btn-host-start, #panel-join-room #btn-join-connect, #panel-settings .settings-tabs .menu-btn[aria-selected="true"], #panel-settings #btn-settings-apply { background: #00a9d5e6; border-color: #bcf7ff; color: #062b3b; }
+#panel-main #btn-play-sp:hover, #panel-pause #btn-pause-resume:hover, #panel-mp #btn-mp-host-view:hover, #panel-host-waiting #btn-host-start:hover, #panel-join-room #btn-join-connect:hover, #panel-settings .settings-tabs .menu-btn[aria-selected="true"]:hover, #panel-settings #btn-settings-apply:hover { background: #5fdef7; }
 .menu-btn { appearance: none; box-sizing: border-box; border-radius: var(--control-radius); font-family: inherit; line-height: 20px; cursor: pointer; font-weight: bold; border: 1px solid transparent; box-shadow: none; background: #087da8; color: white; min-height: 46px; margin: 0 0 12px; padding: 12px 22px; font-size: 16px; text-align: left; transition: background 150ms; }
 .menu-btn:hover { background: #056a90; }
 .menu-btn.secondary { color: #233c50; background: #dce5ec; border-color: #cedbe4; }
@@ -261,7 +261,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .menu-input:focus { outline: 2px solid var(--menu-accent); outline-offset: 2px; }
 .menu-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .menu-actions-column { display: flex; flex-direction: column; width: 100%; }
-#btn-settings-apply, #btn-host-start, #pause-lobby-info, #pvp-stats { display: none; }
+#btn-host-start, #pause-lobby-info, #pvp-stats { display: none; }
 #mp-name-error, #join-error-log { font-size: 14px; color: #c93649; font-weight: bold; }
 #mp-name-error { min-height: 18px; margin-bottom: 8px; }
 #mp-name-error:empty { display: none; }
@@ -1298,7 +1298,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     .menu-eyebrow { font-size: 9px; margin-bottom: 6px; }
     .menu-btn { min-height: 40px; padding: 10px 16px; font-size: 14px; margin-bottom: 8px; }
     #panel-main, #panel-pause, #panel-mp, #panel-host-waiting, #panel-join-room { bottom: 36px; }
-    #panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn, #panel-settings .settings-tabs .menu-btn { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
+    #panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn, #panel-settings .settings-sidebar .menu-btn { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
     #panel-join-room #input-room-code { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
     #panel-weapons { bottom: 36px; }
     #panel-weapons .menu-btn { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
@@ -1323,16 +1323,21 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .touch-device #npc-interaction:active { background: #dce8f0; }
 #npc-interaction:focus-visible { outline: 2px solid #087da8; outline-offset: 3px; }
 
-/* Categorized settings retain one shared draft and Apply footer. */
+/* Categorized settings retain one shared draft and sidebar actions. */
 #blocker:has(#panel-settings[style*="flex"]) #character-panel { display: none; }
 #instructions:has(#panel-settings[style*="flex"]) { padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(40px, calc(env(safe-area-inset-bottom) + 28px)) max(var(--menu-column-left), env(safe-area-inset-left)); display: flex; flex-direction: column; overflow: hidden; }
 /* Reuse the main menu's column geometry at every breakpoint. The content fits
    beside that column; neither centering nor scroll padding may shift the tabs. */
 #panel-settings { --settings-column-gap: clamp(12px, 2vw, 20px); max-width: calc(var(--menu-column-width) + var(--settings-column-gap) + 920px); width: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; flex: 1; min-height: 0; max-height: none; overflow: hidden; }
-.settings-body { display: grid; grid-template-columns: var(--menu-column-width) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; column-gap: var(--settings-column-gap); flex: 1; min-width: 0; min-height: 0; }
-.settings-tabs { grid-column: 1; grid-row: 1 / -1; display: flex; flex-direction: column; gap: var(--menu-button-gap); min-height: 0; padding: 0; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
-#panel-settings .settings-tabs .menu-btn { flex: none; width: 100%; margin: 0; text-align: left; overflow-wrap: anywhere; }
-#panel-settings .settings-tabs .menu-btn:focus-visible { outline-color: #bcf7ff; outline-offset: -4px; }
+.settings-body { display: grid; grid-template-columns: var(--menu-column-width) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); column-gap: var(--settings-column-gap); flex: 1; min-width: 0; min-height: 0; }
+.settings-sidebar { grid-column: 1; display: flex; flex-direction: column; gap: var(--menu-button-gap); min-width: 0; min-height: 0; }
+.settings-tabs { display: flex; flex-direction: column; gap: var(--menu-button-gap); flex: 0 1 auto; min-height: 0; padding: 0; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
+#panel-settings .settings-sidebar .menu-btn { min-width: 0; margin: 0; text-align: left; overflow-wrap: anywhere; }
+#panel-settings .settings-tabs .menu-btn { flex: none; width: 100%; }
+#panel-settings .settings-sidebar .menu-btn:focus-visible { outline-color: #bcf7ff; outline-offset: -4px; }
+.settings-actions { display: flex; gap: var(--menu-button-gap); flex: none; }
+.settings-actions .menu-btn { flex: 1; }
+#panel-settings .settings-actions .menu-btn[hidden] { display: none; }
 .settings-page .mobile-input-options .menu-btn { flex: 1; min-width: 0; }
 #panel-settings .settings-container { grid-column: 2; grid-row: 1; border: 1px solid #d4e0e8; border-radius: var(--control-radius); background: #f8fafc; padding: clamp(16px, 3vw, 28px); margin: 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; container-type: inline-size; }
 .settings-page[hidden] { display: none; }
@@ -1342,8 +1347,6 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .settings-page input:focus-visible, .settings-page select:focus-visible { outline: 2px solid #087da8; outline-offset: 4px; }
 .settings-page input:disabled { opacity: .35; }
 .settings-page input[type="color"] { width: 60px; height: 34px; padding: 3px; background: white; border: 1px solid #cbd8e1; cursor: pointer; }
-#panel-settings .settings-body > .menu-actions { grid-column: 2; grid-row: 2; padding: 14px clamp(16px, 3vw, 28px) 16px; box-sizing: border-box; margin: 0; background: #ecf1f5; }
-#btn-settings-back { margin-left: auto; }
 .keybind-list { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; margin-bottom: 22px; }
 .keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #e3eaf0; color: #425d70; font-size: 14px; }
 .keybind-row button { min-width: 112px; max-width: 180px; margin: 0; text-align: center; }
@@ -1373,18 +1376,12 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 .settings-page > .settings-row:first-child, .crosshair-editor .settings-row:first-child { border-top: 0; }
-#panel-settings .menu-actions .menu-btn, .settings-page > .menu-btn { min-width: 112px; }
-#panel-settings .menu-actions .menu-btn { text-align: center; }
-#panel-settings .settings-body > .menu-actions .menu-btn { min-width: 0; }
+.settings-page > .menu-btn { min-width: 112px; }
 .settings-page input[type="color"] { appearance: none; box-sizing: border-box; border: 1px solid #cedbe4; border-radius: var(--control-radius); padding: 4px; background: #dce5ec; }
 .settings-page input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .settings-page input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 
 .weapon-tabs .menu-btn[aria-pressed="true"]:hover, .keybind-row .menu-btn.is-listening:hover { background: #056a90; }
-@media (max-width: 600px) {
-    #panel-settings .menu-actions { gap: 8px; }
-    #panel-settings .menu-actions .menu-btn { min-width: 0; flex: 1; }
-}
 .crosshair-dropdown { margin-top: 12px; }
 .crosshair-dropdown > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; list-style: none; }
 .crosshair-dropdown > summary::-webkit-details-marker { display: none; }

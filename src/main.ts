@@ -163,6 +163,7 @@ const UI = {
     get btnSettingsBack() { return getUI<HTMLElement>('btn-settings-back'); },
     get btnSettingsReset() { return getUI<HTMLElement>('btn-settings-reset'); },
     get btnSettingsApply() { return getUI<HTMLElement>('btn-settings-apply'); },
+    get btnSettingsDiscard() { return getUI<HTMLElement>('btn-settings-discard'); },
     get btnMpBack() { return getUI<HTMLElement>('btn-mp-back'); },
     get btnMpHostView() { return getUI<HTMLElement>('btn-mp-host-view'); },
     get btnMpJoinView() { return getUI<HTMLElement>('btn-mp-join-view'); },
@@ -397,6 +398,11 @@ function setupMenuListeners(): void {
             applyPendingSettings();
         });
     }
+
+    UI.btnSettingsDiscard?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        resetPendingSettings();
+    });
 
     if (UI.btnMpBack) {
         UI.btnMpBack.addEventListener('click', (e) => {
@@ -1139,10 +1145,15 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         JSON.stringify(a.crosshair) === JSON.stringify(b.crosshair);
 }
 
-function updateApplyButton(): void {
-    if (UI.btnSettingsApply) {
-        UI.btnSettingsApply.style.display = settingsEqual(pendingSettings, userSettings) ? 'none' : 'inline-block';
-    }
+function updateSettingsActions(): void {
+    const changed = !settingsEqual(pendingSettings, userSettings);
+    const actions = [UI.btnSettingsBack, UI.btnSettingsApply, UI.btnSettingsDiscard];
+    const focusedAction = actions.find(button => button === document.activeElement);
+    if (UI.btnSettingsBack) UI.btnSettingsBack.hidden = changed;
+    if (UI.btnSettingsApply) UI.btnSettingsApply.hidden = !changed;
+    if (UI.btnSettingsDiscard) UI.btnSettingsDiscard.hidden = !changed;
+    // A completed action disappears; keep keyboard focus in the same location.
+    if (focusedAction?.hidden) (changed ? UI.btnSettingsApply : UI.btnSettingsBack)?.focus();
 }
 
 function syncSettingsControls(settings: UserSettings = pendingSettings): void {
@@ -1182,7 +1193,7 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     if (UI.settingPhotosensitivity) UI.settingPhotosensitivity.checked = settings.photosensitivityMode;
     setCheckboxLabel(UI.settingPhotosensitivityValue, settings.photosensitivityMode);
     syncSettingsMenu?.(settings);
-    updateApplyButton();
+    updateSettingsActions();
 }
 
 function resetPendingSettings(): void {
@@ -1238,14 +1249,11 @@ function applyLiveSettings(): void {
 function setupSettingsControls(): void {
     syncSettingsMenu = setupSettingsMenu(() => pendingSettings, updatePendingSettings, () => {
         mobileControlsEditor.open(pendingSettings.touchLayout, pendingSettings.touchFireMode, (layout, fireMode) => {
-            // Editor Save persists its layout and Fire type. Other settings retain their
-            // existing Apply/Back draft lifecycle, including the input toggle.
-            userSettings.touchLayout = cloneTouchLayout(layout);
+            // Editor Apply commits the shared draft, including the Touch selection.
+            // Returning from this submenu must not require a second Apply.
             pendingSettings.touchLayout = cloneTouchLayout(layout);
-            userSettings.touchFireMode = pendingSettings.touchFireMode = fireMode;
-            saveUserSettings();
-            syncMobileControls?.();
-            syncSettingsControls();
+            pendingSettings.touchFireMode = fireMode;
+            applyPendingSettings();
         });
     });
     resetPendingSettings();

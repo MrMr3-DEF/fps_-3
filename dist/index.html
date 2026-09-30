@@ -12,9 +12,9 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-DolQ3cRH.js"></script>
+  <script type="module" crossorigin src="/assets/index-NrVhQzyv.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-DxHwRq2j.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-kHi23OD-.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-Bxc3niyJ.css">
 </head>
 
 <body>
@@ -172,10 +172,11 @@
                         <span class="settings-value" id="setting-photosensitivity-value">Off</span>
                     </div>
                 </div>
-                <div class="menu-actions">
-                    <button class="menu-btn secondary" id="btn-settings-reset">Reset all settings</button>
-                    <button class="menu-btn" id="btn-settings-apply">Apply</button>
-                    <button class="menu-btn" id="btn-settings-back" data-menu-back>Back</button>
+                <button class="menu-btn secondary" id="btn-settings-reset">Reset all settings</button>
+                <div class="settings-actions">
+                    <button type="button" class="menu-btn" id="btn-settings-back" data-menu-back>Back</button>
+                    <button type="button" class="menu-btn" id="btn-settings-apply" hidden>Apply</button>
+                    <button type="button" class="menu-btn" id="btn-settings-discard" data-menu-back hidden>Discard</button>
                 </div>
             </div>
 
