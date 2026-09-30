@@ -70,6 +70,11 @@ Vite writes to `dist/`, empties the directory first, and splits Three.js into it
 
 Local-only material is ignored by `.gitignore`: dependencies, `.wrangler/`, `.env*`, logs, editor/OS clutter, coverage, screenshots, and analysis artifacts. Tests are not temporary output and must remain tracked.
 
+Before committing, inspect `git status --short` and explicitly add new source files,
+tests, and generated `dist/assets/` files. `git commit -a` only includes paths that
+Git already tracks; omitted new modules can pass local checks but fail CI's clean
+checkout, and omitted bundles leave `dist/index.html` pointing at missing assets.
+
 ## Tests
 
 The test suite focuses on deterministic logic and security boundaries that can run without WebGL or a browser:
