@@ -7,7 +7,12 @@ the crosshair within its category only stages defaults for that category.
 
 Categories form a vertical sidebar on the left. The sidebar and category content
 scroll independently on smaller screens, while Apply and Back remain visible below
-the content. Up/Down arrows move between tabs; Home/End select the first/last tab
+the content. Category buttons share the main menu's width, rounded shape, padding,
+dark translucent surface and cyan active state. Their left edge stays on the same
+horizontal anchor as the main menu buttons, and the first category aligns with the
+top edge of the settings box. The content box fits the remaining width beside the
+button column, up to 920px. Compact layouts reuse the main menu's smaller buttons
+and spacing. Up/Down arrows move between tabs; Home/End select the first/last tab
 and bring it into view. Selecting a category starts its content at the top. Settings
 hides the game title and has no visible Settings heading. Controls adapt to the
 content area's width, including stacked labels and sliders on narrow screens.
@@ -53,6 +58,11 @@ at 821 × 400, 821 × 300, and 500 × 300. Checked independent sidebar/content s
 Up/Down and Home/End navigation, narrow graphics/crosshair/input controls, visible
 Apply/Back with an unsaved draft, hidden headings in settings, and title restoration
 after Back. The existing Apply/Back draft lifecycle was retained.
+
+Category-button follow-up on September 30, 2026: native Chrome at 1728 × 918,
+924 × 412, 500 × 300, and 500 × 250 confirmed matching main-menu button widths,
+horizontal positions and styles, plus alignment with the settings box's top edge.
+The short layout retained independent tab scrolling and visible Apply/Back buttons.
 
 Input-selector follow-up on September 30, 2026: native Chrome desktop showed both
 input options, renamed the category to Keybinds/Controls when switching, exposed

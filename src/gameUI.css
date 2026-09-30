@@ -55,7 +55,7 @@ body {
 
 
 /* Menu sky, character scan, and shared controls. */
-:root { --control-radius: 4px; --menu-accent: #087da8; --accent-pink: #ff0055; --accent-blue: #00aaee; --menu-sky: linear-gradient(#55afe0 0%, #83cbed 58%, #b7e4f7 100%); }
+:root { --control-radius: 4px; --menu-accent: #087da8; --accent-pink: #ff0055; --accent-blue: #00aaee; --menu-sky: linear-gradient(#55afe0 0%, #83cbed 58%, #b7e4f7 100%); --menu-column-left: clamp(24px, 5vw, 80px); --menu-column-width: min(340px, 38vw); --menu-button-gap: 12px; }
 button, input, select, textarea { font-family: inherit; }
 button { border-radius: var(--control-radius); }
 #blocker { position: fixed; inset: 0; display: block; background: var(--menu-sky); text-align: left; cursor: default; overflow: hidden; z-index: 10; color: #1a1c24; }
@@ -63,12 +63,12 @@ button { border-radius: var(--control-radius); }
 #instructions > * { pointer-events: auto; }
 #title { position: absolute; top: max(28px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 80px); color: #f1fcff; font-size: clamp(30px, 4.8vw, 68px); text-align: center; letter-spacing: -2px; margin: 0; text-shadow: 0 2px 18px #052536a8, 0 0 2px #052536; }
 .menu-eyebrow { color: #4088a4; font: 700 11px var(--ui-font); letter-spacing: 3px; margin: 0 0 12px; }
-#panel-main, #panel-pause, #panel-mp, #panel-host-waiting, #panel-join-room { position: absolute; left: clamp(24px, 5vw, 80px); bottom: max(42px, calc(env(safe-area-inset-bottom) + 34px)); flex-direction: column; align-items: stretch; width: min(340px, 38vw); max-width: calc(100vw - 48px); }
+#panel-main, #panel-pause, #panel-mp, #panel-host-waiting, #panel-join-room { position: absolute; left: max(var(--menu-column-left), env(safe-area-inset-left)); bottom: max(42px, calc(env(safe-area-inset-bottom) + 34px)); flex-direction: column; align-items: stretch; width: var(--menu-column-width); max-width: calc(100vw - 48px); }
 #panel-main { display: flex; }
-#panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn { background: #082a3acc; border-color: #8be9fb80; color: #effcff; backdrop-filter: blur(8px); }
-#panel-main .menu-btn:hover, #panel-pause .menu-btn:hover, #panel-mp .menu-btn:hover, #panel-host-waiting .menu-btn:hover, #panel-join-room .menu-btn:hover { background: #0c5169ed; }
-#panel-main #btn-play-sp, #panel-pause #btn-pause-resume, #panel-mp #btn-mp-host-view, #panel-host-waiting #btn-host-start, #panel-join-room #btn-join-connect { background: #00a9d5e6; border-color: #bcf7ff; color: #062b3b; }
-#panel-main #btn-play-sp:hover, #panel-pause #btn-pause-resume:hover, #panel-mp #btn-mp-host-view:hover, #panel-host-waiting #btn-host-start:hover, #panel-join-room #btn-join-connect:hover { background: #5fdef7; }
+#panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn, #panel-settings .settings-tabs .menu-btn { background: #082a3acc; border-color: #8be9fb80; color: #effcff; backdrop-filter: blur(8px); }
+#panel-main .menu-btn:hover, #panel-pause .menu-btn:hover, #panel-mp .menu-btn:hover, #panel-host-waiting .menu-btn:hover, #panel-join-room .menu-btn:hover, #panel-settings .settings-tabs .menu-btn:hover { background: #0c5169ed; }
+#panel-main #btn-play-sp, #panel-pause #btn-pause-resume, #panel-mp #btn-mp-host-view, #panel-host-waiting #btn-host-start, #panel-join-room #btn-join-connect, #panel-settings .settings-tabs .menu-btn[aria-selected="true"] { background: #00a9d5e6; border-color: #bcf7ff; color: #062b3b; }
+#panel-main #btn-play-sp:hover, #panel-pause #btn-pause-resume:hover, #panel-mp #btn-mp-host-view:hover, #panel-host-waiting #btn-host-start:hover, #panel-join-room #btn-join-connect:hover, #panel-settings .settings-tabs .menu-btn[aria-selected="true"]:hover { background: #5fdef7; }
 .menu-btn { appearance: none; box-sizing: border-box; border-radius: var(--control-radius); font-family: inherit; line-height: 20px; cursor: pointer; font-weight: bold; border: 1px solid transparent; box-shadow: none; background: #087da8; color: white; min-height: 46px; margin: 0 0 12px; padding: 12px 22px; font-size: 16px; text-align: left; transition: background 150ms; }
 .menu-btn:hover { background: #056a90; }
 .menu-btn.secondary { color: #233c50; background: #dce5ec; border-color: #cedbe4; }
@@ -94,7 +94,7 @@ body button:focus-visible, #character-color:focus-visible { outline: 3px solid #
 .color-picker-tile:focus-within { outline: 3px solid #078ab7; outline-offset: 3px; }
 #legal-links { position: absolute; z-index: 11; display: flex; gap: 14px; align-items: center; left: clamp(24px, 5vw, 80px); right: auto; bottom: max(12px, env(safe-area-inset-bottom)); font-size: 11px; }
 .weapon-tabs { display: flex; flex-direction: column; width: 100%; }
-#panel-weapons { position: absolute; left: clamp(24px, 5vw, 80px); bottom: max(42px, calc(env(safe-area-inset-bottom) + 34px)); width: min(340px, 38vw); max-width: calc(100vw - 48px); max-height: calc(100dvh - 100px); box-sizing: border-box; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; overflow-y: auto; }
+#panel-weapons { position: absolute; left: max(var(--menu-column-left), env(safe-area-inset-left)); bottom: max(42px, calc(env(safe-area-inset-bottom) + 34px)); width: var(--menu-column-width); max-width: calc(100vw - 48px); max-height: calc(100dvh - 100px); box-sizing: border-box; margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; overflow-y: auto; }
 #panel-weapons .menu-btn { width: 100%; flex: none; background: #082a3acc; border-color: #8be9fb80; color: #effcff; backdrop-filter: blur(8px); }
 #panel-weapons .menu-btn:hover { background: #0c5169ed; }
 #panel-weapons .weapon-tabs .menu-btn[aria-pressed="true"] { background: #00a9d5e6; border-color: #bcf7ff; color: #062b3b; }
@@ -1292,14 +1292,15 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 
 /* Compact layouts. */
 @media (max-height: 550px) {
+    :root { --menu-column-left: 24px; --menu-column-width: min(300px, 36vw); --menu-button-gap: 5px; }
     #instructions { padding: 18px 24px 40px; }
     #title { top: 14px; font-size: 30px; }
     .menu-eyebrow { font-size: 9px; margin-bottom: 6px; }
     .menu-btn { min-height: 40px; padding: 10px 16px; font-size: 14px; margin-bottom: 8px; }
-    #panel-main, #panel-pause, #panel-mp, #panel-host-waiting, #panel-join-room { left: 24px; bottom: 36px; width: min(300px, 36vw); }
-    #panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
+    #panel-main, #panel-pause, #panel-mp, #panel-host-waiting, #panel-join-room { bottom: 36px; }
+    #panel-main .menu-btn, #panel-pause .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn, #panel-settings .settings-tabs .menu-btn { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
     #panel-join-room #input-room-code { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
-    #panel-weapons { left: 24px; bottom: 36px; width: min(300px, 36vw); }
+    #panel-weapons { bottom: 36px; }
     #panel-weapons .menu-btn { min-height: 35px; padding: 6px 12px; margin-bottom: 5px; }
     #weapon-scan-layer .goggles-target-label-panel { font-size: 10px; letter-spacing: 0.02em; }
     .character-customize { gap: 8px; }
@@ -1308,8 +1309,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     #legal-links { position: absolute; z-index: 11; display: flex; gap: 14px; align-items: center; left: 24px; }
 }
 @media (max-width: 700px) {
-    #panel-main, #panel-pause, #panel-mp, #panel-host-waiting, #panel-join-room { width: min(280px, 43vw); }
-    #panel-weapons { width: min(280px, 43vw); }
+    :root { --menu-column-width: min(280px, 43vw); }
     #desktop-control-help, #touch-control-help { font-size: 10px; }
     .color-options { gap: 6px; }
     .color-options button, .color-picker-tile { width: 28px; min-width: 28px; height: 28px; }
@@ -1325,12 +1325,14 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 
 /* Categorized settings retain one shared draft and Apply footer. */
 #blocker:has(#panel-settings[style*="flex"]) #character-panel { display: none; }
-#instructions:has(#panel-settings[style*="flex"]) { padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(40px, calc(env(safe-area-inset-bottom) + 28px)) max(20px, env(safe-area-inset-left)); display: flex; flex-direction: column; overflow: hidden; }
-#panel-settings { max-width: 920px; width: 100%; margin: 0 auto; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; flex: 1; min-height: 0; max-height: none; overflow: hidden; }
-.settings-body { display: grid; grid-template-columns: clamp(144px, 22vw, 180px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; column-gap: clamp(12px, 2vw, 20px); flex: 1; min-width: 0; min-height: 0; }
-.settings-tabs { grid-column: 1; grid-row: 1 / -1; display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 4px; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
-.settings-tabs button { flex: none; width: 100%; margin: 0; padding-inline: clamp(8px, 2vw, 18px); text-align: left; overflow-wrap: anywhere; }
-.settings-tabs .menu-btn[aria-selected="true"] { background: #087da8; border-color: #087da8; color: white; }
+#instructions:has(#panel-settings[style*="flex"]) { padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(40px, calc(env(safe-area-inset-bottom) + 28px)) max(var(--menu-column-left), env(safe-area-inset-left)); display: flex; flex-direction: column; overflow: hidden; }
+/* Reuse the main menu's column geometry at every breakpoint. The content fits
+   beside that column; neither centering nor scroll padding may shift the tabs. */
+#panel-settings { --settings-column-gap: clamp(12px, 2vw, 20px); max-width: calc(var(--menu-column-width) + var(--settings-column-gap) + 920px); width: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; flex: 1; min-height: 0; max-height: none; overflow: hidden; }
+.settings-body { display: grid; grid-template-columns: var(--menu-column-width) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; column-gap: var(--settings-column-gap); flex: 1; min-width: 0; min-height: 0; }
+.settings-tabs { grid-column: 1; grid-row: 1 / -1; display: flex; flex-direction: column; gap: var(--menu-button-gap); min-height: 0; padding: 0; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
+#panel-settings .settings-tabs .menu-btn { flex: none; width: 100%; margin: 0; text-align: left; overflow-wrap: anywhere; }
+#panel-settings .settings-tabs .menu-btn:focus-visible { outline-color: #bcf7ff; outline-offset: -4px; }
 .settings-page .mobile-input-options .menu-btn { flex: 1; min-width: 0; }
 #panel-settings .settings-container { grid-column: 2; grid-row: 1; border: 1px solid #d4e0e8; border-radius: var(--control-radius); background: #f8fafc; padding: clamp(16px, 3vw, 28px); margin: 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; container-type: inline-size; }
 .settings-page[hidden] { display: none; }
@@ -1378,9 +1380,8 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .settings-page input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
 .settings-page input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 2px; }
 
-.settings-tabs .menu-btn[aria-selected="true"]:hover, .weapon-tabs .menu-btn[aria-pressed="true"]:hover, .keybind-row .menu-btn.is-listening:hover { background: #056a90; }
+.weapon-tabs .menu-btn[aria-pressed="true"]:hover, .keybind-row .menu-btn.is-listening:hover { background: #056a90; }
 @media (max-width: 600px) {
-    .settings-tabs .menu-btn { font-size: 13px; }
     #panel-settings .menu-actions { gap: 8px; }
     #panel-settings .menu-actions .menu-btn { min-width: 0; flex: 1; }
 }
