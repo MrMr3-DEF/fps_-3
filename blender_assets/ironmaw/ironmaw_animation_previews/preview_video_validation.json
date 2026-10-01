@@ -1,0 +1,99 @@
+{
+  "resolution": [
+    768,
+    768
+  ],
+  "fps": 24,
+  "codec": "H.264",
+  "clips": {
+    "Stomp": {
+      "frames": 73,
+      "video_duration_seconds": 3.0416666666666665,
+      "clip_duration_seconds": 3.0,
+      "bytes": 1257988,
+      "decoded_start_middle_end": true,
+      "fps": 24
+    },
+    "HeavyPunch": {
+      "frames": 85,
+      "video_duration_seconds": 3.5416666666666665,
+      "clip_duration_seconds": 3.5,
+      "bytes": 1388891,
+      "decoded_start_middle_end": true,
+      "fps": 24
+    },
+    "Death": {
+      "frames": 145,
+      "video_duration_seconds": 6.041666666666667,
+      "clip_duration_seconds": 6.0,
+      "bytes": 2153910,
+      "decoded_start_middle_end": true,
+      "sha256": "abd5c59e55bcc7255111e1a26968f7ec6c5b07f47b1974e3da737763c0653a75",
+      "revision": "2026-10-01 two-stage collapse and flat fists",
+      "fps": 24
+    },
+    "Mount": {
+      "frames": 169,
+      "video_duration_seconds": 7.041666666666667,
+      "clip_duration_seconds": 7.0,
+      "bytes": 3726621,
+      "decoded_start_middle_end": true,
+      "sha256": "fe74e21640878d668599eb61db10883dfbbc0b72eca5c9279241ad16c4a307e2",
+      "revision": "2026-10-01 two-stage collapse and flat fists",
+      "fps": 24
+    },
+    "FinalDeath": {
+      "frames": 121,
+      "video_duration_seconds": 5.041666666666667,
+      "clip_duration_seconds": 5.0,
+      "bytes": 1805272,
+      "decoded_start_middle_end": true,
+      "fps": 24
+    },
+    "Walk": {
+      "frames": 160,
+      "fps": 30,
+      "video_duration_seconds": 5.333333333333333,
+      "clip_duration_seconds": 1.3333333333333333,
+      "cycles": 4,
+      "bytes": 3912088,
+      "decoded_start_middle_end": true,
+      "sha256": "c67c498b3669147052f6755463a8ceb1d6e05f6befb3ab30b9b38537d645c1e6",
+      "preview_only_translation_mps": 1.5
+    },
+    "TurnLeft": {
+      "frames": 360,
+      "fps": 30,
+      "video_duration_seconds": 12,
+      "clip_duration_seconds": 1.3333333333333333,
+      "cycles": 9,
+      "bytes": 8245312,
+      "decoded_start_middle_end": true,
+      "sha256": "50e955852774d6d4a119dba16abb2a8e8242699947efddda1345f6fb3420b48d",
+      "preview_only_rotation_degrees_per_second": -30,
+      "total_heading_degrees": -360,
+      "normal_speed_playback_completed": true,
+      "player": "QuickTime Player"
+    },
+    "TurnRight": {
+      "frames": 360,
+      "fps": 30,
+      "video_duration_seconds": 12,
+      "clip_duration_seconds": 1.3333333333333333,
+      "cycles": 9,
+      "bytes": 8207511,
+      "decoded_start_middle_end": true,
+      "sha256": "79a2c99cf9325b0495053d2aa1f3c5059289b25c948f703ae02b1888b23b35f6",
+      "preview_only_rotation_degrees_per_second": 30,
+      "total_heading_degrees": 360,
+      "normal_speed_playback_completed": true,
+      "player": "QuickTime Player"
+    }
+  },
+  "glb_sha256": "cc9e8f9055c2da2633bae91ddd3ecef9c72d743c663551039f8b0ff827a4e7d3",
+  "normal_speed_death_review": {
+    "player": "QuickTime Player",
+    "playback_completed": true,
+    "fps": 24
+  }
+}

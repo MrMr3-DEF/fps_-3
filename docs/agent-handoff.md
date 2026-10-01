@@ -22,7 +22,7 @@ Snapshot: 25 September 2026, starting from commit `5c51b29` on `main`. The worki
 - `src/dayNightCycle.ts` installs a process-wide Three.js shader-chunk patch for sun-shadow edge fading; changes there need shader compilation and visual checks at noon, low sun, and night. `src/lavaGlow.ts` bakes one texture for pool spill, while `src/world.ts` assigns one movable point light to nearby visible lava.
 - Projectile and sniper range share `BULLET_TRAVEL_DISTANCE`. Smart-goggle lock, shot creation/network packets, and in-flight homing all enforce reachability. See `src/projectileHoming.ts`, `src/weapons.ts`, and `src/projectiles.ts` before changing targeting.
 - The host validates and relays packets, but movement and some hit detection still run in clients. New packet types belong in `src/networkTypes.ts` and `src/multiplayer.ts`; room capabilities and TURN admission belong in `src/worker.ts` and `src/turnRoom.ts`.
-- The goth character uses a GLB from `blender_assets/` plus editable character files in `public/npc/goth/`. Its model load is independent of procedural world staging, so a render-preparation pass does not guarantee the model has finished downloading.
+- The goth character uses a GLB from `blender_assets/goth_girlfriend/` plus editable character files in `public/npc/goth/`. Its model load is independent of procedural world staging, so a render-preparation pass does not guarantee the model has finished downloading.
 
 ## Verification snapshot
 

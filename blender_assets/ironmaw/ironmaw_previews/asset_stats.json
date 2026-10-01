@@ -1,0 +1,17 @@
+{
+  "meshes": 19,
+  "transform_nodes": 21,
+  "triangles": 1680,
+  "materials": 3,
+  "animation_actions": 0,
+  "opening_hinges": [
+    "H_ChestDoor_L",
+    "H_ShoulderFlap_L",
+    "H_ChestDoor_R",
+    "H_ShoulderFlap_R",
+    "H_Helmet_Rear"
+  ],
+  "resets_used": 0,
+  "opening_check_positions": 81,
+  "opening_collisions_above_4mm": 0
+}

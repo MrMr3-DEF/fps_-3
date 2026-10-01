@@ -8,7 +8,7 @@ import { state } from '../src/state.js';
 
 // Read the shipped rig's real hierarchy/transforms without requiring image decoding or WebGL.
 function rig() {
-    const data = readFileSync(new URL('../blender_assets/Goth Girl - Makeup Rigged.glb', import.meta.url));
+    const data = readFileSync(new URL('../blender_assets/goth_girlfriend/Goth Girl - Makeup Rigged.glb', import.meta.url));
     const gltf = JSON.parse(data.subarray(20, 20 + data.readUInt32LE(12)).toString());
     const joints = new Set(gltf.skins[0].joints);
     const nodes = gltf.nodes.map((node: any, index: number) => {

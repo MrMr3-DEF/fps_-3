@@ -1,0 +1,57 @@
+{
+  "fps": 24,
+  "frame_to_seconds": "(frame - 1) / 24",
+  "material": "IRONMAW_Eye_State",
+  "clone_per_instance": true,
+  "colors_linear": {
+    "red": [
+      1,
+      0.018,
+      0.004
+    ],
+    "blue": [
+      0.008,
+      0.24,
+      1
+    ],
+    "gray": [
+      0.24,
+      0.27,
+      0.3
+    ]
+  },
+  "normal_emission_strength": 1.35,
+  "events": {
+    "Stomp": [],
+    "HeavyPunch": [],
+    "Death": [
+      {
+        "start_frame": 12,
+        "end_frame": 28,
+        "start_seconds": 0.4583333333333333,
+        "end_seconds": 1.125,
+        "operation": "fade current color to gray and emission strength to zero"
+      }
+    ],
+    "Mount": [
+      {
+        "start_frame": 1,
+        "operation": "gray, emission zero"
+      },
+      {
+        "start_frame": 44,
+        "end_frame": 56,
+        "start_seconds": 1.7916666666666667,
+        "end_seconds": 2.2916666666666665,
+        "operation": "fade gray to blue and emission strength to 1.35"
+      }
+    ],
+    "FinalDeath": [
+      {
+        "frame": 30,
+        "seconds": 1.2083333333333333,
+        "operation": "gray, emission zero"
+      }
+    ]
+  }
+}

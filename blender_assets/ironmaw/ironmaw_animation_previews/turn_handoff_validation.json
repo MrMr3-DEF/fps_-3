@@ -1,0 +1,38 @@
+{
+  "Standing_to_TurnLeft": {
+    "body_blend_seconds": 0.4,
+    "foot_handoff_seconds": 1.3333333333333333,
+    "support_ankle_drift_m": 0,
+    "minimum_sole_z_m": -5.961919669061899e-08,
+    "unreachable_leg_error_m": 0,
+    "endpoint_matrix_difference": 3.814697265625e-06,
+    "passed": true
+  },
+  "Standing_to_TurnRight": {
+    "body_blend_seconds": 0.4,
+    "foot_handoff_seconds": 1.3333333333333333,
+    "support_ankle_drift_m": 0,
+    "minimum_sole_z_m": -5.961919669061899e-08,
+    "unreachable_leg_error_m": 0,
+    "endpoint_matrix_difference": 3.814697265625e-06,
+    "passed": true
+  },
+  "Walk_to_TurnLeft": {
+    "body_blend_seconds": 0.4,
+    "foot_handoff_seconds": 1.3333333333333333,
+    "support_ankle_drift_m": 0,
+    "minimum_sole_z_m": 2.9802322387695312e-08,
+    "unreachable_leg_error_m": 0,
+    "endpoint_matrix_difference": 6.67572021484375e-06,
+    "passed": true
+  },
+  "Walk_to_TurnRight": {
+    "body_blend_seconds": 0.4,
+    "foot_handoff_seconds": 1.3333333333333333,
+    "support_ankle_drift_m": 0,
+    "minimum_sole_z_m": 2.9802322387695312e-08,
+    "unreachable_leg_error_m": 0,
+    "endpoint_matrix_difference": 1.1920928955078125e-05,
+    "passed": true
+  }
+}

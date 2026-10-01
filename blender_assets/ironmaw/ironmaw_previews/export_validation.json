@@ -1,0 +1,30 @@
+{
+  "format": "glTF 2.0 binary",
+  "bytes": 241356,
+  "sha256": "e5d53fa9bdcec5fc4025c9aee79154a61580d385a279fb733b12aaaa884adc34",
+  "triangles": 1680,
+  "meshes": 19,
+  "materials": 3,
+  "embedded_images": 5,
+  "animations": 0,
+  "skins": 0,
+  "cameras": 0,
+  "lights": 0,
+  "configuration": "closed red eye",
+  "eye_material": "IRONMAW_Eye_State",
+  "eye_material_mesh_users": [
+    "M_EyeLens"
+  ],
+  "eye_texture": "neutral grayscale, tint factors preserved",
+  "nearest_filtering": true,
+  "opening_hinges": [
+    "H_ChestDoor_L",
+    "H_ChestDoor_R",
+    "H_ShoulderFlap_L",
+    "H_ShoulderFlap_R",
+    "H_Helmet_Rear"
+  ],
+  "closed_hinge_rotations_verified": true,
+  "reset_count": 0,
+  "roundtrip_render_verified": true
+}

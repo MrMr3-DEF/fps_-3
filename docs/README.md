@@ -28,7 +28,7 @@ Each document owns a distinct subject so information has one canonical location:
 | Tests | Node's built-in test runner against TypeScript source |
 | Production host | `fps.luigi.host` in the checked-in Worker configuration |
 
-The browser entry point is `src/main.ts`; the Worker entry point is `src/worker.ts`. `src/config.ts` is the canonical location for gameplay constants, limits, weapon statistics, and world-density settings. Most arena visuals and textures are generated in code; the goth character's GLB is a checked-in asset under `blender_assets/`, and character text lives in `public/npc/goth/`.
+The browser entry point is `src/main.ts`; the Worker entry point is `src/worker.ts`. `src/config.ts` is the canonical location for gameplay constants, limits, weapon statistics, and world-density settings. Most arena visuals and textures are generated in code; the goth character's GLB is a checked-in asset under `blender_assets/goth_girlfriend/`, and character text lives in `public/npc/goth/`.
 
 ## Read before changing code
 

@@ -1,0 +1,69 @@
+{
+  "other_clips_unchanged": {
+    "Stomp": true,
+    "HeavyPunch": true,
+    "Death": true,
+    "Mount": true,
+    "FinalDeath": true,
+    "Walk": true
+  },
+  "clips": {
+    "TurnLeft": {
+      "duration_seconds": 1.3333333333333333,
+      "matching_yaw_degrees_per_second": -30.0,
+      "degrees_per_cycle": -40.0,
+      "contact_rate_per_minute": 90,
+      "loop_matrix_error": 0.0,
+      "four_cycle_support_corner_drift_m": 0.0001271109123369709,
+      "support_rotation_drift_degrees": 0.0,
+      "minimum_foot_ground_z_m": -0.00010359566658735275,
+      "rigid_link_error_m": 1.3322450056474366e-06,
+      "pelvis_horizontal_radius_m": 0.08500000176184316,
+      "samples_without_support": 0,
+      "yaw_lower_body_drift": 0,
+      "heading_tracks": false
+    },
+    "TurnRight": {
+      "duration_seconds": 1.3333333333333333,
+      "matching_yaw_degrees_per_second": 30.0,
+      "degrees_per_cycle": 40.0,
+      "contact_rate_per_minute": 90,
+      "loop_matrix_error": 0.0,
+      "four_cycle_support_corner_drift_m": 0.0001312069133511489,
+      "support_rotation_drift_degrees": 0.0,
+      "minimum_foot_ground_z_m": -0.00011769208504119888,
+      "rigid_link_error_m": 1.3788110944101817e-06,
+      "pelvis_horizontal_radius_m": 0.08500000176184316,
+      "samples_without_support": 0,
+      "yaw_lower_body_drift": 0,
+      "heading_tracks": false
+    }
+  },
+  "passed": true,
+  "exported": {
+    "TurnLeft": {
+      "duration_seconds": 1.3333333333333333,
+      "start_seconds": 0,
+      "loop_matrix_error": 0.0,
+      "four_cycle_support_vertex_drift_m": 0.0001277797675479969,
+      "minimum_foot_z_m": -0.00010377762373536825,
+      "yaw_sweep_lower_body_drift": 0,
+      "waist_yaw_animated": false,
+      "root_animated": false,
+      "preview_control_exported": false,
+      "passed": true
+    },
+    "TurnRight": {
+      "duration_seconds": 1.3333333333333333,
+      "start_seconds": 0,
+      "loop_matrix_error": 0.0,
+      "four_cycle_support_vertex_drift_m": 0.00013130233249614522,
+      "minimum_foot_z_m": -0.00011822977103292942,
+      "yaw_sweep_lower_body_drift": 0,
+      "waist_yaw_animated": false,
+      "root_animated": false,
+      "preview_control_exported": false,
+      "passed": true
+    }
+  }
+}

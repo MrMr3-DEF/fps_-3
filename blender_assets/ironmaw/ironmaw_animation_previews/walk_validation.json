@@ -1,0 +1,50 @@
+{
+  "duration_seconds": 1.3333333333333333,
+  "fps_source": 24,
+  "frames": [
+    1,
+    33
+  ],
+  "equivalent_30fps_intervals": 40,
+  "contacts_per_minute": 90,
+  "contact_seconds": {
+    "left": [
+      0,
+      1.3333333333333333
+    ],
+    "right": [
+      0.6666666666666666
+    ]
+  },
+  "stride_m": 2.0,
+  "step_length_m": 1.0,
+  "speed_mps": 1.5,
+  "support_fraction": 0.6,
+  "loop_matrix_error": 0.0,
+  "analytic_seam_velocity_difference_mps": 3.1939577805478736e-05,
+  "support_foot_drift_with_game_translation_m": 0.000531792426905603,
+  "minimum_ground": [
+    -0.0005432707839645445,
+    1.5,
+    "PART_Foot_L_02"
+  ],
+  "rigid_joint_length_error_m": 1.4265129402168952e-06,
+  "other_clips_unchanged": {
+    "Stomp": true,
+    "HeavyPunch": true,
+    "Death": true,
+    "Mount": true,
+    "FinalDeath": true
+  },
+  "waist_yaw_keyed": false,
+  "exported": {
+    "duration_seconds": 1.3333333333333333,
+    "loop_matrix_error": 0.0,
+    "support_drift_m": 0.0005319584716687196,
+    "minimum_foot_z_m": -0.0005430746823549271,
+    "yaw_sweep_lower_body_drift": 0,
+    "waist_yaw_animated": false,
+    "root_animated": false
+  },
+  "passed": true
+}

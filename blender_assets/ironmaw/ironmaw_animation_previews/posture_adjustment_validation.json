@@ -1,0 +1,52 @@
+{
+  "waist_correction_degrees": -15,
+  "Death_blend_frames": [
+    54,
+    70
+  ],
+  "Mount_blend_out_frames": [
+    47,
+    84
+  ],
+  "changed_channels": [
+    [
+      "Death",
+      "pose.bones[\"CTRL_Waist\"].rotation_quaternion",
+      0
+    ],
+    [
+      "Death",
+      "pose.bones[\"CTRL_Waist\"].rotation_quaternion",
+      1
+    ],
+    [
+      "Mount",
+      "pose.bones[\"CTRL_Waist\"].rotation_quaternion",
+      0
+    ],
+    [
+      "Mount",
+      "pose.bones[\"CTRL_Waist\"].rotation_quaternion",
+      1
+    ]
+  ],
+  "death_mount_max_matrix_error": 1.430511474609375e-06,
+  "clearance": {
+    "Death": {
+      "overlap": [
+        0,
+        null,
+        null
+      ],
+      "minimum_ground_z_m": -5.634501576423645e-07
+    },
+    "Mount": {
+      "overlap": [
+        0,
+        null,
+        null
+      ],
+      "minimum_ground_z_m": -3.008462954312563e-07
+    }
+  }
+}

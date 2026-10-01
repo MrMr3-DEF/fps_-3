@@ -1,0 +1,79 @@
+{
+  "Stomp": {
+    "frames_checked": 73,
+    "max_surface_error_m": 4.951133646320149e-06,
+    "worst_at": [
+      42,
+      "M_Forearm_L"
+    ]
+  },
+  "HeavyPunch": {
+    "frames_checked": 85,
+    "max_surface_error_m": 5.941360375584179e-06,
+    "worst_at": [
+      48,
+      "M_Forearm_R"
+    ]
+  },
+  "Death": {
+    "frames_checked": 145,
+    "max_surface_error_m": 6.060945424502449e-06,
+    "worst_at": [
+      15,
+      "M_Forearm_R"
+    ]
+  },
+  "Mount": {
+    "frames_checked": 169,
+    "max_surface_error_m": 1.2430962721089087e-05,
+    "worst_at": [
+      113,
+      "M_Foot_R"
+    ]
+  },
+  "FinalDeath": {
+    "frames_checked": 121,
+    "max_surface_error_m": 5.039155888985789e-05,
+    "worst_at": [
+      74,
+      "M_UpperTorso_Cavity"
+    ]
+  },
+  "Walk": {
+    "frames_checked": 33,
+    "max_surface_error_m": 4.369700414366896e-06,
+    "worst_at": [
+      6,
+      "M_UpperArm_R"
+    ]
+  },
+  "TurnLeft": {
+    "frames_checked": 33,
+    "max_surface_error_m": 3.882202931827679e-06,
+    "worst_at": [
+      10,
+      "M_HelmetShell"
+    ]
+  },
+  "TurnRight": {
+    "frames_checked": 33,
+    "max_surface_error_m": 4.554980558047962e-06,
+    "worst_at": [
+      32,
+      "M_Forearm_L"
+    ]
+  },
+  "death_mount_matrix_error": 1.7881393432617188e-07,
+  "rigid_weight_check": true,
+  "clips": [
+    "Stomp",
+    "HeavyPunch",
+    "Death",
+    "Mount",
+    "FinalDeath",
+    "Walk",
+    "TurnLeft",
+    "TurnRight"
+  ],
+  "passed": true
+}

@@ -1,0 +1,320 @@
+{
+  "revision": "2026-10-01 two-stage collapse and flat fists",
+  "contacts": {
+    "Forearm_L": {
+      "min_z": 7.748603820800781e-07,
+      "vertices_on_ground": 4
+    },
+    "LowerLeg_L": {
+      "min_z": 3.725290298461914e-08,
+      "vertices_on_ground": 1
+    },
+    "Forearm_R": {
+      "min_z": 7.748603820800781e-07,
+      "vertices_on_ground": 4
+    },
+    "LowerLeg_R": {
+      "min_z": 9.685754776000977e-08,
+      "vertices_on_ground": 1
+    }
+  },
+  "hand_matrix_drift": {
+    "Death": 9.5367431640625e-07,
+    "Mount": 1.3113021850585938e-06
+  },
+  "ground": {
+    "Death": [
+      -1.1758479558920953e-06,
+      20,
+      "PART_Foot_L_02"
+    ],
+    "Mount": [
+      -1.7434358596801758e-06,
+      98,
+      "PART_Forearm_L_04"
+    ]
+  },
+  "rigid_link_error_m": 1.379291402425764e-06,
+  "knee_contact_frame": 40,
+  "fist_contact_frame": 64,
+  "settled_frame": 78,
+  "cabin_open_frames": [
+    80,
+    129
+  ],
+  "minor_local_armor_overlap_allowed": true,
+  "knee_matrix_drift": 6.556510925292969e-07,
+  "collapse_samples": [
+    {
+      "frame": 35,
+      "knee_z": 0.5726980566978455,
+      "fist_z": 1.3223237991333008,
+      "chest_angle_degrees": 8.17402205902359
+    },
+    {
+      "frame": 36,
+      "knee_z": 0.4676419794559479,
+      "fist_z": 1.2382166385650635,
+      "chest_angle_degrees": 7.999976032366971
+    },
+    {
+      "frame": 37,
+      "knee_z": 0.36510974168777466,
+      "fist_z": 1.1396687030792236,
+      "chest_angle_degrees": 7.999975178593325
+    },
+    {
+      "frame": 38,
+      "knee_z": 0.25143662095069885,
+      "fist_z": 1.0352089405059814,
+      "chest_angle_degrees": 7.999975178593325
+    },
+    {
+      "frame": 39,
+      "knee_z": 0.17087680101394653,
+      "fist_z": 0.9248483180999756,
+      "chest_angle_degrees": 7.999976032366971
+    },
+    {
+      "frame": 40,
+      "knee_z": -3.725290298461914e-08,
+      "fist_z": 0.808598518371582,
+      "chest_angle_degrees": 7.999976886140617
+    },
+    {
+      "frame": 41,
+      "knee_z": -2.5331974029541016e-07,
+      "fist_z": 0.7204195261001587,
+      "chest_angle_degrees": 9.999974095883534
+    },
+    {
+      "frame": 42,
+      "knee_z": -1.043081283569336e-07,
+      "fist_z": 0.6298894286155701,
+      "chest_angle_degrees": 11.999983258457497
+    },
+    {
+      "frame": 43,
+      "knee_z": -2.7567148208618164e-07,
+      "fist_z": 0.6509360671043396,
+      "chest_angle_degrees": 11.374976553171726
+    },
+    {
+      "frame": 44,
+      "knee_z": -5.21540641784668e-08,
+      "fist_z": 0.6978748440742493,
+      "chest_angle_degrees": 9.999974095883534
+    },
+    {
+      "frame": 45,
+      "knee_z": 6.705522537231445e-08,
+      "fist_z": 0.745742917060852,
+      "chest_angle_degrees": 8.624978468784512
+    },
+    {
+      "frame": 46,
+      "knee_z": 7.450580596923828e-08,
+      "fist_z": 0.767830491065979,
+      "chest_angle_degrees": 7.9999777399142635
+    },
+    {
+      "frame": 47,
+      "knee_z": 8.195638656616211e-08,
+      "fist_z": 0.767830491065979,
+      "chest_angle_degrees": 7.999976032366971
+    },
+    {
+      "frame": 48,
+      "knee_z": 7.450580596923828e-08,
+      "fist_z": 0.767830491065979,
+      "chest_angle_degrees": 7.999976032366971
+    },
+    {
+      "frame": 49,
+      "knee_z": -2.5331974029541016e-07,
+      "fist_z": 0.7646715641021729,
+      "chest_angle_degrees": 8.07809888231993
+    },
+    {
+      "frame": 50,
+      "knee_z": -2.2351741790771484e-08,
+      "fist_z": 0.7551983594894409,
+      "chest_angle_degrees": 8.312480238783504
+    },
+    {
+      "frame": 51,
+      "knee_z": 1.341104507446289e-07,
+      "fist_z": 0.7394201159477234,
+      "chest_angle_degrees": 8.70310388005841
+    },
+    {
+      "frame": 52,
+      "knee_z": 1.4156103134155273e-07,
+      "fist_z": 0.7173539996147156,
+      "chest_angle_degrees": 9.249982612749344
+    },
+    {
+      "frame": 53,
+      "knee_z": -2.682209014892578e-07,
+      "fist_z": 0.6890287399291992,
+      "chest_angle_degrees": 9.95311131421443
+    },
+    {
+      "frame": 54,
+      "knee_z": -4.470348358154297e-08,
+      "fist_z": 0.6544933915138245,
+      "chest_angle_degrees": 10.81248230049085
+    },
+    {
+      "frame": 55,
+      "knee_z": 1.4901161193847656e-08,
+      "fist_z": 0.6138176321983337,
+      "chest_angle_degrees": 11.828106670636004
+    },
+    {
+      "frame": 56,
+      "knee_z": -2.2351741790771484e-08,
+      "fist_z": 0.5670962333679199,
+      "chest_angle_degrees": 12.99997417936614
+    },
+    {
+      "frame": 57,
+      "knee_z": -1.2665987014770508e-07,
+      "fist_z": 0.5144580602645874,
+      "chest_angle_degrees": 14.32810617102241
+    },
+    {
+      "frame": 58,
+      "knee_z": -2.9802322387695312e-08,
+      "fist_z": 0.456066370010376,
+      "chest_angle_degrees": 15.812480447490017
+    },
+    {
+      "frame": 59,
+      "knee_z": -7.450580596923828e-08,
+      "fist_z": 0.39212357997894287,
+      "chest_angle_degrees": 17.453107254052714
+    },
+    {
+      "frame": 60,
+      "knee_z": -3.8743019104003906e-07,
+      "fist_z": 0.322878897190094,
+      "chest_angle_degrees": 19.249979760521327
+    },
+    {
+      "frame": 61,
+      "knee_z": 7.450580596923828e-08,
+      "fist_z": 0.24863344430923462,
+      "chest_angle_degrees": 21.203099674443152
+    },
+    {
+      "frame": 62,
+      "knee_z": -1.9371509552001953e-07,
+      "fist_z": 0.16975529491901398,
+      "chest_angle_degrees": 23.31248065619653
+    },
+    {
+      "frame": 63,
+      "knee_z": -1.7881393432617188e-07,
+      "fist_z": 0.086692214012146,
+      "chest_angle_degrees": 25.578110752950412
+    },
+    {
+      "frame": 64,
+      "knee_z": 3.725290298461914e-08,
+      "fist_z": 1.341104507446289e-07,
+      "chest_angle_degrees": 27.9999899647048
+    },
+    {
+      "frame": 65,
+      "knee_z": -1.4901161193847656e-08,
+      "fist_z": -1.6391277313232422e-07,
+      "chest_angle_degrees": 29.814793425291988
+    },
+    {
+      "frame": 66,
+      "knee_z": -1.7881393432617188e-07,
+      "fist_z": 6.556510925292969e-07,
+      "chest_angle_degrees": 33.185160516518536
+    },
+    {
+      "frame": 67,
+      "knee_z": -5.960464477539063e-08,
+      "fist_z": -1.043081283569336e-07,
+      "chest_angle_degrees": 34.999975929936774
+    },
+    {
+      "frame": 68,
+      "knee_z": -2.384185791015625e-07,
+      "fist_z": -2.682209014892578e-07,
+      "chest_angle_degrees": 33.67185589111155
+    },
+    {
+      "frame": 69,
+      "knee_z": -4.470348358154297e-08,
+      "fist_z": -7.748603820800781e-07,
+      "chest_angle_degrees": 30.74998634154472
+    },
+    {
+      "frame": 70,
+      "knee_z": 4.470348358154297e-08,
+      "fist_z": -2.5331974029541016e-07,
+      "chest_angle_degrees": 27.828098008957674
+    },
+    {
+      "frame": 71,
+      "knee_z": 2.1606683731079102e-07,
+      "fist_z": 3.5762786865234375e-07,
+      "chest_angle_degrees": 26.499981385227034
+    },
+    {
+      "frame": 72,
+      "knee_z": 1.1920928955078125e-07,
+      "fist_z": -3.2782554626464844e-07,
+      "chest_angle_degrees": 26.583062098743778
+    },
+    {
+      "frame": 73,
+      "knee_z": -4.470348358154297e-08,
+      "fist_z": -5.960464477539063e-08,
+      "chest_angle_degrees": 26.79735416131105
+    },
+    {
+      "frame": 74,
+      "knee_z": -1.6391277313232422e-07,
+      "fist_z": -1.043081283569336e-07,
+      "chest_angle_degrees": 27.090357323873548
+    },
+    {
+      "frame": 75,
+      "knee_z": 2.9802322387695312e-08,
+      "fist_z": -2.9802322387695312e-08,
+      "chest_angle_degrees": 27.40959865813265
+    },
+    {
+      "frame": 76,
+      "knee_z": -1.4901161193847656e-07,
+      "fist_z": -6.556510925292969e-07,
+      "chest_angle_degrees": 27.70260182069515
+    },
+    {
+      "frame": 77,
+      "knee_z": 1.1920928955078125e-07,
+      "fist_z": 2.2351741790771484e-08,
+      "chest_angle_degrees": 27.91689046816784
+    },
+    {
+      "frame": 78,
+      "knee_z": 3.725290298461914e-08,
+      "fist_z": 8.046627044677734e-07,
+      "chest_angle_degrees": 27.9999899647048
+    }
+  ],
+  "death_mount_matrix_error": 2.9802322387695312e-08,
+  "other_clips_unchanged": {
+    "Stomp": true,
+    "HeavyPunch": true,
+    "FinalDeath": true
+  },
+  "passed": true
+}

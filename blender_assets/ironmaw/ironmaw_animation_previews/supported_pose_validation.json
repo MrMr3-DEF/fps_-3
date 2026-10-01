@@ -1,0 +1,78 @@
+{
+  "target_lean_degrees": 40,
+  "target_pelvis_z": 1.100000023841858,
+  "hand_contact_frames": {
+    "Death": [
+      58,
+      145
+    ],
+    "Mount": [
+      1,
+      90
+    ]
+  },
+  "max_reach_error_m": 9.716417115335219e-07,
+  "ground": {
+    "Death": [
+      -1.4454126358032227e-06,
+      60,
+      "PART_Forearm_L_04"
+    ],
+    "Mount": [
+      -2.339482307434082e-06,
+      75,
+      "PART_Forearm_L_04"
+    ]
+  },
+  "worst_reach_frame": [
+    "Mount",
+    88
+  ],
+  "clearance": {
+    "Death": [
+      0,
+      null,
+      null
+    ],
+    "Mount": [
+      0,
+      null,
+      null
+    ]
+  },
+  "hand_matrix_drift": {
+    "Death": 9.5367431640625e-07,
+    "Mount": 1.1920928955078125e-06
+  },
+  "link_length_error_m": 9.364331967631756e-07,
+  "final_contacts": {
+    "Forearm_L": {
+      "minimum_z": -7.301568984985352e-07,
+      "vertices_on_ground": 1
+    },
+    "LowerLeg_L": {
+      "minimum_z": 3.725290298461914e-08,
+      "vertices_on_ground": 1
+    },
+    "Forearm_R": {
+      "minimum_z": -7.301568984985352e-07,
+      "vertices_on_ground": 1
+    },
+    "LowerLeg_R": {
+      "minimum_z": 3.725290298461914e-08,
+      "vertices_on_ground": 1
+    }
+  },
+  "death_mount_matrix_error": 4.76837158203125e-07,
+  "other_clips_unchanged": {
+    "Stomp": true,
+    "HeavyPunch": true,
+    "FinalDeath": true
+  },
+  "revision": "2026-10-01 supported kneel",
+  "knees_contact_frame": 54,
+  "fists_contact_frame": 58,
+  "mount_left_foot_plant_frame": 81,
+  "mount_fists_release_after_frame": 90,
+  "passed": true
+}

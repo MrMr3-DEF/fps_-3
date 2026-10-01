@@ -1,0 +1,79 @@
+{
+  "live_ik": {
+    "L": {
+      "pole_angle": -1.3826367855072021,
+      "knee_error_m": 5.462855929083633e-07,
+      "ankle_target_error_m": 1.2731557704981462e-07
+    },
+    "R": {
+      "pole_angle": -1.532755970954895,
+      "knee_error_m": 1.6858739404357614e-07,
+      "ankle_target_error_m": 8.024520884654677e-08
+    }
+  },
+  "rigid_parts": 133,
+  "attack_root_motion_m": {
+    "Stomp": 0,
+    "HeavyPunch": 0
+  },
+  "support_foot_drift_m": {
+    "Stomp": 5.676271659584557e-07,
+    "HeavyPunch": 7.545346803614893e-07
+  },
+  "minimum_ground_z_m": {
+    "Stomp": -3.177687517563754e-07,
+    "HeavyPunch": -2.608142892768228e-07,
+    "Death": -1.1758479558920953e-06,
+    "Mount": -1.7434358596801758e-06,
+    "FinalDeath": -3.124855822989048e-07
+  },
+  "settled_fragment_footprint_overlaps": 0,
+  "death_mount_max_matrix_error": 2.9802322387695312e-08,
+  "reference_pose_errors": {
+    "Stomp": 0.0,
+    "HeavyPunch": 0.0,
+    "Mount": 0.0
+  },
+  "fragment_extent_xy": 12.45318209528923,
+  "arm_revision": "Two-stage Death: knee impact f40, accelerating fall f48-64, flat-fist catch f64, compression and settle through f78. Matching Mount with planted hands through f90.",
+  "contact_worst_detail": {
+    "Death": [
+      -1.1758479558920953e-06,
+      20,
+      "PART_Foot_L_02"
+    ],
+    "Mount": [
+      -1.7434358596801758e-06,
+      98,
+      "PART_Forearm_L_04"
+    ],
+    "HeavyPunch": [
+      -2.608142892768228e-07,
+      43,
+      "PART_Foot_L_02"
+    ]
+  },
+  "sampled_arm_opening_cuboid_overlap_m": [
+    [
+      "HeavyPunch",
+      [
+        0,
+        null,
+        null
+      ]
+    ]
+  ],
+  "full_yaw_sweep_samples": 73,
+  "yaw_lower_body_matrix_drift": 0,
+  "full_yaw_upper_lower_overlap_m": [
+    0,
+    null,
+    null
+  ],
+  "death_mount_render_mean_channel_difference_8bit": 1.2715657552083333e-06,
+  "supported_pose_report": "two_stage_collapse_validation.json",
+  "death_mount_clearance_policy": "Minor local armor/joint overlaps accepted in favor of natural motion and flat fist support; ground contacts verified.",
+  "walk_report": "walk_validation.json",
+  "clip_count": 8,
+  "turn_report": "turn_validation.json"
+}

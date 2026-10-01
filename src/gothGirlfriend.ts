@@ -42,7 +42,7 @@ export function getGothConversationPose(group: THREE.Object3D): { position: THRE
     return { position, lookAt };
 }
 const durations: Record<GothGesture, number> = { Wave: 3.2, Explain: 3.8, Shrug: 3, Agree: 3.4 };
-const modelUrl = new URL('../blender_assets/Goth Girl - Makeup Rigged.glb', import.meta.url).href;
+const modelUrl = new URL('../blender_assets/goth_girlfriend/Goth Girl - Makeup Rigged.glb', import.meta.url).href;
 
 export function getGothPlacement(building: TownBuilding): { position: THREE.Vector3; yaw: number } {
     const position = new THREE.Vector3(building.x, 0.035, building.z);

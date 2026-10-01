@@ -1,0 +1,1437 @@
+{
+  "clips": {
+    "Stomp": {
+      "start": 1,
+      "end": 73,
+      "fps": 24,
+      "duration_seconds": 3.0
+    },
+    "HeavyPunch": {
+      "start": 1,
+      "end": 85,
+      "fps": 24,
+      "duration_seconds": 3.5
+    },
+    "Death": {
+      "start": 1,
+      "end": 145,
+      "fps": 24,
+      "duration_seconds": 6.0
+    },
+    "Mount": {
+      "start": 1,
+      "end": 169,
+      "fps": 24,
+      "duration_seconds": 7.0
+    },
+    "FinalDeath": {
+      "start": 1,
+      "end": 121,
+      "fps": 24,
+      "duration_seconds": 5.0
+    },
+    "Walk": {
+      "start": 1,
+      "end": 33,
+      "fps": 24,
+      "duration_seconds": 1.3333333333333333,
+      "loop": true,
+      "stride_m": 2.0,
+      "matching_speed_mps": 1.5,
+      "contacts_per_minute": 90
+    },
+    "TurnLeft": {
+      "start": 1,
+      "end": 33,
+      "fps": 24,
+      "duration_seconds": 1.3333333333333333,
+      "loop": true,
+      "matching_yaw_degrees_per_second": -30,
+      "heading_degrees_per_cycle": -40,
+      "contacts_per_minute": 90
+    },
+    "TurnRight": {
+      "start": 1,
+      "end": 33,
+      "fps": 24,
+      "duration_seconds": 1.3333333333333333,
+      "loop": true,
+      "matching_yaw_degrees_per_second": 30,
+      "heading_degrees_per_cycle": 40,
+      "contacts_per_minute": 90
+    }
+  },
+  "rigid_pieces": 133,
+  "mesh_count": 20,
+  "qa": {
+    "unreachable": [],
+    "support_foot_max_error": 0,
+    "death_mount_matrix_error": 2.9802322387695312e-08,
+    "supported_pose_report": "two_stage_collapse_validation.json",
+    "walk_report": "walk_validation.json",
+    "turn_report": "turn_validation.json",
+    "turn_handoff_report": "turn_handoff_validation.json"
+  },
+  "kneel_pelvis_offset": [
+    0.0,
+    -0.5,
+    -0.7029090523719788
+  ],
+  "controls": [
+    "CTRL_Root",
+    "CTRL_Pelvis",
+    "CTRL_Waist",
+    "CTRL_Chest",
+    "CTRL_Head",
+    "CTRL_Shoulder_L",
+    "CTRL_Elbow_L",
+    "CTRL_Hip_L",
+    "CTRL_Knee_L",
+    "CTRL_Ankle_L",
+    "CTRL_Shoulder_R",
+    "CTRL_Elbow_R",
+    "CTRL_Hip_R",
+    "CTRL_Knee_R",
+    "CTRL_Ankle_R",
+    "CTRL_TorsoShell",
+    "CTRL_ChestDoor_L",
+    "CTRL_ShoulderFlap_L",
+    "CTRL_ChestDoor_R",
+    "CTRL_ShoulderFlap_R",
+    "CTRL_Helmet_Rear",
+    "CTRL_WaistYaw"
+  ],
+  "pieces": [
+    {
+      "bone": "PART_Pelvis_01",
+      "mesh": "M_Pelvis",
+      "owner": "CTRL_Pelvis",
+      "center": [
+        0.0,
+        0.0,
+        2.5004184246063232
+      ]
+    },
+    {
+      "bone": "PART_Abdomen_01",
+      "mesh": "M_Abdomen",
+      "owner": "CTRL_Pelvis",
+      "center": [
+        0.0,
+        -0.44499996304512024,
+        2.700418472290039
+      ]
+    },
+    {
+      "bone": "PART_Abdomen_02",
+      "mesh": "M_Abdomen",
+      "owner": "CTRL_Waist",
+      "center": [
+        0.0,
+        0.0,
+        3.310209274291992
+      ]
+    },
+    {
+      "bone": "PART_Abdomen_03",
+      "mesh": "M_Abdomen",
+      "owner": "CTRL_Waist",
+      "center": [
+        0.0,
+        -0.44499996304512024,
+        2.960418462753296
+      ]
+    },
+    {
+      "bone": "PART_Abdomen_04",
+      "mesh": "M_Abdomen",
+      "owner": "CTRL_Waist",
+      "center": [
+        0.0,
+        -0.44499996304512024,
+        3.220418691635132
+      ]
+    },
+    {
+      "bone": "PART_Abdomen_05",
+      "mesh": "M_Abdomen",
+      "owner": "CTRL_Waist",
+      "center": [
+        0.0,
+        -0.44499996304512024,
+        3.4804189205169678
+      ]
+    },
+    {
+      "bone": "PART_Abdomen_06",
+      "mesh": "M_Abdomen",
+      "owner": "CTRL_Waist",
+      "center": [
+        0.0,
+        0.49000000953674316,
+        3.2752089500427246
+      ]
+    },
+    {
+      "bone": "PART_UpperArm_L_01",
+      "mesh": "M_UpperArm_L",
+      "owner": "CTRL_Shoulder_L",
+      "center": [
+        -1.63413405418396,
+        -0.6064110994338989,
+        5.024755001068115
+      ]
+    },
+    {
+      "bone": "PART_UpperArm_L_02",
+      "mesh": "M_UpperArm_L",
+      "owner": "CTRL_Shoulder_L",
+      "center": [
+        -1.7126809358596802,
+        -0.7401834726333618,
+        4.280755519866943
+      ]
+    },
+    {
+      "bone": "PART_UpperArm_L_03",
+      "mesh": "M_UpperArm_L",
+      "owner": "CTRL_Shoulder_L",
+      "center": [
+        -2.1955182552337646,
+        -0.7401278018951416,
+        4.4645161628723145
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_01",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -1.7994955778121948,
+        -0.8880370259284973,
+        3.458440065383911
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_02",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -1.8609627485275269,
+        -1.373216152191162,
+        2.722489833831787
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_03",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -1.8101946115493774,
+        -1.0533721446990967,
+        3.297661304473877
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_04",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -1.9189316034317017,
+        -1.7219531536102295,
+        2.0723958015441895
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_05",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -2.2334065437316895,
+        -2.2043039798736572,
+        2.6551475524902344
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_06",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -1.8363882303237915,
+        -2.186042547225952,
+        2.6099493503570557
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_07",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -1.439369797706604,
+        -2.167781352996826,
+        2.564751386642456
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_08",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -2.447357177734375,
+        -1.2271525859832764,
+        3.11759352684021
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_09",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -2.4669411182403564,
+        -1.3449689149856567,
+        2.8979673385620117
+      ]
+    },
+    {
+      "bone": "PART_Forearm_L_10",
+      "mesh": "M_Forearm_L",
+      "owner": "CTRL_Elbow_L",
+      "center": [
+        -2.486525297164917,
+        -1.4627856016159058,
+        2.6783409118652344
+      ]
+    },
+    {
+      "bone": "PART_Thigh_L_01",
+      "mesh": "M_Thigh_L",
+      "owner": "CTRL_Hip_L",
+      "center": [
+        -0.6562169790267944,
+        -0.012525588274002075,
+        2.301511287689209
+      ]
+    },
+    {
+      "bone": "PART_Thigh_L_02",
+      "mesh": "M_Thigh_L",
+      "owner": "CTRL_Hip_L",
+      "center": [
+        -0.6914465427398682,
+        -0.083503857254982,
+        1.7977049350738525
+      ]
+    },
+    {
+      "bone": "PART_LowerLeg_L_01",
+      "mesh": "M_LowerLeg_L",
+      "owner": "CTRL_Knee_L",
+      "center": [
+        -0.7287484407424927,
+        -0.15865737199783325,
+        1.2642629146575928
+      ]
+    },
+    {
+      "bone": "PART_LowerLeg_L_02",
+      "mesh": "M_LowerLeg_L",
+      "owner": "CTRL_Knee_L",
+      "center": [
+        -0.7617229223251343,
+        -0.07530622184276581,
+        0.7927066683769226
+      ]
+    },
+    {
+      "bone": "PART_LowerLeg_L_03",
+      "mesh": "M_LowerLeg_L",
+      "owner": "CTRL_Knee_L",
+      "center": [
+        -0.7401795387268066,
+        -0.6273213028907776,
+        1.1007897853851318
+      ]
+    },
+    {
+      "bone": "PART_Foot_L_01",
+      "mesh": "M_Foot_L",
+      "owner": "CTRL_Ankle_L",
+      "center": [
+        -0.7961941957473755,
+        -0.22544454038143158,
+        0.26089736819267273
+      ]
+    },
+    {
+      "bone": "PART_Foot_L_02",
+      "mesh": "M_Foot_L",
+      "owner": "CTRL_Ankle_L",
+      "center": [
+        -0.7964066863059998,
+        -0.2255278080701828,
+        0.06089746579527855
+      ]
+    },
+    {
+      "bone": "PART_UpperArm_R_01",
+      "mesh": "M_UpperArm_R",
+      "owner": "CTRL_Shoulder_R",
+      "center": [
+        1.6341339349746704,
+        -0.6064110994338989,
+        5.024755001068115
+      ]
+    },
+    {
+      "bone": "PART_UpperArm_R_02",
+      "mesh": "M_UpperArm_R",
+      "owner": "CTRL_Shoulder_R",
+      "center": [
+        1.7126808166503906,
+        -0.7401834726333618,
+        4.280755043029785
+      ]
+    },
+    {
+      "bone": "PART_UpperArm_R_03",
+      "mesh": "M_UpperArm_R",
+      "owner": "CTRL_Shoulder_R",
+      "center": [
+        2.1955182552337646,
+        -0.7401279211044312,
+        4.4645161628723145
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_01",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        1.7994956970214844,
+        -0.8880370259284973,
+        3.458440065383911
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_02",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        1.860962986946106,
+        -1.373216152191162,
+        2.722489833831787
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_03",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        1.810194492340088,
+        -1.0533722639083862,
+        3.297661304473877
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_04",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        1.9189316034317017,
+        -1.7219531536102295,
+        2.0723958015441895
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_05",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        1.439369797706604,
+        -2.167781352996826,
+        2.564751386642456
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_06",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        1.8363882303237915,
+        -2.186042547225952,
+        2.6099493503570557
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_07",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        2.2334065437316895,
+        -2.204303741455078,
+        2.6551475524902344
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_08",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        2.447357177734375,
+        -1.2271525859832764,
+        3.117593765258789
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_09",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        2.4669411182403564,
+        -1.3449690341949463,
+        2.8979673385620117
+      ]
+    },
+    {
+      "bone": "PART_Forearm_R_10",
+      "mesh": "M_Forearm_R",
+      "owner": "CTRL_Elbow_R",
+      "center": [
+        2.486525297164917,
+        -1.4627856016159058,
+        2.6783411502838135
+      ]
+    },
+    {
+      "bone": "PART_Thigh_R_01",
+      "mesh": "M_Thigh_R",
+      "owner": "CTRL_Hip_R",
+      "center": [
+        0.6562169790267944,
+        -0.012525588274002075,
+        2.301511526107788
+      ]
+    },
+    {
+      "bone": "PART_Thigh_R_02",
+      "mesh": "M_Thigh_R",
+      "owner": "CTRL_Hip_R",
+      "center": [
+        0.6914465427398682,
+        -0.083503857254982,
+        1.797705054283142
+      ]
+    },
+    {
+      "bone": "PART_LowerLeg_R_01",
+      "mesh": "M_LowerLeg_R",
+      "owner": "CTRL_Knee_R",
+      "center": [
+        0.7287484407424927,
+        -0.15865737199783325,
+        1.2642629146575928
+      ]
+    },
+    {
+      "bone": "PART_LowerLeg_R_02",
+      "mesh": "M_LowerLeg_R",
+      "owner": "CTRL_Knee_R",
+      "center": [
+        0.7617228627204895,
+        -0.07530622184276581,
+        0.7927066087722778
+      ]
+    },
+    {
+      "bone": "PART_LowerLeg_R_03",
+      "mesh": "M_LowerLeg_R",
+      "owner": "CTRL_Knee_R",
+      "center": [
+        0.7401795983314514,
+        -0.6273213028907776,
+        1.1007897853851318
+      ]
+    },
+    {
+      "bone": "PART_Foot_R_01",
+      "mesh": "M_Foot_R",
+      "owner": "CTRL_Ankle_R",
+      "center": [
+        0.7961942553520203,
+        -0.22544454038143158,
+        0.26089736819267273
+      ]
+    },
+    {
+      "bone": "PART_Foot_R_02",
+      "mesh": "M_Foot_R",
+      "owner": "CTRL_Ankle_R",
+      "center": [
+        0.7964066863059998,
+        -0.225527822971344,
+        0.06089746206998825
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_01",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.45362991094589233,
+        4.766734600067139
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_02",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.014187783002853394,
+        3.505260467529297
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_03",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -1.190000057220459,
+        -0.35676610469818115,
+        4.450098514556885
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_04",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -1.25,
+        -0.4227324426174164,
+        5.534336566925049
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_05",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        1.190000057220459,
+        -0.35676610469818115,
+        4.450098514556885
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_06",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        1.25,
+        -0.4227324426174164,
+        5.534336566925049
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_07",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        -0.04651975631713867,
+        5.751049041748047
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_08",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.33120429515838623,
+        4.728055953979492
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_09",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        -0.027908846735954285,
+        3.5961060523986816
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_10",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -1.0880000591278076,
+        -0.4097275733947754,
+        4.461056709289551
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_11",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        1.0880000591278076,
+        -0.4097275733947754,
+        4.461056709289551
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_12",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.8799999952316284,
+        0.5776859521865845,
+        4.870782852172852
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_13",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.4399999678134918,
+        0.5776859521865845,
+        4.870782852172852
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_14",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.5776859521865845,
+        4.870782852172852
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_15",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.4399999678134918,
+        0.5776859521865845,
+        4.870782852172852
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_16",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.8799999952316284,
+        0.5776859521865845,
+        4.870782852172852
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_17",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.8889765739440918,
+        4.263148784637451
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_18",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.36078131198883057,
+        5.570478439331055
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_19",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.15388822555541992,
+        4.721128463745117
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_20",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.09319156408309937,
+        4.017127990722656
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_21",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.0,
+        0.30344438552856445,
+        3.8971543312072754
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_22",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.8699999451637268,
+        0.14021049439907074,
+        4.381256103515625
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_23",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.830000102519989,
+        -0.41225388646125793,
+        4.654172420501709
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_24",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.830000102519989,
+        -0.5071252584457397,
+        4.702124118804932
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_25",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.7100000381469727,
+        0.3800586462020874,
+        4.2948102951049805
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_26",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.7100000381469727,
+        0.26018449664115906,
+        4.591508865356445
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_27",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.7100000381469727,
+        0.13656432926654816,
+        4.897480010986328
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_28",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.7100000381469727,
+        0.009198039770126343,
+        5.2127227783203125
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_29",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.5600000023841858,
+        0.19060227274894714,
+        4.843814849853516
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_30",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.6399999856948853,
+        0.19060227274894714,
+        4.843814849853516
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_31",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.8699999451637268,
+        0.14021049439907074,
+        4.381256103515625
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_32",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.8300000429153442,
+        -0.41225388646125793,
+        4.654172420501709
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_33",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.8300000429153442,
+        -0.5071252584457397,
+        4.702124118804932
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_34",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.7100000381469727,
+        0.3800586462020874,
+        4.2948102951049805
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_35",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.7100000381469727,
+        0.26018449664115906,
+        4.591508865356445
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_36",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.7100000381469727,
+        0.13656432926654816,
+        4.897480010986328
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_37",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.7100000381469727,
+        0.009198039770126343,
+        5.2127227783203125
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_38",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.5600000023841858,
+        0.19060227274894714,
+        4.843814849853516
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_39",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.6399999856948853,
+        0.19060227274894714,
+        4.843814849853516
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_40",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.9900000095367432,
+        -1.2322983741760254,
+        4.174553871154785
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_41",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        -0.9450000524520874,
+        -0.49962010979652405,
+        5.751335620880127
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_42",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.9900000095367432,
+        -1.2322983741760254,
+        4.174553871154785
+      ]
+    },
+    {
+      "bone": "PART_UpperTorso_Cavity_43",
+      "mesh": "M_UpperTorso_Cavity",
+      "owner": "CTRL_TorsoShell",
+      "center": [
+        0.9450000524520874,
+        -0.49962010979652405,
+        5.751335620880127
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_01",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.4269871711730957,
+        -1.4821679592132568,
+        4.205720901489258
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_02",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.4269871115684509,
+        -1.3903768062591553,
+        4.242807388305664
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_03",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.6191211342811584,
+        -1.3511282205581665,
+        3.625117540359497
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_04",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.6191211342811584,
+        -1.457077980041504,
+        3.8873519897460938
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_05",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.6191211342811584,
+        -1.57117760181427,
+        4.1697587966918945
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_06",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.26765644550323486,
+        -1.3542166948318481,
+        4.257416725158691
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_07",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.10363954305648804,
+        -1.3814480304718018,
+        4.316808700561523
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_08",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.830000102519989,
+        -1.188768744468689,
+        3.479532241821289
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_L_09",
+      "mesh": "M_ChestDoor_L",
+      "owner": "CTRL_ChestDoor_L",
+      "center": [
+        -0.830000102519989,
+        -1.7755671739578247,
+        4.931909561157227
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_01",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.4269871115684509,
+        -1.4821679592132568,
+        4.205720901489258
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_02",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.4269871115684509,
+        -1.3903768062591553,
+        4.242807388305664
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_03",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.6191211342811584,
+        -1.3511282205581665,
+        3.625117540359497
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_04",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.6191211342811584,
+        -1.457077980041504,
+        3.8873519897460938
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_05",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.6191211342811584,
+        -1.57117760181427,
+        4.1697587966918945
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_06",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.26765644550323486,
+        -1.3542166948318481,
+        4.257416725158691
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_07",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.10363954305648804,
+        -1.3814480304718018,
+        4.316808700561523
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_08",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.8300000429153442,
+        -1.188768744468689,
+        3.479532241821289
+      ]
+    },
+    {
+      "bone": "PART_ChestDoor_R_09",
+      "mesh": "M_ChestDoor_R",
+      "owner": "CTRL_ChestDoor_R",
+      "center": [
+        0.8300000429153442,
+        -1.7755671739578247,
+        4.931909561157227
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_01",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.0,
+        -1.9723362922668457,
+        5.7926554679870605
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_02",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.0,
+        -0.7438176274299622,
+        6.289009094238281
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_03",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        -0.5950000286102295,
+        -1.3576133251190186,
+        6.041018962860107
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_04",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        -0.5189999938011169,
+        -1.350121259689331,
+        6.0224761962890625
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_05",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.5950000286102295,
+        -1.3576133251190186,
+        6.041018962860107
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_06",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.5189999938011169,
+        -1.350121259689331,
+        6.0224761962890625
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_07",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.0,
+        -1.5561549663543701,
+        6.532426834106445
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_08",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.0,
+        -1.5261863470077515,
+        6.458251953125
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_09",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.0,
+        -1.890669345855713,
+        5.804079532623291
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_10",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.0,
+        -0.8077185750007629,
+        6.241620063781738
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_11",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        -0.4400000274181366,
+        -0.483229398727417,
+        5.844240188598633
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_12",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.4400000274181366,
+        -0.483229398727417,
+        5.844240188598633
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_13",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        0.0,
+        -1.6001429557800293,
+        6.633293628692627
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_14",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        1.2417634698280722e-09,
+        -2.053464412689209,
+        5.759877681732178
+      ]
+    },
+    {
+      "bone": "PART_HelmetShell_15",
+      "mesh": "M_HelmetShell",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        3.1044087300813317e-09,
+        -2.0882344245910645,
+        5.745830535888672
+      ]
+    },
+    {
+      "bone": "PART_EyeLens_01",
+      "mesh": "M_EyeLens",
+      "owner": "CTRL_Helmet_Rear",
+      "center": [
+        -3.725290298461914e-09,
+        -2.110023260116577,
+        5.737025737762451
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_L_01",
+      "mesh": "M_ShoulderFlap_L",
+      "owner": "CTRL_ShoulderFlap_L",
+      "center": [
+        -0.9850000143051147,
+        -1.2638436555862427,
+        5.5072808265686035
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_L_02",
+      "mesh": "M_ShoulderFlap_L",
+      "owner": "CTRL_ShoulderFlap_L",
+      "center": [
+        -0.9850000143051147,
+        -1.645395278930664,
+        5.223700046539307
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_L_03",
+      "mesh": "M_ShoulderFlap_L",
+      "owner": "CTRL_ShoulderFlap_L",
+      "center": [
+        -0.98499995470047,
+        -1.2335004806518555,
+        5.4321794509887695
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_L_04",
+      "mesh": "M_ShoulderFlap_L",
+      "owner": "CTRL_ShoulderFlap_L",
+      "center": [
+        -1.2599998712539673,
+        -1.282387137413025,
+        5.499789237976074
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_R_01",
+      "mesh": "M_ShoulderFlap_R",
+      "owner": "CTRL_ShoulderFlap_R",
+      "center": [
+        0.98499995470047,
+        -1.2638436555862427,
+        5.5072808265686035
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_R_02",
+      "mesh": "M_ShoulderFlap_R",
+      "owner": "CTRL_ShoulderFlap_R",
+      "center": [
+        0.98499995470047,
+        -1.645395278930664,
+        5.223700046539307
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_R_03",
+      "mesh": "M_ShoulderFlap_R",
+      "owner": "CTRL_ShoulderFlap_R",
+      "center": [
+        0.98499995470047,
+        -1.2335004806518555,
+        5.4321794509887695
+      ]
+    },
+    {
+      "bone": "PART_ShoulderFlap_R_04",
+      "mesh": "M_ShoulderFlap_R",
+      "owner": "CTRL_ShoulderFlap_R",
+      "center": [
+        1.2599998712539673,
+        -1.282387137413025,
+        5.499789237976074
+      ]
+    },
+    {
+      "bone": "PART_WaistBearing_01",
+      "mesh": "M_WaistBearing",
+      "owner": "CTRL_Pelvis",
+      "center": [
+        -1.1175870895385742e-08,
+        0.0,
+        2.765000820159912
+      ]
+    }
+  ],
+  "revision": "2026-10-01 TurnLeft and TurnRight added; earlier six actions preserved"
+}

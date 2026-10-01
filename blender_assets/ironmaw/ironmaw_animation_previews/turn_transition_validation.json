@@ -1,0 +1,30 @@
+{
+  "Standing_to_TurnLeft": {
+    "crossfade_seconds": 0.4,
+    "phase_aligned": true,
+    "minimum_foot_z_m": -0.02634657546877861,
+    "max_pelvis_displacement_per_60hz_sample_m": 0.011865555751288418,
+    "note": "Local transform crossfade; exact transient foot locking is a runtime choice."
+  },
+  "Standing_to_TurnRight": {
+    "crossfade_seconds": 0.4,
+    "phase_aligned": true,
+    "minimum_foot_z_m": -0.0257155429571867,
+    "max_pelvis_displacement_per_60hz_sample_m": 0.011865555751288418,
+    "note": "Local transform crossfade; exact transient foot locking is a runtime choice."
+  },
+  "Walk_to_TurnLeft": {
+    "crossfade_seconds": 0.4,
+    "phase_aligned": true,
+    "minimum_foot_z_m": -0.017054321244359016,
+    "max_pelvis_displacement_per_60hz_sample_m": 0.008534814106897685,
+    "note": "Local transform crossfade; exact transient foot locking is a runtime choice."
+  },
+  "Walk_to_TurnRight": {
+    "crossfade_seconds": 0.4,
+    "phase_aligned": true,
+    "minimum_foot_z_m": -0.05048076808452606,
+    "max_pelvis_displacement_per_60hz_sample_m": 0.008534814106897685,
+    "note": "Local transform crossfade; exact transient foot locking is a runtime choice."
+  }
+}
