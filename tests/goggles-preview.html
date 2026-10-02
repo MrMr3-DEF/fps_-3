@@ -43,6 +43,7 @@
         const previewParams = new URLSearchParams(location.search);
         const celestialPreview = previewParams.has('celestial-preview');
         const homingPreview = previewParams.has('homing-preview');
+        const crowdedPreview = previewParams.has('crowded-preview');
 
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x07131b);
@@ -159,6 +160,30 @@
             anomalyVisual.visible = false;
             anomalyHitbox.visible = false;
         }
+        let rangeBoundaryTarget = null;
+        if (crowdedPreview) {
+            targets.forEach(target => { target.visible = false; });
+            peerMesh.visible = false;
+            anomalyVisual.visible = false;
+            anomalyHitbox.visible = false;
+            scene.fog = null;
+            for (const [index, slope] of [-0.18, -0.13, -0.08, -0.03, 0.025, 0.075, 0.125, 0.18].entries()) {
+                targets.push(enemy(index + 3, new THREE.Vector3(slope * 180, 4 + [-16, 22, -8, 16, -23, 0, 28, -32][index], -180), 1.5, 3, 3, 0x2ed573));
+            }
+            // Different angles keep these distance boundaries on separate
+            // sightlines. Only the last moves across the hard scan cutoff.
+            for (const [index, distance] of [1199, 1200, 1201].entries()) {
+                const angle = [-0.12, 0.12, 0.17][index];
+                const target = enemy(index + 11,
+                    new THREE.Vector3(Math.sin(angle) * Math.cos(0.14) * distance, 4 + Math.sin(0.14) * distance, -Math.cos(angle) * Math.cos(0.14) * distance),
+                    5, 3, 3, 0xff4757);
+                targets.push(target);
+                if (index === 2) rangeBoundaryTarget = target;
+            }
+            addEventListener('pointermove', event => {
+                camera.rotation.y = (event.clientX / innerWidth - 0.5) * 0.24;
+            });
+        }
         const hud = new SmartGogglesHud(document.getElementById('goggles-target-layer'));
         const previewStartedAt = performance.now();
         const panDuringElimination = previewParams.has('elimination-pan');
@@ -196,7 +221,7 @@
                     : 'SMART GOGGLES · RESTART ATTEMPT / NO SIGNAL';
                 brickNoiseStarted = true;
             }
-            if (!eliminationPlayed && previewElapsed >= 2200) {
+            if (!crowdedPreview && !eliminationPlayed && previewElapsed >= 2200) {
                 targets[0].userData.eliminationRevision++;
                 targets[0].visible = false;
                 eliminationPlayed = true;
@@ -211,8 +236,12 @@
             peerMesh.rotation.y = Math.sin(seconds * 0.7) * 0.5;
             // Cross the viewport completely so acquire, edge-follow and collapse
             // can be inspected without pointer-lock support.
-            if (!homingPreview) targets[2].position.x = Math.sin(seconds * 0.48) * 85;
+            if (!homingPreview && !crowdedPreview) targets[2].position.x = Math.sin(seconds * 0.48) * 85;
 
+            if (rangeBoundaryTarget) {
+                const distance = 1200 + Math.sin(previewElapsed / 1600) * 2;
+                rangeBoundaryTarget.position.set(Math.sin(0.17) * Math.cos(0.14) * distance, 4 + Math.sin(0.14) * distance, -Math.cos(0.17) * Math.cos(0.14) * distance);
+            }
             camera.updateMatrixWorld(true);
             hud.update(
                 camera,
@@ -222,9 +251,15 @@
                 celestialPreview ? {} : peers,
                 true,
                 now,
-                celestialPreview || homingPreview ? null : anomaly,
+                celestialPreview || homingPreview || crowdedPreview ? null : anomaly,
                 celestialTargets,
             );
+            if (crowdedPreview) {
+                const scans = document.querySelectorAll('[data-target-key]').length;
+                const callouts = document.querySelectorAll('.is-callout-active').length;
+                const exits = document.querySelectorAll('.is-callout-leaving').length;
+                previewNote.textContent = `MOVE POINTER TO PAN · SCANS ${scans} · CALLOUTS ${callouts} · RETRACTING ${exits}`;
+            }
             renderer.render(scene, camera);
             requestAnimationFrame(frame);
         }

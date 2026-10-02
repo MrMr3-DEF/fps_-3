@@ -1026,12 +1026,24 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     transition: stroke-dashoffset 155ms 165ms cubic-bezier(0.22, 0.8, 0.24, 1);
 }
 
-.goggles-target-lock.is-active .goggles-target-leader path {
+.goggles-target-lock.is-active:not(.is-callout-managed) .goggles-target-leader path,
+.goggles-target-lock.is-callout-active .goggles-target-leader path {
     stroke-dashoffset: 0;
 }
 
-.goggles-target-lock.is-leaving .goggles-target-leader path {
+.goggles-target-lock.is-leaving .goggles-target-leader path,
+.goggles-target-lock.is-callout-leaving .goggles-target-leader path {
     stroke-dashoffset: 1;
+}
+
+/* Gameplay callouts can retract while their target corners keep tracking.
+   A quick reselection reverses from the current CSS transition position. */
+.goggles-target-lock.is-callout-leaving .goggles-target-leader path,
+.goggles-target-lock.is-callout-managed.is-leaving .goggles-target-leader path,
+.goggles-target-lock.is-callout-reentering .goggles-target-leader path,
+.goggles-target-lock.is-callout-reentering .goggles-target-identifier,
+.goggles-target-lock.is-callout-reentering .goggles-target-label-panel {
+    transition-delay: 0ms;
 }
 
 .goggles-target-label {
@@ -1060,11 +1072,13 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     text-align: right;
 }
 
-.goggles-target-lock.is-active .goggles-target-identifier {
+.goggles-target-lock.is-active:not(.is-callout-managed) .goggles-target-identifier,
+.goggles-target-lock.is-callout-active .goggles-target-identifier {
     opacity: 0.96;
 }
 
-.goggles-target-lock.is-leaving .goggles-target-identifier {
+.goggles-target-lock.is-leaving .goggles-target-identifier,
+.goggles-target-lock.is-callout-leaving .goggles-target-identifier {
     opacity: 0;
     transition-delay: 0ms;
 }
@@ -1107,12 +1121,14 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     background: linear-gradient(270deg, rgba(3, 24, 34, 0.82), rgba(3, 24, 34, 0.28));
 }
 
-.goggles-target-lock.is-active .goggles-target-label-panel {
+.goggles-target-lock.is-active:not(.is-callout-managed) .goggles-target-label-panel,
+.goggles-target-lock.is-callout-active .goggles-target-label-panel {
     opacity: 0.96;
     transform: translateY(0);
 }
 
-.goggles-target-lock.is-leaving .goggles-target-label-panel {
+.goggles-target-lock.is-leaving .goggles-target-label-panel,
+.goggles-target-lock.is-callout-leaving .goggles-target-label-panel {
     opacity: 0;
     transform: translateY(var(--goggles-label-shift, 4px));
     transition-delay: 0ms;

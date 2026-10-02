@@ -59,9 +59,9 @@ export function setupMainMenu(): void {
     const customization = document.getElementById('menu-character-customize') as HTMLFieldSetElement;
     const menuScanLayer = document.getElementById('menu-goggles-target-layer')!;
     const scan = new SmartGogglesHud(menuScanLayer, {
-        horizontal: 'right', vertical: 'up', customPeerReadout: customization,
+        horizontal: 'right', vertical: 'up', customPeerReadout: customization, gameplayLimits: false,
     });
-    const lobbyScan = new SmartGogglesHud(menuScanLayer, { lobbyPreview: true, lobbyAvoidElements: [
+    const lobbyScan = new SmartGogglesHud(menuScanLayer, { lobbyPreview: true, gameplayLimits: false, lobbyAvoidElements: [
         main, document.getElementById('panel-host-waiting')!, document.getElementById('panel-join-room')!,
     ] });
     const weaponScan = new WeaponMenuScan(document.getElementById('weapon-scan-layer')!, document.getElementById('weapon-specs')!);

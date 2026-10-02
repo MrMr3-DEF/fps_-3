@@ -533,6 +533,7 @@ test('covered goggles retain only a presence hint, release homing and honor phot
     hud.update(camera, camera.position, camera.position, [cover], {}, true, 2200, null, [], true, actor);
     const record = layer.children.find(child => child.dataset.targetKey === 'mecha:forgotten')!;
     assert.equal(record.classList.contains('is-mecha-hidden'), true); assert.equal(getProjectileHomingTarget(), null);
+    assert.equal(record.classList.contains('is-callout-active'), false, 'covered presence does not retain a callout');
     assert.equal(layer.children.filter(child => child.dataset.targetKey === 'mecha:forgotten').length, 1, 'reuse one overlay');
     const previous = userSettings.photosensitivityMode; userSettings.photosensitivityMode = true;
     try {
@@ -540,5 +541,8 @@ test('covered goggles retain only a presence hint, release homing and honor phot
         assert.equal(record.classList.contains('is-mecha-steady'), true);
         hud.update(camera, camera.position, camera.position, [], {}, true, 2400, null, [], true, actor);
         assert.equal(record.classList.contains('is-mecha-hidden'), false);
+        camera.position.copy(actor.hitbox.position).z += 1201; camera.lookAt(actor.hitbox.position); camera.updateMatrixWorld(true);
+        hud.update(camera, camera.position, camera.position, [], {}, true, 2500, null, [], true, actor);
+        assert.equal(layer.children.some(child => child.dataset.targetKey === 'mecha:forgotten'), false, 'Mecha respects the hard scan range');
     } finally { userSettings.photosensitivityMode = previous; hud.reset(); actor.dispose(); body.geometry.dispose(); (body.material as THREE.Material).dispose(); }
 });
