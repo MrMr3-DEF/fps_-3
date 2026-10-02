@@ -1,5 +1,6 @@
-import { Camera, Euler, EventDispatcher } from 'three';
+import { Camera, EventDispatcher } from 'three';
 import { MouseMovementFilter } from './mouseMovement.js';
+import { applyLookInput } from './lookInput.js';
 
 type LockElement = HTMLElement & {
     requestPointerLock(options?: { unadjustedMovement?: boolean }): Promise<void> | void;
@@ -12,7 +13,6 @@ export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {};
     minPolarAngle = 0;
     maxPolarAngle = Math.PI;
     private readonly filter = new MouseMovementFilter();
-    private readonly rotation = new Euler(0, 0, 0, 'YXZ');
     private pending = false;
     private generation = 0;
 
@@ -89,12 +89,8 @@ export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {};
         if (!this.isLocked) return;
         const movement = this.filter.sample(event.movementX, event.movementY, event.timeStamp);
         if (!movement) return;
-        this.rotation.setFromQuaternion(this.camera.quaternion);
-        this.rotation.y -= movement.x * 0.002 * this.pointerSpeed;
-        this.rotation.x -= movement.y * 0.002 * this.pointerSpeed;
-        this.rotation.x = Math.max(Math.PI / 2 - this.maxPolarAngle,
-            Math.min(Math.PI / 2 - this.minPolarAngle, this.rotation.x));
-        this.camera.quaternion.setFromEuler(this.rotation);
+        applyLookInput(this.camera, -movement.x * 0.002 * this.pointerSpeed, -movement.y * 0.002 * this.pointerSpeed,
+            Math.PI / 2 - this.maxPolarAngle, Math.PI / 2 - this.minPolarAngle, event.timeStamp);
         this.dispatchEvent({ type: 'change' });
     };
 }

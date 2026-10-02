@@ -2,6 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SpatialHash } from '../src/spatialHash.ts';
 
+test('padded segment finds colliders across a cell edge without duplicates', () => {
+    const hash = new SpatialHash<string>(10);
+    hash.insert(10.1, 5, 0.05, 'edge'); hash.insert(25, 5, 0.05, 'far');
+    assert.deepEqual(hash.querySegment(9.9, 0, 9.9, 9), []);
+    assert.deepEqual(hash.querySegment(9.9, 0, 9.9, 9, [], 0.3), ['edge']);
+});
+
 test('SpatialHash returns nearby inserted values once', () => {
     const hash = new SpatialHash<string>(10);
     hash.insert(0, 0, 12, 'pillar');

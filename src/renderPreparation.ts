@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { state } from './state.js';
 import { prepareParticleResources } from './particles.js';
-import { prepareWorldInstanceBuffers, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns } from './world.js';
+import { forgottenMecha, prepareWorldInstanceBuffers, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns } from './world.js';
 import type { DayNightCycle } from './dayNightCycle.js';
 import { userSettings } from './settings.js';
 
@@ -27,7 +27,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     // Hidden weapon/effect geometry otherwise waits until the first switch/shot
     // to reach WebGL. Draw it only into the tiny offscreen preparation target.
     for (const object of [...representatives, state.leftGun, state.pistolMesh, state.shotgunMesh,
-        state.arMesh, state.sniperMesh, state.minigunMesh]) object?.traverse(warmObject);
+        state.arMesh, state.sniperMesh, state.minigunMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group]) object?.traverse(warmObject);
     const textures = new Set<THREE.Texture>();
     scene.traverse(object => {
         const material = (object as THREE.Mesh).material;
@@ -36,6 +36,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
         }
     });
     try {
+        await forgottenMecha?.headEffects.prepare(renderer);
         let uploads = 0;
         for (const texture of textures) {
             renderer.initTexture(texture);
@@ -56,6 +57,16 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
             renderer.setRenderTarget(target);
             renderer.render(scene, camera);
             renderer.setRenderTarget(previousTarget);
+            const actor = forgottenMecha;
+            if (phase === 150 && actor) {
+                // Compile the cockpit-facing material variant before its first
+                // visible fold; the deliberate video lag must not be shader work.
+                try {
+                    actor.preparePilotView(true, true);
+                    await renderer.compileAsync(scene, camera);
+                    renderer.setRenderTarget(target); renderer.render(scene, camera);
+                } finally { actor.restorePilotView(); renderer.setRenderTarget(previousTarget); }
+            }
         }
     } finally {
         renderer.setRenderTarget(previousTarget);

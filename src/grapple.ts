@@ -13,7 +13,10 @@ import {
     HOOK_SLINGSHOT_ACCEL,
     GUN_TIP_Z,
 } from './config.js';
-import { queryGrappleSurfacesAlongSegment, queryTargetsNear } from './world.js';
+import { queryGrappleSurfacesAlongSegment, queryTargetsNear, queryObstaclesAlongSegment, forgottenMecha } from './world.js';
+import { segmentRoundedBoxHitT } from './gameplayMath.js';
+import { obstacleData } from './userDataTypes.js';
+import { PLAYER_RADIUS, PLAYER_HEIGHT } from './config.js';
 import { triggerMuzzleFlash } from './muzzleFlash.js';
 
 // Reused scratch values for aiming and cable placement.
@@ -38,6 +41,7 @@ let hookBadgeEl: HTMLElement | null = null;
 // Fire from screen center. Enemy targets get a small aim-assist radius; surfaces
 // use exact ray hits so pillars and floor still feel precise.
 export function toggleGrapplingHook(): void {
+    if (forgottenMecha?.ownsPilot) return;
     if (!state.scene || !state.camera || !state.leftGun || !state.controls) return;
 
     if (state.hookState === 'IDLE') {
@@ -57,6 +61,7 @@ export function toggleGrapplingHook(): void {
 
         _raycaster.setFromCamera(_centerScreen, state.camera);
         const ray = _raycaster.ray;
+        const cockpit = forgottenMecha?.cockpitHit(ray, HOOK_MAX_RANGE);
 
         const playerObj = state.controls.getObject();
 
@@ -98,14 +103,19 @@ export function toggleGrapplingHook(): void {
             _rayEnd.z,
             _surfaceCandidates
         );
-        const surfaceHits = _raycaster.intersectObjects(surfaceCandidates);
+        // Only a verified opening may bypass the body's coarse boxes. Exterior
+        // armor still uses the ordinary surface grapple behavior.
+        const surfaceHits = _raycaster.intersectObjects(cockpit ? surfaceCandidates.filter(object => object.userData.damageTarget !== 'forgotten-mecha') : surfaceCandidates);
         let bestSurfaceHit: THREE.Intersection | null = null;
         if (surfaceHits.length > 0 && surfaceHits[0].distance <= HOOK_MAX_RANGE) {
             bestSurfaceHit = surfaceHits[0];
         }
 
         // Prefer an unobstructed enemy pull over a farther surface hit.
-        if (bestEnemyHit && (!bestSurfaceHit || bestEnemyHit.distance <= bestSurfaceHit.distance)) {
+        if (cockpit && (!bestSurfaceHit || cockpit.distance < bestSurfaceHit.distance) && (!bestEnemyHit || cockpit.distance < bestEnemyHit.distance)) {
+            state.hookTargetCockpit = forgottenMecha;
+            state.hookTarget.copy(cockpit.point); state.hookWillHit = true; state.hookIsEnemy = true;
+        } else if (bestEnemyHit && (!bestSurfaceHit || bestEnemyHit.distance <= bestSurfaceHit.distance)) {
             state.hookTargetEnemy = bestEnemyHit.target;
             state.hookTarget.copy(state.hookTargetEnemy.position);
             state.hookWillHit = true;
@@ -132,6 +142,7 @@ export function toggleGrapplingHook(): void {
 }
 
 export function updateHook(delta: number): void {
+    if (state.hookTargetCockpit && (!state.hookTargetCockpit.canMount || state.hookTargetCockpit.disposed)) { resetHook(); return; }
     if (state.hookState !== 'IDLE') {
         if (!state.controls) return;
         const playerObj = state.controls.getObject();
@@ -159,7 +170,28 @@ export function updateHook(delta: number): void {
             }
         } else if (state.hookState === 'PULLING') {
 
-            if (state.hookIsEnemy && state.hookTargetEnemy) {
+            if (state.hookTargetCockpit) {
+                const actor = state.hookTargetCockpit;
+                actor.seatAnchor.getWorldPosition(state.hookTarget);
+                _toEnemy.subVectors(state.hookTarget, playerObj.position);
+                const distance = _toEnemy.length(); const travel = Math.min(distance, HOOK_SPEED * 0.75 * delta);
+                _pullDir.copy(_toEnemy).normalize(); _rayEnd.copy(playerObj.position).addScaledVector(_pullDir, travel);
+                // This pull owns translation so ordinary bean substeps cannot
+                // collide with the empty-cockpit AABBs or overshoot the seat.
+                const candidates = queryObstaclesAlongSegment(playerObj.position.x, playerObj.position.z, _rayEnd.x, _rayEnd.z, _surfaceCandidates, PLAYER_RADIUS);
+                let blocked = false;
+                for (const object of candidates) {
+                    if (object.userData.damageTarget === 'forgotten-mecha') continue;
+                    const d = obstacleData(object), hh = d.halfH ?? d.height / 2;
+                    _midPoint.set(object.position.x - d.halfW, object.position.y - hh - PLAYER_HEIGHT, object.position.z - d.halfD);
+                    _gunTip.set(object.position.x + d.halfW, object.position.y + hh + PLAYER_HEIGHT, object.position.z + d.halfD);
+                    if (segmentRoundedBoxHitT(playerObj.position, _rayEnd, _midPoint, _gunTip, PLAYER_RADIUS) !== null) { blocked = true; break; }
+                }
+                state.velocity.set(0, 0, 0);
+                if (blocked) { resetHook(); return; }
+                playerObj.position.copy(_rayEnd);
+                if (distance <= travel + 0.001) { playerObj.position.copy(state.hookTarget); actor.beginBoarding(playerObj.position, playerObj.quaternion); resetHook(); return; }
+            } else if (state.hookIsEnemy && state.hookTargetEnemy) {
                 state.hookTarget.copy(state.hookTargetEnemy.position);
                 _toEnemy.subVectors(state.hookTarget, playerObj.position);
                 const dist = _toEnemy.length();

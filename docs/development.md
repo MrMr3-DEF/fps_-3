@@ -34,6 +34,41 @@ Stop any development or preview server with `Ctrl+C` in the terminal that owns i
 
 ## Local run modes
 
+For the singleplayer siege robot, `/tests/mecha-preview.html` reviews the real
+match with controls for finding/scanning the robot, firing, stomps, death, wall
+punch and cleanup. Body height, automatic sideways evasion, phase history and
+event pauses review laser pitching, horizontal misses, shield drop and rebuild.
+It uses temporary touch input without saving settings; use a
+landscape viewport. See [Forgotten Mecha](forgotten-mecha.md) for gameplay and
+resource ownership. Focused checks are in `tests/forgottenMecha.test.ts`,
+`tests/mechaCombat.test.ts` and `tests/mechaWeapons.test.ts`.
+Mounting controls additionally expose cockpit aim/grapple, turning, forward/reverse
+movement, third-person view, targets ahead, rocket firing and a held shield.
+Fitted pillar approach, leg-supported stomp and sideways defeat controls review
+the movement/contact changes; event pauses expose torso alignment and immediate
+breakup/release.
+Finishing-touch controls add a ground-level upper-cabin approach, O helmet toggle,
+rocket/helmet event pauses, safe lava placement, front asset inspection, and
+player/pilot damage for death/respawn review. Head-view controls also pause before Mount's helmet closure, during
+orange loading, black goggles boot, video tearing and toggle blackout. The gentle
+reveal button changes the fixture's in-memory Photosensitivity Mode without saving
+settings. Inspect first-person eye alignment, the physical interior fold, smooth
+reversal while moving, scoped open-head scans and unchanged third-person framing.
+`tests/mechaHeadView.test.ts` covers clip cues, protected startup, camera geometry,
+reversals across frame rates, paused clocks, bounded captures and render restoration.
+Front asset review changes only the
+fixture draw camera; turn it off for acquisition and first/third-person checks.
+`tests/mechaLifecycle.test.ts` checks fitted sweep/slide/escape/border behavior,
+real-asset clearance, defeat alignment, leg contact at varied rates, living release
+with normal gravity and the collision-safe camera handoff.
+`tests/mechaMount.test.ts` checks actual asset containment, boarding/FinalDeath,
+grapple arrival, steering and manual shielding; `tests/mechaRockets.test.ts`
+checks immediate acquisition, continuous guidance, straight launch, range, interception,
+splash, target lives and wandering landing distance. `tests/mechaFinishing.test.ts`
+checks the eleven-clip export, animated cassette socket, firing phases, helmet
+layering/reversal, sampled pointer stopping, grounded lava ticks, yellow eye cues
+and normal cockpit grappling/occlusion.
+
 ### Offline gameplay and client UI
 
 Run `npm run dev` and open the Vite URL. Offline singleplayer, rendering, settings, input, and most menu work do not require the Worker.
@@ -184,3 +219,29 @@ Chat consumes Escape keydown and repeats, then closes on keyup so mouse capture 
 The idle pose rolls both forearms inward so palms face the thighs. This rotation blends out only for the gesturing arm and returns smoothly afterward; palm orientation is checked against the supplied rig at three world orientations.
 
 Power jump starts disabled on every house spawn and church respawn, including multiplayer placement. The first horizontal crossing beyond the castle walls (`TOWN_HALF_SIZE + TOWN_WALL_THICKNESS / 2`) enables it once per life. Returning inside does not disable it, and later crossings do not override Ctrl or the HUD toggle. The activation does not change a normal jump already in progress.
+
+## Mecha follow-up verification workflow
+
+For the 2 October scan/combat/shutdown changes, run only the affected existing
+suites while iterating. Final validation is one `npm run check`, one
+`npm run build` (including generated `dist/`) and `git diff --check`; repeat only
+for relevant failures or later changes. Capture logs and report the summary,
+not individual passing test lines. Existing actual-GLB tests cover pilot/head
+clearance, walking-hit guidance, reverse Mount, life/ownership cleanup and
+render-before-damage behavior. Do not add a second browser harness or repeat an
+exhaustive visual review: the user will perform interactive acceptance using
+[the compact checklist](forgotten-mecha.md#current-manual-acceptance). Record those results separately from
+automated checks; this change has not established physical-device or pointer-lock
+feel, visual quality or deployed-network behavior.
+
+2 October repair/balance results: affected suites passed 51 tests, then one final
+`npm run check` passed both TypeScript projects and all 345 tests. One production
+build regenerated `dist/` successfully (existing large-chunk warning), and
+whitespace validation passed. No interactive acceptance was performed by the agent.
+
+2 October cylinder/dome results: affected combat/actor suites passed 40 tests;
+the updated lifecycle suite passed 11. Final `npm run check` passed both
+TypeScript projects and all 349 tests after correcting two older high-altitude
+defeat fixtures. One production build regenerated `dist/` successfully with the
+existing large-chunk warning; whitespace checks passed. Interactive acceptance
+remains with the user, and `to_be_changed.md` was untouched.

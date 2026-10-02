@@ -6,8 +6,8 @@ The permitted design reset remains unused.
 
 ## Deliverables
 
-- `ironmaw_siege_robot.blend`: editable model, mechanical rig, eight baked actions,
-  packed textures and a separate review studio. Saved closed, standing, red eye.
+- `ironmaw_siege_robot.blend`: editable model, mechanical rig, eleven baked actions,
+  packed textures and a separate review studio. Saved closed, standing, red eye, with `RocketFire` selected.
 - `ironmaw_siege_robot.glb`: model only; 20 meshes, 1,724 triangles, 3 materials,
   one skeleton, 159 bones (26 controls and 133 rigid physical pieces), eight clips.
 - `ironmaw_animation_previews/{clip}.mp4`: 768 × 768 previews with eye cues.
@@ -21,6 +21,95 @@ The permitted design reset remains unused.
 - `ironmaw_animation_previews/two_stage_collapse_validation.json`: current Death/Mount
   flat contacts, rigid link lengths, fall samples and unchanged-action checks.
 - `ironmaw_previews/` contains historical model/opening reviews from before rigging.
+
+## Forearm rocket launcher (Blender)
+
+`RocketFire` is a **3.0 s action, f1–73 at 24 fps**. Ironmaw straightens its
+upper body slightly, lowers its anatomical left arm, and raises its right forearm to point
+forward with a bent elbow. The dorsal forearm cassette rises, holds for one
+simulated shot, recoils, retracts, and returns exactly to closed standing.
+Feet and root stay fixed; the head and cabin stay closed. The eye retains its
+selected red/blue state. There are no rockets, smoke or game behavior in this revision.
+
+| Frames | Event |
+| --- | --- |
+| 1–19 | Prepare the bent-elbow firing pose; torso straightens by 4°. |
+| 19–31 | Cassette rises 0.75 m along its local Y. |
+| 31–37 | Aim hold. **Shot cue f37 / 1.500 s**. |
+| 37–47 | Sharp recoil peaks f39, then the arm recovers. |
+| 49–61 | Cassette retracts into its recess. |
+| 61–73 | Recover to the exact normal standing pose. |
+
+The launcher is on **Ironmaw’s anatomical right arm**, which is **viewer’s left
+in a head-on view**. The original rig labels are preserved: this is
+`M_Forearm_L`, with physical parent `PART_Forearm_L_02`. The former launcher on
+`M_Forearm_R` has been removed and its original forearm surface restored.
+The launcher object/control suffix `_R` denotes the anatomical side.
+
+`M_RocketCassette_R` has a **0.70 × 0.70 m square front**, is 0.75 m long,
+and rises 0.75 m to expose its full front with 0.05 m clearance underneath.
+The centered twelve-sided silver barrel has a 0.60 m outer diameter, a 0.52 m
+bore and a shallow 0.02 m projecting rim. The bore stops **0.30 m** inside
+the cassette at a **closed, matte textured black back wall**; it does not pass
+through the cassette. The front, sides, rear, recess and guides use textured black metal: the existing packed
+pixel atlas is mapped with varying UV coordinates, converted to grayscale,
+and tinted neutral black. The exterior top cap retains silver/rust armor.
+No new texture files are needed. The model gains **230 triangles**, two rigid
+mesh objects and one bone, below the 300-triangle budget.
+
+The deep recess fits within the original forearm shell. Cassette-to-slot gaps
+are 15 mm; housing-to-cuff/pad clearance is 10 mm. Longer sliding guide stems
+retain at least 0.05 m sleeve engagement throughout the action and at least
+0.03 m floor clearance. The retracted cap sits flush with the forearm surface.
+
+`CTRL_RocketSlide_R` uses local Y travel **0–0.75 m** and is parented to
+`PART_Forearm_L_02`, so it follows the shell during `FinalDeath` as well as
+normal arm movement. Every new vertex has one rigid weight of 1.0. For later
+projectiles, the bone stores `muzzle_rest_position` and `muzzle_rest_direction`
+in rig rest coordinates; apply its skin-deformation matrix and rig world
+transform to obtain the moving muzzle. Its metadata identifies the anatomical
+right arm, physical parent and travel. `RocketFire` stores `shot_frame=37` and
+`shot_seconds=1.5`. These are authoring references for a later projectile system.
+
+Run the embedded `IRONMAW_CONTROLS.py`, then `select_clip('RocketFire')`, or select
+it in the Action Editor. Selecting another clip clears the launcher slide, including
+when leaving a shot mid-deployment. The animation is baked; live leg IK stays off.
+The GLB remains the existing eight-clip version. The Blender export helper can
+export the revised model and all eleven actions when a future export is requested.
+
+`rocket_fire_validation.json` checks 289 quarter-frame samples, foot/root stability,
+rigid arm lengths, actual square/barrel dimensions, guide engagement,
+exact start/end pose agreement, muzzle alignment, and cassette
+clearance against the surrounding model. All ten earlier actions have identical
+keyframe hashes and sampled evaluated poses. The cassette follows the shell during
+breakup. `RocketFire_front.mp4` and `RocketFire_side.mp4` are 24 fps previews;
+they include the held final endpoint sample (73 frames, about 3.04 s).
+`RocketFire_front_031.png` and `RocketFire_side_031.png` show deployment;
+`RocketFire_031.png` is the three-quarter view; `rocket_launcher_compatibility.jpg` reviews
+walking, punching, defeat, mounting, destruction and the standing head fold.
+`RocketFire_launcher_detail.png` shows the square face, silver rim and closed
+black back wall straight along the muzzle axis.
+
+## Standing head fold (Blender)
+
+`HeadOpen` folds only the helmet backward while Ironmaw stands still.
+`HeadClose` is its exact reverse. Both run from **f1 to f25 at 24 fps (1.0 s)**.
+The helmet rotation is taken from `Death` f105–129, reaching **−105° local X**
+on `CTRL_Helmet_Rear`. The eye travels with the helmet and retains the selected
+red or blue state. Chest doors, shoulder flaps, torso, arms and legs remain in
+the closed standing reference pose. There is no collapse or root movement.
+
+Run the embedded `IRONMAW_CONTROLS.py`, then `select_clip('HeadOpen')` or
+`select_clip('HeadClose')`. Alternatively select the rig and choose either action
+in the Action Editor. Play with Space. Both endpoint poses match for a seamless
+open/close handoff; hold the last frame to keep the head open or closed.
+
+These two new actions are saved in the Blender source. The existing GLB remains
+the eight-clip version; the Blender export helper can export all eleven if requested.
+`head_fold_validation.json` records 97 samples per action, including quarter-frame
+samples: zero movement in non-head bone matrices, an exact reverse match, and
+unchanged keyframe hashes for all eight original actions. `HeadOpen_001.png`,
+`HeadOpen_013.png` and `HeadOpen_025.png` provide standing pose reviews.
 
 ## Clips and cues
 
@@ -41,6 +130,8 @@ no duplicate boundary frames. Turning previews also omit duplicate boundary fram
 | `Death` | 6.0 s | Knees hit **f40 / 1.625 s**, compress f42 and recover by f46. Forward fall accelerates over f48–64; flat fists hit **f64 / 2.625 s**. Shoulders/elbows compress through f67, recoil and settle by f78. Cabin opens f80–129; final pose holds through f145. |
 | `Mount` | 7.0 s | Exact Death endpoint, held f1–9. Armor closes f9–45. Push onto the fists f47–65; left foot plants by **f81 / 3.333 s**. Fists stay planted through f90, then release progressively as weight transfers onto the foot. The right foot comes underneath f111–138. Arms and final foot placement recover through f167; stable standing f169. |
 | `FinalDeath` | 5.0 s | Failure anticipation through f29. Breakup **f30 / 1.208 s**; all 133 physical pieces separate with independently baked trajectories and rotations. Ends scattered and settled. |
+
+The game first aligns an initially defeated enemy torso with its legs at 90 degrees/s, then plays the full Death clip. For piloted destruction only, it skips FinalDeath anticipation and starts at the GLB breakup time **1.25 s** (the legacy export includes its leading frame); the living pilot is released from the pre-breakup cockpit pose. The authored clips are unchanged.
 
 The resting pose has both knees grounded and both broad fist soles flush with
 z=0. The cabin leans forward 28°, with the hands close to the body and the entrance
@@ -160,7 +251,7 @@ Nearest-neighbor texture sampling is retained. No bloom is required.
 Run the embedded Blender text `IRONMAW_CONTROLS.py`, then call
 `select_clip('Mount')` (or another clip). It selects the action, frame range and
 matching eye preview. `select_clip('HeavyPunch', mounted=True)` previews blue.
-`export_closed_glb(filepath)` exports all eight clips and preserves eye tint factors.
+`export_closed_glb(filepath)` exports all eleven Blender clips and preserves eye tint factors.
 
 - `CTRL_Root`: overall facing and placement.
 - `CTRL_Pelvis`: lower-body weight shift.
@@ -185,7 +276,7 @@ collection can be shown for editing the breakup.
 
 ## Verification
 
-All 692 sampled frames were compared after GLB reimport against Blender's evaluated
+The historical eight-clip export sampled 692 frames after GLB reimport against Blender's evaluated
 mesh surfaces. Maximum difference was 0.051 mm during breakup; all other clips
 were below 0.013 mm. The exported Death/Mount join differs by less than 0.000003
 in matrix elements. Rigid weights, eight action names and durations were verified.
@@ -214,3 +305,19 @@ intermediate floor error is below 0.12 mm. Independent 360° waist rotation leav
 the pelvis and feet unchanged. All six earlier action keyframes and modifiers
 were compared and remain unchanged. Full-revolution videos provide front, side,
 and back inspection of both turn directions.
+
+## Game export and mounted finishing touches (2026-10-01)
+
+Run `export_game_asset.py` with installed Blender against this `.blend` in background mode. It exports the game GLB without saving or changing the authoring file. All eleven clips are included. Five legacy clips retain the existing one-frame lead; Walk/TurnLeft/TurnRight and the three new actions start at zero. Root/waist-yaw channels are omitted from those six clips so runtime world yaw stays authoritative. Materials, nearest-neighbor sampling and the red default eye are retained.
+
+The export copies cassette socket extras from pose-bone authoring properties to the exported `CTRL_RocketSlide_R` joint: `muzzle_rest_position`, `muzzle_rest_direction`, `travel_m`, `anatomical_arm` and `physical_parent`. Socket vectors use Blender armature rest space before the Z-up conversion. Runtime transforms them into slide-local coordinates once, then follows the animated socket. The anatomical right launcher has the legacy `PART_Forearm_L_02` parent; it must not be chosen by the forearm suffix alone. `M_RocketCassette_R` exports a 0.52 m bore diameter used to fit the 90% rocket width. Its four material primitives plus the housing bring the runtime skin proxy count to 25.
+
+RocketFire is three seconds with the frame-37 release at 1.5 seconds; runtime masks it to the upper body, retaining leg locomotion and independent waist yaw. HeadOpen/HeadClose are exact one-second reverses, masked to helmet-related bones. Runtime controls their sampled phase to reverse without snapping. The physical seat and head-height camera remain separate from the folding lens. Game piloting overrides the authored blue eye with warm yellow `#ffd34d` at the existing power-on cue; Blender preview drivers remain unchanged.
+
+The runtime optical camera now sits at the closed `PART_EyeLens_01` center, with a
+chest-owned interior view 0.75 game meters behind it. It does not follow the folding
+lens. The actual Mount helmet hinge reaches its closed pose at exported **f27 /
+1.125 s**; f45 is the remaining armor closure cue, not the helmet cue. An orange
+runtime boot bar starts at f27, completes at the native Mount duration, then shows
+the goggles/video startup. HeadOpen/HeadClose use short render-only blackouts for
+camera relocation; the Blender clips and their timing are unchanged.

@@ -28,6 +28,15 @@
         </div>
     </div>
     <button type="button" id="npc-interaction" hidden aria-label="Talk to goth girlfriend"></button>
+    <div id="mecha-approach-warning" role="status" aria-live="polite" aria-atomic="true" hidden>Something’s approaching...</div>
+    <div id="mecha-head-screen" hidden aria-hidden="true">
+        <div id="mecha-head-loading" hidden role="status" aria-live="polite">
+            <span class="world-loading-boot-label">Loading...</span>
+            <div class="world-loading-boot-track" role="progressbar" aria-label="Mecha startup" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="world-loading-boot-fill"></div>
+            </div>
+        </div>
+    </div>
 
     <div id="blocker">
         <div id="instructions">
@@ -262,6 +271,14 @@
         <div class="menu-actions-column">
             <button class="menu-btn" id="btn-death-respawn">Respawn</button>
             <button class="menu-btn secondary" id="btn-death-leave">Exit to Main Menu</button>
+        </div>
+    </div>
+
+    <div id="game-over-overlay" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
+        <strong class="death-title" id="game-over-title">GAME OVER</strong>
+        <p>Forgotten Mecha reached the castle.</p>
+        <div class="menu-actions-column">
+            <button class="menu-btn secondary" id="btn-game-over-leave">Back to Main Menu</button>
         </div>
     </div>
 

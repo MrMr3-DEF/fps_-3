@@ -26,6 +26,14 @@ export function createTouchControls(fireMode: TouchFireMode = 'joystick'): HTMLE
         }
         layer.append(element);
     }
+    // Mounted-only control shares the vacated grapple slot. It is deliberately
+    // absent from the bean's saved layout and from the settings preview.
+    const helmet = document.createElement('button');
+    helmet.type = 'button'; helmet.textContent = 'Helmet'; helmet.dataset.control = 'helmet'; helmet.dataset.key = 'KeyO';
+    helmet.setAttribute('aria-label', 'Toggle mech helmet'); helmet.hidden = true; layer.append(helmet);
+    const exit = document.createElement('button');
+    exit.type = 'button'; exit.textContent = 'Exit'; exit.dataset.control = 'exit'; exit.dataset.key = 'KeyR';
+    exit.setAttribute('aria-label', 'Shut down and leave mech'); exit.hidden = true; layer.append(exit);
     setFireMode(layer, fireMode);
     return layer;
 }
@@ -62,4 +70,9 @@ export function applyTouchLayout(layer: HTMLElement, layout: TouchLayout, fireMo
             fontSize: `${(id === 'fire' ? 16 : id === 'powerJump' ? 9 : 12) * (layout[id]?.scale ?? 1)}px`,
         });
     }
+    const helmet = layer.querySelector<HTMLElement>('[data-control="helmet"]')!;
+    const grapple = layer.querySelector<HTMLElement>('[data-control="grapple"]')!;
+    helmet.style.cssText = grapple.style.cssText;
+    const exit = layer.querySelector<HTMLElement>('[data-control="exit"]')!;
+    exit.style.cssText = layer.querySelector<HTMLElement>('[data-control="inspect"]')!.style.cssText;
 }

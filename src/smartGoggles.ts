@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { BULLET_TRAVEL_DISTANCE } from './config.js';
+import { userSettings } from './settings.js';
+import { BULLET_TRAVEL_DISTANCE, MECHA_HEIGHT } from './config.js';
+import type { ForgottenMecha } from './forgottenMecha.js';
+import type { RocketLock } from './mechaRockets.js';
 import {
     classifyOutOfRange,
     createScreenBounds,
@@ -153,6 +156,7 @@ const _eliminatedWorldEnvelope: StableTargetEnvelope = {
     halfHeight: 0,
 };
 const _worldIdentity = new THREE.Matrix4();
+const _mechaCalloutBounds = createScreenBounds();
 const _cameraFrustum = new THREE.Frustum();
 const _viewProjection = new THREE.Matrix4();
 const _occlusionRaycaster = new THREE.Raycaster();
@@ -161,6 +165,13 @@ const _occlusionHits: THREE.Intersection[] = [];
 const _enemyOccluders: THREE.Object3D[] = [];
 const _visiblePeerMeshes: THREE.Mesh[] = [];
 const NO_ADDITIONAL_OCCLUDERS: THREE.Object3D[] = [];
+
+function queryMechaOccluders(startX: number, startZ: number, endX: number, endZ: number, out: THREE.Object3D[]): THREE.Object3D[] {
+    queryObstaclesAlongSegment(startX, startZ, endX, endZ, out);
+    // Scan visibility must ignore all twenty of its own body proxies.
+    for (let i = out.length - 1; i >= 0; i--) if (out[i].userData.damageTarget === 'forgotten-mecha') out.splice(i, 1);
+    return out;
+}
 
 export function isAimInsideScanBox(bounds: ScreenBounds, viewportWidth: number, viewportHeight: number): boolean {
     const aimX = viewportWidth / 2;
@@ -389,6 +400,8 @@ export class SmartGogglesHud {
         anomalyTarget: SmartGogglesAnomalyTarget | null = null,
         celestialTargets: readonly CelestialScanTarget[] = [],
         homingEnabled = true,
+        mecha: ForgottenMecha | null = null,
+        mountedLock?: RocketLock | null,
     ): void {
         this.anomalyDetectedThisFrame = false;
         this.homingAimScore = Infinity;
@@ -468,7 +481,7 @@ export class SmartGogglesHud {
                 camera.position,
                 localBox,
                 data.bodyMesh.matrixWorld,
-                queryObstaclesAlongSegment,
+                mountedLock !== undefined ? queryMechaOccluders : queryObstaclesAlongSegment,
                 _enemyOccluders,
                 data.bodyMesh,
             )) continue;
@@ -592,6 +605,30 @@ export class SmartGogglesHud {
             );
         }
 
+        if (mecha?.ready) {
+            const key = 'mecha:forgotten';
+            const previous = this.records.get(key);
+            if (previous && previous.targetRevision !== mecha.revision) { this.eliminate(previous, now); this.records.delete(key); }
+            const hitbox = mecha.hitbox;
+            if (!hitbox.geometry.boundingBox) hitbox.geometry.computeBoundingBox();
+            const box = hitbox.geometry.boundingBox!;
+            const bounds = this.records.get(key)?.bounds ?? createScreenBounds();
+            _anomalyEnvelope.center.copy(mecha.group.position);
+            _anomalyEnvelope.center.y += MECHA_HEIGHT / 2;
+            _anomalyEnvelope.halfWidth = mecha.radius;
+            _anomalyEnvelope.halfHeight = MECHA_HEIGHT / 2;
+            if (mecha.hp > 0 && _cameraFrustum.intersectsObject(hitbox) && projectStableTargetEnvelopeToScreen(_anomalyEnvelope, _worldIdentity, camera, viewportWidth, viewportHeight, bounds)) {
+                const visible = hasLineOfSightToOrientedBox(camera.position, box, hitbox.matrixWorld, queryMechaOccluders, _enemyOccluders);
+                const record = this.trackTarget(key, mecha.revision, 'enemy', 'Forgotten Mecha', bounds, hitbox.position,
+                    mecha.radius, MECHA_HEIGHT / 2, playerPosition.distanceTo(hitbox.position), distanceToOrientedBox(weaponOrigin, box, hitbox.matrixWorld),
+                    mecha.hp, mecha.maxHp, viewportWidth, viewportHeight, now);
+                record.root.classList.toggle('is-mecha-hidden', !visible);
+                record.root.classList.toggle('is-mecha-steady', this.reducedMotion || userSettings.photosensitivityMode);
+                if (visible) this.considerHomingTarget(record, bounds, viewportWidth, viewportHeight, playerPosition.distanceTo(hitbox.position),
+                    { kind: 'mecha', object: mecha.group, actor: mecha, targetRevision: mecha.revision });
+            }
+        }
+
         if (anomalyTarget) {
             const hitbox = anomalyTarget.hitbox;
             const geometry = hitbox.geometry;
@@ -705,6 +742,12 @@ export class SmartGogglesHud {
         // a hitscan weapon also cancels a pending or completed red lock.
         if (!homingEnabled) this.bestHomingCandidate = null;
         this.updateHomingLock(now);
+        if (mountedLock !== undefined) {
+            // Vehicle acquisition is immediate and remains active without this
+            // DOM overlay. These red brackets merely display its chosen target.
+            for (const record of this.records.values()) record.root.classList.remove('is-homing-locking', 'is-homing-locked');
+            if (mountedLock) this.records.get(`npc:${mountedLock.index}`)?.root.classList.add('is-homing-locked');
+        }
 
         for (const [targetKey, record] of this.records) {
             if (record.seenFrame === this.frame) continue;
@@ -1071,8 +1114,17 @@ export class SmartGogglesHud {
             this.updateGeometry(record);
             return;
         }
+        let calloutBounds = record.bounds;
+        if (record.targetKey === 'mecha:forgotten' && Math.max(record.bounds.left, viewportWidth - record.bounds.right) < record.labelWidth + CALLOUT_DIAGONAL_LENGTH) {
+            // The giant body can fill the entire zoomed scope. Keep its real
+            // bounds for acquisition, but lead inward from the visible edge so
+            // the name and health do not collapse to zero width or leave view.
+            _mechaCalloutBounds.left = _mechaCalloutBounds.right = viewportWidth - LABEL_VIEWPORT_MARGIN;
+            _mechaCalloutBounds.top = _mechaCalloutBounds.bottom = THREE.MathUtils.clamp(record.bounds.top, LABEL_VIEWPORT_MARGIN + 24, Math.max(LABEL_VIEWPORT_MARGIN + 24, viewportHeight - 140));
+            calloutBounds = _mechaCalloutBounds;
+        }
         const place = () => layoutSmartGogglesCallout(
-            record.bounds,
+            calloutBounds,
             viewportWidth,
             viewportHeight,
             record.layout,

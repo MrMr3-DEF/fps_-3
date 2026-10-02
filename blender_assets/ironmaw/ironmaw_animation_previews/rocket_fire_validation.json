@@ -1,0 +1,255 @@
+{
+  "clip": "RocketFire",
+  "fps": 24,
+  "frames": [
+    1,
+    73
+  ],
+  "duration_seconds": 3,
+  "shot_frame": 37,
+  "shot_seconds": 1.5,
+  "launcher": {
+    "cassette_width_m": 0.7,
+    "cassette_length_m": 0.75,
+    "housing_length_m": 0.81,
+    "cassette_height_m": 0.7,
+    "rise_m": 0.75,
+    "barrel_outer_diameter_m": 0.6,
+    "barrel_bore_diameter_m": 0.52,
+    "barrel_sides": 12,
+    "bore_depth_m": 0.3,
+    "closed_black_back_wall": true,
+    "anatomical_arm": "right",
+    "viewer_side": "left",
+    "added_triangles": 230,
+    "side_gap_m": 0.015,
+    "front_rear_gap_m": 0.015,
+    "housing_to_cuff_knuckle_gap_m": 0.01,
+    "new_control": "CTRL_RocketSlide_R",
+    "parent": "PART_Forearm_L_02"
+  },
+  "actual_cassette_dimensions_m": [
+    0.7000000476837158,
+    0.75,
+    0.7000002777203918
+  ],
+  "actual_barrel_radii_m": [
+    0.26,
+    0.3
+  ],
+  "minimum_guide_engagement_m": 0.04999999999999988,
+  "minimum_guide_to_floor_gap_m": 0.030000000000000027,
+  "deployed_under_clearance_m": 0.05,
+  "packed_textures": true,
+  "varying_uv_count": 96,
+  "quarter_frame_samples": 289,
+  "maximum_planted_leg_matrix_difference": 0,
+  "maximum_rigid_upper_arm_length_difference_m": 5.05412605766864e-07,
+  "maximum_bone_scale_difference": 8.344650268554688e-07,
+  "maximum_endpoint_matrix_difference": 0.0,
+  "maximum_standing_reference_matrix_difference": 0.0,
+  "original_action_hashes_unchanged": {
+    "Death": true,
+    "FinalDeath": true,
+    "HeadClose": true,
+    "HeadOpen": true,
+    "HeavyPunch": true,
+    "Mount": true,
+    "Stomp": true,
+    "TurnLeft": true,
+    "TurnRight": true,
+    "Walk": true
+  },
+  "original_action_pose_errors": {
+    "Death": 0,
+    "FinalDeath": 0,
+    "HeadClose": 0,
+    "HeadOpen": 0,
+    "HeavyPunch": 0,
+    "Mount": 0,
+    "Stomp": 0,
+    "TurnLeft": 0,
+    "TurnRight": 0,
+    "Walk": 0
+  },
+  "maximum_retracted_slide_to_shell_deformation_difference": 4.76837158203125e-07,
+  "cassette_external_surface_intersections": [],
+  "key_frame_measurements": {
+    "1": {
+      "slide_m": 0.0,
+      "muzzle_direction": [
+        -0.07833617925643921,
+        -0.47126638889312744,
+        -0.8785052299499512
+      ],
+      "top_normal": [
+        0.0933573767542839,
+        -0.8808086514472961,
+        0.4641774594783783
+      ],
+      "torso_pitch_degrees": 0.0,
+      "left_elbow_degrees": 1.7075472925031877e-06,
+      "right_elbow_degrees": 1.7075472925031877e-06
+    },
+    "19": {
+      "slide_m": 0.0,
+      "muzzle_direction": [
+        -4.4703497792397684e-08,
+        -1.0,
+        6.575139650522033e-07
+      ],
+      "top_normal": [
+        3.725290742551124e-09,
+        5.424954565569351e-07,
+        1.0
+      ],
+      "torso_pitch_degrees": -4.0000046647695875,
+      "left_elbow_degrees": -32.89320749554093,
+      "right_elbow_degrees": 20.000001125733135
+    },
+    "31": {
+      "slide_m": 0.75,
+      "muzzle_direction": [
+        -4.4703497792397684e-08,
+        -1.0,
+        6.575139650522033e-07
+      ],
+      "top_normal": [
+        3.725290742551124e-09,
+        5.424954565569351e-07,
+        1.0
+      ],
+      "torso_pitch_degrees": -4.0000046647695875,
+      "left_elbow_degrees": -32.89320749554093,
+      "right_elbow_degrees": 20.000001125733135
+    },
+    "37": {
+      "slide_m": 0.75,
+      "muzzle_direction": [
+        -4.4703497792397684e-08,
+        -1.0,
+        6.575139650522033e-07
+      ],
+      "top_normal": [
+        3.725290742551124e-09,
+        5.424954565569351e-07,
+        1.0
+      ],
+      "torso_pitch_degrees": -4.0000046647695875,
+      "left_elbow_degrees": -32.89320749554093,
+      "right_elbow_degrees": 20.000001125733135
+    },
+    "39": {
+      "slide_m": 0.75,
+      "muzzle_direction": [
+        -5.960465188081798e-08,
+        -0.9975640177726746,
+        0.06975702941417694
+      ],
+      "top_normal": [
+        7.450580596923828e-09,
+        0.06975723803043365,
+        0.9975640177726746
+      ],
+      "torso_pitch_degrees": -5.200000600049128,
+      "left_elbow_degrees": -38.67442645810687,
+      "right_elbow_degrees": 20.000001125733135
+    },
+    "47": {
+      "slide_m": 0.75,
+      "muzzle_direction": [
+        -4.4703497792397684e-08,
+        -1.0,
+        6.575139650522033e-07
+      ],
+      "top_normal": [
+        3.725290742551124e-09,
+        5.424954565569351e-07,
+        1.0
+      ],
+      "torso_pitch_degrees": -4.0000046647695875,
+      "left_elbow_degrees": -32.89320749554093,
+      "right_elbow_degrees": 20.000001125733135
+    },
+    "49": {
+      "slide_m": 0.75,
+      "muzzle_direction": [
+        -4.4703497792397684e-08,
+        -1.0,
+        6.575139650522033e-07
+      ],
+      "top_normal": [
+        3.725290742551124e-09,
+        5.424954565569351e-07,
+        1.0
+      ],
+      "torso_pitch_degrees": -4.0000046647695875,
+      "left_elbow_degrees": -32.89320749554093,
+      "right_elbow_degrees": 20.000001125733135
+    },
+    "61": {
+      "slide_m": 0.0,
+      "muzzle_direction": [
+        -4.4703497792397684e-08,
+        -1.0,
+        6.575139650522033e-07
+      ],
+      "top_normal": [
+        3.725290742551124e-09,
+        5.424954565569351e-07,
+        1.0
+      ],
+      "torso_pitch_degrees": -4.0000046647695875,
+      "left_elbow_degrees": -32.89320749554093,
+      "right_elbow_degrees": 20.000001125733135
+    },
+    "73": {
+      "slide_m": 0.0,
+      "muzzle_direction": [
+        -0.07833617925643921,
+        -0.47126638889312744,
+        -0.8785052299499512
+      ],
+      "top_normal": [
+        0.0933573767542839,
+        -0.8808086514472961,
+        0.4641774594783783
+      ],
+      "torso_pitch_degrees": 0.0,
+      "left_elbow_degrees": 1.7075472925031877e-06,
+      "right_elbow_degrees": 1.7075472925031877e-06
+    }
+  },
+  "original_glb_unchanged": true,
+  "axial_ray_hits_black_back_wall": true,
+  "preview_video_validation": {
+    "front": {
+      "frames": 73,
+      "fps": 24.0,
+      "bytes": 123360,
+      "decoded_frames": [
+        1,
+        31,
+        39,
+        73
+      ],
+      "minimum_pixel_std": 31.320039529862377,
+      "aim_to_recoil_pixel_difference": 2.091638997395833,
+      "endpoint_pixel_difference": 0.59186767578125
+    },
+    "side": {
+      "frames": 73,
+      "fps": 24.0,
+      "bytes": 93071,
+      "decoded_frames": [
+        1,
+        31,
+        39,
+        73
+      ],
+      "minimum_pixel_std": 18.388631892345863,
+      "aim_to_recoil_pixel_difference": 1.7547208658854168,
+      "endpoint_pixel_difference": 0.3525569661458333
+    }
+  }
+}

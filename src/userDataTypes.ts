@@ -15,6 +15,7 @@ export interface TargetUserData {
 }
 
 export interface ObstacleUserData {
+    damageTarget?: 'forgotten-mecha';
     height: number;
     halfW: number;
     halfD: number;
@@ -29,6 +30,8 @@ export interface ProjectileUserData {
     distanceTraveled: number;
     visualOnly: boolean;
     damage?: number;
+    /** Original muzzle position survives steering and pooled projectile reuse. */
+    shotOrigin?: THREE.Vector3;
     shotId?: number;
     pelletIndex?: number;
     homingTarget?: ProjectileHomingTarget;

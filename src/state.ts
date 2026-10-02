@@ -4,6 +4,7 @@ import type { PointerLockControls } from './pointerLockControls.js';
 import type { Particle } from './particles.js';
 import { createGogglesFailureState, resetGogglesFailure, type GogglesFailureState } from './gogglesFailure.js';
 import type { HookState, LobbyPlayer, PlayerListEntry } from './networkTypes.js';
+import type { ForgottenMecha } from './forgottenMecha.js';
 
 export interface PeerLike {
     id: string;
@@ -70,6 +71,7 @@ export interface GameState {
     playerMaxHp: number;
     lastDamageTime: number;
     isPlaying: boolean;
+    matchEnded: boolean;
     pendingPlay: boolean;
     regenTimer: number;
     kills: number;
@@ -141,6 +143,7 @@ export interface GameState {
     gogglesFailure: GogglesFailureState;
     baseSensitivity: number;
     hoverFuel: number;
+    hookTargetCockpit: ForgottenMecha | null;
     isShiftDown: boolean;
     isHovering: boolean;
 }
@@ -169,6 +172,7 @@ export const state: GameState = {
     playerMaxHp: PLAYER_MAX_HP,
     lastDamageTime: 0,
     isPlaying: false,
+    matchEnded: false,
     pendingPlay: false,
     regenTimer: 0,
     kills: 0,
@@ -240,11 +244,13 @@ export const state: GameState = {
     gogglesFailure: createGogglesFailureState(),
     baseSensitivity: 1.0,
     hoverFuel: 1.0,
+    hookTargetCockpit: null,
     isShiftDown: false,
     isHovering: false,
 };
 
 export function resetPlayerState() {
+    state.hookTargetCockpit = null;
     state.regenUpdatedAt = performance.now();
     state.lifeId++;
     state.lastDamageTime = 0;
@@ -270,6 +276,7 @@ export function resetPlayerState() {
 
 /** Reset score and PvP counters only when starting a genuinely fresh match. */
 export function resetMatchStats() {
+    state.matchEnded = false;
     state.score = 0;
     state.kills = 0;
     state.deaths = 0;

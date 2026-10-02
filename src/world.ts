@@ -1,6 +1,7 @@
 import { cancelHookForTarget } from './hookLifecycle.js';
 import * as THREE from 'three';
 import { state } from './state.js';
+import { ForgottenMecha, type MechaEvents } from './forgottenMecha.js';
 import {
     MAP_SIZE,
     PILLAR_COUNT,
@@ -35,6 +36,22 @@ const obstacleHash = new SpatialHash<THREE.Object3D>(32);
 const lavaHash = new SpatialHash<THREE.Object3D>(32);
 const targetHash = new SpatialHash<THREE.Group>(48);
 export let gothGirlfriend: GothGirlfriend | null = null;
+export let forgottenMecha: ForgottenMecha | null = null;
+
+/** Asset preparation is awaited by offline startup; cancellation disposes even
+ * a model that finishes downloading after its match has already been replaced. */
+export async function prepareForgottenMecha(events: MechaEvents, checkpoint: () => Promise<void>): Promise<void> {
+    if (state.isMultiplayer || !state.scene) return;
+    const scene = state.scene;
+    const actor = new ForgottenMecha([...state.obstacles], [...state.lavaPools], worldSeed, events, queryObstaclesAlongSegment);
+    forgottenMecha = actor;
+    scene.add(actor.group, actor.combat.effects.group, actor.pilot.rockets.group);
+    await actor.load();
+    await checkpoint();
+    if (forgottenMecha !== actor || state.scene !== scene || actor.disposed) throw new DOMException('Loading cancelled', 'AbortError');
+    if (state.renderer) actor.prepareLighting(state.renderer);
+    for (const collider of actor.colliders) { scene.add(collider); state.obstacles.push(collider); }
+}
 
 const worldObjects: THREE.Object3D[] = [];
 const renderChunks = new Map<string, THREE.Object3D[]>();
@@ -520,7 +537,14 @@ export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChu
 }
 
 export function queryObstaclesNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
-    return obstacleHash.query(x, z, radius, out);
+    const candidates = obstacleHash.query(x, z, radius, out);
+    // Only one actor has moving colliders. Append its bounded set rather than
+    // rebuilding thousands of static hash entries every animation frame.
+    for (const collider of forgottenMecha?.solidColliders ?? []) {
+        const data = obstacleData(collider);
+        if (Math.abs(x - collider.position.x) <= radius + data.halfW && Math.abs(z - collider.position.z) <= radius + data.halfD) candidates.push(collider);
+    }
+    return candidates;
 }
 
 export function queryLavaPoolsNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
@@ -536,9 +560,16 @@ export function queryObstaclesAlongSegment(
     startZ: number,
     endX: number,
     endZ: number,
-    out?: THREE.Object3D[]
+    out?: THREE.Object3D[],
+    padding = 0,
 ): THREE.Object3D[] {
-    return obstacleHash.querySegment(startX, startZ, endX, endZ, out);
+    const candidates = obstacleHash.querySegment(startX, startZ, endX, endZ, out, padding);
+    for (const collider of forgottenMecha?.solidColliders ?? []) {
+        const data = obstacleData(collider);
+        if (collider.position.x + data.halfW + padding >= Math.min(startX, endX) && collider.position.x - data.halfW - padding <= Math.max(startX, endX) &&
+            collider.position.z + data.halfD + padding >= Math.min(startZ, endZ) && collider.position.z - data.halfD - padding <= Math.max(startZ, endZ)) candidates.push(collider);
+    }
+    return candidates;
 }
 
 export function queryTargetsAlongSegment(
@@ -562,7 +593,7 @@ export function queryGrappleSurfacesAlongSegment(
     endZ: number,
     out: THREE.Object3D[] = []
 ): THREE.Object3D[] {
-    const candidates = obstacleHash.querySegment(startX, startZ, endX, endZ, out);
+    const candidates = queryObstaclesAlongSegment(startX, startZ, endX, endZ, out);
     const lavaCandidates = lavaHash.querySegment(startX, startZ, endX, endZ, _grappleLavaCandidates);
     for (let i = 0; i < lavaCandidates.length; i++) candidates.push(lavaCandidates[i]);
     if (grappleFloor) candidates.push(grappleFloor);
@@ -1494,6 +1525,8 @@ export async function createEnvironmentAsync(seed: number, checkpoint: () => Pro
 }
 
 export function disposeWorld(): void {
+    forgottenMecha?.dispose();
+    forgottenMecha = null;
     gothGirlfriend?.dispose();
     gothGirlfriend = null;
     if (!state.scene) return;

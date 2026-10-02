@@ -9,10 +9,10 @@ import {
     TARGET_HIT_RANGE_MULTIPLIER,
     WEAPON_STATS
 } from './config.js';
-import { processTargetHit } from './damage.js';
+import { processTargetHit, processMechaHit } from './damage.js';
 import { flashPeerMesh, broadcastToAll } from './weaponNetworkPort.js';
 import { spawnParticles } from './particles.js';
-import { queryObstaclesAlongSegment, queryTargetsNear } from './world.js';
+import { forgottenMecha, queryObstaclesAlongSegment, queryTargetsNear } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { obstacleData, projectileData, targetData } from './userDataTypes.js';
 import { segmentAabbHitT, segmentSphereHitT } from './gameplayMath.js';
@@ -87,6 +87,7 @@ export function updateProjectiles(delta: number, attackerName: string): void {
         const damage = data.damage ?? fallbackDamage;
 
         _segmentStart.copy(proj.position);
+        data.shotOrigin ??= _segmentStart.clone();
         _movementDirection.set(data.dx, data.dy, data.dz).normalize();
         let curvedTrail = false;
         if (data.homingTarget && !isHomingTargetInRange(data.homingTarget, _segmentStart, remainingDistance)) {
@@ -138,9 +139,10 @@ export function updateProjectiles(delta: number, attackerName: string): void {
         const queryRadius = travelDistance * 0.5 + 12;
 
         let closestHitT = Infinity;
-        let hitObstacle = false;
+        let hitObstacle: THREE.Object3D | null = null;
         let hitTarget: THREE.Group | null = null;
         let hitPeerId: string | null = null;
+        let hitShield = false;
 
         // Always stop projectiles on terrain, including remote visual-only
         // bullets. The collider meshes are invisible but represent the same
@@ -150,7 +152,8 @@ export function updateProjectiles(delta: number, attackerName: string): void {
             _segmentStart.z,
             _segmentEnd.x,
             _segmentEnd.z,
-            _obstacleCandidates
+            _obstacleCandidates,
+            PROJECTILE_RADIUS,
         );
         for (let j = 0; j < obstacleCandidates.length; j++) {
             const obstacle = obstacleCandidates[j];
@@ -171,10 +174,16 @@ export function updateProjectiles(delta: number, attackerName: string): void {
             const hitT = segmentAabbHitT(_segmentStart, _segmentEnd, _aabbMin, _aabbMax);
             if (hitT !== null && hitT < closestHitT) {
                 closestHitT = hitT;
-                hitObstacle = true;
+                hitObstacle = obstacle;
                 hitTarget = null;
                 hitPeerId = null;
             }
+        }
+
+        const shieldT = !visualOnly && !state.isMultiplayer
+            ? forgottenMecha?.combat.shieldContactT(_segmentStart, _segmentEnd, data.shotOrigin, PROJECTILE_RADIUS) : null;
+        if (shieldT != null && shieldT < closestHitT) {
+            closestHitT = shieldT; hitObstacle = null; hitShield = true;
         }
 
         if (!visualOnly) {
@@ -192,9 +201,10 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                 const hitT = segmentSphereHitT(_segmentStart, _segmentEnd, target.position, hitRange);
                 if (hitT !== null && hitT < closestHitT) {
                     closestHitT = hitT;
-                    hitObstacle = false;
+                    hitObstacle = null;
                     hitTarget = target;
                     hitPeerId = null;
+                    hitShield = false;
                 }
             }
         }
@@ -212,9 +222,10 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                     );
                     if (hitT !== null && hitT < closestHitT) {
                         closestHitT = hitT;
-                        hitObstacle = false;
+                        hitObstacle = null;
                         hitTarget = null;
                         hitPeerId = peerId;
+                        hitShield = false;
                     }
                 }
             }
@@ -250,7 +261,11 @@ export function updateProjectiles(delta: number, attackerName: string): void {
                     if (state.isHost) flashHitmarker(false);
                     projectileHit = true;
                 }
+            } else if (hitShield) {
+                processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'shield' });
+                projectileHit = true;
             } else if (hitObstacle) {
+                if (!visualOnly && !state.isMultiplayer && obstacleData(hitObstacle).damageTarget === 'forgotten-mecha') processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'body' });
                 spawnParticles(_impactPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
                 projectileHit = true;
             }

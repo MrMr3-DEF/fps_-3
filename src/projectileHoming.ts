@@ -3,6 +3,7 @@ import type { HomingTargetPacket } from './networkTypes.js';
 import { targetData } from './userDataTypes.js';
 import { classifyOutOfRange, distanceToOrientedBox } from './smartGogglesMath.js';
 import { distanceToVisiblePeerMeshes } from './smartGogglesPeerMath.js';
+import type { ForgottenMecha } from './forgottenMecha.js';
 
 /** Strong enough to correct a near miss, but finite so fast/close targets can escape. */
 export const PROJECTILE_HOMING_RESPONSE = 48;
@@ -14,6 +15,7 @@ export const PROJECTILE_HOMING_START_FRACTION = 1 / 3;
 export const HOMING_AIM_PADDING_RADIANS = THREE.MathUtils.degToRad(1.25);
 
 export type ProjectileHomingTarget =
+    | { kind: 'mecha'; object: THREE.Group; actor: ForgottenMecha; targetRevision: number }
     | {
         kind: 'npc';
         object: THREE.Group;
@@ -44,7 +46,12 @@ export function isHomingTargetInRange(
     maximumRange: number,
 ): boolean {
     let distance: number;
-    if (target.kind === 'peer') {
+    if (target.kind === 'mecha') {
+        if (!target.actor.ready || target.actor.disposed || target.actor.hp <= 0 || target.actor.revision !== target.targetRevision) return false;
+        const body = target.actor.hitbox;
+        if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
+        distance = distanceToOrientedBox(origin, body.geometry.boundingBox!, body.matrixWorld);
+    } else if (target.kind === 'peer') {
         distance = distanceToVisiblePeerMeshes(origin, target.object);
     } else {
         const body = targetData(target.object).bodyMesh;
@@ -67,6 +74,10 @@ export function resolveProjectileHomingTarget(
     peers: Readonly<Record<string, { mesh: THREE.Group; hp: number; lifeId?: number }>>,
     out: THREE.Vector3,
 ): THREE.Vector3 | null {
+    if (target.kind === 'mecha') {
+        return target.actor.ready && !target.actor.disposed && target.actor.hp > 0 && target.actor.revision === target.targetRevision
+            ? out.copy(target.actor.hitbox.position) : null;
+    }
     if (target.kind === 'npc') {
         if (npcTargets[target.targetIndex] !== target.object) return null;
         const data = targetData(target.object);
@@ -80,7 +91,8 @@ export function resolveProjectileHomingTarget(
 }
 
 export function toHomingTargetPacket(target: ProjectileHomingTarget | null): HomingTargetPacket | undefined {
-    if (!target) return undefined;
+    // The offline-only actor has no network identity and cannot enter a packet.
+    if (!target || target.kind === 'mecha') return undefined;
     return target.kind === 'npc'
         ? { kind: 'npc', targetIndex: target.targetIndex, targetRevision: target.targetRevision }
         : { kind: 'peer', targetPeerId: target.targetPeerId, targetLifeId: target.targetLifeId };

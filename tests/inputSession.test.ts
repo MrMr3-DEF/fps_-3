@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { state } from '../src/state.js';
+import { state, resetMatchStats } from '../src/state.js';
 import { beginInput, enableTouchMode, endInput, isInputActive, onInputStarted, onInputEnded, setTouchMode, touchMode, touchMove } from '../src/inputSession.js';
 
 test('desktop uses pointer lock; landscape touch uses the same session lifecycle without requesting it', async () => {
@@ -80,4 +80,14 @@ test('desktop uses pointer lock; landscape touch uses the same session lifecycle
     assert.equal(ends, 5);
     setTouchMode(true);
     assert.equal(ends, 5, 'reapplying the same mode does not emit a second pause');
+});
+
+test('a terminal game-over match cannot reacquire desktop or touch input, and a fresh match can', () => {
+    let locks = 0;
+    state.controls = { isLocked: false, lock: () => locks++, addEventListener() {} } as any;
+    state.matchEnded = true;
+    setTouchMode(false); beginInput(); assert.equal(locks, 0);
+    setTouchMode(true); beginInput(); assert.equal(isInputActive(), false);
+    resetMatchStats();
+    setTouchMode(false); beginInput(); assert.equal(locks, 1);
 });

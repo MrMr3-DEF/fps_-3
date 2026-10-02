@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forgotten Mecha gameplay review</title>
+<style>
+    body { margin: 0; background: #10161b; color: #eee; font: 14px system-ui; display:flex; flex-direction:column; height:100vh; }
+    #tools { padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button, input { padding: 8px; background: #24323b; color: white; border: 1px solid #638093; border-radius: 4px; }
+    #status { padding: 0 12px 10px; white-space: pre-wrap; font-size:12px; }
+    iframe { width: 100%; flex:1; min-height:0; border: 0; display: block; }
+</style>
+<div id="tools">
+    <button data-action="start">Start singleplayer</button>
+    <button data-action="find">Find Mecha</button>
+    <label>Distance (m) <input id="distance" type="number" value="60" min="3" max="180" style="width:65px"></label>
+    <label>Body height (m) <input id="height" type="number" value="2" min="0" max="80" style="width:60px"></label>
+    <label><input id="hover" type="checkbox"> Hold height</label>
+    <label><input id="evade" type="checkbox"> Evade charged shots</label>
+    <label>Pause at <select id="pause-at"><option value="none">No event</option><option value="aligning">Defeat torso alignment</option><option value="breakup">Immediate breakup / release</option><option value="charging">Charged sphere</option><option value="firing">Beam firing</option><option value="down">Shield drop</option><option value="rebuilding">Shield rebuilding</option><option value="rocket">Rocket windup</option><option value="helmet">Helmet folding</option><option value="head-mount">Mount helmet closure</option><option value="head-loading">Orange loading</option><option value="head-hud">Black goggles boot</option><option value="head-reveal">Video tearing</option><option value="head-black">Helmet blackout</option></select></label>
+    <button data-action="dodge">Dodge sideways</button>
+    <button data-action="scan">Toggle goggles</button>
+    <button data-action="noon">Noon lighting</button>
+    <button data-action="shoot">Fire weapon</button>
+    <button data-action="sniper">Equip sniper</button>
+    <button data-action="kill">Kill Mecha</button>
+    <button data-action="cockpit">Aim into cockpit</button>
+    <button data-action="cockpit-ground">Ground cabin approach</button>
+    <button data-action="grapple">Grapple cockpit</button>
+    <button data-action="turn">Turn right for 1s</button>
+    <button data-action="helmet">Toggle helmet (O)</button>
+    <button data-action="head-safe">Toggle gentle reveal</button>
+    <button data-action="lava">Place feet in lava</button>
+    <button data-action="pillar-clearance">Fitted pillar approach</button>
+    <button data-action="stomp-leg">Stand on leg for stomp</button>
+    <button data-action="defeat-turn">Face sideways before defeat</button>
+    <button data-action="walk">Walk / stop</button>
+    <button data-action="reverse">Reverse / stop</button>
+    <button data-action="third">Toggle third person</button>
+    <button data-action="front">Front asset review</button>
+    <button data-action="player-death">Damage player / pilot</button>
+    <button data-action="targets">Targets ahead</button>
+    <button data-action="rockets">Fire / stop rockets</button>
+    <label><input id="shield" type="checkbox"> Hold shield</label>
+    <button data-action="jump">Jump</button>
+    <button data-action="punch">Place at wall</button>
+    <button data-action="pause">Pause / resume</button>
+    <button data-action="leave">Leave match</button>
+</div>
+<div id="status" role="status">Loading gameplay review…</div>
+<div id="history" style="padding:0 12px 8px" role="log"></div>
+<iframe id="game" title="FPS Arena gameplay" src="/" allow="fullscreen"></iframe>
+<script type="module">
+    const frame = document.getElementById('game');
+    frame.addEventListener('load', () => {
+        const script = frame.contentDocument.createElement('script');
+        script.type = 'module'; script.src = '/tests/mechaPreview.ts';
+        frame.contentDocument.body.append(script);
+    });
+    for (const button of document.querySelectorAll('[data-action]')) button.onclick = () => {
+        frame.contentWindow.dispatchEvent(new CustomEvent('mecha-review-action', { detail: button.dataset.action }));
+    };
+</script>
+</html>

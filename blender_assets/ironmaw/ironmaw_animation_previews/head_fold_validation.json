@@ -1,0 +1,34 @@
+{
+  "clips": {
+    "HeadOpen": {
+      "frames": [
+        1,
+        25
+      ],
+      "duration_seconds": 1,
+      "source": "Death f105-129: helmet hinge rotation only"
+    },
+    "HeadClose": {
+      "frames": [
+        1,
+        25
+      ],
+      "duration_seconds": 1,
+      "source": "HeadOpen reversed"
+    }
+  },
+  "maximum_non_head_bone_matrix_difference": 0.0,
+  "maximum_open_close_reverse_matrix_difference": 0.0,
+  "original_actions_unchanged": {
+    "Death": true,
+    "FinalDeath": true,
+    "HeavyPunch": true,
+    "Mount": true,
+    "Stomp": true,
+    "TurnLeft": true,
+    "TurnRight": true,
+    "Walk": true
+  },
+  "fold_angle_degrees": -105.00000633698578,
+  "export_scope": "Blender-only actions; existing GLB unchanged"
+}

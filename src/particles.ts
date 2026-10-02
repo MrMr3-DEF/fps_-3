@@ -101,7 +101,7 @@ function releaseShockwaveMaterial(mat: THREE.MeshBasicMaterial): void {
     }
 }
 
-export type ParticleKind = 'spark' | 'sniper-trail' | 'shockwave' | 'rocket-flame' | 'maneuvering';
+export type ParticleKind = 'spark' | 'dust' | 'sniper-trail' | 'shockwave' | 'rocket-flame' | 'maneuvering';
 
 export interface Particle {
     kind: ParticleKind;
@@ -121,7 +121,7 @@ export interface Particle {
 }
 
 function isBoxParticle(kind: ParticleKind): boolean {
-    return kind === 'spark' || kind === 'rocket-flame' || kind === 'maneuvering';
+    return kind === 'spark' || kind === 'dust' || kind === 'rocket-flame' || kind === 'maneuvering';
 }
 
 function pushBoxParticle(
@@ -190,6 +190,23 @@ export function spawnParticles(position: THREE.Vector3, color: number, count: nu
     }
 }
 
+/** Radial dust and stone chips share the existing instance pool and user budget;
+ * a giant footfall must not create a mesh/material for every speck of debris. */
+export function spawnGroundImpact(position: THREE.Vector3, radius: number, heavy: boolean): void {
+    const count = Math.min(scaleParticleCount(heavy ? 64 : 12), availableParticleSlots());
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const dust = i % 3 !== 0;
+        const speed = radius * (0.4 + Math.random() * 0.6);
+        _instancePosition.set(position.x + Math.sin(angle) * radius * 0.12, position.y + 0.3, position.z + Math.cos(angle) * radius * 0.12);
+        pushBoxParticle(dust ? 'dust' : 'spark', _instancePosition, dust ? 0x938976 : 0x68645b,
+            dust ? 0.5 + Math.random() * (heavy ? 1.2 : 0.35) : 0.12 + Math.random() * 0.28,
+            Math.sin(angle) * speed, dust ? 1 + Math.random() * 2 : 5 + Math.random() * 7, Math.cos(angle) * speed,
+            dust ? 0.4 : 24, dust ? 1.1 + Math.random() * 0.8 : 0.6 + Math.random() * 0.5);
+    }
+    if (heavy) createShockwave(position, radius, 0xc9b998);
+}
+
 export function createLaserBeam(startPos: THREE.Vector3, endPos: THREE.Vector3, color: number = 0x00d2ff): void {
     if (availableParticleSlots() <= 0 || !state.scene) return;
 
@@ -247,7 +264,7 @@ function updateBoxInstances(hasBoxParticles: boolean): void {
         if (instanceIndex >= limit) break;
 
         const ratio = Math.max(0, p.life / p.maxLife);
-        const scale = (p.size || 0.1) * ratio;
+        const scale = (p.size || 0.1) * (p.kind === 'dust' ? Math.sin(Math.PI * ratio) : ratio);
         _instancePosition.set(p.x || 0, p.y || 0, p.z || 0);
         _instanceScale.set(scale, scale, scale);
         _instanceMatrix.compose(_instancePosition, _instanceQuaternion, _instanceScale);

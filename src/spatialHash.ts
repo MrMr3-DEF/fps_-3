@@ -63,7 +63,7 @@ export class SpatialHash<T> {
      * broad-phase helper for ray-like gameplay queries; callers still perform
      * the exact 3D intersection test afterwards.
      */
-    querySegment(startX: number, startZ: number, endX: number, endZ: number, out: T[] = []): T[] {
+    querySegment(startX: number, startZ: number, endX: number, endZ: number, out: T[] = [], padding = 0): T[] {
         out.length = 0;
         this.seen.clear();
 
@@ -73,6 +73,7 @@ export class SpatialHash<T> {
         const endCellZ = this.toCell(endZ);
         const deltaX = endX - startX;
         const deltaZ = endZ - startZ;
+        const neighbors = Math.ceil(Math.max(0, padding) / this.cellSize);
         const stepX = Math.sign(deltaX);
         const stepZ = Math.sign(deltaZ);
 
@@ -84,7 +85,11 @@ export class SpatialHash<T> {
         let tMaxZ = stepZ === 0 ? Infinity : (nextBoundaryZ - startZ) / deltaZ;
 
         while (true) {
-            this.appendCell(cellX, cellZ, out);
+            // A thick beam near a cell edge can touch a collider whose cells
+            // the center ray never crosses. Exact geometry filters this halo.
+            for (let x = cellX - neighbors; x <= cellX + neighbors; x++) {
+                for (let z = cellZ - neighbors; z <= cellZ + neighbors; z++) this.appendCell(x, z, out);
+            }
             if (cellX === endCellX && cellZ === endCellZ) break;
 
             if (tMaxX < tMaxZ) {

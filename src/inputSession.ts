@@ -50,6 +50,7 @@ export function isInputActive(): boolean {
     return touchPlaying || Boolean(state.controls?.isLocked);
 }
 export function beginInput(): void {
+    if (state.matchEnded) return;
     bindControls();
     if (!touchMode) { state.controls?.lock(); return; }
     if (innerWidth <= innerHeight || touchPlaying) return;

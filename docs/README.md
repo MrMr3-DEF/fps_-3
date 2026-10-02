@@ -10,10 +10,11 @@ Each document owns a distinct subject so information has one canonical location:
 - [Agent handoff](agent-handoff.md) gives a compact current-state map, lifecycle boundaries, and verification snapshot for a new contributor.
 - [Full-screen menu](main-menu.md) covers character customization and weapon specifications.
 - [Mobile controls](mobile-controls.md) covers touch input, landscape behavior and device validation.
+- [Forgotten Mecha](forgotten-mecha.md) covers the singleplayer siege robot, navigation, attacks, cockpit mounting, piloting and match ending.
 - [Development](development.md) covers prerequisites, local workflows, scripts, tests, CI, generated output, and change validation.
 - [Cloudflare operations](operations.md) covers deployment, bindings, TURN and Turnstile configuration, API routes, quotas, security properties, and troubleshooting.
 - [Audit resolution](audit-resolution.md) records fixes and validation for the historical September audit; [Code audit](code-audit.md) is the original finding record.
-- [Follow-up validation](to_be_changed.md) is the short, living list of deployment and device checks still to perform.
+- [Planned changes](to_be_changed.md) preserves the user's original requests. Current Mecha behavior and its separate manual checklist live in [Forgotten Mecha](forgotten-mecha.md).
 
 ## Project at a glance
 

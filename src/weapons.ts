@@ -18,10 +18,10 @@ import {
 } from './config.js';
 import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './weaponNetworkPort.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
-import { processTargetHit } from './damage.js';
-import { queryObstaclesAlongSegment, queryTargetsAlongSegment } from './world.js';
+import { processTargetHit, processMechaHit } from './damage.js';
+import { forgottenMecha, queryObstaclesAlongSegment, queryTargetsAlongSegment } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
-import { projectileData, targetData } from './userDataTypes.js';
+import { projectileData, targetData, obstacleData } from './userDataTypes.js';
 import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
 import { attachGrappleMuzzleShockwave, attachMuzzleShockwave, triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import { flashHitmarker } from './hitmarker.js';
@@ -456,6 +456,7 @@ let minigunHomingDistanceSample: {
 
 function isSameHomingTarget(a: ProjectileHomingTarget, b: ProjectileHomingTarget): boolean {
     return a.kind === b.kind && a.object === b.object && (
+        a.kind === 'mecha' && b.kind === 'mecha' ? a.actor === b.actor && a.targetRevision === b.targetRevision :
         a.kind === 'npc' && b.kind === 'npc'
             ? a.targetIndex === b.targetIndex && a.targetRevision === b.targetRevision
             : a.kind === 'peer' && b.kind === 'peer' &&
@@ -493,6 +494,7 @@ function sampleHomingStartDistance(
 }
 
 export function fireProjectile(): void {
+    if (forgottenMecha?.ownsPilot) return;
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
 
     if (state.activeWeaponName === 'MINIGUN' && state.minigunRamp < MINIGUN_SHOOT_DELAY) {
@@ -562,6 +564,7 @@ export function fireProjectile(): void {
         data.distanceTraveled = projectile.position.distanceTo(barrelWorldPosition);
         data.visualOnly = false;
         data.damage = stats.damage;
+        (data.shotOrigin ??= new THREE.Vector3()).copy(barrelWorldPosition);
         data.shotId = shotId;
         data.pelletIndex = pelletIndex;
         data.homingTarget = homingTarget ?? undefined;
@@ -661,9 +664,15 @@ export function fireProjectile(): void {
 
         const hitPoint = _hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, BULLET_TRAVEL_DISTANCE);
         let sniperFireBroadcast = false;
+        const shieldT = !state.isMultiplayer ? forgottenMecha?.combat.shieldContactT(barrelWorldPosition, _rayEnd, barrelWorldPosition) : null;
+        const shieldDist = shieldT != null ? shieldT * BULLET_TRAVEL_DISTANCE : Infinity;
 
-        if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
+        if (shieldDist < closestObstacleDist && shieldDist < closestTargetDist && shieldDist < closestPeerDist) {
+            hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, shieldDist);
+            processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'shield' });
+        } else if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestObstacleDist);
+            if (!state.isMultiplayer && obstacleData(obstacleHits[0].object).damageTarget === 'forgotten-mecha') processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'body' });
             spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
         } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist && hitTargetGroup) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestTargetDist);
@@ -739,6 +748,7 @@ export function fireProjectile(): void {
 }
 
 export function updateWeapons(delta: number): void {
+    if (forgottenMecha?.ownsPilot) return;
     updateMuzzleFlash(state.leftGun, delta);
     updateMuzzleFlash(state.rightGun, delta);
 
@@ -1083,7 +1093,17 @@ export function disposePlayerVisuals(): void {
 // First-person attaches guns to the camera; third-person reparents the same
 // objects onto the avatar so weapon state stays shared.
 export function syncThirdPersonPresentation(): void {
+    if (forgottenMecha?.ownsPilot) {
+        state.isThirdPersonView = (forgottenMecha.mode === 'piloted' || forgottenMecha.mode === 'shutting-down') && state.isThirdPerson && !state.keyCActive && !state.rightClickActive;
+        if (state.leftGun) state.leftGun.visible = false;
+        if (state.rightGunContainer) state.rightGunContainer.visible = false;
+        return;
+    }
     const enabled = shouldUseThirdPersonView(state.isThirdPerson, state.keyCActive);
+    // A mounted session hides these containers. Release/respawn restores their
+    // presentation rather than leaving an otherwise functional invisible gun.
+    if (state.leftGun) state.leftGun.visible = state.playerHp > 0;
+    if (state.rightGunContainer) state.rightGunContainer.visible = state.playerHp > 0;
     state.isThirdPersonView = enabled;
     if (enabled) {
         if (state.playerMesh) state.playerMesh.visible = state.playerHp > 0;

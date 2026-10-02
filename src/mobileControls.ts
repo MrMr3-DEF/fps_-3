@@ -1,5 +1,5 @@
-import { Euler } from 'three';
 import { state } from './state.js';
+import { applyLookInput } from './lookInput.js';
 import { onInputStarted, onInputEnded, setTouchMode, touchMode, endInput, isInputActive, touchMove } from './inputSession.js';
 import { userSettings } from './settings.js';
 import { createTouchControls, applyTouchLayout } from './mobileControlsView.js';
@@ -27,7 +27,6 @@ export function setupMobileControls(actions: Actions): () => void {
     const stick = layer.querySelector<HTMLElement>('.touch-stick')!;
     const knob = stick.firstElementChild as HTMLElement;
     const look = layer.querySelector<HTMLElement>('.touch-look')!;
-    const rotation = new Euler(0, 0, 0, 'YXZ');
     const held = new Map<number, { element: HTMLElement; release: () => void }>();
     let stickPointer: number | null = null;
     let lookPointer: number | null = null;
@@ -77,17 +76,14 @@ export function setupMobileControls(actions: Actions): () => void {
         if (!capture(e, look, () => { lookPointer = null; })) return;
         lookPointer = e.pointerId; lastX = e.clientX; lastY = e.clientY;
     });
-    function lookBy(x: number, y: number): void {
+    function lookBy(x: number, y: number, time: number): void {
         if (!state.camera || !isInputActive()) return;
         const sensitivity = 0.004 * state.baseSensitivity * (state.isScoped ? 0.45 : 1);
-        rotation.setFromQuaternion(state.camera.quaternion);
-        rotation.y -= x * sensitivity;
-        rotation.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotation.x - y * sensitivity));
-        state.camera.quaternion.setFromEuler(rotation);
+        applyLookInput(state.camera, -x * sensitivity, -y * sensitivity, -Math.PI / 2, Math.PI / 2, time);
     }
     look.addEventListener('pointermove', e => {
         if (e.pointerId !== lookPointer) return;
-        lookBy(e.clientX - lastX, e.clientY - lastY);
+        lookBy(e.clientX - lastX, e.clientY - lastY, e.timeStamp);
         lastX = e.clientX; lastY = e.clientY;
     });
     for (const button of layer.querySelectorAll<HTMLButtonElement>('button')) {
@@ -116,7 +112,7 @@ export function setupMobileControls(actions: Actions): () => void {
         });
         if (button.hasAttribute('data-fire')) button.addEventListener('pointermove', e => {
             if (e.pointerId !== owner || userSettings.touchFireMode !== 'joystick' || !isInputActive()) return;
-            lookBy(e.clientX - fireLastX, e.clientY - fireLastY);
+            lookBy(e.clientX - fireLastX, e.clientY - fireLastY, e.timeStamp);
             fireLastX = e.clientX; fireLastY = e.clientY;
             const x = e.clientX - fireStartX, y = e.clientY - fireStartY;
             const radius = button.getBoundingClientRect().width * 0.25;

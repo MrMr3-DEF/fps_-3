@@ -6,6 +6,7 @@ export function resetHook(): void {
     state.hookWillHit = false;
     state.hookIsEnemy = false;
     state.hookTargetEnemy = null;
+    state.hookTargetCockpit = null;
     state.hookMesh?.removeFromParent();
     const badge = document.getElementById('hook-badge');
     if (badge) badge.style.display = 'none';

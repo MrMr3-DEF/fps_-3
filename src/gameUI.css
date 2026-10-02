@@ -288,7 +288,9 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 /* Death feedback retains its red warning surface with the shared flat buttons. */
 #death-overlay { position: absolute; inset: 0; background: radial-gradient(circle, rgba(255, 0, 0, 0.2) 20%, rgba(139, 0, 0, 0.75) 100%); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 15; backdrop-filter: blur(3px); color: white; text-align: center; animation: fadeIn 0.4s ease-in-out; }
 .death-title { font-size: 48px; color: #ff3838; text-shadow: 0 0 20px #ff3838cc; font-weight: 900; letter-spacing: 2px; }
-#death-overlay .menu-actions-column { width: 240px; }
+#death-overlay .menu-actions-column, #game-over-overlay .menu-actions-column { width: 240px; }
+#game-over-overlay { position: absolute; inset: 0; background: radial-gradient(circle, rgba(255, 0, 0, 0.2) 20%, rgba(139, 0, 0, 0.75) 100%); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 15; backdrop-filter: blur(3px); color: white; text-align: center; animation: fadeIn 0.4s ease-in-out; }
+#game-over-overlay p { margin: 24px 16px 32px; }
 .hud-badges { display: flex; gap: 8px; margin-top: 4px; }
 
 /* In-game HUD and effects. */
@@ -662,6 +664,27 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     box-shadow: inset 0 0 100px rgba(0, 210, 255, 0.25);
 }
 
+/* Vehicle hardware has its own palette. Target scan/lock semantics and the
+   normal/menu goggles retain their existing colors. */
+#goggles-scope.mecha-goggles {
+    background: radial-gradient(circle, rgba(255, 154, 50, 0.04) 30%, rgba(110, 62, 12, 0.18) 70%, rgba(20, 10, 0, 0.90) 100%);
+    box-shadow: inset 0 0 100px rgba(255, 154, 50, 0.25);
+}
+#goggles-scope.mecha-goggles .goggles-corner { border-color: rgba(255, 154, 50, 0.7); box-shadow: 0 0 15px rgba(255, 154, 50, 0.2); }
+#goggles-scope.mecha-goggles .goggles-dot { background: #ff9a32; box-shadow: 0 0 10px #ff9a32, 0 0 20px rgba(255, 154, 50, 0.6); }
+#goggles-scope.mecha-goggles .goggles-scanlines { background: repeating-linear-gradient(0deg, rgba(255,154,50,.07) 0 1px, transparent 2px 4px); }
+/* The boot hardware sits over the opaque video cover, while ordinary HUD and
+   border warnings remain behind it. Pause/death panels retain their priority. */
+#goggles-scope.mecha-head-display { z-index: 10; }
+#mecha-approach-warning { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 24px; pointer-events: none; color: #fff; font: 500 clamp(20px, 3vw, 32px) var(--ui-font); text-align: center; text-shadow: 0 1px 8px #0006; }
+#mecha-approach-warning[hidden] { display: none; }
+#mecha-head-screen { position: fixed; inset: 0; z-index: 9; background: #000; pointer-events: none; display: grid; place-items: center; }
+#mecha-head-screen[hidden], #mecha-head-loading[hidden] { display: none; }
+#mecha-head-loading { display: grid; justify-items: center; gap: 24px; color: #ff9a32; font-family: var(--ui-font); }
+#mecha-head-loading .world-loading-boot-label { animation: none; }
+#mecha-head-loading .world-loading-boot-track { border-color: #754013; background: #231306; box-shadow: 0 0 18px #ff9a3233; }
+#mecha-head-loading .world-loading-boot-fill { background: #ff9a32; box-shadow: 0 0 16px #ff9a32; transition: none; }
+
 #menu-goggles-target-layer .goggles-target-label { pointer-events: auto; }
 #menu-goggles-target-layer .goggles-target-label-panel { font-size: 11px; }
 #menu-goggles-target-layer .goggles-target-identifier { font-size: 13px; }
@@ -817,6 +840,28 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .goggles-target-lock.is-anomalous.is-active {
     animation: goggles-target-anomaly 760ms steps(1, end) infinite;
     will-change: opacity, transform, filter;
+}
+
+/* Cover reveals a presence hint, never a readout or a targeting promise. */
+.goggles-target-lock.is-mecha-hidden {
+    --goggles-lock-color: #ff9a32;
+}
+.goggles-target-lock.is-mecha-hidden .goggles-target-label,
+.goggles-target-lock.is-mecha-hidden .goggles-target-leader,
+.goggles-target-lock.is-mecha-hidden .goggles-homing-corner,
+.goggles-target-lock.is-mecha-hidden .goggles-target-killmark {
+    display: none;
+}
+.goggles-target-lock.is-mecha-hidden.is-active {
+    animation: mecha-presence 1.8s steps(1, end) infinite;
+}
+.goggles-target-lock.is-mecha-hidden.is-mecha-steady {
+    animation: none;
+}
+@keyframes mecha-presence {
+    0%, 22%, 28%, 65%, 73%, 100% { opacity: 0.85; transform: translate(0, 0); }
+    24%, 69% { opacity: 0.55; transform: translate(1px, -1px); }
+    26%, 71% { opacity: 0.7; transform: translate(-1px, 0); }
 }
 
 .goggles-anomaly-filter-defs {

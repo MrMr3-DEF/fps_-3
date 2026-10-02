@@ -48,3 +48,9 @@ The preview reuses the actual gameplay control markup and layout geometry, but h
 - Physical iOS/Android testing is still needed for simultaneous multi-finger input, actual orientation/fullscreen support, safe areas, sustained performance and mobile-to-desktop multiplayer. Desktop emulation does not establish these results.
 
 Implementation: `src/inputSession.ts` owns input activation and mode switching; `src/mobileControls.ts` owns pointer capture and touch actions; `src/mobileControlsView.ts` shares the control markup and DOM layout with `src/mobileControlsEditor.ts`; `src/mobileControlLayout.ts` owns placement math, size limits, cloning and storage validation; `src/mobile.css` owns the mobile/editor styles. `src/settings.ts` persists input mode and layout, and `src/settingsMenu.ts` builds the input selector and editor entry point for all devices.
+
+While piloting the Mecha, Helmet occupies the Grapple layout slot, Shield replaces
+Hover, and Exit occupies the otherwise inactive Inspect slot. Exit closes the
+helmet and runs voluntary shutdown; it is unavailable during boarding/startup.
+These mounted controls inherit existing saved slot placement/scale and remain
+inactive in the layout editor. No stored-layout migration is required.
