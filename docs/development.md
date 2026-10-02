@@ -4,6 +4,7 @@
 
 - Node.js 22.15 or newer, matching the `engines` requirement in `package.json`.
 - npm, using the committed `package-lock.json`.
+- Git LFS for the Blender binaries and generated model/chat assets.
 - A WebGL-capable browser.
 - Wrangler authentication and Cloudflare credentials only when exercising or deploying secure multiplayer.
 
@@ -14,6 +15,42 @@ npm ci
 ```
 
 Use `npm install` instead when intentionally changing dependencies and the lockfile.
+
+### Git LFS assets
+
+On macOS, install Git LFS before cloning:
+
+```bash
+brew install git-lfs
+git lfs install
+git clone https://github.com/MrMr3-DEF/fps_-3.git
+cd fps_-3
+git lfs install --local
+git lfs pull
+```
+
+For an existing checkout, run `git lfs install --local` and `git lfs pull` in
+its root after installing Git LFS. Normal clones and pulls then download LFS
+contents automatically. If checkout skipped those downloads, run `git lfs pull`
+before development, tests, builds, previews, or deployment: pointer files cannot
+replace real GLBs or JavaScript bundles. Any external build/deployment checkout
+must also enable LFS downloads; `npm run deploy` uses the hydrated local files.
+
+`.gitattributes` tracks `.blend`, `.glb`, `.png`, `.jpg`, and `.mp4` recursively
+under `blender_assets/`, plus generated GLBs and the Goth chat engine/worker
+bundles under `dist/assets/`. Scripts, JSON, Markdown, character knowledge, and
+other bundles remain in regular Git. Chat model weights still download from
+their existing external hosts. Add and commit asset changes normally; Git LFS
+stores pointers in Git and uploads the contents through its pre-push hook.
+The initial conversion preserves existing commits, so older copies remain in
+regular Git history.
+
+[GitHub's LFS allowances](https://docs.github.com/en/billing/concepts/product-billing/git-lfs)
+are shared across the repository owner's account: Free/Pro plans include 10 GiB
+of storage and 10 GiB of download bandwidth per month; Team/Enterprise Cloud
+include 250 GiB of each. Each changed file version consumes its full size in
+storage, and downloads by collaborators or CI consume bandwidth. Overage behavior
+depends on the account's budget and payment settings.
 
 ## Scripts
 
@@ -139,7 +176,9 @@ Add or update tests for changes to packet parsing, authorization rules, geometry
 
 ## CI contract
 
-GitHub Actions runs on pushes and pull requests using Node 22. It performs:
+GitHub Actions runs on pushes and pull requests using Node 22. Checkout downloads
+LFS contents (`lfs: true`), then `git lfs fsck` checks the objects and pointers
+before the existing verification steps:
 
 1. `npm ci`
 2. `npm run check`

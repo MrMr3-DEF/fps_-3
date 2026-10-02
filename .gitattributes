@@ -1,0 +1,11 @@
+# Asset sources and previews use LFS; scripts and editable metadata stay in Git.
+blender_assets/**/*.blend filter=lfs diff=lfs merge=lfs -text
+blender_assets/**/*.glb filter=lfs diff=lfs merge=lfs -text
+blender_assets/**/*.png filter=lfs diff=lfs merge=lfs -text
+blender_assets/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+blender_assets/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+
+# Match generated names so subsequent builds retain LFS tracking.
+dist/assets/*.glb filter=lfs diff=lfs merge=lfs -text
+dist/assets/gothChatEngine-*.js filter=lfs diff=lfs merge=lfs -text
+dist/assets/gothChat.worker-*.js filter=lfs diff=lfs merge=lfs -text
