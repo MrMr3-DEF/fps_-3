@@ -239,6 +239,10 @@ The host is authoritative enough to reject many fabricated hits and target mutat
 
 ## Adding or changing a system
 
+- `dayNightCycle.ts` installs a process-wide Three.js shader-chunk patch for
+  sun-shadow edge fading. Changes need shader compilation and browser checks at
+  noon, low sun, and night using the lighting fixture in
+  [Development](development.md#browser-visual-checks).
 - Mecha scan presence through cover is presentation only; it never authorizes a
   lock or changes obstacle authority. Enemy detection and acquisition
   share the lower 28 m cylinder and upper ground-centered 130 m spherical dome.

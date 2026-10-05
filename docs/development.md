@@ -1,5 +1,19 @@
 # Development workflow
 
+## Working on a change
+
+1. Inspect `git status` and preserve unrelated changes.
+2. Use the [documentation index](README.md) and
+   [architecture ownership table](architecture.md#module-ownership) to find the
+   relevant system. Read its feature guide and inspect the current code before
+   editing. [Planned changes](to_be_changed.md) holds the original requests;
+   September audit documents are historical records.
+3. Keep success, cancellation, reset, and disposal paths aligned. Update the
+   owning documentation when behavior or workflows change.
+4. Run the checks in [Validation by change type](#validation-by-change-type).
+   Include regenerated `dist/` output for production changes and distinguish
+   automated results from browser, device, and deployed-network validation.
+
 ## Prerequisites
 
 - Node.js 22.15 or newer, matching the `engines` requirement in `package.json`.

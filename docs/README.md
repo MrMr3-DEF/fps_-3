@@ -1,46 +1,38 @@
 # FPS Arena documentation
 
-This directory is the starting point for humans and AI agents working on FPS Arena. The project is a browser-based Three.js arena shooter with offline play and small peer-to-peer multiplayer rooms. Most arena geometry, weapons, effects, UI, and textures are generated in code. The goth character is a checked-in GLB asset.
+For a project overview and quick start, see the [project README](../README.md).
 
-## Documentation map
+## Development
 
-Each document owns a distinct subject so information has one canonical location:
+Start with [Development](development.md) for setup, local run modes, tests, and
+the contribution workflow. Use [Architecture](architecture.md) to find the
+owning module and understand runtime state, lifecycle, and multiplayer data flow.
+Feature guides below cover current behavior and manual checks.
 
-- [Architecture](architecture.md) explains the runtime, module boundaries, frame loop, world generation, gameplay, and multiplayer data flow.
-- [Agent handoff](agent-handoff.md) gives a compact current-state map, lifecycle boundaries, and verification snapshot for a new contributor.
-- [Full-screen menu](main-menu.md) covers character customization and weapon specifications.
-- [Mobile controls](mobile-controls.md) covers touch input, landscape behavior and device validation.
-- [Forgotten Mecha](forgotten-mecha.md) covers the singleplayer siege robot, navigation, attacks, cockpit mounting, piloting and match ending.
-- [Development](development.md) covers prerequisites, local workflows, scripts, tests, CI, generated output, and change validation.
-- [Cloudflare operations](operations.md) covers deployment, bindings, TURN and Turnstile configuration, API routes, quotas, security properties, and troubleshooting.
-- [Audit resolution](audit-resolution.md) records fixes and validation for the historical September audit; [Code audit](code-audit.md) is the original finding record.
-- [Planned changes](to_be_changed.md) preserves the user's original requests. Current Mecha behavior and its separate manual checklist live in [Forgotten Mecha](forgotten-mecha.md).
-
-## Project at a glance
-
-| Area | Implementation |
+| Guide | Contents |
 | --- | --- |
-| Client | TypeScript, Three.js, PeerJS, DOM in `index.html`, CSS in `src/` |
-| Build | Vite, with output committed under `dist/` |
-| Backend | Cloudflare Worker in `src/worker.ts` |
-| Stateful backend | Two SQLite-backed Durable Objects |
-| Multiplayer transport | PeerJS signalling plus WebRTC data channels using short-lived Cloudflare STUN/TURN credentials |
-| Human verification | Cloudflare Turnstile for room creation and joining |
-| Tests | Node's built-in test runner against TypeScript source |
-| Production host | `fps.luigi.host` in the checked-in Worker configuration |
+| [Architecture](architecture.md) | Runtime layers, module ownership, world generation, gameplay, and networking |
+| [Development](development.md) | Prerequisites, scripts, tests, browser fixtures, CI, and generated output |
+| [Cloudflare operations](operations.md) | Deployment, bindings, TURN, Turnstile, API routes, and troubleshooting |
+| [Planned changes](to_be_changed.md) | Original feature requests and follow-up list |
 
-The browser entry point is `src/main.ts`; the Worker entry point is `src/worker.ts`. `src/config.ts` is the canonical location for gameplay constants, limits, weapon statistics, and world-density settings. Most arena visuals and textures are generated in code; the goth character's GLB is a checked-in asset under `blender_assets/goth_girlfriend/`, and character text lives in `public/npc/goth/`.
+## Features and assets
 
-## Read before changing code
+| Guide | Contents |
+| --- | --- |
+| [Full-screen menu](main-menu.md) | Character customization, controls, and weapon specifications |
+| [Mobile controls](mobile-controls.md) | Touch input, layout editing, landscape behavior, and device validation |
+| [Forgotten Mecha](forgotten-mecha.md) | Siege robot behavior, combat, mounting, piloting, and manual acceptance checks |
+| [Blender assets](../blender_assets/README.md) | Asset layout and exports |
+| [NPC character files](../public/npc/goth/README.md) | Editing character behavior and knowledge for local chat |
+| [Fonts](../public/fonts/README.md) | Font provenance and licensing |
 
-- `state.ts` is the mutable runtime state shared by client systems. Match and player reset helpers must be used when starting, leaving, dying, or respawning.
-- Imports between TypeScript source files deliberately use `.js` suffixes. Vite and the TypeScript `bundler` resolver map them to the `.ts` sources; do not mechanically change them to `.ts`.
-- Client and Worker code use separate TypeScript configurations because the Worker needs Cloudflare types and the browser client must not inherit them.
-- `dist/` is version-controlled. A source change that affects the bundle is incomplete until `npm run build` has refreshed it.
-- Multiplayer fails closed when its security configuration is absent. Do not add public STUN/TURN fallbacks or expose TURN secrets to the browser.
-- The host validates and relays gameplay packets in a star topology. New packet types require both runtime parsing and an explicit authority decision.
-- `damage.ts` and `weaponNetworkPort.ts` are intentional dependency-injection seams that prevent import cycles.
-- Render distance controls visibility only. Collision, grappling, projectiles, peers, particles, the floor, and fog are independent of it.
-- Tests are source files and belong in version control. Generated coverage, logs, local environment files, Wrangler state, and dependencies do not.
+## Validation and historical records
 
-For the exact workflow and validation commands, continue with [Development](development.md). For a code change, use [Architecture](architecture.md) to identify the owning module before editing.
+[Multiplayer live test](multiplayer-live-test.md) tracks deployed networking
+checks. Physical-device checks live in [Mobile controls](mobile-controls.md).
+
+[Code audit](code-audit.md) and [Audit resolution](audit-resolution.md) record
+the September audit and subsequent fixes. They are historical records rather
+than the current backlog. Dated verification results describe the environment
+and code tested at that time; use the development guide to verify a new change.
