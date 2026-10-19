@@ -1,3 +1,5 @@
+import { worldGeneration } from './world.js';
+import { hasLineOfSightToOrientedBox as boxLineOfSight, type TargetObstacleQuery } from './targetVisibility.js';
 import * as THREE from 'three';
 import { userSettings } from './settings.js';
 import { BULLET_TRAVEL_DISTANCE, GOGGLES_SCAN_DISTANCE, GOGGLES_MAX_CALLOUTS, MECHA_HEIGHT } from './config.js';
@@ -55,7 +57,6 @@ export const SCAN_TYPE_LINE_PAUSE_CHARACTERS = 2;
 const EXIT_DURATION_MS = 180;
 const ELIMINATION_DURATION_MS = 540;
 const TELEPORT_DISTANCE_SQ = 40 * 40;
-const OCCLUSION_SURFACE_EPSILON = 0.02;
 const CORRUPTED_HEALTH_FRAMES = [
     'HEALTH: ?? / ##',
     'HEALTH: #? / ?#',
@@ -69,13 +70,7 @@ const CORRUPTED_IDENTIFIER_FRAMES = [
     '██?█//?███',
 ] as const;
 
-export type SmartGogglesObstacleQuery = (
-    startX: number,
-    startZ: number,
-    endX: number,
-    endZ: number,
-    out: THREE.Object3D[],
-) => THREE.Object3D[];
+export type { TargetObstacleQuery as SmartGogglesObstacleQuery } from './targetVisibility.js';
 
 type LockPhase = 'entering' | 'tracking' | 'leaving' | 'eliminated';
 type ReadoutMode = 'facts' | 'warning';
@@ -148,8 +143,6 @@ interface HomingCandidate {
 
 const _bodyCenter = new THREE.Vector3();
 const _peerRootPosition = new THREE.Vector3();
-const _toBody = new THREE.Vector3();
-const _sightSample = new THREE.Vector3();
 const _envelopeSize = new THREE.Vector3();
 const _anomalyEnvelope: StableTargetEnvelope = {
     center: new THREE.Vector3(),
@@ -165,12 +158,8 @@ const _worldIdentity = new THREE.Matrix4();
 const _mechaCalloutBounds = createScreenBounds();
 const _cameraFrustum = new THREE.Frustum();
 const _viewProjection = new THREE.Matrix4();
-const _occlusionRaycaster = new THREE.Raycaster();
-const _occlusionCandidates: THREE.Object3D[] = [];
-const _occlusionHits: THREE.Intersection[] = [];
 const _enemyOccluders: THREE.Object3D[] = [];
 const _visiblePeerMeshes: THREE.Mesh[] = [];
-const NO_ADDITIONAL_OCCLUDERS: THREE.Object3D[] = [];
 
 function queryMechaOccluders(startX: number, startZ: number, endX: number, endZ: number, out: THREE.Object3D[]): THREE.Object3D[] {
     queryObstaclesAlongSegment(startX, startZ, endX, endZ, out);
@@ -202,24 +191,7 @@ export function isGogglesScanZoomReady(
     return Math.abs(currentFov - scopedFov) <= halfwayRemainingGap;
 }
 
-// A 3 x 3 x 3 lattice without its interior point covers face centers, edge
-// midpoints and corners. Face centers make the common case cheap; silhouette
-// corners and edges preserve acquisition when only a slice of a target peeks
-// around cover.
-const OCCLUSION_SAMPLE_FRACTIONS: ReadonlyArray<readonly [number, number, number]> = (() => {
-    const samples: Array<readonly [number, number, number]> = [];
-    for (let boundaryCount = 1; boundaryCount <= 3; boundaryCount++) {
-        for (let ix = 0; ix < 3; ix++) {
-            for (let iy = 0; iy < 3; iy++) {
-                for (let iz = 0; iz < 3; iz++) {
-                    const boundaries = Number(ix !== 1) + Number(iy !== 1) + Number(iz !== 1);
-                    if (boundaries === boundaryCount) samples.push([ix / 2, iy / 2, iz / 2]);
-                }
-            }
-        }
-    }
-    return samples;
-})();
+
 
 function setCornerGeometry(
     corner: HTMLElement,
@@ -353,6 +325,7 @@ function ensureAnomalyTearFilters(layer: HTMLElement): void {
 export class SmartGogglesHud {
     private readonly records = new Map<string, TargetLockRecord>();
     private readonly retiringRecords = new Set<TargetLockRecord>();
+    private worldGeneration = -1;
     private readonly hiddenHealthBars = new Map<THREE.Object3D, boolean>();
     private readonly layer: HTMLElement;
     private readonly reducedMotion: boolean;
@@ -412,6 +385,7 @@ export class SmartGogglesHud {
         mecha: ForgottenMecha | null = null,
         mountedLock?: RocketLock | null,
     ): void {
+        if (this.gameplayLimits && this.worldGeneration !== worldGeneration) { this.reset(); this.worldGeneration = worldGeneration; }
         this.anomalyDetectedThisFrame = false;
         this.homingAimScore = Infinity;
         this.bestHomingCandidate = null;
@@ -646,10 +620,8 @@ export class SmartGogglesHud {
             const hitbox = anomalyTarget.hitbox;
             const geometry = hitbox.geometry;
             if (!geometry.boundingBox) geometry.computeBoundingBox();
-            if (!geometry.boundingSphere) geometry.computeBoundingSphere();
             const localBox = geometry.boundingBox;
-            const localSphere = geometry.boundingSphere;
-            if (localBox && localSphere) {
+            if (localBox) {
                 localBox.getCenter(_anomalyEnvelope.center);
                 localBox.getSize(_envelopeSize);
                 _anomalyEnvelope.halfWidth = Math.hypot(_envelopeSize.x, _envelopeSize.z) * 0.5;
@@ -674,7 +646,6 @@ export class SmartGogglesHud {
                     viewportHeight,
                     projectionBounds,
                 )) {
-                    _bodyCenter.copy(_anomalyEnvelope.center).applyMatrix4(hitbox.matrixWorld);
                     const anomalyWorldScale = hitbox.matrixWorld.getMaxScaleOnAxis();
                     this.trackTarget(
                         targetKey,
@@ -1334,67 +1305,9 @@ export class SmartGogglesHud {
     }
 }
 
-/**
- * Returns true when at least one representative point on an oriented box is
- * visible from the observer. Each obstacle ray ends at its own target sample;
- * it never borrows the shorter distance of another point on the box.
- *
- * The optional query seam keeps the geometry behavior directly testable while
- * production uses the world's spatial hash broad phase.
- */
-export function hasLineOfSightToOrientedBox(
-    origin: THREE.Vector3,
-    localBox: THREE.Box3,
-    worldMatrix: THREE.Matrix4,
-    obstacleQuery: SmartGogglesObstacleQuery = queryObstaclesAlongSegment,
-    additionalOccluders: THREE.Object3D[] = NO_ADDITIONAL_OCCLUDERS,
-    ignoredTargetRoot?: THREE.Object3D,
-): boolean {
-    if (localBox.isEmpty()) return false;
-    const determinant = worldMatrix.determinant();
-    if (!Number.isFinite(determinant) || Math.abs(determinant) <= Number.EPSILON) return false;
 
-    const sizeX = localBox.max.x - localBox.min.x;
-    const sizeY = localBox.max.y - localBox.min.y;
-    const sizeZ = localBox.max.z - localBox.min.z;
-    for (let i = 0; i < OCCLUSION_SAMPLE_FRACTIONS.length; i++) {
-        const fraction = OCCLUSION_SAMPLE_FRACTIONS[i];
-        _sightSample.set(
-            localBox.min.x + sizeX * fraction[0],
-            localBox.min.y + sizeY * fraction[1],
-            localBox.min.z + sizeZ * fraction[2],
-        ).applyMatrix4(worldMatrix);
-
-        _toBody.subVectors(_sightSample, origin);
-        const sampleDistance = _toBody.length();
-        if (sampleDistance <= OCCLUSION_SURFACE_EPSILON) return true;
-
-        _occlusionRaycaster.set(origin, _toBody.multiplyScalar(1 / sampleDistance));
-        _occlusionRaycaster.near = 0;
-        _occlusionRaycaster.far = Math.max(0, sampleDistance - OCCLUSION_SURFACE_EPSILON);
-        const candidates = obstacleQuery(
-            origin.x,
-            origin.z,
-            _sightSample.x,
-            _sightSample.z,
-            _occlusionCandidates,
-        );
-        _occlusionHits.length = 0;
-        _occlusionRaycaster.intersectObjects(candidates, false, _occlusionHits);
-        if (additionalOccluders.length > 0) {
-            _occlusionRaycaster.intersectObjects(additionalOccluders, true, _occlusionHits);
-        }
-        let blocked = false;
-        for (let hitIndex = 0; hitIndex < _occlusionHits.length; hitIndex++) {
-            let hitObject: THREE.Object3D | null = _occlusionHits[hitIndex].object;
-            if (ignoredTargetRoot) {
-                while (hitObject && hitObject !== ignoredTargetRoot) hitObject = hitObject.parent;
-                if (hitObject === ignoredTargetRoot) continue;
-            }
-            blocked = true;
-            break;
-        }
-        if (!blocked) return true;
-    }
-    return false;
+/** The gameplay HUD supplies its world query; authority shares the geometry. */
+export function hasLineOfSightToOrientedBox(origin: THREE.Vector3, localBox: THREE.Box3, worldMatrix: THREE.Matrix4,
+    obstacleQuery: TargetObstacleQuery = queryObstaclesAlongSegment, additionalOccluders: THREE.Object3D[] = [], ignoredTargetRoot?: THREE.Object3D): boolean {
+    return boxLineOfSight(origin, localBox, worldMatrix, obstacleQuery, additionalOccluders, ignoredTargetRoot);
 }

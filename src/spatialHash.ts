@@ -6,6 +6,7 @@ export class SpatialHash<T> {
     private readonly seen = new Set<T>();
 
     constructor(cellSize: number) {
+        if (!Number.isFinite(cellSize) || cellSize <= 0) throw new RangeError('Invalid spatial cell size');
         this.cellSize = cellSize;
     }
 
@@ -15,6 +16,7 @@ export class SpatialHash<T> {
     }
 
     insert(x: number, z: number, radius: number, value: T): void {
+        this.validateArea(x, z, radius);
         const minX = this.toCell(x - radius);
         const maxX = this.toCell(x + radius);
         const minZ = this.toCell(z - radius);
@@ -34,6 +36,7 @@ export class SpatialHash<T> {
     }
 
     query(x: number, z: number, radius: number, out: T[] = []): T[] {
+        this.validateArea(x, z, radius);
         out.length = 0;
         this.seen.clear();
         const minX = this.toCell(x - radius);
@@ -64,6 +67,9 @@ export class SpatialHash<T> {
      * the exact 3D intersection test afterwards.
      */
     querySegment(startX: number, startZ: number, endX: number, endZ: number, out: T[] = [], padding = 0): T[] {
+        if (![startX, startZ, endX, endZ, padding].every(Number.isFinite) || padding < 0) {
+            throw new RangeError('Invalid spatial segment');
+        }
         out.length = 0;
         this.seen.clear();
 
@@ -74,6 +80,12 @@ export class SpatialHash<T> {
         const deltaX = endX - startX;
         const deltaZ = endZ - startZ;
         const neighbors = Math.ceil(Math.max(0, padding) / this.cellSize);
+        const remainingSteps = Math.abs(endCellX - cellX) + Math.abs(endCellZ - cellZ);
+        if (![cellX, cellZ, endCellX, endCellZ, neighbors, remainingSteps,
+            cellX - neighbors, cellX + neighbors, cellZ - neighbors, cellZ + neighbors,
+            endCellX - neighbors, endCellX + neighbors, endCellZ - neighbors, endCellZ + neighbors].every(Number.isSafeInteger)) {
+            throw new RangeError('Spatial segment exceeds the cell index range');
+        }
         const stepX = Math.sign(deltaX);
         const stepZ = Math.sign(deltaZ);
 
@@ -84,7 +96,10 @@ export class SpatialHash<T> {
         let tMaxX = stepX === 0 ? Infinity : (nextBoundaryX - startX) / deltaX;
         let tMaxZ = stepZ === 0 ? Infinity : (nextBoundaryZ - startZ) / deltaZ;
 
-        while (true) {
+        // Each iteration consumes at least one of these finite axis steps.
+        // Endpoint boundaries may differ by a rounding bit: an axis that has
+        // arrived must never step past its destination while the other catches up.
+        for (let steps = remainingSteps; steps >= 0; steps--) {
             // A thick beam near a cell edge can touch a collider whose cells
             // the center ray never crosses. Exact geometry filters this halo.
             for (let x = cellX - neighbors; x <= cellX + neighbors; x++) {
@@ -92,10 +107,10 @@ export class SpatialHash<T> {
             }
             if (cellX === endCellX && cellZ === endCellZ) break;
 
-            if (tMaxX < tMaxZ) {
+            if (cellZ === endCellZ || (cellX !== endCellX && tMaxX < tMaxZ)) {
                 cellX += stepX;
                 tMaxX += tDeltaX;
-            } else if (tMaxZ < tMaxX) {
+            } else if (cellX === endCellX || tMaxZ < tMaxX) {
                 cellZ += stepZ;
                 tMaxZ += tDeltaZ;
             } else {
@@ -130,7 +145,15 @@ export class SpatialHash<T> {
     }
 
     private toCell(value: number): number {
-        return Math.floor(value / this.cellSize);
+        const cell = Math.floor(value / this.cellSize);
+        if (!Number.isSafeInteger(cell)) throw new RangeError('Invalid spatial cell index');
+        return cell;
+    }
+
+    private validateArea(x: number, z: number, radius: number): void {
+        if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(radius) || radius < 0) {
+            throw new RangeError('Invalid spatial query area');
+        }
     }
 
     private key(x: number, z: number): string {

@@ -91,3 +91,23 @@ test('a terminal game-over match cannot reacquire desktop or touch input, and a 
     resetMatchStats();
     setTouchMode(false); beginInput(); assert.equal(locks, 1);
 });
+
+test('ending input releases held actions before a deferred unlock and ignores obsolete controls', () => {
+    setTouchMode(false);
+    let ended = 0;
+    const events = new Map<string, () => void>();
+    const controls = { isLocked: true, unlock() {}, addEventListener(name: string, cb: () => void) { events.set(name, cb); } };
+    state.controls = controls as any;
+    onInputEnded(() => ended++);
+    state.moveForward = state.isMouseDown = state.isShiftDown = state.isHovering = state.isScoped = true;
+    endInput();
+    assert.equal(isInputActive(), false);
+    assert.equal(ended, 1);
+    assert.equal(state.moveForward || state.isMouseDown || state.isShiftDown || state.isHovering || state.isScoped, false);
+    events.get('unlock')?.();
+    assert.equal(ended, 1, 'deferred unlock cannot repeat the transition');
+    state.controls = { isLocked: false, addEventListener() {} } as any;
+    events.get('lock')?.(); events.get('unlock')?.();
+    assert.equal(isInputActive(), false);
+    assert.equal(ended, 1);
+});

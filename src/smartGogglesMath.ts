@@ -43,8 +43,6 @@ export interface SmartGogglesCalloutLayout {
     labelX: number;
     /** Y coordinate of the horizontal leader line. */
     labelY: number;
-    /** Smart-goggles readouts always hang below their leader rule. */
-    labelPlacement: 'above' | 'below';
 }
 
 export interface CalloutLabelBox { left: number; top: number; right: number; bottom: number; }
@@ -89,7 +87,6 @@ export function createSmartGogglesCalloutLayout(): SmartGogglesCalloutLayout {
         end: { x: 0, y: 0 },
         labelX: 0,
         labelY: 0,
-        labelPlacement: 'below',
     };
 }
 
@@ -294,7 +291,6 @@ export function layoutSmartGogglesCallout(
     out.end.x = out.elbow.x + horizontalSign * horizontalLength;
     out.end.y = out.elbow.y;
     out.labelY = out.elbow.y;
-    out.labelPlacement = 'below';
 
     const naturalLabelX = out.horizontal === 'right' ? out.elbow.x : out.elbow.x - labelWidth;
     const maximumLabelX = Math.max(margin, viewportWidth - margin - labelWidth);

@@ -5,7 +5,8 @@ import { getTownSpawn, generateTownLayout, createTownBoxes, createTownPaving, ov
 import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CHURCH_TOWER_HEIGHT, TOWN_WALL_THICKNESS, TOWN_ROAD_WIDTH, TOWN_APPROACH_LENGTH, PLAYER_RADIUS, PLAYER_HEIGHT, CAMERA_CEILING_CLEARANCE, MAX_PLAYERS, PLAYER_STEP_HEIGHT, TOWN_STAIR_WIDTH, TOWN_STAIR_X, TOWN_STAIR_STEPS, TOWN_STAIR_TREAD, TOWN_STAIR_START_Z, TOWN_STAIR_LANDING_DEPTH, TOWN_STAIR_LANDING_Z, LAVA_POOL_HALF_SIZE, PILLAR_COUNT, MAP_HALF_SIZE } from '../src/config.ts';
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
-import { createEnvironmentAsync, rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget } from '../src/world.ts';
+import { createEnvironmentAsync, rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget, rebuildTargetHash } from '../src/world.ts';
+import { toggleGrapplingHook, resetHook } from '../src/grapple.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
@@ -82,6 +83,23 @@ function setup(seed = 42) {
     rebuildEnvironmentWithSeed(seed);
     state.scene.updateMatrixWorld(true);
 }
+
+test('magnetic grapples test the chosen enemy path and use the supplied shoulder-ray origin', () => {
+    setup();
+    const enemy = new THREE.Group(); enemy.position.set(20, 2, 105); enemy.userData = { hp: 10, scale: 6 };
+    state.targets = [enemy]; rebuildTargetHash();
+    state.leftGun = new THREE.Group(); state.camera!.add(state.leftGun); state.hookMesh = new THREE.Group() as any;
+    const aim = new THREE.Ray(new THREE.Vector3(0, 2, 80), new THREE.Vector3(0, 0, 1));
+    try {
+        state.camera!.position.set(3, 2, 76); state.hookState = 'IDLE';
+        toggleGrapplingHook(aim);
+        assert.equal(state.hookTargetEnemy, null, 'the center ray clears the gate but the assisted enemy path hits its wall');
+        resetHook();
+        enemy.position.set(0, 2, 105); rebuildTargetHash();
+        toggleGrapplingHook(aim);
+        assert.equal(state.hookTargetEnemy, enemy, 'the clear path is measured from the same shoulder-ray origin');
+    } finally { resetHook(); state.leftGun = null; state.hookMesh = null; disposeWorld(); }
+});
 function snapshot() {
     return {
         obstacles: state.obstacles.map(o => [o.name, ...o.position.toArray(), ...o.scale.toArray()]),
@@ -189,6 +207,7 @@ test('lava illumination follows visible chunks with one reusable light and conti
 
 test('all town lanterns emit light together at night', () => {
     setup();
+    updateEnvironmentVisibility(new THREE.Vector3(), 1);
     updateTownLanterns(1, 1);
     const group = state.scene!.getObjectByName('town-lanterns')!;
     const lights = group.children.filter(child => (child as THREE.PointLight).isPointLight) as THREE.PointLight[];
@@ -197,6 +216,31 @@ test('all town lanterns emit light together at night', () => {
 
     updateTownLanterns(2, 0);
     assert.ok(lights.every(light => !light.visible));
+    disposeWorld();
+});
+
+test('lantern instances and lights follow their own chunks on both sides of zero', () => {
+    setup();
+    const group = state.scene!.getObjectByName('town-lanterns')!;
+    const frames = group.getObjectByName('town-lantern-frames') as THREE.InstancedMesh;
+    const glass = group.getObjectByName('town-lantern-glass') as THREE.InstancedMesh;
+    const flames = group.getObjectByName('town-lantern-flames') as THREE.InstancedMesh;
+    const lights = group.children.filter(object => object instanceof THREE.PointLight) as THREE.PointLight[];
+    const matrix = new THREE.Matrix4(), scale = new THREE.Vector3();
+    updateTownLanterns(1, 1);
+    for (const [x, z] of [[0, 0], [200, 0], [-200, 0], [400, 400], [-400, -400]]) {
+        updateEnvironmentVisibility(new THREE.Vector3(x, 0, z), 1);
+        const visible = lights.map(light => Math.abs(Math.floor(light.position.x / 200) - Math.floor(x / 200)) <= 1 &&
+            Math.abs(Math.floor(light.position.z / 200) - Math.floor(z / 200)) <= 1);
+        assert.deepEqual(lights.map(light => light.visible), visible);
+        assert.equal(frames.count, visible.filter(Boolean).length); assert.equal(glass.count, frames.count);
+        lights.forEach((_light, index) => {
+            flames.getMatrixAt(index, matrix); scale.setFromMatrixScale(matrix);
+            assert.equal(scale.lengthSq() > 0, visible[index], 'culled lantern flame must not remain at the batch origin');
+        });
+        assert.equal(queryObstaclesAlongSegment(-8.5, -65, -8.5, -55).some(object => object.name === 'town-lantern'), true,
+            'visual selection does not remove the physical lantern');
+    }
     disposeWorld();
 });
 

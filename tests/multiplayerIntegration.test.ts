@@ -2,14 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { getTownSpawn } from '../src/town.ts';
-import { getWorldSeed } from '../src/world.ts';
+import { getWorldSeed, rebuildTargetHash } from '../src/world.ts';
 import { state } from '../src/state.ts';
-import { setMultiplayerWorldLoader, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
-import { BULLET_TRAVEL_DISTANCE, PLAYER_MAX_HP, REGEN_DELAY_MS } from '../src/config.ts';
+import { setMultiplayerWorldLoader, onMultiplayerDisconnected, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
+import { BULLET_TRAVEL_DISTANCE, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED } from '../src/config.ts';
 import { Peer, Connection } from './fakePeer.ts';
 import worker, { TurnRateLimiter } from '../src/worker.ts';
 import { TurnRoomStateMachine } from '../src/turnRoom.ts';
 import { registerTurnSession } from '../src/turnSecurity.ts';
+import { parseNetworkPacket } from '../src/networkTypes.ts';
+import { SHARED_BODY_MAT } from '../src/weapons.ts';
 
 (globalThis as any).document={getElementById:()=>null,createElement:()=>({getContext:()=>null})};
 class Storage {
@@ -36,7 +38,130 @@ function backend(){
     }) as typeof fetch;
 }
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
-function update(name:string,lifeId=0){return {type:'update' as const,lifeId,username:name,pos:{x:0,y:2,z:0},yaw:0,pitch:0,activeWeapon:'SNIPER' as const,isMouseDown:false,isDead:false,hookState:'IDLE' as const,hookPos:null,isHovering:false,hoverKeys:null,hp:PLAYER_MAX_HP,maxHp:PLAYER_MAX_HP};}
+function update(name:string,lifeId=0){return {type:'update' as const,lifeId,username:name,pos:{x:0,y:2,z:0},yaw:0,pitch:0,activeWeapon:'SNIPER' as const,switchState:'IDLE' as const,nextWeapon:null,isMouseDown:false,isDead:false,hookState:'IDLE' as const,hookPos:null,isHovering:false,hoverKeys:null,hp:PLAYER_MAX_HP,maxHp:PLAYER_MAX_HP};}
+
+test('termination reports once after invalidating stale signalling and preparation work', async () => {
+    backend(); state.scene = null;
+    const exits: { wasHost: boolean; reason: string | null }[] = [];
+    const unsubscribe = onMultiplayerDisconnected(event => {
+        assert.equal(state.isMultiplayer, false);
+        assert.equal(state.peer, null);
+        exits.push(event);
+        disconnectMultiplayer(); // A composition-root teardown cannot recurse.
+    });
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const old = Peer.latest;
+        old.emit('disconnected'); old.emit('close'); old.emit('error', { type: 'network' });
+        assert.equal(exits.length, 1);
+        assert.equal(exits[0].wasHost, true);
+        assert.match(exits[0].reason!, /signalling connection/);
+        backend();
+        await hostGame('Host', 'JKLMNPQR', 'create-room');
+        old.emit('close');
+        assert.equal(state.isMultiplayer, true);
+        disconnectMultiplayer({ notifyRuntime: false });
+        assert.equal(exits.length, 1, 'explicit composition-root teardown does not report back');
+
+        backend();
+        let finish!: () => void;
+        setMultiplayerWorldLoader(() => new Promise(resolve => { finish = resolve; }));
+        const pending = hostGame('Host', 'ABCDEFGH', 'create-room');
+        for (let i = 0; i < 20 && !finish; i++) await tick();
+        assert.ok(finish);
+        disconnectMultiplayer();
+        assert.equal(exits.length, 2);
+        finish(); await pending;
+        assert.equal(state.peer, null, 'cancelled preparation cannot create another peer');
+        assert.equal(exits.length, 2);
+    } finally { unsubscribe(); setMultiplayerWorldLoader(null); disconnectMultiplayer(); }
+});
+
+test('world preparation failure reports its reason through the termination boundary', async () => {
+    backend(); state.scene = null;
+    let reason: string | null = null;
+    const unsubscribe = onMultiplayerDisconnected(event => { reason = event.reason; });
+    setMultiplayerWorldLoader(async () => { throw new Error('Preparation fixture failed'); });
+    try {
+        await assert.rejects(hostGame('Host', 'ABCDEFGH', 'create-room'), /Preparation fixture failed/);
+        assert.equal(reason, 'Preparation fixture failed');
+        assert.equal(state.isMultiplayer, false);
+    } finally { unsubscribe(); setMultiplayerWorldLoader(null); disconnectMultiplayer(); }
+});
+
+test('host movement allowance bounds cumulative bursts, capped silence and life transitions', async t => {
+    backend(); state.scene = null;
+    let now = 1000;
+    t.mock.method(performance, 'now', () => now);
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const admission = await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'moving-peer');
+        Peer.latest.emit('connection', new Connection('moving-peer', { admissionToken: admission.admissionToken }));
+        await tick(); await tick();
+        const send = (x: number, rest = {}) => authorizeClientPacket('moving-peer', { ...update('Pilot'), pos: { x, y: 2, z: 0 }, ...rest });
+        assert.ok(send(0));
+        let x = 0;
+        for (let i = 0; i < 200; i++) if (send(x + 1)) x++;
+        assert.equal(x, Math.floor(NETWORK_MOVEMENT_BURST), 'packet count cannot grant new distance');
+        assert.equal(send(x + NETWORK_MOVEMENT_BURST, { isDead: true, hp: 0, activeWeapon: 'PISTOL' }), null);
+        assert.equal(send(NaN), null);
+        assert.ok(authorizeClientPacket('moving-peer', { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
+            barrelPos: { x, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } }),
+        'a rejected update cannot mutate death, weapon or shot state');
+        for (let i = 0; i < 10; i++) {
+            now += 33;
+            x += NETWORK_MOVEMENT_SPEED * 0.033;
+            assert.ok(send(x), 'the fastest supported travel remains admissible at the network tick');
+        }
+        now += 60_000;
+        x += NETWORK_MOVEMENT_BURST;
+        assert.ok(send(x), 'silence replenishes a bounded burst');
+        assert.equal(send(x + 1), null, 'a long silence does not bank an unbounded allowance');
+        assert.ok(authorizeClientPacket('moving-peer', { type: 'player_died', lifeId: 0, cause: 'lava', killerPeerId: null,
+            victimName: 'Pilot', killerName: 'Lava' }));
+        assert.ok(send(-500, { lifeId: 1 }), 'an accepted respawn starts a new budget at its spawn');
+        assert.ok(send(-500 + NETWORK_MOVEMENT_BURST, { lifeId: 1 }));
+        assert.equal(send(-498 + NETWORK_MOVEMENT_BURST, { lifeId: 1 }), null);
+        assert.equal(send(0, { lifeId: 2 }), null, 'an unreported extra life cannot reset the budget');
+    } finally { disconnectMultiplayer(); }
+});
+
+test('the real host path canonicalizes shotgun pellets and rejects unfinished weapon changes', async t => {
+    backend(); state.scene = null;
+    let now = 1000;
+    t.mock.method(performance, 'now', () => now);
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const clients: Connection[] = [];
+        for (const username of ['Shooter', 'Viewer']) {
+            const admission = await registerTurnSession('ABCDEFGH', 'join-room', username, username);
+            const connection = new Connection(username, { admissionToken: admission.admissionToken });
+            clients.push(connection); Peer.latest.emit('connection', connection);
+        }
+        await tick(); await tick(); startHostMatch();
+        state.scene = new THREE.Scene();
+        const shooter = clients[0], viewer = clients[1];
+        const packet = { ...update('Shooter'), activeWeapon: 'SHOTGUN' as const };
+        shooter.emit('data', packet);
+        shooter.emit('data', { type: 'fire', weapon: 'SHOTGUN', shotId: 1, spreadSeed: 1, pelletCount: 16,
+            barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
+        assert.equal(viewer.sent.filter(p => p.type === 'fire').at(-1).pelletCount, 5);
+        assert.equal(state.projectiles.length, 5, 'the host renders the configured count too');
+        now += 1000;
+        shooter.emit('data', { ...packet, activeWeapon: 'PISTOL' });
+        assert.equal(viewer.sent.filter(p => p.type === 'update').at(-1).activeWeapon, 'SHOTGUN');
+        shooter.emit('data', { ...packet, switchState: 'WITHDRAWING', nextWeapon: 'PISTOL' });
+        now += 150;
+        shooter.emit('data', { ...packet, activeWeapon: 'PISTOL', switchState: 'BRINGING_IN', nextWeapon: 'PISTOL' });
+        const pistol = { type: 'fire', weapon: 'PISTOL', shotId: 2, spreadSeed: 1,
+            barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } };
+        shooter.emit('data', pistol);
+        assert.equal(viewer.sent.filter(p => p.type === 'fire').length, 1, 'bring-in cannot fire');
+        now += 150;
+        shooter.emit('data', { ...packet, activeWeapon: 'PISTOL' }); shooter.emit('data', pistol);
+        assert.equal(viewer.sent.filter(p => p.type === 'fire').length, 2);
+    } finally { disconnectMultiplayer(); state.scene = null; }
+});
 
 test('Worker-backed host admission, fixed names, host kill credit, departure and stale events',async()=>{
     backend();state.scene=null;
@@ -83,8 +208,6 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(state.peers['peer-a'].username,'Pilot');
         assert.equal(state.peers['peer-b'].hp,PLAYER_MAX_HP);
         assert.equal(state.peers['peer-b'].username,'Other');
-        state.peers['peer-a'].lastDamageTime=performance.now()-REGEN_DELAY_MS-1;
-        state.peers['peer-a'].regenTimer=0.99;
         updateRemotePeers(0.02);
         assert.equal(state.peers['peer-a'].hp,7,'inspection must not invent health regeneration');
         ca.emit('data',{type:'fire',weapon:'SNIPER',shotId:1,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1},hitPoint:{x:4000,y:4000,z:-4000}});
@@ -94,7 +217,6 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.equal(state.peers['peer-b'].hp,PLAYER_MAX_HP,'health waits for victim confirmation');
         cb.emit('data',{...update('Other'),hp:0,isDead:true});
         assert.equal(state.peers['peer-b'].hp,0,'inspection displays confirmed victim health');
-        assert.equal(state.peers['peer-b'].regenTimer,0,'confirmed damage restarts the remote regen clock');
         assert.ok(ca.sent.some(p=>p.type==='player_hit'&&p.targetPeerId==='peer-b'),'shooter receives validated health changes');
         state.playerHp=6;state.playerMaxHp=PLAYER_MAX_HP;sendLocalState(true);
         const hostUpdate=ca.sent.filter(p=>p.type==='update').at(-1);
@@ -215,13 +337,182 @@ test('unopened PeerJS channel timeout frees host lobby capacity even without a c
     backend();state.scene=null;t.mock.timers.enable({apis:['setTimeout','setInterval']});
     try{
         await hostGame('Host','ABCDEFGH','create-room');const host=Peer.latest;host.emit('open',host.id);
-        const pending=new Connection('pending');pending.open=false;host.emit('connection',pending);
+        const pending=new Connection('pending',{admissionToken:'a'.repeat(43)});pending.open=false;host.emit('connection',pending);
         t.mock.timers.tick(20_000);
         for(let i=0;i<4;i++){
-            const replacement=new Connection(`pending-${i}`);replacement.open=false;host.emit('connection',replacement);
+            const replacement=new Connection(`pending-${i}`,{admissionToken:'a'.repeat(43)});replacement.open=false;host.emit('connection',replacement);
             assert.ok(replacement.handlers.has('open'),'each of the four available slots can be reserved');
         }
     }finally{disconnectMultiplayer();}
+});
+
+test('malformed unopened metadata cannot reserve any of the host pending slots', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const host = Peer.latest;
+        for (let i = 0; i < 20; i++) {
+            const bad = new Connection(`bad-${i}`, i % 2 ? null : { admissionToken: 'wrong' });
+            bad.open = false; host.emit('connection', bad);
+            assert.equal(bad.handlers.has('open'), false);
+        }
+        for (let i = 0; i < 4; i++) {
+            const pending = new Connection(`pending-${i}`, { admissionToken: 'a'.repeat(43) });
+            pending.open = false; host.emit('connection', pending);
+            assert.equal(pending.handlers.has('open'), true);
+        }
+        const excess = new Connection('excess', { admissionToken: 'a'.repeat(43) });
+        excess.open = false; host.emit('connection', excess);
+        assert.equal(excess.handlers.has('open'), false, 'syntactically valid unverified offers are still capped');
+    } finally { disconnectMultiplayer(); }
+});
+
+test('disabled multiplayer rejects heartbeats before using a room binding', async () => {
+    const response = await worker.fetch(new Request('https://local/api/rooms/ABCDEFGH', { method: 'PATCH',
+        headers: { Authorization: `Bearer ${'a'.repeat(43)}` }, body: JSON.stringify({ peerIds: [], admissionGeneration: 0 }) }),
+        { DISABLE_TURN: 'true' } as any);
+    assert.equal(response.status, 503);
+});
+
+test('reordered admission responses retain pending peers in the same acknowledged heartbeat snapshot', async t => {
+    backend(); state.scene = null;
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const originalFetch = globalThis.fetch;
+    let release!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const heartbeats: any[] = [];
+    globalThis.fetch = (async (input: any, init: any) => {
+        if (init?.method === 'PATCH') heartbeats.push(JSON.parse(init.body));
+        const result = await originalFetch(input, init);
+        if (String(input).includes('/room-admissions/') && init?.method === 'POST' && JSON.parse(init.body).peerId === 'peer-a') await held;
+        return result;
+    }) as typeof fetch;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        for (const [peerId, username] of [['peer-a', 'Alpha'], ['peer-b', 'Beta']]) {
+            const ticket = await registerTurnSession('ABCDEFGH', 'join-room', username, peerId);
+            Peer.latest.emit('connection', new Connection(peerId, { admissionToken: ticket.admissionToken }));
+        }
+        await tick(); await tick(); assert.equal(state.connections.length, 1);
+        t.mock.timers.tick(120_000); await tick();
+        assert.equal(heartbeats.at(-1).admissionGeneration, 2);
+        assert.deepEqual(heartbeats.at(-1).peerIds.sort(), ['peer-a', 'peer-b']);
+        release(); await tick(); await tick(); assert.equal(state.connections.length, 2);
+        t.mock.timers.tick(120_000); await tick();
+        assert.equal(heartbeats.at(-1).admissionGeneration, 2, 'an older response never moves acknowledgement backward');
+    } finally { release(); disconnectMultiplayer(); globalThis.fetch = originalFetch; }
+});
+
+test('host canonical sniper presentation stops on the floor', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const ticket = await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'floor-peer');
+        Peer.latest.emit('connection', new Connection('floor-peer', { admissionToken: ticket.admissionToken }));
+        await tick(); await tick();
+        assert.ok(authorizeClientPacket('floor-peer', update('Pilot')));
+        const fire = authorizeClientPacket('floor-peer', { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
+            barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: -1, z: 0 }, hitPoint: { x: 0, y: -500, z: 0 } });
+        assert.equal(fire?.type, 'fire');
+        if (fire?.type === 'fire') assert.deepEqual(fire.hitPoint, { x: 0, y: 0, z: 0 });
+    } finally { disconnectMultiplayer(); }
+});
+
+test('the real host checks homing acquisition, intervening bodies and captured revisions', async t => {
+    backend(); state.scene = null; state.camera = null; state.controls = null;
+    let now = 1000; t.mock.method(performance, 'now', () => now);
+    const make = (index: number, position: THREE.Vector3, size: number, scale: number) => {
+        const root = new THREE.Group(), body = new THREE.Mesh(new THREE.BoxGeometry(size, size, 1));
+        root.add(body); root.position.copy(position);
+        root.userData = { index, bodyMesh: body, hp: 10, scale, eliminationRevision: 0 }; return root;
+    };
+    const target = make(0, new THREE.Vector3(1.5, 3, -120), 2, 1);
+    const cover = make(1, new THREE.Vector3(0, 3, -60), 8, 4);
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const ticket = await registerTurnSession('ABCDEFGH', 'join-room', 'Shooter', 'guided-peer');
+        Peer.latest.emit('connection', new Connection('guided-peer', { admissionToken: ticket.admissionToken }));
+        await tick(); await tick();
+        state.targets = [target, cover]; rebuildTargetHash();
+        assert.ok(authorizeClientPacket('guided-peer', { ...update('Shooter'), pos: { x: 0, y: 3, z: 0 }, activeWeapon: 'AR' }));
+        const packet = { type: 'fire' as const, weapon: 'AR' as const, shotId: 1, spreadSeed: 42,
+            barrelPos: { x: 0, y: 3, z: 0 }, dir: { x: 0, y: 0, z: -1 },
+            homingTarget: { kind: 'npc' as const, targetIndex: 0, targetRevision: 0 }, homingStartDistance: Math.hypot(1.5, 120) / 3 };
+        assert.equal(authorizeClientPacket('guided-peer', packet), null, 'fully covered target cannot be acquired');
+        cover.position.x = -3.2; rebuildTargetHash();
+        assert.ok(authorizeClientPacket('guided-peer', packet), 'a visible silhouette can be acquired');
+        const claim = { type: 'hit_target' as const, targetIndex: 0, shotId: 1, pelletIndex: 0, damage: 1 };
+        now = 1200;
+        assert.equal(authorizeClientPacket('guided-peer', claim), null, 'acquisition does not let the curved shot cross an intervening body');
+        cover.position.x = -1000; rebuildTargetHash();
+        const peerTicket = await registerTurnSession('ABCDEFGH', 'join-room', 'Cover', 'cover-peer');
+        const peerCover = new Connection('cover-peer', { admissionToken: peerTicket.admissionToken });
+        Peer.latest.emit('connection', peerCover); await tick(); await tick();
+        assert.ok(authorizeClientPacket('cover-peer', { ...update('Cover'), pos: { x: 0.4, y: 3.35, z: -60 } }));
+        assert.equal(authorizeClientPacket('guided-peer', { ...packet, shotId: 2 }), null, 'a physical peer body can fully occlude acquisition too');
+        peerCover.close();
+        assert.ok(authorizeClientPacket('guided-peer', { ...packet, shotId: 2 }));
+        now = 1400;
+        assert.ok(authorizeClientPacket('guided-peer', { ...claim, shotId: 2 }));
+        assert.ok(authorizeClientPacket('guided-peer', { ...packet, shotId: 3 }));
+        target.userData.eliminationRevision++;
+        now = 1600;
+        assert.equal(authorizeClientPacket('guided-peer', { ...claim, shotId: 3 }), null, 'replacement revision cannot use the straight-hit fallback');
+    } finally {
+        disconnectMultiplayer(); state.targets = []; rebuildTargetHash();
+        for (const root of [target, cover]) { const body = root.children[0] as THREE.Mesh; body.geometry.dispose(); (body.material as THREE.Material).dispose(); }
+    }
+});
+
+test('departing avatars dispose each owned resource once even after the scene reference is gone', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const ticket = await registerTurnSession('ABCDEFGH', 'join-room', 'Guest', 'owned-peer');
+        const connection = new Connection('owned-peer', { admissionToken: ticket.admissionToken });
+        Peer.latest.emit('connection', connection); await tick(); await tick();
+        state.scene = new THREE.Scene(); startHostMatch(); connection.emit('data', update('Guest'));
+        const peer = state.peers['owned-peer'], root = peer.mesh;
+        const geometry = new THREE.BoxGeometry(), texture = new THREE.Texture();
+        const material = new THREE.MeshBasicMaterial({ map: texture }), spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+        root.add(new THREE.Mesh(geometry, [material, material]), new THREE.Mesh(geometry, material), new THREE.Sprite(spriteMaterial));
+        const counts = [0, 0, 0, 0];
+        [geometry, texture, material, spriteMaterial].forEach((resource, index) => resource.addEventListener('dispose', () => counts[index]++));
+        let sharedDisposals = 0; const sharedListener = () => sharedDisposals++;
+        SHARED_BODY_MAT.addEventListener('dispose', sharedListener);
+        try {
+            state.scene = null; connection.close(); connection.emit('close');
+            assert.deepEqual(counts, [1, 1, 1, 1]); assert.equal(sharedDisposals, 0);
+            assert.equal(root.parent, null); assert.equal(state.peers['owned-peer'], undefined);
+        } finally { SHARED_BODY_MAT.removeEventListener('dispose', sharedListener); }
+    } finally { disconnectMultiplayer(); state.scene = null; }
+});
+
+test('an accepted hit retains valid death attribution after the killer leaves, without blocking respawn', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const clients: Connection[] = [];
+        for (const name of ['Alpha', 'Beta', 'Gamma']) {
+            const ticket = await registerTurnSession('ABCDEFGH', 'join-room', name, name);
+            const connection = new Connection(name, { admissionToken: ticket.admissionToken });
+            clients.push(connection); Peer.latest.emit('connection', connection);
+        }
+        await tick(); await tick(); state.scene = new THREE.Scene(); startHostMatch();
+        for (const connection of clients) connection.emit('data', update(connection.peer));
+        const [killer, victim, observer] = clients;
+        killer.emit('data', { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
+            barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
+        killer.emit('data', { type: 'player_hit', targetPeerId: victim.peer, targetLifeId: 0, shotId: 1, pelletIndex: 0, damage: 10, attackerName: 'Alpha' });
+        killer.close();
+        const death = { type: 'player_died', lifeId: 0, cause: 'player', killerPeerId: killer.peer, victimName: 'Beta', killerName: 'Alpha' };
+        victim.emit('data', death); victim.emit('data', death);
+        const relayed = observer.sent.filter(p => p.type === 'player_died').at(-1);
+        assert.ok(parseNetworkPacket(relayed)); assert.equal(relayed.killerPeerId, killer.peer);
+        assert.equal(state.playerList.find(p => p.peerId === victim.peer)?.deaths, 1);
+        victim.emit('data', update('Beta', 1));
+        assert.equal(state.peers[victim.peer].lifeId, 1); assert.equal(state.peers[victim.peer].mesh.visible, true);
+    } finally { disconnectMultiplayer(); state.scene = null; }
 });
 
 test('full five-player rooms assign distinct houses and reset assignments for a new room', async () => {

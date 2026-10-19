@@ -68,7 +68,7 @@ test('heartbeat renews admitted sessions, prunes departed names; old alarm canno
     await call(room,'/heartbeat',{closeToken:cap('X'),expiresAt:Date.now()+1800_000,peerIds:['peer-a']});
     assert.ok((await storage.get<any>('room')).sessions[cap('a')].expiresAt>=before);
     await room.alarm(); assert.ok(await storage.get('room'));
-    await call(room,'/heartbeat',{closeToken:cap('X'),expiresAt:Date.now()+1800_000,peerIds:[]});
+    await call(room,'/heartbeat',{closeToken:cap('X'),expiresAt:Date.now()+1800_000,peerIds:[],admissionGeneration:1});
     assert.equal((await storage.get<any>('room')).sessions[cap('a')],undefined);
 });
 test('close requires capability and invalidates every session', async () => {
@@ -123,4 +123,59 @@ test('concurrent guest reservations assign Guest2 through Guest5 and reuse a rel
     await call(room, '/release-session', { turnSessionToken: cap('b') });
     assert.equal((await call(room, '/create-session', fields('e', 'Guest'))).status, 201);
     assert.equal((await storage.get<any>('room')).sessions[cap('e')].username, sessions[cap('b')].username);
+});
+
+test('a stale or legacy heartbeat cannot prune a later admission; acknowledged departures can', async () => {
+    const { room, storage } = await setup();
+    await call(room, '/create-session', fields('a'));
+    const stale = { closeToken: cap('X'), expiresAt: Date.now() + 1800_000, peerIds: [], admissionGeneration: 0 };
+    const admitted = await (await call(room, '/admit', { closeToken: cap('X'), peerId: 'peer-a', admissionToken: cap('A') })).json();
+    assert.equal(admitted.admissionGeneration, 1);
+    await call(room, '/heartbeat', stale);
+    await call(room, '/heartbeat', { ...stale, admissionGeneration: undefined });
+    assert.ok((await storage.get<any>('room')).sessions[cap('a')]);
+    const lease = (await storage.get<any>('room')).expiresAt;
+    await call(room, '/heartbeat', { ...stale, expiresAt: lease - 1000 });
+    assert.equal((await storage.get<any>('room')).expiresAt, lease, 'a delayed renewal cannot shorten the room lease');
+    await call(room, '/heartbeat', { ...stale, admissionGeneration: 1 });
+    assert.equal((await storage.get<any>('room')).sessions[cap('a')], undefined);
+    await call(room, '/heartbeat', { ...stale, admissionGeneration: 1, peerIds: ['peer-a'] });
+    assert.equal((await storage.get<any>('room')).sessions[cap('a')], undefined, 'stale presence cannot resurrect a departed capability');
+});
+
+test('unobserved admissions expire, and old room storage upgrades without granting old pruning rights', async t => {
+    let now = Date.now(); t.mock.method(Date, 'now', () => now);
+    const { room, storage } = await setup();
+    await call(room, '/create-session', fields('a'));
+    await call(room, '/admit', { closeToken: cap('X'), peerId: 'peer-a', admissionToken: cap('A') });
+    const old = await storage.get<any>('room');
+    delete old.admissionGeneration;
+    for (const s of Object.values<any>(old.sessions)) delete s.admissionGeneration;
+    await storage.put('room', old);
+    const heartbeat = () => call(room, '/heartbeat', { closeToken: cap('X'), expiresAt: now + 1800_000, peerIds: [] });
+    await heartbeat();
+    assert.equal((await storage.get<any>('room')).admissionGeneration, 1);
+    assert.ok((await storage.get<any>('room')).sessions[cap('a')]);
+    now += 300_001; await heartbeat();
+    assert.equal((await storage.get<any>('room')).sessions[cap('a')], undefined);
+    assert.ok((await storage.get<any>('room')).sessions[cap('h')], 'the host remains renewable');
+});
+
+test('heartbeat acknowledgement is bounded by server admissions', async () => {
+    const { room } = await setup();
+    for (const admissionGeneration of [-1, 0.1, 1, null, '0']) {
+        const response = await call(room, '/heartbeat', { closeToken: cap('X'), expiresAt: Date.now() + 1800_000, peerIds: [], admissionGeneration });
+        assert.equal(response.status, 400);
+    }
+});
+
+test('automatic guests fill every slot with a custom or non-first guest host', async () => {
+    for (const host of ['Host', 'Guest2', 'Guest5']) {
+        const storage = new MemoryStorage(), room = new TurnRoomStateMachine({ storage }, 5);
+        await call(room, '/register', { ...fields('h', host), closeToken: cap('X'), expiresAt: Date.now() + 1800_000, sessionExpiresAt: Date.now() + 300_000 });
+        for (const c of ['a', 'b', 'c', 'd']) assert.equal((await call(room, '/create-session', fields(c, 'Guest'))).status, 201);
+        const names = Object.values<any>((await storage.get<any>('room')).sessions).map(s => s.username.toLowerCase());
+        assert.equal(names.length, 5); assert.equal(new Set(names).size, 5);
+        assert.equal((await call(room, '/create-session', fields('e', 'Guest'))).status, 409);
+    }
 });

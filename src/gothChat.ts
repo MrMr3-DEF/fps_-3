@@ -17,6 +17,8 @@ interface GothChatResetOptions {
 /** Owns the conversation UI, consent gate, transcript and async request lifetime. */
 export class GothChat {
     private downloadApproval: ((approved: boolean) => void) | null = null;
+    private downloadReturnFocus: HTMLElement | null = null;
+    private automaticLoad = false;
     private preloadError: unknown = null;
     private preloadTask: Promise<void> | null = null;
     private preloadGeneration = 0;
@@ -58,7 +60,7 @@ export class GothChat {
                 <ul>
                     <li><strong>Runs on your device.</strong> Chat text is processed locally with <a href="https://webllm.mlc.ai/" target="_blank" rel="noopener noreferrer">WebLLM</a> and a local language model. This chat does not send your messages to an AI service.</li>
                     <li><strong>A download on first use.</strong> Enabling chat downloads model files (roughly 1.8 GB with the default Hermes 3 3B model) from Hugging Face and MLC’s hosting. These hosts receive normal connection information, such as your IP address. Running the model uses your device’s GPU and memory.</li>
-                    <li><strong>You control when it starts.</strong> Messages stay in this page’s memory while chat is open. Closing chat clears the conversation. Model files may remain cached. Approval is saved in this browser; clearing site data removes it.</li>
+                    <li><strong>You control when it starts.</strong> Messages stay in this page’s memory while chat is open. Closing chat clears the conversation. Unfinished loading stops unless immediate downloading is enabled in Settings. Model files may remain cached. Approval is saved in this browser; clearing site data removes it.</li>
                 </ul>
                 <p class="goth-chat-legal">Site information: <a href="https://luigi.host/impressum" target="_blank" rel="noopener noreferrer">Impressum</a> · <a href="https://luigi.host/datenschutz" target="_blank" rel="noopener noreferrer">Datenschutz</a></p>
                 <div class="goth-chat-notice-actions"><button type="button" data-action="decline">Not now</button><button type="button" data-action="approve">I understand — enable AI chat</button></div>
@@ -89,6 +91,7 @@ export class GothChat {
                 this.panel.hidden = true;
                 document.body.classList.remove('goth-chat-open');
                 complete(true);
+                this.restoreDownloadFocus();
                 return;
             }
             this.showConversation();
@@ -156,6 +159,8 @@ export class GothChat {
 
     requestDownloadApproval(complete: (approved: boolean) => void): void {
         if (this.opened) { complete(false); return; }
+        if (this.consent.approved) { complete(true); return; }
+        this.downloadReturnFocus = document.activeElement as HTMLElement | null;
         this.downloadApproval = complete;
         this.opened = true;
         this.panel.hidden = false;
@@ -165,34 +170,64 @@ export class GothChat {
         this.focus();
     }
 
-    /** Load in the background only after the saved consent gate has been passed. */
+    private restoreDownloadFocus(): void {
+        this.downloadReturnFocus?.focus({ preventScroll: true });
+        this.downloadReturnFocus = null;
+    }
+
+    /** Only the applied immediate-download setting owns background work. Chat
+     * may share that task, but an interaction must not silently become its owner. */
     preload(): void {
+        this.automaticLoad = true;
+        this.startLoad();
+    }
+
+    private startLoad(): void {
         if (!this.consent.approved || this.preloadTask || this.engine?.ready) return;
         const generation = ++this.preloadGeneration;
+        const controller = new AbortController();
+        this.fetchController = controller;
         this.preloadError = null;
-        this.preloadTask = (async () => {
-            const knowledge = this.knowledge ?? await loadCharacterKnowledge();
-            if (generation !== this.preloadGeneration) return;
+        let ownedEngine: GothChatEngine | null = null;
+        const current = () => generation === this.preloadGeneration && !controller.signal.aborted;
+        const task = (async () => {
+            const knowledge = this.knowledge ?? await loadCharacterKnowledge(controller.signal);
+            if (!current()) return;
             this.knowledge = knowledge;
             const { GothChatEngine } = await import('./gothChatEngine.js');
-            if (generation !== this.preloadGeneration) return;
-            const engine = new GothChatEngine();
+            if (!current()) return;
+            const engine = ownedEngine = new GothChatEngine();
             this.engine = engine;
             await engine.load(knowledge.config, (fraction, text) => {
-                if (!this.opened || this.downloadApproval) return;
+                if (!current() || this.engine !== engine || !this.opened || this.downloadApproval) return;
                 this.progress.hidden = false;
                 this.progress.value = Math.min(1, Math.max(0, fraction));
                 this.status.textContent = `Loading local chat · ${Math.round(fraction * 100)}%`;
                 this.progress.title = text;
             });
-            if (generation !== this.preloadGeneration || this.engine !== engine) engine.dispose();
+            if (!current() || this.engine !== engine) engine.dispose();
         })().catch(error => {
-            if (generation !== this.preloadGeneration) return;
+            if (!current()) return;
             this.preloadError = error;
-            this.engine?.dispose();
-            this.engine = null;
-            console.warn('Automatic local chat loading failed; interaction can retry.', error);
-        }).finally(() => { this.preloadTask = null; });
+            ownedEngine?.dispose();
+            if (this.engine === ownedEngine) this.engine = null;
+            console.warn('Local chat loading failed; interaction can retry.', error);
+        }).finally(() => {
+            // An abandoned import/load can settle after a replacement started.
+            // Only its own generation may clear the current task/controller.
+            if (generation !== this.preloadGeneration) return;
+            this.preloadTask = null;
+            this.fetchController = null;
+        });
+        this.preloadTask = task;
+    }
+
+    private cancelLoad(): void {
+        this.preloadGeneration++;
+        this.fetchController?.abort(); this.fetchController = null;
+        this.preloadTask = null;
+        this.engine?.dispose(); this.engine = null;
+        this.preloadError = null;
     }
 
     open(trigger?: { code: string; preventDefault?: () => void }): void {
@@ -233,6 +268,7 @@ export class GothChat {
             const complete = this.downloadApproval;
             this.downloadApproval = null;
             complete(false);
+            this.restoreDownloadFocus();
             return;
         }
         this.cancelPending();
@@ -246,9 +282,8 @@ export class GothChat {
             this.activeAnswer.textContent = `${this.activeAnswer.textContent === '…' ? '' : this.activeAnswer.textContent}\n[Reply interrupted]`.trim();
             this.activeAnswer = null;
         }
-        this.fetchController?.abort();
-        this.fetchController = null;
-        if (this.pending && !this.preloadTask) { this.engine?.dispose(); this.engine = null; }
+        if (this.preloadTask && !this.automaticLoad) this.cancelLoad();
+        else if (this.pending && !this.preloadTask) { this.engine?.dispose(); this.engine = null; }
         this.pending = false;
     }
 
@@ -264,11 +299,9 @@ export class GothChat {
         this.cancelPending();
         this.clearConversation();
         if (options.preserveLoadedModel === false) {
-            this.preloadGeneration++;
-            this.engine?.dispose();
-            this.engine = null;
+            this.automaticLoad = false;
+            this.cancelLoad();
             this.knowledge = null;
-            this.preloadError = null;
             this.progress.hidden = true;
             this.status.textContent = '';
         } else if (!this.preloadTask && !this.engine?.ready) {
@@ -305,10 +338,9 @@ export class GothChat {
         const epoch = ++this.epoch;
         this.pending = true;
         this.status.textContent = 'Reading her character notes…';
-        this.fetchController = new AbortController();
         try {
-            // Both entry points share one load. Closing chat only detaches its UI.
-            this.preload();
+            // Automatic loads survive close; interaction-owned loads are aborted.
+            this.startLoad();
             if (this.preloadTask) await this.preloadTask;
             if (epoch !== this.epoch) return;
             if (this.preloadError) throw this.preloadError;

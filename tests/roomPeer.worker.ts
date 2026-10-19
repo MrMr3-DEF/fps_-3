@@ -6,8 +6,9 @@ import { pack, unpack } from 'peerjs-js-binarypack';
 import { parentPort } from 'node:worker_threads';
 import * as THREE from 'three';
 import { state, resetPlayerState } from '../src/state.ts';
+import { parseNetworkPacket } from '../src/networkTypes.ts';
 import { hostGame, joinGame, startHostMatch, sendLocalState, updateRemotePeers, broadcastToAll } from '../src/multiplayer.ts';
-import { createAkimboGuns, fireProjectile } from '../src/weapons.ts';
+import { createAkimboGuns, fireProjectile, updateWeapons } from '../src/weapons.ts';
 import { updateProjectiles } from '../src/projectiles.ts';
 import { setDamageHandlers } from '../src/damage.ts';
 import { Peer, Connection } from './fakePeer.ts';
@@ -24,13 +25,18 @@ const goggles = new SmartGogglesHud(layer as any);
 const cap = 'a'.repeat(43);
 globalThis.fetch = (async (input: any) => {
     if (String(input).startsWith('/api/turn?')) return Response.json({ iceServers: [{ urls: 'stun:test' }] });
-    if (String(input).startsWith('/api/room-admissions/')) return Response.json({ username: 'Guest2', admissionProof: cap });
+    if (String(input).startsWith('/api/room-admissions/')) return Response.json({ username: 'Guest2', admissionProof: cap, admissionGeneration: 1 });
     return Response.json({ closeToken: cap, turnSessionToken: cap, admissionToken: cap, admissionProof: cap, expiresAt: Date.now() + 300000 });
 }) as typeof fetch;
 let connection: Connection;
+let lastDeath: unknown;
 const wire = (c: Connection) => {
     connection = c;
     c.send = packet => {
+        if ((packet as any).type === 'player_died') {
+            if (!parseNetworkPacket(packet)) throw new Error('Outgoing death packet failed parsing');
+            lastDeath = packet;
+        }
         const encoded = pack(packet as any);
         if (encoded instanceof Promise) throw new Error('Unexpected asynchronous packet encoding');
         parentPort!.postMessage({ packet: unpack(encoded) });
@@ -48,7 +54,7 @@ parentPort!.on('message', async ({ id, command, args }) => {
         let result: unknown;
         if (command === 'init') {
             state.camera = new THREE.PerspectiveCamera();
-            state.controls = { getObject: () => state.camera, unlock: () => {} } as any;
+            state.controls = { isLocked: true, getObject: () => state.camera, unlock: () => {} } as any;
             if (args.host) await hostGame('Guest1', 'ABCDEFGH', 'test');
             else await joinGame('Guest', 'ABCDEFGH', 'test');
             Peer.latest.emit('open', Peer.latest.id);
@@ -73,13 +79,15 @@ parentPort!.on('message', async ({ id, command, args }) => {
             } else {
                 goggles.reset();
             }
+        } else if (command === 'equip') {
+            state.desiredWeaponName = args.weapon;
         } else if (command === 'shoot') {
-            state.activeWeaponName = args.weapon;
-            state.rightGun = ({ SNIPER: state.sniperMesh, PISTOL: state.pistolMesh, AR: state.arMesh, SHOTGUN: state.shotgunMesh, MINIGUN: state.minigunMesh } as any)[args.weapon];
+            if (state.activeWeaponName !== args.weapon || state.switchState !== 'IDLE' || state.fireCooldown > 0) throw new Error('Weapon is not ready');
             fireProjectile();
         } else if (command === 'tick') {
             now += args.delta * 1000;
             mock.timers.tick(args.delta * 1000);
+            updateWeapons(args.delta);
             updateRemotePeers(args.delta);
             if (state.isScoped) {
                 state.camera!.updateMatrixWorld(true);
@@ -92,12 +100,12 @@ parentPort!.on('message', async ({ id, command, args }) => {
             goggles.update(state.camera!, state.camera!.position, state.camera!.position, [], state.peers, true, now);
             result = layer.texts().filter(text => text.startsWith('HEALTH'));
         } else if (command === 'trigger') {
-            state.activeWeaponName = 'MINIGUN'; state.minigunRamp = 3; state.isMouseDown = true; sendLocalState(true);
+            state.isMouseDown = true; sendLocalState(true);
         } else if (command === 'pauseTime') {
             now += args.duration;
             mock.timers.tick(args.duration);
         } else if (command === 'respawn') { resetPlayerState(); sendLocalState(true); }
-        else if (command === 'state') result = { hp: state.playerHp, lifeId: state.lifeId, isPlaying: state.isPlaying,
+        else if (command === 'state') result = { hp: state.playerHp, lifeId: state.lifeId, isPlaying: state.isPlaying, lastDeath,
             peers: Object.fromEntries(Object.entries(state.peers).map(([key, p]) => [key, { hp: p.hp, lifeId: p.lifeId,
                 visible: p.mesh.visible, position: p.mesh.position.toArray() }])) };
         parentPort!.postMessage({ id, result });

@@ -29,7 +29,7 @@
 
 #touch-control-help { display: none; }
 .touch-input #desktop-control-help { display: none; }
-.touch-input #touch-control-help { display: block; font-size: 12px; line-height: 1.5; color: #637080; }
+.touch-input #touch-control-help { display: block; line-height: 1.5; }
 .touch-device #fps-counter { top: 78px; right: max(16px, env(safe-area-inset-right)); font-size: 12px; }
 
 .touch-device #accelerometer { display: none !important; }

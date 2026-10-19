@@ -35,9 +35,17 @@ The Worker also serves the static Vite output through its `ASSETS` binding. The 
 5. Construct the menu-only character/weapon preview.
 6. Start the menu animation loop.
 
-The gameplay renderer does not exist while the main menu is idle. Offline Singleplayer creates the Three.js scene, camera, renderer, lights, fog, pointer-lock controls, weapons, local avatar, hook mesh, and projectile pool, then builds a newly seeded world in stages. `worldLoading.ts` shows a black `Booting...` screen with a blue bar that eases upward but stays below full until world generation and renderer preparation finish. The player is placed at spawn before the bar finishes; the full bar flashes twice, the boot content fades into black, then the black overlay fades out over an already rendered gameplay frame. Multiplayer retains the white orbiting sun-and-moon world screen. Both modes use the same checkpoints and cancellation generation. `renderPreparation.ts` uploads textures and instance buffers and compiles lighting variants before the first playable frame. The pointer-lock/fullscreen request remains in the original Start click, before asynchronous work. The frame loop skips simulation during loading, but draws the prepared scene without simulation behind the final black fade, and resets its elapsed-time baseline afterward. Multiplayer creates the same match runtime after room verification; the host prepares its synchronized seed and clients wait for a snapshot before preparing that world. The day/night clock remains at zero until play begins.
+The gameplay renderer does not exist while the main menu is idle. Offline Singleplayer creates the Three.js scene, camera, renderer, lights, fog, pointer-lock controls, weapons, local avatar, hook mesh, and projectile pool, then builds a newly seeded world in stages. `worldLoading.ts` shows a black `Booting...` screen with a blue bar that eases upward but stays below full until world generation and renderer preparation finish. The player is placed at spawn before the bar finishes; the full bar flashes twice, the boot content fades into black, then the black overlay fades out over an already rendered gameplay frame. Multiplayer retains the white orbiting sun-and-moon world screen. Both modes use the same checkpoints and cancellation generation. `renderPreparation.ts` uploads textures and instance buffers and compiles lighting variants before the first playable frame. The pointer-lock/fullscreen request remains in the original Start click, before asynchronous work. The frame loop skips simulation during loading, but draws the prepared scene without simulation behind the final black fade, and resets its elapsed-time baseline afterward. Multiplayer creates the same match runtime after room verification; the host prepares its synchronized seed and clients wait for a snapshot before preparing that world. The offline clock remains at zero until input first activates play; a multiplayer room's clock also progresses in the prepared lobby.
 
 Each loading checkpoint checks a generation token and the current scene/session. Leaving, failed startup, or a replacement match invalidates pending work. The synchronous world builder remains for deterministic tests and preview fixtures; both builders use the same ordered stages. The goth character model loads separately and can still be pending when world preparation completes.
+
+Networking reports unexpected session termination through
+`onMultiplayerDisconnected`; `main.ts` owns the complete idempotent runtime
+teardown and preserves the reason in the appropriate host/join panel. Explicit
+composition-root teardown suppresses that notification to avoid recursion.
+Input release clears held actions synchronously even if the browser's unlock
+event arrives later. A denied initial offline activation leaves a prepared,
+retryable arena with no simulation updates.
 
 Pointer lock is the practical boundary between menu state and active game input. Locking begins or resumes play and exposes the HUD. Unlocking clears held inputs, resets the hook, and shows the appropriate pause or main panel. Offline pause stops the complete simulation and its day/night clock; multiplayer continues simulating while its local player has the pause menu open. The offline pause menu can open and apply the shared settings panel, which returns to Pause instead of the main menu. Leaving a game disposes all match-owned objects, the world, the day/night cycle, the WebGL renderer/context, and pointer-lock controls before returning to the menu. Multiplayer cleanup also closes WebRTC connections, destroys PeerJS state, disposes peer meshes, and best-effort releases the server-side room or session. Persisted settings remain, and the local LLM may remain loaded only while its immediate-download setting is enabled.
 
@@ -45,7 +53,8 @@ Pointer lock is the practical boundary between menu state and active game input.
 
 | File | Responsibility |
 | --- | --- |
-| `main.ts` | Composition root, renderer and UI lifecycle, input, frame loop, local health/death, lava, regeneration, world-border warning |
+| `main.ts` | Composition root, renderer and UI lifecycle, input, frame loop, local health/death, regeneration, world-border warning |
+| `lavaDamage.ts` | Floor-level lava contact and damage cadence; multiplayer pause preserves hazards and dead lives never tick |
 | `mainMenu.ts`, `appearance.ts` | Menu preview, weapon display, and persisted suit color |
 | `inputSession.ts`, `mobileControls.ts` | Shared input activation, selected keyboard/touch mode switching on all devices, touch capture, movement, and action controls |
 | `mobileControlLayout.ts`, `mobileControlsView.ts`, `mobileControlsEditor.ts` | Validated touch layout, shared control geometry/markup, and inactive blank sky layout editor |
@@ -64,10 +73,11 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `thirdPersonCamera.ts`, `conversationCamera.ts` | Collision-aware shoulder view and eased character-conversation pose |
 | `weapons.ts` | Weapon/avatar mesh builders, firing, hitscan/projectile creation, recoil, switching, inspecting, ADS and third-person presentation |
 | `projectiles.ts` | Projectile pooling, delayed goggles homing, swept collision, local target/player hits, projectile retirement |
-| `projectileHoming.ts` | Scoped scan-box target capture, network identity, finite steering and host aim-envelope checks |
+| `projectileHoming.ts`, `projectileFlight.ts` | Target identity/range, finite steering, fixed guidance steps and bounded host motion history |
+| `targetVisibility.ts` | Shared sampled-body visibility for goggles and host acquisition |
 | `projectileTrails.ts` | Pooled world-space projectile path history and post-impact tracer fading |
 | `particles.ts` | Instanced debris, beams, exhaust, shockwaves, material pools, cleanup |
-| `hud.ts` | Health/reload/hover bars, FPS, speed lines, accelerometer |
+| `hudPresentation.ts`, `hud.ts` | Pure phase/input visibility policy, one DOM applicator, health flash ownership, bars, FPS, speed lines and accelerometer |
 | `smartGoggles.ts` | Scoped enemy recognition, line-of-sight filtering, target-lock DOM lifecycle, and live distance/health callouts |
 | `gogglesFailure.ts` | Match-scoped continuous anomaly-scan timer, terminal failure, shutdown timing, and input-release latch |
 | `smartGogglesMath.ts` | Rotation-independent target-envelope projection, adaptive 45-degree callout layout, and target-surface distance math |
@@ -121,9 +131,21 @@ Three.js objects carry typed metadata through the accessors in `userDataTypes.ts
 6. Animate visible targets and particles.
 7. Send a multiplayer state update when required.
 8. Update border warnings, FPS, FOV/scope UI, and pointer sensitivity.
-9. Resolve the collision-safe over-the-shoulder camera when third person is active, project smart-goggles locks from that exact render pose, render, then restore the logical player position.
+9. Copy the final accepted player pose to the on-foot avatar, resolve the collision-safe over-the-shoulder camera, project smart-goggles locks from that exact render pose, render, then restore the logical player position. Preserve the rendered center ray for third-person grappling input.
 
 Moving damage or collision work across the networking or rendering steps can change authority, visual timing, and hit positions.
+
+Health width and damage-flash ownership are independent. Normal mounted/regen
+ticks preserve a live 100 ms flash; overlap replaces its expiry, and life,
+health-owner and runtime transitions cancel stale callbacks. Voluntary Mecha
+release restores the neutral on-foot bar. Respawn retains the actually equipped
+weapon, cancels pending switching/inspection and normalizes its pose while
+preserving match score, clock and terminal goggles failure. Fresh matches start
+with Pistol and reset match state.
+
+On-foot multiplayer lava remains active while local input is paused, using the
+same tick cadence and one death per life. Offline pause freezes simulation and
+does not consume hazard time. Regeneration keeps its independent timing policy.
 
 ## World generation and visibility
 
@@ -136,6 +158,17 @@ A six-unit-wide straight stair cantilevers from the inside face of the west ston
 Town box visuals are batched into fourteen material instance sets: twelve for chunked structures and well water and two permanently rendered ground sets. The goth house is identified only in code and excluded from initial player spawns. It has charcoal masonry, solid stepped gables and buttresses, with decorative spires, lancet windows, a rose window, bat grotesques, iron cresting, candles, a chandelier, banners, a hearth and coffin-style furniture. These decorative shapes share six merged material meshes in one culled group; structural collision remains in the shared town box generator. Streets, the plaza, footpaths and room floors are partitioned into adjoining tiles at y=0, with no layered paving faces. The grass mesh has a matching cutout, and a separate invisible full-floor plane preserves grappling across both surfaces. Paving stays visible like the grass floor so distant chunk culling cannot expose a hole. Invisible colliders use the same box bounds as the solid geometry and remain in the spatial index when culled. Movement handles elevated lintels and roof slabs using each collider's bottom and top, with upward ceiling collision and floor support evaluated at the accepted horizontal position. Explicit `rebuildEnvironmentWithSeed` calls preserve their seed in both offline and multiplayer modes; ordinary new offline matches still choose a fresh seed.
 
 Gameplay queries do not iterate the whole world. `world.ts` maintains separate spatial hashes for obstacles, lava pools, and targets. Point-radius queries support movement and nearby hits; grid-traversing segment queries support bullets, sniper rays, and grappling. Collision helpers use swept segment/sphere and segment/AABB tests to avoid tunnelling between frames. The goth girlfriend has one fixed 1.1-by-3.564-by-0.8 box proxy registered in the obstacle hash; movement, projectiles, sniper rays and grapples use this proxy without tracing her animated GLB meshes. Her own conversation and goggles visibility rays explicitly ignore that proxy after accounting for other intervening geometry.
+
+Shot queries include the ground half-space without indexing an arena-sized
+collider. Projectile centers stop one `PROJECTILE_RADIUS` above it; sniper rays
+use zero radius. The host uses the same radius for broad-phase padding and exact
+obstruction bounds, and clips replicated sniper beams at terrain. Straight
+bullet/hitscan hit volumes for living peers do not depend on mesh visibility.
+Horizontal movement requires the same camera clearance as upward ceiling contact.
+Magnetic grapples test cover along the selected target's actual path and compare
+distances from one aim origin. Mecha armor hooks store a collider-local anchor,
+follow its current transform and release when that solid collider is removed or
+disposed. Cockpit entry remains a separate verified opening/pull path.
 
 Visible static props are largely batched into `InstancedMesh` groups by material. The world is divided into 200-by-200-unit render chunks. Packed full-capacity instance buffers are uploaded during preparation; crossing a chunk boundary then updates active chunks and copies only relevant matrices. Dynamic target billboards update every other frame. Shared geometries and materials are tracked so disposal removes match-owned resources without destroying reusable assets.
 
@@ -168,7 +201,7 @@ seconds of shield downtime and the existing half-second rebuild.
 Robot-owned combat clocks and GPU effects survive respawn and freeze on pause
 or player death. Piloted movement uses height-aware part sweeps and sliding independently of enemy navigation. Mounted zero HP immediately releases the living pilot and plays FinalDeath from its breakup cue, retaining third person with a short camera-boom handoff. See the behavior document for exact phase and cancellation rules.
 
-Projectile weapons reuse a preallocated pool. Every weapon has the sniper's 700-meter travel distance; simulated projectiles track muzzle-inclusive distance and clamp their final swept segment to that exact limit. When enabled in Graphics settings, each bullet also owns a pooled additive tracer that records its recent world-space path and fades briefly after impact, making direction changes visible without affecting collision. Homing frames cap angular turn speed, move along the midpoint of the old and new headings, and add two cubic tracer samples so guidance renders as an arc while retaining one collision sweep and one target lookup per frame. Collision checks sweep each projectile's previous-to-next segment against nearby obstacle AABBs, targets, and peer hit volumes. When a scoped shot is fired after the visual homing lock has completed, the selected NPC or opponent and its current life/revision are captured for the shot. The bullet flies straight until it has covered one-third of the target distance measured at fire time, then applies strong but finite steering toward the target's current position. At full minigun speed, one initial-distance sample is shared by each batch of ten bullets and a target change forces an immediate new sample; every other firing state samples each shot. The sampled threshold travels with multiplayer fire packets so all peers render the same delayed turn. Steering does not bypass obstacles or range, does not guarantee a hit, and never applies to the hitscan sniper, the sun, the moon, or the girlfriend. Each player hit volume is one solid yaw-oriented cuboid whose width, height and depth exactly match the complete bean body's maximum bounds, including the visor and booster but excluding weapons and name tags. The cuboid's empty corner space is hittable, and projectile size does not expand it beyond those model bounds. The sniper uses a hitscan ray with the same range. Target damage is applied locally in offline play and only by the host in multiplayer. A killed target respawns with authoritative position, class, health, scale, color, and score.
+Projectile weapons reuse a preallocated pool. Every weapon has the sniper's 700-meter travel distance; simulated projectiles track muzzle-inclusive distance and clamp their final swept segment to that exact limit. When enabled in Graphics settings, each bullet also owns a pooled additive tracer that records its recent world-space path and fades briefly after impact, making direction changes visible without affecting collision. Guided projectiles use fixed 1/120-second steps, interpolate their target observations between render frames, cap angular turn speed and move along the midpoint of the old and new headings. Cubic tracer samples preserve the visible arc. Every guidance step owns one swept collision query; straight projectiles retain their single frame sweep. Collision checks sweep each projectile's previous-to-next segment against nearby obstacle AABBs, targets, and peer hit volumes. When a scoped shot is fired after the visual homing lock has completed, the selected NPC or opponent and its current life/revision are captured for the shot. The bullet flies straight until it has covered one-third of the target distance measured at fire time, then applies strong but finite steering toward the target's current position. At full minigun speed, one initial-distance sample is shared by each batch of ten bullets and a target change forces an immediate new sample; every other firing state samples each shot. The sampled threshold travels with multiplayer fire packets so all peers render the same delayed turn. Steering does not bypass obstacles or range, does not guarantee a hit, and never applies to the hitscan sniper, the sun, the moon, or the girlfriend. Each player hit volume is one solid yaw-oriented cuboid whose width, height and depth exactly match the complete bean body's maximum bounds, including the visor and booster but excluding weapons and name tags. The cuboid's empty corner space is hittable. Simulated bullets expand it by their actual 0.07-unit radius; sniper rays use the unexpanded bounds. The sniper uses a hitscan ray with the same range. Target damage is applied locally in offline play and only by the host in multiplayer. A killed target respawns with authoritative position, class, health, scale, color, and score.
 
 While aiming through the goggles, each visible, unobstructed NPC target or multiplayer opponent within 1200 m is framed by a fixed maximum envelope. The inclusive scan cutoff uses the existing player-to-target distance, applies to the Mecha and girlfriend too, and immediately removes scans beyond it; sun and moon are exempt. Every eligible target retains its four scan corners, while only the five scan-box centers nearest the screen-center crosshair receive the leader, identifier and stats/warning callout. NPCs, opponents, visible Mecha, girlfriend and celestial bodies share these slots; exact screen-distance ties use target keys. Covered Mecha retains its corners-only hint without taking a slot. Selection updates each frame and changes replay callout entry/exit independently of corner and homing clocks; incoming reveals may overlap the brief outgoing retractions. Menu customization and lobby scans opt out through `SmartGogglesHud`'s `gameplayLimits: false` constructor option. The square frame follows the target center and scales with distance, but ignores model rotation, child animation and weapon visibility so a spinning cube or animated avatar cannot make the overlay jitter. Unclipped envelope coordinates preserve the frame's size while a target crosses a viewport edge. Target acquisition begins about halfway through the scope FOV's settle time, then runs its original roughly half-second sequence: four brackets visibly converge on the envelope, the 45-degree/horizontal leader draws outward, then an identifier types above the leader while the fact readout types below it. The sniper retains scan annotations but cannot acquire a red targeting lock; switching to it clears any pending or completed homing lock. For projectile weapons, when the reticle lies inside an in-range enemy scan box, four additional red brackets converge immediately after the yellow scan brackets. They occupy the 12, 3, 6 and 9 o'clock points of the notional circle through the yellow box corners, so each red vertex remains the same distance from the target center; projectile homing is unavailable until that red animation completes. If overlapping scan boxes compete, the enemy whose box center is closest to the reticle owns the red lock, and changing that winner immediately clears the previous lock before reacquisition. Normal enemies use an orange overlay identified as `Enemy`, with distance above health beneath the line. Targets beyond the shared weapon range but within scan range retain the red warning state and type only `OUT OF RANGE` beneath their identifier; annotations collapse after the complete envelope leaves the view. The visible sun and moon use their rendered sky-disc spheres for the same tracking animation and retain the blue overlay, identifying themselves as `sun` and `moon`; beneath that they show only their rounded mean distance from Earth—149,600,000 km and 384,400 km respectively—and never participate in health, weapon-range, or homing-lock classification. The girlfriend is detected from her fixed physical proxy rather than the animated model: her overlay is white, its identifier cycles through unreadable/redacted text, distance remains readable, her health cycles through corrupted symbols, and her complete annotation continuously glitches with stepped horizontal scanline tearing, side-to-side jumps and chromatic separation. Holding that anomaly in an active scan continuously for 30 seconds, including when it has only corners and no selected callout, permanently bricks the goggles for the current match: the scope performs a one-shot CRT line-and-dot shutdown, releases the aim view, and every later scan attempt displays only animated TV noise. The persistent Photosensitivity Mode setting replaces that noise with a steady black screen. Losing the anomaly lock before the threshold resets the timer, death does not repair the hardware, and only fresh-match initialization clears the failure. An eliminated locked target turns red, receives a drawn X, glitches through two partial fade pulses, and disappears in about half a second. During that sequence the overlay remains projected from the target's last world-space envelope as the camera moves, and clears immediately if its center leaves the goggles FOV. Other enemies participate in visibility checks, so a fully covered rear target is not annotated. The world-space NPC health bars are hidden during this mode to avoid duplicate health readouts. Peer state updates require canonical health totals consistent with alive/dead state so remote-player facts stay usable without making those self-reported values authoritative for hit validation.
 
@@ -191,6 +224,25 @@ Player damage records the last damage time for regeneration and kill attribution
 | `P` | Toggle third-person presentation |
 | Hold `Tab` in multiplayer | Show the host-ordered player list with suit-colored pixel faces and kills/deaths |
 | `Escape` | Toggle pause; offline simulation stops completely, while multiplayer continues. Resume waits for pointer lock. If the browser requires a fresh gesture after Esc, click Resume. |
+
+The composition root derives HUD visibility from `hudPresentation.ts` on input,
+conversation and terminal transitions, before loading/paused frame returns, and
+again before drawing. `hud.ts` applies ordinary visibility without letting value
+updates decide it. The prepared boot reveal initializes the G-meter and Power
+Jump with the other HUD elements while simulation remains frozen. Respawn uses
+the same policy without replaying boot. Boarding/startup/shutdown hide the motion
+readout; active piloting restores it. Mecha hardware fades retain their authored
+phases but cannot overlay pause, chat, death or disposal.
+
+World replacement increments `worldGeneration`; gameplay goggles release old
+health-bar references at their next update. The Goth actor owns its animated
+root and fill light, which follow render chunks; the world owns its always-active
+hitbox. Lantern frame/glass instances are selected by their actual chunks;
+flames and lights use the same selection. Preparation may temporarily include
+all eight lantern light variants, then restores the current chunk mask. Lobby
+flame instances own their instance buffers; their geometry/material stay shared
+until the menu itself is disposed. Fresh-world construction rejects a populated
+world; replacements use the disposing rebuild entry points.
 
 ## Multiplayer topology and synchronization
 
@@ -217,8 +269,8 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 
 | Packet | Origin | Host behavior |
 | --- | --- | --- |
-| `update` | Any player | Bounds position, limits implausible travel, records current weapon/death state, relays |
-| `fire` | Any live player | Checks weapon, cooldown in milliseconds, minigun ramp and barrel proximity; records a unique shot ID and deterministic pellet directions |
+| `update` | Any player | Bounds position, charges cumulative travel against a capped receipt-time budget, validates life and weapon-switch phases, relays |
+| `fire` | Any live player | Checks the previous shot's cooldown deadline, completed weapon switch, minigun ramp and barrel proximity; records a unique shot ID and deterministic pellet directions; canonicalizes pellet count |
 | `hit_target` | Shooter client | Requires a matching recent shot, exact weapon damage, target intersection, clear path, and burst allowance; host applies damage |
 | `player_hit` | Shooter client | Applies the same fire/path checks, rejects self-hits, records attacker for death attribution, relays |
 | `player_died` | Victim client | Consumes one death per life ID, validates recent player damage, and attributes kills by peer ID with a separate lava cause |
@@ -233,7 +285,56 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 
 Every received value first passes `parseNetworkPacket()`. It rejects unknown packet types, malformed structures, invalid usernames/weapons, non-finite or excessive coordinates, invalid directions, and oversized target snapshots. Do not handle a newly introduced packet before adding strict parsing for it.
 
-Hit reports reference a shot ID and pellet index. Each pellet can cause one accepted hit, with exact shared spread, damage, travel-distance and obstruction checks. Scoped homing fire packets may additionally name one live NPC revision or opponent life; the host accepts the lock only when that target lies inside the server-side approximation of the visual scan box and later accepts homing damage only for that captured identity. Host-originated damage uses the same attribution bookkeeping as relayed damage. A dead peer cannot submit new shots; death acceptance retires outstanding shot claims.
+Movement allowance replenishes at `NETWORK_MOVEMENT_SPEED`, derived from enemy
+grapple pull, walking and jump values, and is capped by `NETWORK_MOVEMENT_BURST`.
+It is independent of packet count and resets only on admission or an accepted
+new life. Rejected movement/weapon updates do not mutate life, position or the
+shot ledger. This is a plausibility envelope for client simulation, not host
+physics simulation.
+
+Updates require `switchState` and `nextWeapon`: withdrawal keeps the old weapon,
+bring-in equips the pending weapon, and idle clears the pending identity. The
+host verifies both 0.15-second phases, with one network tick of bounded timing
+tolerance across the whole transition. Delayed bursts can finish the original
+intent on a later idle update. Fire is rejected during either phase. Switching
+does not shorten the previous accepted shot's deadline, and cadence jitter
+cannot compound. Pellet counts always come from weapon configuration on the
+host and viewers. Room participants must use the same client build; packets
+from older builds missing the required switching fields fail parsing.
+The composition root publishes each phase change immediately rather than
+waiting for the movement throttle. A newly begun withdrawal starts its clock
+at zero; elapsed time from before the switch intent cannot shorten it.
+
+Hit reports reference a shot ID and pellet index. Each pellet can cause one
+accepted hit with shared spread, exact damage, range and obstruction checks.
+Homing fire requires the captured NPC revision/opponent life and its steering
+threshold. Acquisition checks the host aim envelope and sampled body visibility,
+including partially exposed silhouettes. The threshold must match recent
+host-owned raw/filtered motion history; only a full-speed Minigun may reuse its
+accepted sample for a ten-shot batch. The host replays the same 120 Hz guidance,
+including the 0.1-unit muzzle offset, finite turns, floor/obstacle and intervening
+body contacts. Incidental hits use that curve too; they cannot fall back to an
+unsteered ray. Old target lives cannot authorize damage to replacements.
+Acquisition retains exact body-box reachability. During flight, both simulations
+use the same enclosing body radius to decide whether guidance can continue near
+the range boundary; this does not enlarge collision shapes or the 700-unit
+muzzle-inclusive travel limit. The player bound encloses the asymmetric visor
+and booster relative to the body origin.
+
+Each tracked target retains at most 128 receipt-time samples, coalesced into
+guidance-time bins. At most 12 observation candidates cover up to 150 ms of lag;
+replay permits 0.35 units of pose error and 100 ms of arrival grace. Range limits
+each candidate to 94 steps (1,128 per claim), and a per-shooter token budget caps
+acquisition/replay work at 40,000 step units per second plus one bounded burst.
+Every guided-fire context/history search is charged 256 units before it starts,
+including searches that produce no candidates; visibility checks also consume
+the budget.
+Claims whose required history has expired fail closed. These bounds deliberately
+limit compensation; they do not prove a client completed the visual lock
+animation. Reduced-motion lock timings remain presentation only.
+
+Host-originated damage uses the same attribution bookkeeping as relayed damage.
+A dead peer cannot submit new shots; death acceptance retires outstanding claims.
 
 The host is authoritative enough to reject many fabricated hits and target mutations, but this is not a dedicated authoritative simulation server: clients still simulate their own movement, health, and shot detection. Changes to competitive trust assumptions should account for that limit.
 

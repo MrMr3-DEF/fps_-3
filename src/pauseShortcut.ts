@@ -21,10 +21,9 @@ export function getEscapePauseAction(code: string, state: PauseShortcutState): E
     return state.isPauseMenuVisible ? 'resume' : null;
 }
 
-/** Offline play stops completely while its pause/death UI owns input. */
+/** A prepared offline arena is idle until input first activates it. Multiplayer
+ * keeps its lobby clock and background simulation while local input is paused. */
 export function shouldPauseOfflineSimulation(state: SimulationPauseState): boolean {
-    return state.isPlaying &&
-        !state.isMultiplayer &&
-        !state.isInputActive &&
-        !state.isConversationOpen;
+    return !state.isMultiplayer && (!state.isPlaying ||
+        (!state.isInputActive && !state.isConversationOpen));
 }

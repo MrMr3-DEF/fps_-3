@@ -4,6 +4,14 @@ export interface Vec3Like {
     z: number;
 }
 
+/** First contact with the solid half-space below the arena floor. Radius is
+ * zero for a ray; a projectile's center stops one radius above the surface. */
+export function segmentGroundHitT(start: Vec3Like, end: Vec3Like, radius = 0): number | null {
+    if (start.y <= radius) return 0;
+    if (end.y > radius) return null;
+    return (start.y - radius) / (start.y - end.y);
+}
+
 /** Keep simulation steps stable after backgrounding or a long render stall. */
 export function clampFrameDelta(delta: number, maxDelta: number): number {
     if (!Number.isFinite(delta) || !Number.isFinite(maxDelta) || maxDelta <= 0) return 0;

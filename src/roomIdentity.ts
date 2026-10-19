@@ -2,6 +2,9 @@ export function isUsername(value: unknown): value is string {
     return typeof value === 'string' && /^(?:[A-Za-z]{1,10}|Guest[1-5])$/.test(value);
 }
 export function usernameKey(name: string): string { return name.toLowerCase(); }
+export function isAdmissionGeneration(value: unknown): value is number {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
 export function isPeerId(value: unknown): value is string {
     return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }

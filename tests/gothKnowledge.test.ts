@@ -101,7 +101,7 @@ test('maximum editable prompt and examples leave room for the thinking output bu
         config: { ...config, maxReplyTokens: 4096, styleExamples: Array.from({ length: 2 }, () => ({ user: 'b'.repeat(100), assistant: 'c'.repeat(160) })) },
     };
     const result = buildCharacterPrompt(large, '🦇'.repeat(200));
-    assert.ok(result.messages.reduce((sum, message) => sum + byteLength(message.content), 0) + 4096 + 256 <= characterContextSize(config.modelId));
+    assert.ok(result.messages.reduce((sum, message) => sum + byteLength(message.content), 0) + 4096 + 256 <= characterContextSize());
     assert.ok(!result.messages.some(message => message.content.includes('\ufffd')));
 });
 
@@ -150,6 +150,6 @@ test('long conversations keep the newest complete pairs within context including
         assert.equal(previous.at(-2)!.content, history.at(-1)!.user);
         assert.ok(!previous.some(message => message.content.startsWith('Turn 0:')));
         const bytes = result.messages.reduce((sum, message) => sum + byteLength(message.content), 0);
-        assert.ok(bytes + previous.length * 32 + 4096 + 256 <= characterContextSize(modelId));
+        assert.ok(bytes + previous.length * 32 + 4096 + 256 <= characterContextSize());
     }
 });

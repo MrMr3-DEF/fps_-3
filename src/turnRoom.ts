@@ -1,5 +1,5 @@
 import { parseJsonBody } from './boundedJson.js';
-import { isCapability, isPeerId, isUsername, usernameKey } from './roomIdentity.js';
+import { isAdmissionGeneration, isCapability, isPeerId, isUsername, usernameKey } from './roomIdentity.js';
 
 export interface TurnRoomStorage {
     get<T>(key: string): Promise<T | undefined>;
@@ -11,8 +11,9 @@ export interface TurnRoomState { storage: TurnRoomStorage; }
 interface Session {
     ip: string; expiresAt: number; credentialIssues: number; credentialWindow: number;
     username: string; peerId: string; admissionToken: string; admissionProof: string; admitted: boolean;
+    admissionGeneration: number;
 }
-interface RoomRecord { expiresAt: number; closeToken: string; hostPeerId: string; sessions: Record<string, Session>; }
+interface RoomRecord { expiresAt: number; closeToken: string; hostPeerId: string; admissionGeneration: number; sessions: Record<string, Session>; }
 const SESSION_MS = 5 * 60_000;
 const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 function json(body: unknown, status = 200): Response { return new Response(JSON.stringify(body), { status, headers }); }
@@ -26,7 +27,7 @@ function validSession(body: Body): boolean {
 function session(body: Body, expiresAt: number, admitted: boolean): Session {
     return { ip: body.ip as string, username: body.username as string, peerId: body.peerId as string,
         admissionToken: body.admissionToken as string, admissionProof: body.admissionProof as string,
-        expiresAt, admitted, credentialIssues: 0, credentialWindow: Date.now() };
+        expiresAt, admitted, admissionGeneration: 0, credentialIssues: 0, credentialWindow: Date.now() };
 }
 
 /** Parse outside the queue; serialize every storage read/check/write, including alarms. */
@@ -41,18 +42,17 @@ export class TurnRoomStateMachine {
         return result;
     }
     async fetch(request: Request): Promise<Response> {
-        const body = request.method === 'POST' ? await parseJsonBody<Body>(request) : {};
+        if (request.method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
+        const body = await parseJsonBody<Body>(request);
         if (!body) return json({ error: 'Expected a small JSON object.' }, 400);
-        return this.serialized(() => this.handle(new URL(request.url).pathname, request.method, body));
+        return this.serialized(() => this.handle(new URL(request.url).pathname, body));
     }
-    private async handle(path: string, method: string, body: Body): Promise<Response> {
+    private async handle(path: string, body: Body): Promise<Response> {
         const record = await this.readActiveRecord();
-        if (path === '/authorize') return record ? json({ active: true, expiresAt: record.expiresAt }) : json({ error: 'Room is inactive.' }, 404);
-        if (method !== 'POST') return json({ error: 'Method not allowed.' }, 405);
         if (path === '/register') {
             if (record) return json({ error: 'Room is already active.' }, 409);
             if (!validSession(body) || !isCapability(body.closeToken) || !future(body.expiresAt) || !future(body.sessionExpiresAt)) return json({ error: 'Invalid room registration.' }, 400);
-            const next: RoomRecord = { closeToken: body.closeToken, expiresAt: body.expiresAt, hostPeerId: body.peerId as string,
+            const next: RoomRecord = { closeToken: body.closeToken, expiresAt: body.expiresAt, hostPeerId: body.peerId as string, admissionGeneration: 0,
                 sessions: { [body.turnSessionToken as string]: session(body, Math.min(body.expiresAt, body.sessionExpiresAt), true) } };
             await this.state.storage.put('room', next);
             await this.state.storage.setAlarm(next.expiresAt);
@@ -64,8 +64,8 @@ export class TurnRoomStateMachine {
             const sessions = Object.values(record.sessions);
             // Guest is an allocation request; reservations are serialized with admission.
             if (body.username === 'Guest') {
-                let number = 2;
-                while (sessions.some(s => s.username === `Guest${number}`)) number++;
+                let number = 1;
+                while (sessions.some(s => usernameKey(s.username) === usernameKey(`Guest${number}`))) number++;
                 if (number > this.maxPlayers) return json({ error: 'Room is full.' }, 409);
                 body.username = `Guest${number}`;
             }
@@ -83,10 +83,12 @@ export class TurnRoomStateMachine {
             const [token, s] = entry;
             if (path === '/depart') { delete record.sessions[token]; await this.state.storage.put('room', record); return empty(); }
             if (s.admitted || !isCapability(body.admissionToken) || s.admissionToken !== body.admissionToken) return json({ error: 'Invalid or used admission ticket.' }, 403);
+            if (record.admissionGeneration === Number.MAX_SAFE_INTEGER) return json({ error: 'Room admission limit reached.' }, 503);
             s.admitted = true;
+            s.admissionGeneration = ++record.admissionGeneration;
             s.expiresAt = Math.min(record.expiresAt, Date.now() + SESSION_MS);
             await this.state.storage.put('room', record);
-            return json({ username: s.username, admissionProof: s.admissionProof });
+            return json({ username: s.username, admissionProof: s.admissionProof, admissionGeneration: s.admissionGeneration });
         }
         if (path === '/claim-credential') {
             if (!isCapability(body.turnSessionToken)) return json({ error: 'Invalid room-session capability.' }, 400);
@@ -107,11 +109,17 @@ export class TurnRoomStateMachine {
         }
         if (path === '/heartbeat') {
             if (body.closeToken !== record.closeToken || !future(body.expiresAt) || !Array.isArray(body.peerIds) || body.peerIds.length > this.maxPlayers || !body.peerIds.every(isPeerId)) return json({ error: 'Invalid room heartbeat.' }, 403);
-            record.expiresAt = body.expiresAt;
+            const acknowledged = body.admissionGeneration === undefined ? 0 : body.admissionGeneration;
+            if (!isAdmissionGeneration(acknowledged) || acknowledged > record.admissionGeneration) return json({ error: 'Invalid admission acknowledgement.' }, 400);
+            record.expiresAt = Math.max(record.expiresAt, body.expiresAt);
             for (const [token, s] of Object.entries(record.sessions)) {
                 if (!s.admitted) continue;
-                if (s.peerId !== record.hostPeerId && !body.peerIds.includes(s.peerId)) delete record.sessions[token];
-                else s.expiresAt = Math.min(record.expiresAt, Date.now() + SESSION_MS);
+                if (s.peerId !== record.hostPeerId && !body.peerIds.includes(s.peerId)) {
+                    // The roster and acknowledgement are one host snapshot. A
+                    // heartbeat captured before admission cannot evict it, even
+                    // when delivered after /admit. Unobserved orphans still expire.
+                    if (s.admissionGeneration <= acknowledged || s.expiresAt <= Date.now()) delete record.sessions[token];
+                } else s.expiresAt = Math.min(record.expiresAt, Date.now() + SESSION_MS);
             }
             await this.state.storage.put('room', record);
             await this.state.storage.setAlarm(record.expiresAt);
@@ -135,6 +143,17 @@ export class TurnRoomStateMachine {
         // Fail closed for rooms created by the older protocol.
         if (record.expiresAt <= Date.now() || !record.hostPeerId) { await this.state.storage.deleteAll(); return null; }
         let changed = false;
+        if (record.admissionGeneration === undefined) {
+            // Existing rooms may renew through an old host, but a missing
+            // acknowledgement must never acquire pruning authority after upgrade.
+            record.admissionGeneration = 0;
+            for (const s of Object.values(record.sessions)) if (s) {
+                s.admissionGeneration = s.admitted && s.peerId !== record.hostPeerId ? ++record.admissionGeneration : 0;
+            }
+            changed = true;
+        } else if (!isAdmissionGeneration(record.admissionGeneration)) {
+            await this.state.storage.deleteAll(); return null;
+        }
         for (const [token, s] of Object.entries(record.sessions)) {
             if (!s || (!s.admitted && s.expiresAt <= Date.now())) { delete record.sessions[token]; changed = true; }
         }

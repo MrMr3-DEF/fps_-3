@@ -56,6 +56,7 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
         assert.deepEqual(await call(0, 'inspect'), ['HEALTH: 10 / 10'], 'C updates on confirmed regeneration');
         for (const weapon of ['AR', 'SHOTGUN', 'MINIGUN', 'SNIPER']) {
             for (const shooter of [0, 1]) {
+                await call(shooter, 'equip', { weapon });
                 if (weapon === 'MINIGUN') { await call(shooter, 'trigger'); await flush(); }
                 for (let i = 0; i < 65; i++) await tick();
                 const victim = 1 - shooter;
@@ -63,6 +64,8 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
                 await call(shooter, 'shoot', { weapon }); await flush();
                 if (weapon === 'SNIPER') {
                     assert.equal((await call(victim, 'state')).hp, 0, 'hitscan is applied without a victim render tick');
+                    assert.equal((await call(victim, 'state')).lastDeath.killerPeerId, shooter === 0 ? host.peerId : guest.peerId,
+                        'actual accepted hits produce a parseable, correctly attributed host/client death packet');
                     const victimId = victim === 0 ? host.peerId : guest.peerId;
                     assert.equal((await call(shooter, 'state')).peers[victimId].hp, 0, 'victim immediately confirms lethal health');
                 }

@@ -44,8 +44,6 @@ export interface PeerData {
     /** Last confirmed victim health, shared by combat targeting and C inspection. */
     hp: number;
     maxHp: number;
-    lastDamageTime: number;
-    regenTimer: number;
     lastHookState: HookState;
 }
 
@@ -107,6 +105,8 @@ export interface GameState {
     hookWillHit: boolean;
     hookIsEnemy: boolean;
     hookTargetEnemy: THREE.Object3D | null;
+    hookTargetSurface: THREE.Object3D | null;
+    hookSurfaceLocalPoint: THREE.Vector3;
     hookMesh: THREE.Mesh | null;
 
     activeWeaponName: string;
@@ -208,6 +208,8 @@ export const state: GameState = {
     hookWillHit: false,
     hookIsEnemy: false,
     hookTargetEnemy: null,
+    hookTargetSurface: null,
+    hookSurfaceLocalPoint: new THREE.Vector3(),
     hookMesh: null,
 
     // Current weapon, switching, firing and inspect animation state.
@@ -249,7 +251,15 @@ export const state: GameState = {
     isHovering: false,
 };
 
+/** Release held actions synchronously; pointer-lock events may arrive later. */
+export function resetHeldInput(): void {
+    state.moveForward = state.moveBackward = state.moveLeft = state.moveRight = false;
+    state.isShiftDown = state.isHovering = state.isMouseDown = false;
+    state.isScoped = state.rightClickActive = state.keyCActive = false;
+}
+
 export function resetPlayerState() {
+    resetHeldInput();
     state.hookTargetCockpit = null;
     state.regenUpdatedAt = performance.now();
     state.lifeId++;
@@ -267,15 +277,24 @@ export function resetPlayerState() {
     state.hookWillHit = false;
     state.hookIsEnemy = false;
     state.hookTargetEnemy = null;
+    state.hookTargetSurface = null;
+    state.hookSurfaceLocalPoint.set(0, 0, 0);
     state.hoverFuel = 1.0;
     state.fireCooldown = 0;
     state.inspectState = 'IDLE';
     state.inspectTimer = 0;
     state.minigunRamp = 0;
+    state.desiredWeaponName = state.activeWeaponName;
+    state.nextWeaponName = null;
+    state.switchState = 'IDLE';
+    state.switchTimer = 0;
 }
 
 /** Reset score and PvP counters only when starting a genuinely fresh match. */
 export function resetMatchStats() {
+    state.dayNightElapsedSeconds = 0;
+    state.dayNightSyncPending = false;
+    state.dayNightSyncImmediate = false;
     state.matchEnded = false;
     state.score = 0;
     state.kills = 0;

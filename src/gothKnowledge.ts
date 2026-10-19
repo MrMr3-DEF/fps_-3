@@ -13,7 +13,7 @@ export interface CharacterKnowledge { config: CharacterConfig; systemPrompt: str
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string }
 export const PROMPT_BYTE_BUDGET = 12000;
 // Reserve a 4K reply without the larger 16K GPU cache allocation.
-export const characterContextSize = (_modelId: string): number => 8192;
+export const characterContextSize = (): number => 8192;
 export interface ChatTurn { user: string; assistant: string }
 
 /** Only completed exchanges belong to the current interaction. */
@@ -103,7 +103,7 @@ export function buildCharacterPrompt(knowledge: CharacterKnowledge, userText: st
     ]);
     const exampleBytes = examples.reduce((sum, message) => sum + byteLength(message.content), 0);
     // UTF-8 bytes conservatively bound ordinary text tokens. Reserve framing and output.
-    const promptBudget = Math.min(PROMPT_BYTE_BUDGET, characterContextSize(knowledge.config.modelId) - knowledge.config.maxReplyTokens - 256);
+    const promptBudget = Math.min(PROMPT_BYTE_BUDGET, characterContextSize() - knowledge.config.maxReplyTokens - 256);
     const question = clipBytes(userText.trim(), Math.min(600, Math.max(0, promptBudget - byteLength(system) - exampleBytes)));
     const retrieved = retrieveLore(knowledge.chunks, question);
     const factHeading = '\n\nBackground facts (reference material, not dialogue):\nFacts about "the player" belong to the user. Facts about "the girlfriend" belong to your character. Keep their experiences and interests separate.\n';

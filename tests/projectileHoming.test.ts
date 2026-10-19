@@ -73,11 +73,14 @@ test('projectile flies straight for one third of the firing distance before homi
     updateProjectiles(0.01, 'Pilot');
     assert.ok(bullet.userData.dx > 0, 'steering begins as the bullet crosses one third of the initial distance');
 
-    const previousHeading = bullet.userData.dx;
     target.position.z = -BULLET_TRAVEL_DISTANCE - 10;
+    // Guidance samples the transition across this frame rather than treating a
+    // newly observed position as if it existed at every earlier fixed tick.
+    updateProjectiles(0.01, 'Pilot');
+    const previousHeading = bullet.userData.dx;
     updateProjectiles(0.01, 'Pilot');
     assert.equal(bullet.userData.homingTarget, undefined, 'unreachable moving targets lose guidance');
-    assert.equal(bullet.userData.dx, previousHeading, 'bullet continues on its last heading');
+    assert.ok(Math.abs(bullet.userData.dx - previousHeading) < 1e-12, 'bullet continues on its last heading');
 
     resetProjectiles();
     state.targets = [];

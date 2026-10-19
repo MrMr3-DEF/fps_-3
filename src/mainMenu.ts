@@ -90,6 +90,9 @@ export function setupMainMenu(): void {
         const item = lobbyModels.get(id);
         if (!item) return;
         scene.remove(item.model, item.booster);
+        // Instance/color buffers belong to this guest; flame geometry/material
+        // stay shared with the creator preview and the remaining lobby guests.
+        item.particles.dispose();
         const geometries = new Set<THREE.BufferGeometry>();
         const materials = new Set<THREE.Material>();
         item.model.traverse(object => {
@@ -411,6 +414,7 @@ export function setupMainMenu(): void {
             }
         });
         geometries.forEach(geometry => geometry.dispose()); materials.forEach(material => material.dispose());
+        flameParticles.dispose();
         flameGeometry.dispose(); flameMaterial.dispose();
         weaponScan.hide();
         scan.reset();

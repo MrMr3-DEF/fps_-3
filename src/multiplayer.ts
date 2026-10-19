@@ -1,3 +1,5 @@
+import { TargetMotionHistory, type HomingFireContext } from './projectileFlight.js';
+import { hasLineOfSightToOrientedBox } from './targetVisibility.js';
 import { updateHealthRegen } from './healthRegen.js';
 import { cancelHookForTarget } from './hookLifecycle.js';
 import { characterColor } from './appearance.js';
@@ -5,8 +7,8 @@ import { endInput } from './inputSession.js';
 import { renderPlayerList, setPlayerListVisible } from './playerList.js';
 import { resetProjectiles } from './projectiles.js';
 import type { Peer } from 'peerjs';
-import { ShotLedger, spreadDirection, acceptLifeUpdate, acceptDeath } from './shotAuthority.js';
-import { isCapability, isUsername } from './roomIdentity.js';
+import { ShotLedger, spreadDirection, acceptLifeUpdate, acceptDeath, initialWeaponState, advanceWeaponState, type AcceptedWeaponState } from './shotAuthority.js';
+import { isCapability, isPeerId } from './roomIdentity.js';
 import * as THREE from 'three';
 import { state, resetPlayerState, resetMatchStats, type DataConnectionLike, type PeerData } from './state.js';
 import { placePlayerAtTownSpawn } from './playerSpawn.js';
@@ -15,6 +17,7 @@ import {
     generateWorldSeed,
     getWorldSeed,
     queryObstaclesAlongSegment,
+    queryTargetsAlongSegment,
     rebuildEnvironmentWithSeed,
     rebuildTargetHash,
 } from './world.js';
@@ -22,6 +25,7 @@ import { resetHook, GUN_TIP_OFFSET } from './grapple.js';
 import { processTargetHit, takePlayerDamage } from './damage.js';
 import {
     NETWORK_TICK_MS,
+    NETWORK_POSITION_RESPONSE,
     MAX_PLAYERS,
     PROJECTILE_RADIUS,
     TARGET_HIT_RANGE_MULTIPLIER,
@@ -34,6 +38,8 @@ import {
     WEAPON_STATS,
     BULLET_TRAVEL_DISTANCE,
     MAX_PROJECTILES,
+    NETWORK_MOVEMENT_SPEED,
+    NETWORK_MOVEMENT_BURST,
     GRAPPLE_BLUE,
 } from './config.js';
 import { setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
@@ -55,19 +61,18 @@ import {
     type WorldSnapshotPacket
 } from './networkTypes.js';
 import { obstacleData, projectileData, targetData, type TargetUserData } from './userDataTypes.js';
-import { segmentAabbHitT } from './gameplayMath.js';
+import { segmentAabbHitT, segmentGroundHitT, segmentSphereHitT } from './gameplayMath.js';
 import { clearDamagePulse, pulseDamageMaterials } from './damagePulse.js';
 import { excludeFromStablePeerEnvelope } from './smartGogglesPeerMath.js';
 import { setWeaponNetworkPort } from './weaponNetworkPort.js';
 import { flashHitmarker } from './hitmarker.js';
 import {
     fromHomingTargetPacket,
-    isWithinHomingAimEnvelope,
     PROJECTILE_HOMING_START_FRACTION,
     resolveProjectileHomingTarget,
     type ProjectileHomingTarget,
 } from './projectileHoming.js';
-import { PLAYER_HITBOX_BOUNDING_RADIUS } from './playerHitbox.js';
+import { PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX, PLAYER_HITBOX_BOUNDING_RADIUS, segmentPlayerHitboxHitT } from './playerHitbox.js';
 import { beginProjectileTrail } from './projectileTrails.js';
 import {
     admitRoomPeer,
@@ -140,6 +145,14 @@ let cachedUsername = 'Guest1';
 let healthInterval: ReturnType<typeof setInterval> | null = null;
 const matchStartListeners = new Set<() => void>();
 export function onMultiplayerStarted(listener: () => void): void { matchStartListeners.add(listener); }
+export interface MultiplayerDisconnect { wasHost: boolean; reason: string | null; }
+const disconnectListeners = new Set<(event: MultiplayerDisconnect) => void>();
+/** The composition root owns renderer/world teardown; networking only reports
+ * session termination, after invalidating all pending callbacks. */
+export function onMultiplayerDisconnected(listener: (event: MultiplayerDisconnect) => void): () => void {
+    disconnectListeners.add(listener);
+    return () => disconnectListeners.delete(listener);
+}
 
 function enterMultiplayerMatch(): void {
     if (state.isPlaying) return;
@@ -266,7 +279,7 @@ export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | nu
     if (state.isHost && packet.type === 'player_died') recordConfirmedDeath(packet);
 }
 
-export function flashPeerMesh(peerData: PeerData, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
+function flashPeerMesh(peerData: PeerData, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
     pulseDamageMaterials(peerData, getBeanDamagePulseMaterials(peerData.mesh), color, durationMs);
 }
 
@@ -284,6 +297,7 @@ let clientWorldSynchronized = false;
 let roomCloseToken: string | null = null;
 let turnSessionToken: string | null = null;
 let roomHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let acknowledgedAdmissionGeneration = 0;
 
 const pendingConnectionPeers = new Set<string>();
 const targetStateFingerprints = new Map<number, string>();
@@ -292,21 +306,43 @@ const MAX_PLAYER_HORIZONTAL_POSITION = MAP_HALF_SIZE + 100;
 const MAX_PLAYER_VERTICAL_POSITION = 600;
 
 interface PeerRuntimeState {
+    motion: TargetMotionHistory;
     username: string;
     position: THREE.Vector3;
     yaw: number;
     lastUpdateAt: number;
+    travelAllowance: number;
     shots: ShotLedger;
     lifeId: number;
     deathReported: boolean;
-    activeWeapon: WeaponName;
+    weaponState: AcceptedWeaponState;
     wasDead: boolean;
 }
 
 const peerRuntime = new Map<string, PeerRuntimeState>();
+let localMotion = new TargetMotionHistory(), localMotionLife = -1;
+const npcMotion = new Map<number, { object: THREE.Group; revision: number; history: TargetMotionHistory }>();
+function peerMotion(peerId: string, now: number): TargetMotionHistory | null {
+    const position = getPeerHitPosition(peerId), yaw = getPeerHitYaw(peerId);
+    if (!position || yaw === null) return null;
+    if (peerId !== state.peer?.id) return getPeerRuntime(peerId)?.motion ?? null;
+    if (localMotionLife !== state.lifeId) { localMotion = new TargetMotionHistory(); localMotionLife = state.lifeId; }
+    localMotion.add(now, position, yaw);
+    return localMotion;
+}
+function targetMotion(index: number, now: number): TargetMotionHistory | null {
+    const object = state.targets[index];
+    if (!object) return null;
+    const revision = targetData(object).eliminationRevision ?? 0;
+    let tracked = npcMotion.get(index);
+    if (!tracked || tracked.object !== object || tracked.revision !== revision) {
+        tracked = { object, revision, history: new TargetMotionHistory() }; npcMotion.set(index, tracked);
+    }
+    tracked.history.add(now, object.position, object.rotation.y);
+    return tracked.history;
+}
 
 let lastSentTime = 0;
-let lastForceSendTime = 0;
 let lastSentSnapshot: {
     x: number;
     y: number;
@@ -314,6 +350,8 @@ let lastSentSnapshot: {
     yaw: number;
     pitch: number;
     weapon: string;
+    switchState: UpdatePacket['switchState'];
+    nextWeapon: WeaponName | null;
     flags: number;
     hookX: number;
     hookY: number;
@@ -369,7 +407,10 @@ function startRoomHeartbeat(room: string, closeToken: string, generation: number
             stopRoomHeartbeat();
             return;
         }
-        void heartbeatTurnRoom(room, closeToken, [...new Set([...state.connections.map(c => c.peer), ...pendingConnectionPeers])]).catch(() => {
+        // Pending channels belong to this same snapshot: admission responses
+        // may return out of order, so a later generation must still retain an
+        // earlier peer whose response has not arrived yet.
+        void heartbeatTurnRoom(room, closeToken, [...new Set([...state.connections.map(c => c.peer), ...pendingConnectionPeers])], acknowledgedAdmissionGeneration).catch(() => {
             if (!isCurrentSession(generation)) return;
             // The active connection may continue, but do not hide the fact that
             // new relay credentials can no longer be issued for this room.
@@ -539,6 +580,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function resetLocalMatch(): void {
+    npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     state.playerList = [];
     setPlayerListVisible(false);
     resetHook();
@@ -598,6 +640,7 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
         }
         peerInstance = peer;
         state.peer = peer;
+        watchSignallingClose(peer, generation);
         peerStartupTimeout = setTimeout(() => {
             if (!isCurrentSession(generation)) return;
             showJoinError('Signalling connection timed out. Please retry.');
@@ -621,6 +664,8 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
                 conn.close();
                 return;
             }
+            const metadata = conn.metadata as { admissionToken?: unknown } | null;
+            if (!isPeerId(conn.peer) || !isCapability(metadata?.admissionToken)) { conn.close(); return; }
             const currentPlayers = state.connections.length + pendingConnectionPeers.size + 1;
             const duplicate = pendingConnectionPeers.has(conn.peer) || state.connections.some((item) => item.peer === conn.peer);
             if (duplicate || currentPlayers >= MAX_PLAYERS) {
@@ -642,13 +687,16 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
                     hostStatus.innerText = `Error: ${err.type || 'connection failed'}`;
                 }
             }
-            disconnectMultiplayer();
+            showJoinError(err.type === 'unavailable-id' ? 'Code already in use. Please try again.' : `Connection failed: ${err.type || 'unknown error'}`);
+            disconnectMultiplayer({ preserveJoinError: true });
         });
     } catch (error) {
         if (!isCurrentSession(generation)) return;
         console.error('Failed to create host peer:', error);
-        disconnectMultiplayer();
-        throw new Error(errorMessage(error, 'Unable to create the room. Please retry.'));
+        const message = errorMessage(error, 'Unable to create the room. Please retry.');
+        showJoinError(message);
+        disconnectMultiplayer({ preserveJoinError: true });
+        throw new Error(message);
     }
 }
 
@@ -691,6 +739,7 @@ export async function joinGame(username: string, roomCode: string, turnstileToke
         }
         peerInstance = peer;
         state.peer = peer;
+        watchSignallingClose(peer, generation);
         peerStartupTimeout = setTimeout(() => {
             if (!isCurrentSession(generation)) return;
             showJoinError('Signalling connection timed out. Please retry.');
@@ -729,8 +778,9 @@ export async function joinGame(username: string, roomCode: string, turnstileToke
     }
 }
 
-export function disconnectMultiplayer(options: { preserveJoinError?: boolean } = {}): void {
+export function disconnectMultiplayer(options: { preserveJoinError?: boolean; notifyRuntime?: boolean } = {}): void {
     if (disconnecting) return;
+    const hadSession = state.isMultiplayer || peerInstance !== null;
     disconnecting = true;
     if (healthInterval) clearInterval(healthInterval);
     healthInterval = null;
@@ -741,6 +791,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean } =
     roomCloseToken = null;
     turnSessionToken = null;
     stopRoomHeartbeat();
+    acknowledgedAdmissionGeneration = 0;
     sessionGeneration++;
     pendingWorldPackets = null;
     if (peerStartupTimeout) clearTimeout(peerStartupTimeout);
@@ -768,12 +819,12 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean } =
     state.deaths = 0;
     lastSentSnapshot = null;
     lastSentTime = 0;
-    lastForceSendTime = 0;
     clientWorldSynchronized = false;
     state.dayNightSyncPending = false;
     state.dayNightSyncImmediate = false;
     targetStateFingerprints.clear();
     peerRuntime.clear();
+    npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     pendingConnectionPeers.clear();
     lastDamageByVictim.clear();
 
@@ -829,12 +880,16 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean } =
             // A short server-side session expiry is the fallback cleanup path.
         });
     }
-    disconnecting = false;
+    try {
+        if (hadSession && options.notifyRuntime !== false) {
+            for (const listener of disconnectListeners) listener({ wasHost, reason: options.preserveJoinError ? persistentJoinError : null });
+        }
+    } finally { disconnecting = false; }
 }
 
 function showJoinError(msg: string): void {
     persistentJoinError = msg;
-    const joinErrorLog = DOM.joinErrorLog();
+    const joinErrorLog = state.isHost ? DOM.hostLobbyStatus() : DOM.joinErrorLog();
     if (joinErrorLog) {
         joinErrorLog.style.color = '#ff4757';
         joinErrorLog.innerText = msg;
@@ -846,6 +901,16 @@ function showJoinError(msg: string): void {
         btnJoinConnect.disabled = false;
         btnJoinConnect.removeAttribute('data-connected');
     }
+}
+
+function watchSignallingClose(peer: Peer, generation: number): void {
+    const closed = () => {
+        if (!isCurrentSession(generation) || peerInstance !== peer) return;
+        showJoinError('The signalling connection was lost. Please reconnect.');
+        disconnectMultiplayer({ preserveJoinError: true });
+    };
+    peer.on('disconnected', closed);
+    peer.on('close', closed);
 }
 
 function startIceRefresh(peer: Peer, room: string, token: string, generation: number): void {
@@ -870,7 +935,7 @@ function startIceRefresh(peer: Peer, room: string, token: string, generation: nu
     }, 4 * 60_000);
 }
 
-export function setupConnection(conn: DataConnectionLike, generation: number): void {
+function setupConnection(conn: DataConnectionLike, generation: number): void {
     let closed = false;
     let admitted = false;
     let opening = false;
@@ -894,8 +959,10 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
         if (!room || !closeToken || !isCapability(metadata?.admissionToken)) { conn.close(); return; }
         try {
             const result = await admitRoomPeer(room, closeToken, conn.peer, metadata.admissionToken);
+            if (isCurrentSession(generation) && roomCloseToken === closeToken) {
+                acknowledgedAdmissionGeneration = Math.max(acknowledgedAdmissionGeneration, result.admissionGeneration);
+            }
             if (!current()) { void departRoomPeer(room, closeToken, conn.peer).catch(() => {}); return; }
-            if (!isUsername(result.username) || !isCapability(result.admissionProof)) throw new Error('Invalid admission response.');
             const usedSlots = new Set(spawnHouseSlots.values());
             let slot = 1;
             while (usedSlots.has(slot)) slot++;
@@ -959,11 +1026,6 @@ export function setupConnection(conn: DataConnectionLike, generation: number): v
             showJoinError('Connection to the host was closed.');
             disconnectMultiplayer({ preserveJoinError: true });
             endInput();
-            const blocker = DOM.blocker(); if (blocker) blocker.style.display = 'flex';
-            for (const id of ['panel-mp', 'panel-host-waiting', 'panel-join-room', 'panel-pause', 'death-overlay']) {
-                const el = document.getElementById(id); if (el) el.style.display = 'none';
-            }
-            const panel = DOM.panelMain(); if (panel) panel.style.display = 'flex';
         }
     };
     conn.on('close', handleClose);
@@ -975,18 +1037,60 @@ function getPeerRuntime(peerId: string): PeerRuntimeState | null {
     return peerRuntime.get(peerId) ?? null;
 }
 
-function shotIsBlocked(start: THREE.Vector3, end: THREE.Vector3): boolean {
-    const obstacleCandidates = queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, _shotObstacleCandidates);
+/** Host obstruction uses the shot's radius in both spatial and exact queries. */
+export function shotObstructionT(start: THREE.Vector3, end: THREE.Vector3, radius: number): number | null {
+    let closest = segmentGroundHitT(start, end, radius) ?? Infinity;
+    const obstacleCandidates = queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, _shotObstacleCandidates, radius);
     for (let index = 0; index < obstacleCandidates.length; index++) {
         const obstacle = obstacleCandidates[index];
         const data = obstacleData(obstacle);
-        const halfW = (data.halfW || PILLAR_WIDTH / 2) + PROJECTILE_RADIUS;
-        const halfD = (data.halfD || PILLAR_WIDTH / 2) + PROJECTILE_RADIUS;
-        const halfH = (data.halfH || data.height / 2) + PROJECTILE_RADIUS;
+        const halfW = (data.halfW || PILLAR_WIDTH / 2) + radius;
+        const halfD = (data.halfD || PILLAR_WIDTH / 2) + radius;
+        const halfH = (data.halfH || data.height / 2) + radius;
         _shotAabbMin.set(obstacle.position.x - halfW, obstacle.position.y - halfH, obstacle.position.z - halfD);
         _shotAabbMax.set(obstacle.position.x + halfW, obstacle.position.y + halfH, obstacle.position.z + halfD);
         const hitT = segmentAabbHitT(start, end, _shotAabbMin, _shotAabbMax);
-        if (hitT !== null && hitT < 0.999) return true;
+        if (hitT !== null) closest = Math.min(closest, hitT);
+    }
+    return closest === Infinity ? null : closest;
+}
+function shotIsBlocked(start: THREE.Vector3, end: THREE.Vector3, radius = 0): boolean {
+    const hit = shotObstructionT(start, end, radius);
+    return hit !== null && hit < 1 - 1e-6;
+}
+
+/** Guided sweeps also stop at intervening bodies. The claimed victim and
+ * shooter are excluded; peer poses come from the same bounded observation time. */
+function guidedPathBlocker(shooter: string, victim: HomingTargetPacket) {
+    const targets: THREE.Group[] = [];
+    return (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered = false): boolean => {
+        if (shotIsBlocked(start, end, radius)) return true;
+        // Ordinary straight claims keep their existing intersection policy.
+        // A zero-length contact cannot have a different body strictly before it.
+        if (at === undefined || start.distanceToSquared(end) < 1e-12) return false;
+        queryTargetsAlongSegment(start.x, start.z, end.x, end.z, targets, radius);
+        for (const object of targets) {
+            const data = targetData(object);
+            if (data.hp <= 0 || victim.kind === 'npc' && data.index === victim.targetIndex) continue;
+            if (segmentSphereHitT(start, end, object.position, TARGET_HIT_RANGE_MULTIPLIER * (data.scale || 1) + radius) !== null) return true;
+        }
+        return peerBodiesBlockSegment(shooter, victim, start, end, radius, at, filtered);
+    };
+}
+
+const _peerOcclusionPoint = new THREE.Vector3();
+function peerBodiesBlockSegment(shooter: string, victim: HomingTargetPacket, start: THREE.Vector3, end: THREE.Vector3,
+    radius: number, at: number, filtered: boolean): boolean {
+    for (const [id, runtime] of peerRuntime) {
+        if (id === shooter || victim.kind === 'peer' && id === victim.targetPeerId || runtime.wasDead) continue;
+        const yaw = runtime.motion.sample(at, _peerOcclusionPoint, filtered);
+        const hit = segmentPlayerHitboxHitT(start, end, _peerOcclusionPoint, yaw, radius);
+        if (hit !== null && hit < 1 - 1e-6) return true;
+    }
+    if (state.peer?.id !== shooter && !(victim.kind === 'peer' && victim.targetPeerId === state.peer?.id) && state.playerHp > 0 && localMotion.samples.length) {
+        const yaw = localMotion.sample(at, _peerOcclusionPoint, filtered);
+        const hit = segmentPlayerHitboxHitT(start, end, _peerOcclusionPoint, yaw, radius);
+        if (hit !== null && hit < 1 - 1e-6) return true;
     }
     return false;
 }
@@ -1015,40 +1119,55 @@ function getPeerHitYaw(peerId: string): number | null {
     return getPeerRuntime(peerId)?.yaw ?? null;
 }
 
-function authorizeHomingTarget(fromPeerId: string, packet: FirePacket): boolean {
-    const homingTarget = packet.homingTarget;
-    if (!homingTarget || packet.weapon === 'SNIPER') return !homingTarget;
-    _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
-    _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
-
-    if (homingTarget.kind === 'npc') {
-        const target = state.targets[homingTarget.targetIndex];
-        if (!target) return false;
+/** Acquisition uses the same sampled visible body as the goggles. The host
+ * keeps receipt-time history; neither a client timestamp nor lock animation is authority. */
+function homingFireContext(fromPeerId: string, packet: FirePacket, now: number): HomingFireContext | null {
+    const lock = packet.homingTarget;
+    if (!lock || packet.weapon === 'SNIPER') return null;
+    const origin = new THREE.Vector3(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
+    const occluders: THREE.Object3D[] = [];
+    if (state.peer) peerMotion(state.peer.id, now);
+    const peersBlock = (at: number, filtered: boolean) => (start: THREE.Vector3, end: THREE.Vector3) =>
+        peerBodiesBlockSegment(fromPeerId, lock, start, end, 0, at, filtered);
+    for (const target of state.targets) {
         const data = targetData(target);
-        if (data.hp <= 0 || (data.eliminationRevision ?? 0) !== homingTarget.targetRevision) return false;
-        return isWithinHomingAimEnvelope(
-            _barrelPos,
-            _baseFireDir,
-            target.position,
-            Math.sqrt(3) * (data.scale || 1),
-            BULLET_TRAVEL_DISTANCE,
-        );
+        if (data.hp > 0 && data.bodyMesh) { target.updateWorldMatrix(true, true); occluders.push(data.bodyMesh); }
     }
-
-    if (homingTarget.targetPeerId === fromPeerId) return false;
-    const targetsHost = homingTarget.targetPeerId === state.peer?.id;
-    const targetRuntime = targetsHost ? null : getPeerRuntime(homingTarget.targetPeerId);
-    const targetPosition = getPeerHitPosition(homingTarget.targetPeerId);
-    if (!targetPosition || homingTarget.targetLifeId !== (targetsHost ? state.lifeId : targetRuntime?.lifeId) ||
-        (targetsHost ? state.playerHp <= 0 : targetRuntime?.wasDead !== false) ||
-        (!targetsHost && !state.peers[homingTarget.targetPeerId])) return false;
-    return isWithinHomingAimEnvelope(
-        _barrelPos,
-        _baseFireDir,
-        targetPosition,
-        PLAYER_HITBOX_BOUNDING_RADIUS,
-        BULLET_TRAVEL_DISTANCE,
-    );
+    if (lock.kind === 'npc') {
+        const object = state.targets[lock.targetIndex];
+        if (!object) return null;
+        const data = targetData(object);
+        if (data.hp <= 0 || (data.eliminationRevision ?? 0) !== lock.targetRevision) return null;
+        const history = targetMotion(lock.targetIndex, now)!;
+        const body = data.bodyMesh;
+        const box = new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
+        const matrix = new THREE.Matrix4().makeScale(data.scale || 1, data.scale || 1, data.scale || 1);
+        if (body) {
+            body.updateWorldMatrix(true, false);
+            if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
+            box.copy(body.geometry.boundingBox!); matrix.copy(body.matrixWorld);
+        } else matrix.setPosition(object.position);
+        const offset = new THREE.Vector3().setFromMatrixPosition(matrix).sub(object.position);
+        return { history, kind: 'sphere', radius: TARGET_HIT_RANGE_MULTIPLIER * (data.scale || 1), aimRadius: Math.sqrt(3) * (data.scale || 1),
+            canAcquire: (position, _yaw, at, filtered) => {
+                matrix.setPosition(position.clone().add(offset));
+                return hasLineOfSightToOrientedBox(origin, box, matrix, queryObstaclesAlongSegment, occluders, object, peersBlock(at, filtered));
+            } };
+    }
+    if (lock.targetPeerId === fromPeerId) return null;
+    const host = lock.targetPeerId === state.peer?.id;
+    const runtime = getPeerRuntime(lock.targetPeerId);
+    if (lock.targetLifeId !== (host ? state.lifeId : runtime?.lifeId) ||
+        (host ? state.playerHp <= 0 : runtime?.wasDead !== false) || (!host && !state.peers[lock.targetPeerId])) return null;
+    const history = peerMotion(lock.targetPeerId, now);
+    if (!history) return null;
+    const box = new THREE.Box3(new THREE.Vector3(PLAYER_HITBOX_MIN.x, PLAYER_HITBOX_MIN.y, PLAYER_HITBOX_MIN.z), new THREE.Vector3(PLAYER_HITBOX_MAX.x, PLAYER_HITBOX_MAX.y, PLAYER_HITBOX_MAX.z));
+    const matrix = new THREE.Matrix4(), yawRotation = new THREE.Quaternion(), unit = new THREE.Vector3(1, 1, 1);
+    return { history, kind: 'player', radius: PLAYER_HITBOX_BOUNDING_RADIUS,
+        canAcquire: (position, yaw, at, filtered) => {
+            yawRotation.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw); matrix.compose(position, yawRotation, unit);
+            return hasLineOfSightToOrientedBox(origin, box, matrix, queryObstaclesAlongSegment, occluders, undefined, peersBlock(at, filtered));
+        } };
 }
 
 /** Keep a reported sniper impact on its shot ray and within visual weapon range. */
@@ -1069,7 +1188,9 @@ function canonicalSniperBeamEnd(
             BULLET_TRAVEL_DISTANCE,
         );
     }
-    return out.copy(barrelPosition).addScaledVector(normalizedDirection, distance);
+    out.copy(barrelPosition).addScaledVector(normalizedDirection, distance);
+    const obstruction = shotObstructionT(barrelPosition, out, 0);
+    return obstruction === null ? out : out.lerpVectors(barrelPosition, out, obstruction);
 }
 
 export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket): NetworkPacket | null {
@@ -1080,41 +1201,54 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         const reservedName = admittedNames.get(fromPeerId);
         if (!reservedName) return null;
         packet = { ...packet, username: reservedName };
-        if (Math.abs(packet.pos.x) > MAX_PLAYER_HORIZONTAL_POSITION ||
+        if (![packet.pos.x, packet.pos.y, packet.pos.z].every(Number.isFinite) ||
+            Math.abs(packet.pos.x) > MAX_PLAYER_HORIZONTAL_POSITION ||
             Math.abs(packet.pos.z) > MAX_PLAYER_HORIZONTAL_POSITION ||
             packet.pos.y < -20 || packet.pos.y > MAX_PLAYER_VERTICAL_POSITION) return null;
         let runtime = getPeerRuntime(fromPeerId);
         if (!runtime) {
+            if (packet.switchState !== 'IDLE' || packet.nextWeapon !== null) return null;
             runtime = {
+                motion: new TargetMotionHistory(),
                 username: packet.username,
                 position: new THREE.Vector3(packet.pos.x, packet.pos.y, packet.pos.z),
                 yaw: packet.yaw,
                 lastUpdateAt: now,
+                travelAllowance: NETWORK_MOVEMENT_BURST,
                 shots: new ShotLedger(),
                 lifeId: packet.lifeId,
                 deathReported: false,
-                activeWeapon: packet.activeWeapon,
+                weaponState: initialWeaponState(packet.activeWeapon),
                 wasDead: packet.isDead
             };
             peerRuntime.set(fromPeerId, runtime);
         } else {
-            const oldLife = runtime.lifeId;
-            if (!acceptLifeUpdate(runtime, packet.lifeId, packet.isDead)) return null;
-            if (oldLife !== runtime.lifeId) { runtime.shots.reset(); lastDamageByVictim.delete(fromPeerId); }
-            const elapsed = Math.min(1, Math.max(0.016, (now - runtime.lastUpdateAt) / 1000));
-            const maxTravel = 75 + 450 * elapsed;
+            // Validate a draft life state first. A rejected movement packet must
+            // not kill/revive the peer, reset its ledger, or change its weapon.
+            const life = { lifeId: runtime.lifeId, wasDead: runtime.wasDead, deathReported: runtime.deathReported };
+            if (!acceptLifeUpdate(life, packet.lifeId, packet.isDead)) return null;
+            const newLife = life.lifeId !== runtime.lifeId;
+            const allowance = Math.min(NETWORK_MOVEMENT_BURST,
+                runtime.travelAllowance + Math.max(0, now - runtime.lastUpdateAt) / 1000 * NETWORK_MOVEMENT_SPEED);
             const nextPosition = _targetPos.set(packet.pos.x, packet.pos.y, packet.pos.z);
-            if (nextPosition.distanceTo(runtime.position) > maxTravel && oldLife === runtime.lifeId && !packet.isDead && !runtime.wasDead) {
-                return null;
-            }
+            const travel = nextPosition.distanceTo(runtime.position);
+            if (!newLife && travel > allowance + 1e-6) return null;
+            if (newLife && ((packet.activeWeapon !== runtime.weaponState.activeWeapon && packet.activeWeapon !== runtime.weaponState.nextWeapon) ||
+                packet.switchState !== 'IDLE' || packet.nextWeapon !== null)) return null;
+            const weaponState = newLife ? initialWeaponState(packet.activeWeapon) : advanceWeaponState(runtime.weaponState, packet, now);
+            if (!weaponState) return null;
+            if (newLife) { runtime.motion = new TargetMotionHistory(); runtime.shots.reset(); lastDamageByVictim.delete(fromPeerId); }
+            Object.assign(runtime, life);
+            runtime.travelAllowance = newLife ? NETWORK_MOVEMENT_BURST : Math.max(0, allowance - travel);
             runtime.position.copy(nextPosition);
             runtime.yaw = packet.yaw;
             runtime.lastUpdateAt = now;
             runtime.username = packet.username;
-            runtime.activeWeapon = packet.activeWeapon;
+            runtime.weaponState = weaponState;
             runtime.wasDead = packet.isDead;
         }
-        runtime.shots.updateTrigger(packet.isMouseDown && packet.activeWeapon === 'MINIGUN', now);
+        runtime.motion.add(now, _peerTargetPosition.copy(runtime.position).addScaledVector(THREE.Object3D.DEFAULT_UP, -PEER_Y_OFFSET), runtime.yaw);
+        runtime.shots.updateTrigger(packet.isMouseDown && packet.activeWeapon === 'MINIGUN' && packet.switchState === 'IDLE', now);
         return { ...packet, senderPeerId: fromPeerId };
     }
 
@@ -1123,11 +1257,11 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
 
     if (packet.type === 'fire') {
         const stats = WEAPON_STATS[packet.weapon];
-        if (!stats || packet.weapon !== runtime.activeWeapon || runtime.wasDead) return null;
+        if (!stats || packet.weapon !== runtime.weaponState.activeWeapon || runtime.weaponState.switchState !== 'IDLE' || runtime.wasDead) return null;
         _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
-        if (_barrelPos.distanceTo(runtime.position) > 5 || shotIsBlocked(runtime.position, _barrelPos)) return null;
-        if (!authorizeHomingTarget(fromPeerId, packet)) return null;
-        if (!runtime.shots.record(packet, now, runtime.wasDead)) return null;
+        if (_barrelPos.distanceTo(runtime.position) > 5 || shotIsBlocked(runtime.position, _barrelPos, packet.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)) return null;
+        const firePacket = packet;
+        if (!runtime.shots.record(firePacket, now, runtime.wasDead, () => homingFireContext(fromPeerId, firePacket, now))) return null;
         if (packet.weapon === 'SNIPER') {
             _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
             canonicalSniperBeamEnd(_barrelPos, _baseFireDir, packet.hitPoint, _targetPos);
@@ -1136,7 +1270,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
                 hitPoint: { x: _targetPos.x, y: _targetPos.y, z: _targetPos.z },
             };
         }
-        return { ...packet, senderPeerId: fromPeerId };
+        return { ...packet, pelletCount: stats.pellets ?? 1, senderPeerId: fromPeerId };
     }
 
     if (packet.type === 'hit_target') {
@@ -1145,6 +1279,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         const targetInfo = targetData(target);
         const targetRadius = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0);
         const targetRevision = targetInfo.eliminationRevision ?? 0;
+        targetMotion(packet.targetIndex, now);
+        const blocker = guidedPathBlocker(fromPeerId, { kind: 'npc', targetIndex: packet.targetIndex, targetRevision });
         if (!runtime.shots.consumeHomingNpc(
             packet.shotId,
             packet.pelletIndex,
@@ -1154,7 +1290,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             targetRadius,
             packet.damage,
             now,
-            shotIsBlocked,
+            blocker,
         ) && !runtime.shots.consume(
             packet.shotId,
             packet.pelletIndex,
@@ -1162,7 +1298,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             targetRadius,
             packet.damage,
             now,
-            shotIsBlocked,
+            blocker,
+            { kind: 'npc', targetIndex: packet.targetIndex, targetRevision },
         )) return null;
         return { ...packet, senderPeerId: fromPeerId };
     }
@@ -1171,6 +1308,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         const targetsHost = packet.targetPeerId === state.peer?.id;
         const targetPosition = getPeerHitPosition(packet.targetPeerId);
         const targetYaw = getPeerHitYaw(packet.targetPeerId);
+        peerMotion(packet.targetPeerId, now);
+        const blocker = guidedPathBlocker(fromPeerId, { kind: 'peer', targetPeerId: packet.targetPeerId, targetLifeId: packet.targetLifeId });
         if (packet.targetLifeId !== (targetsHost ? state.lifeId : getPeerRuntime(packet.targetPeerId)?.lifeId)) return null;
         if ((targetsHost ? state.playerHp <= 0 : getPeerRuntime(packet.targetPeerId)?.wasDead !== false) || packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition || targetYaw === null ||
             (!runtime.shots.consumeHomingPeer(
@@ -1182,7 +1321,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
                 PLAYER_HITBOX_BOUNDING_RADIUS,
                 packet.damage,
                 now,
-                shotIsBlocked,
+                blocker,
             ) && !runtime.shots.consumePlayerHitbox(
                 packet.shotId,
                 packet.pelletIndex,
@@ -1190,7 +1329,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
                 targetYaw,
                 packet.damage,
                 now,
-                shotIsBlocked,
+                blocker,
+                { kind: 'peer', targetPeerId: packet.targetPeerId, targetLifeId: packet.targetLifeId },
             ))) return null;
         lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: fromPeerId, at: now });
         return { ...packet, senderPeerId: fromPeerId, attackerName: runtime.username };
@@ -1245,6 +1385,8 @@ function spawnRemoteBullet(
     data.dy = direction.y;
     data.dz = direction.z;
     data.age = 0;
+    data.guidanceRemainder = 0;
+    data.guidanceTargetPosition = undefined;
     data.distanceTraveled = bullet.position.distanceTo(barrelPos);
     data.visualOnly = true;
     data.damage = undefined;
@@ -1264,7 +1406,7 @@ function spawnRemoteBullet(
 
 // Packet router. The host is authoritative for target health/respawns and also
 // relays validated client gameplay packets in a star topology.
-export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
+function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
     if (!state.isMultiplayer) return;
     const parsed = parseNetworkPacket(rawPacket);
     if (!parsed) {
@@ -1381,16 +1523,9 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
             (msg.lifeId === peerData.lifeId && peerData.deathReported && !msg.isDead))) return;
         if (msg.lifeId !== peerData.lifeId) peerData.deathReported = false;
         peerData.lifeId = msg.lifeId;
-        const previousHp = peerData.hp;
         peerData.hp = msg.hp;
         peerData.maxHp = msg.maxHp;
         peerData.username = msg.username;
-        if (msg.hp < previousHp) {
-            peerData.lastDamageTime = performance.now();
-            peerData.regenTimer = 0;
-        } else if (msg.hp <= 0 || msg.hp >= msg.maxHp || previousHp <= 0) {
-            peerData.regenTimer = 0;
-        }
 
         if (msg.bodyColor !== undefined) setBeanColor(peerData.mesh, msg.bodyColor);
         _targetPos.set(msg.pos.x, msg.pos.y - PEER_Y_OFFSET, msg.pos.z);
@@ -1526,11 +1661,8 @@ export function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void 
 
         } else {
             const stats = WEAPON_STATS[msg.weapon];
-            const pelletCount = msg.weapon === 'SHOTGUN'
-                ? Math.min(msg.pelletCount ?? stats.pellets ?? 5, 16)
-                : 1;
-            const fallbackSeed = (Math.floor(_barrelPos.x * 100) ^ Math.floor(_barrelPos.y * 100) ^ Math.floor(_barrelPos.z * 100)) >>> 0;
-            const spreadSeed = msg.spreadSeed ?? fallbackSeed;
+            const pelletCount = stats.pellets ?? 1;
+            const spreadSeed = msg.spreadSeed;
             const homingTarget = fromHomingTargetPacket(msg.homingTarget, state.targets, state.peers);
             for (let pellet = 0; pellet < pelletCount; pellet++) {
                 const direction = spreadDirection(_baseFireDir, spreadSeed, pellet, stats.spread, _dir);
@@ -1626,25 +1758,23 @@ function removePeer(peerId: string): void {
     if (peerData) {
         clearDamagePulse(peerData);
         if (peerData.mesh) {
-            state.scene!.remove(peerData.mesh);
-            peerData.mesh.traverse((child: any) => {
-                if (child.isMesh) {
-                    if (child.geometry && !isSharedGeometry(child.geometry)) {
-                        child.geometry.dispose();
-                    }
-                    if (child.material && child.material !== SHARED_BODY_MAT) {
-                        child.material.dispose();
-                    }
-                }
-                if (child.isSprite) {
-                    child.material?.map?.dispose();
-                    child.material?.dispose();
+            peerData.mesh.removeFromParent();
+            const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
+            peerData.mesh.traverse(child => {
+                if (child instanceof THREE.Mesh && !isSharedGeometry(child.geometry)) geometries.add(child.geometry);
+                if (!(child instanceof THREE.Mesh || child instanceof THREE.Sprite)) return;
+                for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+                    if (material === SHARED_BODY_MAT) continue;
+                    materials.add(material);
+                    for (const value of Object.values(material)) if (value instanceof THREE.Texture) textures.add(value);
                 }
             });
+            textures.forEach(texture => texture.dispose());
+            materials.forEach(material => material.dispose());
+            geometries.forEach(geometry => geometry.dispose());
         }
-        if (peerData.hookLine) {
-            state.scene!.remove(peerData.hookLine);
-        }
+        // Hook geometry/material are module-owned and reused by the next peer.
+        peerData.hookLine?.removeFromParent();
         delete state.peers[peerId];
         state.peerIds = Object.keys(state.peers);
         console.log(`Disposed remote peer mesh for: ${peerId}`);
@@ -1656,7 +1786,11 @@ export function sendLocalState(force = false): void {
 
     const now = performance.now();
     if (!force && now - lastSentTime < NETWORK_TICK_MS) return;
-    if (state.isHost) syncHostTargetStates();
+    if (state.isHost) {
+        syncHostTargetStates();
+        if (state.peer) peerMotion(state.peer.id, now);
+        for (const index of npcMotion.keys()) targetMotion(index, now);
+    }
 
     const playerObj = state.controls.getObject();
     const camEuler = _stateEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
@@ -1685,6 +1819,8 @@ export function sendLocalState(force = false): void {
         yaw: q3(camEuler.y),
         pitch: q3(camEuler.x),
         weapon: activeWeapon,
+        switchState: state.switchState,
+        nextWeapon: state.switchState === 'IDLE' ? null : state.nextWeaponName as WeaponName,
         flags,
         hookX,
         hookY,
@@ -1700,6 +1836,8 @@ export function sendLocalState(force = false): void {
         Math.abs(snapshot.yaw - lastSentSnapshot.yaw) > 0.002 ||
         Math.abs(snapshot.pitch - lastSentSnapshot.pitch) > 0.002 ||
         snapshot.weapon !== lastSentSnapshot.weapon ||
+        snapshot.switchState !== lastSentSnapshot.switchState ||
+        snapshot.nextWeapon !== lastSentSnapshot.nextWeapon ||
         snapshot.flags !== lastSentSnapshot.flags ||
         snapshot.hookX !== lastSentSnapshot.hookX ||
         snapshot.hookY !== lastSentSnapshot.hookY ||
@@ -1707,9 +1845,8 @@ export function sendLocalState(force = false): void {
         snapshot.hp !== lastSentSnapshot.hp ||
         snapshot.maxHp !== lastSentSnapshot.maxHp;
 
-    if (!force && !changed && now - lastForceSendTime < 250) return;
+    if (!force && !changed && now - lastSentTime < 250) return;
     lastSentTime = now;
-    lastForceSendTime = now;
     lastSentSnapshot = snapshot;
 
     const packet: UpdatePacket = {
@@ -1721,6 +1858,8 @@ export function sendLocalState(force = false): void {
         yaw: snapshot.yaw,
         pitch: snapshot.pitch,
         activeWeapon,
+        switchState: snapshot.switchState,
+        nextWeapon: snapshot.nextWeapon,
         isMouseDown: state.isMouseDown,
         isDead: state.playerHp <= 0,
         hookState: state.hookState,
@@ -1745,7 +1884,7 @@ export function updateRemotePeers(delta: number): void {
     if (!state.isMultiplayer) return;
 
     const peerIds = state.peerIds;
-    const alpha = 1 - Math.exp(-14 * delta);
+    const alpha = 1 - Math.exp(-NETWORK_POSITION_RESPONSE * delta);
     for (let i = 0; i < peerIds.length; i++) {
         const peerData = state.peers[peerIds[i]];
         if (!peerData) continue;
@@ -1767,7 +1906,7 @@ export function updateRemotePeers(delta: number): void {
     }
 }
 
-export function broadcastLocalFire(
+function broadcastLocalFire(
     barrelPos: THREE.Vector3,
     dir: THREE.Vector3,
     hitPoint: THREE.Vector3 | null,
@@ -1929,7 +2068,5 @@ function createPeerBean(username: string): PeerData {
         lastHookState: 'IDLE',
         hp: PLAYER_MAX_HP,
         maxHp: PLAYER_MAX_HP,
-        lastDamageTime: 0,
-        regenTimer: 0,
     };
 }

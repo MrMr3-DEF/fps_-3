@@ -232,7 +232,10 @@ anticipation/crossfade, releases all collision and finishes its remaining 3.79 s
 independently. The wreck cannot mount again. The pilot falls normally with zero
 initial velocity; HP, life identity, weapon, hover fuel and death count survive.
 Normal controls, weapons, goggles and HUD return without a death screen. Normal
-hazards can subsequently hurt the released player.
+health presentation resumes without a damage flash; mounted damage cannot leave
+an expiry callback attached to the returning on-foot bar. Armor grapples follow
+their hit collider as it animates and release when destruction removes solidity.
+Normal hazards can subsequently hurt the released player.
 
 Third person remains selected through breakup and afterward. A collision-safe
 0.3-second simulation-clock handoff contracts the eye-centered mech boom to the
@@ -263,7 +266,10 @@ presentation and release.
 After reverse Mount completes, a normal-sized living bean exits in front of the
 open cabin, searching its sides if cover blocks the front. Placement checks both the actor's coarse proxies and static world
 geometry; static swept clearance prevents passing through nearby cover. A
-completely blocked exit waits for clearance. Ownership ends before the one-shot
+completely blocked exit shows a brief message and returns control so the pilot
+can reposition and retry. Clearance is checked before shutdown and again at
+release; a newly blocked release restores the standing cockpit behind the boot
+reveal without refilling shield energy. Ownership ends before the one-shot
 release callback; HP, life, weapon, fuel, death count and selected view survive.
 The existing 0.3-second third-person camera handoff and normal gravity resume.
 The robot remains mountable at zero HP, and remounting restores the original
@@ -483,3 +489,20 @@ The user performs these checks; automated results do not mark them complete.
 - Die to laser/stomp: see the beam/contact before damage and behind the death screen.
 - Inspect the open-helmet pilot; exit with closed/open/folding helmet and near a wall.
   Check reversed goggles animation, pause/resume, living release and remounting.
+
+## Audit repair verification — 19 October 2026
+
+The audit repair adds a shared bounded exit search before shutdown and at final
+release. A blocked preflight leaves piloting active and shows a brief reposition
+and retry message. If the exit becomes blocked during shutdown, startup restores
+the cockpit, health/energy ownership and input; the player can reposition and
+retry. It does not teleport through the obstruction.
+
+Real-asset tests cover blocked release, recovery, energy retention, safe side
+release, destruction, remount and cancellation. A local Chrome 155 application
+check also passed both blocked-exit paths, the visible warning, restored control
+and G-meter, safe retry, every sampled startup/shutdown HUD phase, and mounted
+pause. Input capture and phase stepping were controlled by the fixture. These
+results do not complete the physical-control and visual-art checklist above.
+See [audit-repair-progress.md](audit-repair-progress.md) for the full verification
+record and limits.

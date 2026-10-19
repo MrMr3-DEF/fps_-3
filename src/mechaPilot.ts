@@ -14,7 +14,6 @@ export class MechaPilot {
     readonly cameraQuaternion = new THREE.Quaternion();
     yaw = 0;
     pitch = 0;
-    hudTime = 0;
     cooldown = 0;
     moving = false;
     private rate = 0;
@@ -40,13 +39,12 @@ export class MechaPilot {
     clearLookMotion(): void { this.samples.length = 0; this.inputAge = Infinity; }
     reset(yaw: number): void {
         this.yaw = yaw; this.clearLookMotion();
-        this.pitch = this.hudTime = this.cooldown = this.rate = this.direction = 0;
+        this.pitch = this.cooldown = this.rate = this.direction = 0;
         this.moving = false; this.clip = 'Idle'; this.rockets.clear();
     }
     update(delta: number, position: THREE.Vector3, heading: number, speed: number, direction: number,
         resolve: PilotMotionResolver): PilotMovement & { heading: number } {
         this.cooldown = Math.max(0, this.cooldown - delta);
-        this.hudTime += delta;
         // Integrate only the part of this frame still inside the 50ms window.
         // This also stops correctly on a long frame after input has ended.
         let remaining = delta, consumed = 0;

@@ -73,7 +73,7 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
         const halfH = data.halfH || data.height / 2;
         const top = box.position.y + halfH;
         const bottom = box.position.y - halfH;
-        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y > bottom + 0.001;
+        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y + CAMERA_CEILING_CLEARANCE > bottom + 0.001;
         const halfW = data.halfW || (PILLAR_WIDTH / 2);
         const halfD = data.halfD || (PILLAR_WIDTH / 2);
         const ex = halfW + PLAYER_RADIUS;
@@ -100,7 +100,7 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
         const halfH = data.halfH || data.height / 2;
         const top = box.position.y + halfH;
         const bottom = box.position.y - halfH;
-        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y > bottom + 0.001;
+        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y + CAMERA_CEILING_CLEARANCE > bottom + 0.001;
         const ex = (data.halfW || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
         const ez = (data.halfD || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
 

@@ -2,6 +2,7 @@ import { isUsername, isPeerId } from './roomIdentity.js';
 import { MAX_PLAYERS, PLAYER_MAX_HP } from './config.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
 export type WeaponName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
+export type WeaponSwitchPhase = 'IDLE' | 'WITHDRAWING' | 'BRINGING_IN';
 
 export const WEAPON_NAMES: readonly WeaponName[] = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
 
@@ -28,6 +29,8 @@ export interface UpdatePacket {
     yaw: number;
     pitch: number;
     activeWeapon: WeaponName;
+    switchState: WeaponSwitchPhase;
+    nextWeapon: WeaponName | null;
     isMouseDown: boolean;
     isDead: boolean;
     hookState: HookState;
@@ -243,7 +246,13 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
             if (!(value.bodyColor === undefined || isInteger(value.bodyColor, 0, 0xffffff)) || !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isUsername(value.username) || !isVec3(value.pos) ||
                 !isFiniteNumber(value.yaw, -Math.PI * 4, Math.PI * 4) ||
                 !isFiniteNumber(value.pitch, -Math.PI, Math.PI) ||
-                !isWeaponName(value.activeWeapon) || typeof value.isMouseDown !== 'boolean' ||
+                !isWeaponName(value.activeWeapon) ||
+                !(['IDLE', 'WITHDRAWING', 'BRINGING_IN'] as unknown[]).includes(value.switchState) ||
+                !(value.nextWeapon === null || isWeaponName(value.nextWeapon)) ||
+                (value.switchState === 'IDLE' ? value.nextWeapon !== null : value.nextWeapon === null) ||
+                (value.switchState === 'WITHDRAWING' && value.nextWeapon === value.activeWeapon) ||
+                (value.switchState === 'BRINGING_IN' && value.nextWeapon !== value.activeWeapon) ||
+                typeof value.isMouseDown !== 'boolean' ||
                 typeof value.isDead !== 'boolean' || !isHookState(value.hookState) ||
                 typeof value.isHovering !== 'boolean' ||
                 !(value.hookPos === null || isVec3(value.hookPos)) ||
@@ -262,7 +271,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 !isInteger(value.spreadSeed, 0, 0xffffffff) ||
                 !(value.pelletCount === undefined || isInteger(value.pelletCount, 1, 16)) ||
                 !(value.homingTarget === undefined || (value.weapon !== 'SNIPER' && isHomingTarget(value.homingTarget))) ||
-                !(value.homingStartDistance === undefined || (
+                !(value.homingTarget === undefined ? value.homingStartDistance === undefined : (
                     value.homingTarget !== undefined && value.weapon !== 'SNIPER' &&
                     isFiniteNumber(value.homingStartDistance, 0, MAX_PACKET_POSITION)
                 ))) return null;

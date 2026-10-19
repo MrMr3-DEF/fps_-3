@@ -37,6 +37,8 @@ const lavaHash = new SpatialHash<THREE.Object3D>(32);
 const targetHash = new SpatialHash<THREE.Group>(48);
 export let gothGirlfriend: GothGirlfriend | null = null;
 export let forgottenMecha: ForgottenMecha | null = null;
+/** Changes only at a real world replacement/disposal boundary. */
+export let worldGeneration = 0;
 
 /** Asset preparation is awaited by offline startup; cancellation disposes even
  * a model that finishes downloading after its match has already been replaced. */
@@ -65,6 +67,7 @@ interface TownLanternLight {
     x: number;
     z: number;
     phase: number;
+    chunk: string;
 }
 
 const townLanternLights: TownLanternLight[] = [];
@@ -204,9 +207,11 @@ function createTownLanterns(): void {
 
     const group = new THREE.Group();
     group.name = 'town-lanterns';
-    const frames = new THREE.InstancedMesh(frameGeometry, frameMaterial, TOWN_LANTERN_POSITIONS.length);
+    const frameSet = createChunkedInstanceSet(frameGeometry, frameMaterial, TOWN_LANTERN_POSITIONS.length, false, false, group);
+    const frames = frameSet.mesh;
     frames.name = 'town-lantern-frames';
-    const glass = new THREE.InstancedMesh(glassGeometry, townLanternGlassMaterial, TOWN_LANTERN_POSITIONS.length);
+    const glassSet = createChunkedInstanceSet(glassGeometry, townLanternGlassMaterial, TOWN_LANTERN_POSITIONS.length, false, false, group);
+    const glass = glassSet.mesh;
     glass.name = 'town-lantern-glass';
     townLanternFlames = new THREE.InstancedMesh(flameGeometry, flameMaterial, TOWN_LANTERN_POSITIONS.length);
     townLanternFlames.name = 'town-lantern-flames';
@@ -219,8 +224,8 @@ function createTownLanterns(): void {
         lanternMatrixDummy.position.set(x, 0, z);
         lanternMatrixDummy.scale.set(1, 1, 1);
         lanternMatrixDummy.updateMatrix();
-        frames.setMatrixAt(index, lanternMatrixDummy.matrix);
-        glass.setMatrixAt(index, lanternMatrixDummy.matrix);
+        addChunkedInstance(frameSet, x, z, lanternMatrixDummy.matrix);
+        addChunkedInstance(glassSet, x, z, lanternMatrixDummy.matrix);
 
         lanternMatrixDummy.position.set(x, 4.67, z);
         lanternMatrixDummy.scale.setScalar(0);
@@ -231,7 +236,7 @@ function createTownLanterns(): void {
         light.position.set(x, 4.7, z);
         light.visible = false;
         group.add(light);
-        townLanternLights.push({ light, x, z, phase: index * 1.731 });
+        townLanternLights.push({ light, x, z, phase: index * 1.731, chunk: getRenderChunkKey(x, z) });
 
         const collider = new THREE.Mesh(colliderGeometry, colliderMaterial);
         collider.name = 'town-lantern';
@@ -253,7 +258,6 @@ function createTownLanterns(): void {
     frames.frustumCulled = glass.frustumCulled = townLanternFlames.frustumCulled = false;
     group.add(frames, glass, townLanternFlames);
     addWorldObject(group);
-    addChunkedRenderObject(group);
 }
 
 export function getGasLanternFlicker(timeSeconds: number, phase: number): number {
@@ -263,17 +267,20 @@ export function getGasLanternFlicker(timeSeconds: number, phase: number): number
         + Math.sin(timeSeconds * 4.1 + phase * 0.6) * 0.02;
 }
 
-export function updateTownLanterns(timeSeconds: number, strength: number): void {
+let lastLanternTime = 0, lastLanternStrength = 0;
+export function updateTownLanterns(timeSeconds: number, strength: number, preparing = false): void {
+    lastLanternTime = timeSeconds; lastLanternStrength = strength;
     if (!townLanternFlames || !townLanternGlassMaterial) return;
     const clampedStrength = Math.max(0, Math.min(1, strength));
     townLanternGlassMaterial.emissiveIntensity = 0.05 + clampedStrength * 1.25;
 
-    townLanternLights.forEach(({ light, x, z, phase }, index) => {
+    townLanternLights.forEach(({ light, x, z, phase, chunk }, index) => {
         const flicker = getGasLanternFlicker(timeSeconds, phase);
         light.intensity = 42 * clampedStrength * flicker;
-        light.visible = clampedStrength > 0.015;
+        const visible = preparing || activeRenderChunks.has(chunk);
+        light.visible = visible && clampedStrength > 0.015;
 
-        const flameScale = clampedStrength * flicker;
+        const flameScale = visible ? clampedStrength * flicker : 0;
         lanternMatrixDummy.position.set(x, 4.67, z);
         lanternMatrixDummy.scale.set(flameScale, flameScale * 1.08, flameScale);
         lanternMatrixDummy.updateMatrix();
@@ -384,7 +391,8 @@ function createChunkedInstanceSet(
     material: THREE.Material | THREE.Material[],
     capacity: number,
     castShadow = false,
-    receiveShadow = false
+    receiveShadow = false,
+    parent?: THREE.Group
 ): ChunkedInstanceSet {
     const mesh = new THREE.InstancedMesh(geometry, material, capacity);
     mesh.count = 0;
@@ -394,7 +402,7 @@ function createChunkedInstanceSet(
     // the origin, so its static bounding sphere cannot safely cull it.
     mesh.frustumCulled = false;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    addWorldObject(mesh);
+    if (parent) parent.add(mesh); else addWorldObject(mesh);
 
     const instanceSet: ChunkedInstanceSet = {
         mesh,
@@ -534,6 +542,9 @@ export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChu
         if (activeRenderChunks.has(getRenderChunkKey(pool.position.x, pool.position.z))) visibleLavaPools.push(pool);
     }
     refreshChunkedInstances();
+    // Repack dynamic flames and lights on the same chunk transition, including
+    // zero-delta settings changes and prepared-world reveals.
+    updateTownLanterns(lastLanternTime, lastLanternStrength);
 }
 
 export function queryObstaclesNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
@@ -577,9 +588,10 @@ export function queryTargetsAlongSegment(
     startZ: number,
     endX: number,
     endZ: number,
-    out?: THREE.Group[]
+    out?: THREE.Group[],
+    padding = 0
 ): THREE.Group[] {
-    return targetHash.querySegment(startX, startZ, endX, endZ, out);
+    return targetHash.querySegment(startX, startZ, endX, endZ, out, padding);
 }
 
 /**
@@ -1414,6 +1426,9 @@ function createTown(): void {
         if (typeof window !== 'undefined') {
             gothGirlfriend = new GothGirlfriend(building);
             state.scene!.add(gothGirlfriend.group);
+            // The actor owns its animated model and fill light. Only its
+            // presentation follows chunks; its world-owned hitbox stays solid.
+            addChunkedRenderObject(gothGirlfriend.group);
             addWorldObject(gothGirlfriend.hitbox);
             state.obstacles.push(gothGirlfriend.hitbox);
             const hitbox = obstacleData(gothGirlfriend.hitbox);
@@ -1506,8 +1521,11 @@ const WORLD_GENERATION_STAGES = [
     createBushes, createTown, createTownLanterns, createEnemies, finishStaticWorld,
 ];
 
+/** Fresh-world builder. Public replacements use one of the disposing entry
+ * points so old arrays, hashes and GPU resources cannot be silently retained. */
 export function createEnvironment(preserveSeed = false): void {
     if (!state.scene) return;
+    if (worldObjects.length || gothGirlfriend || forgottenMecha) throw new Error('World already exists; use rebuildEnvironmentWithSeed or createEnvironmentAsync.');
     if (!state.isMultiplayer && !preserveSeed) setWorldSeed(generateWorldSeed());
     resetWorldRandom();
     for (const stage of WORLD_GENERATION_STAGES) stage();
@@ -1525,11 +1543,11 @@ export async function createEnvironmentAsync(seed: number, checkpoint: () => Pro
 }
 
 export function disposeWorld(): void {
+    worldGeneration++;
     forgottenMecha?.dispose();
     forgottenMecha = null;
     gothGirlfriend?.dispose();
     gothGirlfriend = null;
-    if (!state.scene) return;
     const disposedGeometries = new Set<THREE.BufferGeometry>();
     const disposedMaterials = new Set<THREE.Material>();
     const disposedTextures = new Set<THREE.Texture>();
@@ -1548,7 +1566,7 @@ export function disposeWorld(): void {
     };
 
     const disposeObject = (obj: THREE.Object3D) => {
-        state.scene!.remove(obj);
+        obj.removeFromParent();
         obj.traverse((child: any) => {
             if (child.isMesh || child.isSprite) {
                 if (child.isInstancedMesh) {
@@ -1576,6 +1594,7 @@ export function disposeWorld(): void {
     townLanternFlames = null;
     townLanternGlassMaterial = null;
     townLanternLights.length = 0;
+    lastLanternTime = lastLanternStrength = 0;
     lavaLightGroup = null;
     lavaGlowMesh = null;
     lavaGlowMaterial = null;

@@ -8,9 +8,9 @@ export const PLAYER_HITBOX_MIN = Object.freeze({ x: -0.9, y: -1.65, z: -1.107 })
 export const PLAYER_HITBOX_MAX = Object.freeze({ x: 0.9, y: 1.65, z: 0.9 });
 export const PLAYER_BODY_CAMERA_OFFSET = 0.35;
 export const PLAYER_HITBOX_BOUNDING_RADIUS = Math.hypot(
-    (PLAYER_HITBOX_MAX.x - PLAYER_HITBOX_MIN.x) / 2,
-    (PLAYER_HITBOX_MAX.y - PLAYER_HITBOX_MIN.y) / 2,
-    (PLAYER_HITBOX_MAX.z - PLAYER_HITBOX_MIN.z) / 2,
+    Math.max(Math.abs(PLAYER_HITBOX_MIN.x), Math.abs(PLAYER_HITBOX_MAX.x)),
+    Math.max(Math.abs(PLAYER_HITBOX_MIN.y), Math.abs(PLAYER_HITBOX_MAX.y)),
+    Math.max(Math.abs(PLAYER_HITBOX_MIN.z), Math.abs(PLAYER_HITBOX_MAX.z)),
 );
 
 const _localStart = new THREE.Vector3();

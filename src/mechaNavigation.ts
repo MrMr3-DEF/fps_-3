@@ -86,10 +86,6 @@ export class MechaNavigation {
     private point(index: number): NavigationPoint {
         return { x: index % this.size * this.cellSize - this.limit, z: Math.floor(index / this.size) * this.cellSize - this.limit };
     }
-    isClear(x: number, z: number): boolean {
-        const index = this.index(x, z);
-        return index >= 0 && !this.blocked[index];
-    }
     segmentClear(a: NavigationPoint, b: NavigationPoint, allowLava = false): boolean {
         if (Math.max(Math.abs(a.x), Math.abs(a.z), Math.abs(b.x), Math.abs(b.z)) > this.limit) return false;
         for (const box of allowLava ? this.solidBoxes : this.boxes) {

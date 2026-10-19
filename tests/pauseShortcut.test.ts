@@ -35,5 +35,7 @@ test('only an offline pause stops the simulation', () => {
     assert.equal(shouldPauseOfflineSimulation({ ...offlinePause, isMultiplayer: true }), false);
     assert.equal(shouldPauseOfflineSimulation({ ...offlinePause, isInputActive: true }), false);
     assert.equal(shouldPauseOfflineSimulation({ ...offlinePause, isConversationOpen: true }), false);
-    assert.equal(shouldPauseOfflineSimulation({ ...offlinePause, isPlaying: false }), false);
+    assert.equal(shouldPauseOfflineSimulation({ ...offlinePause, isPlaying: false }), true,
+        'a denied initial input request must leave the prepared arena idle');
+    assert.equal(shouldPauseOfflineSimulation({ ...offlinePause, isPlaying: false, isInputActive: true }), true);
 });

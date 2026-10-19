@@ -22,7 +22,7 @@ import type { MechaPilotRelease } from './mechaPilotRelease.js';
 export type MechaMode = 'walking' | 'tracking' | 'rocketing' | 'stomping' | 'punching' | 'aligning' | 'dying' | 'dead' | 'game-over' | 'boarding' | 'startup' | 'piloted' | 'shutting-down' | 'destroying' | 'destroyed';
 export type MechaImpact = 'step' | 'stomp' | 'knees' | 'fists' | 'punch';
 export interface MechaPlayer { position: THREE.Vector3; yaw?: number; alive: boolean; grounded: boolean; lifeId?: number; velocity?: THREE.Vector3 }
-export interface MechaEvents { impact(kind: MechaImpact, position: THREE.Vector3): void; stompPlayer(): void; gameOver(): void; laserPlayer?(damage: number): void; rocketPlayer?(damage: number): void; pilotReleased?(pose: MechaPilotRelease): void }
+export interface MechaEvents { impact(kind: MechaImpact, position: THREE.Vector3): void; stompPlayer(): void; gameOver(): void; laserPlayer?(damage: number): void; rocketPlayer?(damage: number): void; pilotReleased?(pose: MechaPilotRelease): void; exitBlocked?(): void }
 type ObstacleQuery = (startX: number, startZ: number, endX: number, endZ: number, out: THREE.Object3D[], padding?: number) => THREE.Object3D[];
 const modelUrl = new URL('../blender_assets/ironmaw/ironmaw_siege_robot.glb', import.meta.url).href;
 const LOOP = 4 / 3;
@@ -63,6 +63,12 @@ export class ForgottenMecha {
     private enemyReload = 0;
     private enemyGuided = false;
     private shutdownReverse = false;
+    private recoveringExit = false;
+    private exitPitch = 0;
+    private exitYaw = 0;
+    private exitHelmetOpen = false;
+    private readonly exitLocalStart = new THREE.Vector3();
+    private readonly exitStart = new THREE.Vector3();
     private readonly rocketAim = new THREE.Vector3();
     private readonly armRotation = new THREE.Quaternion();
     private readonly armParentRotation = new THREE.Quaternion();
@@ -403,7 +409,6 @@ export class ForgottenMecha {
     get pilotVisible(): boolean { return this.ownsPilot; }
     get hudOpacity(): number { return this.headView.hudOpacity; }
     get boardProgress(): number { return this.mode === 'boarding' ? Math.min(1, this.elapsed / MECHA_BOARD_TIME) : 1; }
-    get cockpitOpen(): boolean { return this.canMount; }
     get helmetClosed(): boolean { return !this.headView.wantedOpen && this.headView.fold <= 1e-9; }
     get helmetProgress(): number { return this.headView.fold; }
     get targetingReady(): boolean { return this.mode === 'piloted' && this.headView.targetingReady; }
@@ -449,9 +454,11 @@ export class ForgottenMecha {
     }
     beginBoarding(position: THREE.Vector3, quaternion: THREE.Quaternion): boolean {
         if (!this.canMount) return false;
+        this.pilotAnchor.getWorldPosition(this.exitLocalStart);
+        this.group.worldToLocal(this.exitLocalStart);
         this.clearPendingDamage(); this.combat.stop(); this.hp = this.maxHp; this.revision++;
         this.boardPosition.copy(position); this.boardQuaternion.copy(quaternion);
-        this.cancelPilotLayers(); this.headView.begin(); this.lavaTime = this.deathTime = 0;
+        this.recoveringExit = false; this.cancelPilotLayers(); this.headView.begin(); this.lavaTime = this.deathTime = 0;
         this.waistYaw = 0; this.pilot.reset(this.group.rotation.y);
         this.mode = 'boarding'; this.elapsed = 0; return true;
     }
@@ -476,6 +483,9 @@ export class ForgottenMecha {
     }
     requestExit(): boolean {
         if (this.mode !== 'piloted') return false;
+        this.group.localToWorld(this.exitStart.copy(this.exitLocalStart));
+        if (!this.findPilotExit(this.exitStart, this.target)) { this.events.exitBlocked?.(); return false; }
+        this.exitPitch = this.pilot.pitch; this.exitYaw = this.pilot.yaw; this.exitHelmetOpen = this.headView.wantedOpen;
         this.clearPendingDamage(); this.combat.stop(); this.pilot.rockets.clear(); this.pilot.clearLookMotion();
         this.fireTime = Infinity; this.releasePending = this.released = this.queuedHelmetToggle = false;
         this.rocketMixer?.stopAllAction(); this.pilotDirection = 0; this.shieldHeld = false;
@@ -510,29 +520,40 @@ export class ForgottenMecha {
             this.releasePose.quaternion.setFromEuler(this.cameraRotation.set(0, this.group.rotation.y + Math.PI, 0, 'YXZ'));
             // Prefer the front of the cabin, then its sides when parked at a wall.
             // Own coarse proxies remain solid; a release must clear them too.
-            const start = this.releasePose.position.clone();
-            this.aim.set(Math.sin(this.group.rotation.y), 0, Math.cos(this.group.rotation.y));
-            let free = false;
-            for (let distance = 1; distance <= this.radius + 8 && !free; distance += 0.5) {
-                for (const [forward, side] of [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1]]) {
-                    this.target.copy(start).addScaledVector(this.aim, forward * distance);
-                    this.target.x += side * distance * this.aim.z; this.target.z -= side * distance * this.aim.x;
-                    free = ![...this.obstacles, ...this.colliders].some(object => {
-                        const d = obstacleData(object), hh = d.halfH ?? d.height / 2;
-                        this.beamMin.set(object.position.x - d.halfW, object.position.y - hh, object.position.z - d.halfD);
-                        this.beamMax.set(object.position.x + d.halfW, object.position.y + hh, object.position.z + d.halfD);
-                        return playerTouchesWorldBox(this.target, this.group.rotation.y + Math.PI, this.beamMin, this.beamMax, 0.1)
-                            || d.damageTarget !== 'forgotten-mecha' && segmentRoundedBoxHitT(start, this.target, this.beamMin, this.beamMax, PLAYER_HITBOX_BOUNDING_RADIUS) !== null;
-                    });
-                    if (free) { this.releasePose.position.copy(this.target); break; }
-                }
+            if (!this.findPilotExit(this.releasePose.position, this.target)) {
+                // Restore the standing mount pose behind the same black/HUD
+                // reveal used by startup. The recovery is bounded and retains
+                // pilot health, fuel, view intent and ownership.
+                this.recoveringExit = true; this.mode = 'startup';
+                this.play('Mount', false); this.action!.time = duration;
+                this.elapsed = duration; this.headView.begin();
+                this.headView.updateStartup(duration, duration);
+                this.mixer!.update(0); this.updateColliders(); this.updatePilotCamera();
+                this.events.exitBlocked?.(); return;
             }
-            // A completely blocked exit waits rather than clipping/teleporting.
-            if (!free) return;
+            this.releasePose.position.copy(this.target);
             this.hp = 0; this.revision++; this.mode = 'dead'; this.deathEye.copy(this.grayEye); this.deathEyeIntensity = 0; this.deathTime = 2;
             this.cancelPilotLayers(); this.updateEye();
             this.events.pilotReleased?.(this.releasePose);
         }
+    }
+    private findPilotExit(start: THREE.Vector3, out: THREE.Vector3): boolean {
+        this.aim.set(Math.sin(this.group.rotation.y), 0, Math.cos(this.group.rotation.y));
+        const blocked = (object: THREE.Object3D): boolean => {
+            const d = obstacleData(object), hh = d.halfH ?? d.height / 2;
+            this.beamMin.set(object.position.x - d.halfW, object.position.y - hh, object.position.z - d.halfD);
+            this.beamMax.set(object.position.x + d.halfW, object.position.y + hh, object.position.z + d.halfD);
+            return playerTouchesWorldBox(out, this.group.rotation.y + Math.PI, this.beamMin, this.beamMax, 0.1)
+                || d.damageTarget !== 'forgotten-mecha' && segmentRoundedBoxHitT(start, out, this.beamMin, this.beamMax, PLAYER_HITBOX_BOUNDING_RADIUS) !== null;
+        };
+        for (let distance = 1; distance <= this.radius + 8; distance += 0.5) {
+            for (const [forward, side] of [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1]]) {
+                out.copy(start).addScaledVector(this.aim, forward * distance);
+                out.x += side * distance * this.aim.z; out.z -= side * distance * this.aim.x;
+                if (!this.obstacles.some(blocked) && !this.colliders.some(blocked)) return true;
+            }
+        }
+        return false;
     }
     requestRocket(): boolean {
         if (this.mode !== 'piloted' || this.pilot.cooldown > 1e-9 || this.fireTime < MECHA_ROCKET_FIRE_TIME || this.releasePending) return false;
@@ -582,7 +603,16 @@ export class ForgottenMecha {
             this.mixer!.update(Math.min(delta, Math.max(0, duration - this.action!.time)));
             const complete = this.headView.updateStartup(this.elapsed, duration);
             if (complete) {
-                this.mode = 'piloted'; this.elapsed = 0; this.locomotion = 'Idle'; this.phase = 0; this.footPlant?.reset(); this.play('Idle', true); this.combat.enterManualShield(); this.updateHelmet(0);
+                this.mode = 'piloted'; this.elapsed = 0; this.locomotion = 'Idle'; this.phase = 0; this.footPlant?.reset(); this.play('Idle', true);
+                const energy = this.combat.energy;
+                this.combat.enterManualShield();
+                if (this.recoveringExit) {
+                    this.combat.energy = energy; this.pilot.pitch = this.exitPitch; this.pilot.yaw = this.exitYaw;
+                    this.waistYaw = this.pilot.yaw - this.group.rotation.y;
+                    if (this.exitHelmetOpen) this.headView.toggle();
+                    this.recoveringExit = false;
+                }
+                this.updateHelmet(0);
             }
         } else {
             const move = this.pilot.update(delta, this.group.position, this.group.rotation.y, this.speed, this.controlsFrozen ? 0 : this.pilotDirection,

@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import type { HomingTargetPacket } from './networkTypes.js';
 import { targetData } from './userDataTypes.js';
 import { classifyOutOfRange, distanceToOrientedBox } from './smartGogglesMath.js';
-import { distanceToVisiblePeerMeshes } from './smartGogglesPeerMath.js';
+import { closestPlayerBodyPoint, PLAYER_HITBOX_BOUNDING_RADIUS } from './playerHitbox.js';
+const _closestBodyPoint = new THREE.Vector3();
 import type { ForgottenMecha } from './forgottenMecha.js';
 
 /** Strong enough to correct a near miss, but finite so fast/close targets can escape. */
@@ -39,6 +40,22 @@ export function getProjectileHomingTarget(): ProjectileHomingTarget | null {
     return aimedTarget;
 }
 
+/** Guidance uses an enclosing body bound on both client and host. Exact box
+ * reachability still governs acquisition; rotation must not make the two flight
+ * simulations drop guidance on different ticks near the range boundary. */
+export function homingGuidanceRadius(target: ProjectileHomingTarget): number {
+    if (target.kind === 'peer') return PLAYER_HITBOX_BOUNDING_RADIUS;
+    if (target.kind === 'npc') return Math.sqrt(3) * (targetData(target.object).scale || 1);
+    const body = target.actor.hitbox;
+    if (!body.geometry.boundingSphere) body.geometry.computeBoundingSphere();
+    const sphere = body.geometry.boundingSphere!;
+    return (sphere.center.length() + sphere.radius) * body.matrixWorld.getMaxScaleOnAxis();
+}
+
+export function canContinueHoming(origin: THREE.Vector3, target: THREE.Vector3, radius: number, remainingRange: number): boolean {
+    return origin.distanceToSquared(target) <= (remainingRange + radius) ** 2;
+}
+
 /** Match the goggles' reachability check, including targets straddling the range boundary. */
 export function isHomingTargetInRange(
     target: ProjectileHomingTarget,
@@ -52,7 +69,7 @@ export function isHomingTargetInRange(
         if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
         distance = distanceToOrientedBox(origin, body.geometry.boundingBox!, body.matrixWorld);
     } else if (target.kind === 'peer') {
-        distance = distanceToVisiblePeerMeshes(origin, target.object);
+        distance = origin.distanceTo(closestPlayerBodyPoint(origin, target.object.position, target.object.rotation.y, _closestBodyPoint));
     } else {
         const body = targetData(target.object).bodyMesh;
         if (body) {
@@ -86,7 +103,7 @@ export function resolveProjectileHomingTarget(
     }
     const peer = peers[target.targetPeerId];
     if (!peer || peer.mesh !== target.object || peer.hp <= 0 ||
-        (peer.lifeId ?? 0) !== target.targetLifeId || !peer.mesh.visible) return null;
+        (peer.lifeId ?? 0) !== target.targetLifeId) return null;
     return out.copy(peer.mesh.position);
 }
 

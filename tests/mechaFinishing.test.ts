@@ -101,7 +101,21 @@ test('real grapple binding accepts high cabin interior from ground, rejects armo
     state.leftGun = new THREE.Group(); camera.add(state.leftGun); state.hookMesh = new THREE.Group() as typeof state.hookMesh;
     try {
         await prepareForgottenMecha({ impact() {}, stompPlayer() {}, gameOver() {} }, async () => {});
-        const actor = forgottenMecha!; actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0; actor.damage(50); advance(actor, 6.1);
+        const actor = forgottenMecha!; actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0; actor.update(1 / 60, absent);
+        camera.position.set(0, 2, 60);
+        const leg = [...actor.colliders].sort((a, b) => a.position.y - b.position.y)[0];
+        camera.lookAt(leg.position); camera.updateMatrixWorld(true); toggleGrapplingHook();
+        const surface = state.hookTargetSurface;
+        assert.ok(surface, 'an armor grapple records its real collider');
+        const anchor = state.hookSurfaceLocalPoint.clone();
+        const oldPoint = state.hookTarget.clone();
+        actor.group.position.x += 5; actor.update(1 / 60, absent); updateHook(0);
+        assert.ok(state.hookTarget.distanceTo(oldPoint) > 0.1, 'the animated contact actually moved');
+        assert.ok(state.hookTarget.distanceTo(surface.localToWorld(anchor.clone())) < 1e-9);
+        state.hookState = 'PULLING'; updateHook(0);
+        assert.ok(state.hookPosition.equals(state.hookTarget), 'the cable follows the armor too');
+        resetHook(); actor.group.position.x = 0; actor.update(1 / 60, absent);
+        actor.damage(50); advance(actor, 6.1);
         const seat = actor.seatAnchor.getWorldPosition(new THREE.Vector3()); const interior = seat.clone(); interior.y += 3;
         camera.position.set(0, 2, 60); camera.lookAt(interior); camera.updateMatrixWorld(true);
         toggleGrapplingHook(); assert.ok(state.hookTargetCockpit === actor); assert.equal(state.hookIsEnemy, true);
@@ -109,6 +123,8 @@ test('real grapple binding accepts high cabin interior from ground, rejects armo
         camera.lookAt(seat.clone().add(new THREE.Vector3(6, 0, 0))); camera.updateMatrixWorld(true); toggleGrapplingHook(); assert.equal(Boolean(state.hookTargetCockpit), false); resetHook();
         camera.lookAt(interior); camera.updateMatrixWorld(true); toggleGrapplingHook(); assert.ok(state.hookTargetCockpit === actor); for (let i = 0; i < 10 && actor.mode === 'dead'; i++) updateHook(0.1);
         assert.equal(actor.mode, 'boarding'); assert.ok(camera.position.equals(seat)); assert.equal(state.hookState, 'IDLE');
+        state.hookTargetSurface = surface; state.hookState = 'FIRING'; actor.dispose(); updateHook(0);
+        assert.equal(state.hookState, 'IDLE'); assert.equal(state.hookTargetSurface, null);
     } finally { resetHook(); disposeWorld(); ForgottenMecha.prototype.load = originalLoad; globalThis.document = originalDocument; }
 });
 

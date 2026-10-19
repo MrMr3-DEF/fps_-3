@@ -145,7 +145,6 @@ test('callout chooses the sides with room and preserves a 45-degree first segmen
 
     assert.equal(layout.horizontal, 'right');
     assert.equal(layout.vertical, 'down');
-    assert.equal(layout.labelPlacement, 'below');
     near(layout.anchor.x, 40);
     near(layout.anchor.y, 28);
     near(Math.abs(layout.elbow.x - layout.anchor.x), Math.abs(layout.elbow.y - layout.anchor.y));
@@ -166,7 +165,6 @@ test('callout flips left and up near the lower-right viewport corner', () => {
 
     assert.equal(layout.horizontal, 'left');
     assert.equal(layout.vertical, 'up');
-    assert.equal(layout.labelPlacement, 'below');
     assert.ok(layout.elbow.x < layout.anchor.x);
     assert.ok(layout.elbow.y < layout.anchor.y);
     assert.ok(layout.end.x < layout.elbow.x);

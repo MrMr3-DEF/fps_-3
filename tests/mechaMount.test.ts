@@ -175,3 +175,36 @@ test('shutdown reverses goggles before Mount and finds a safe side release when 
         advance(actor, 1); assert.equal(releases, 1);
     } finally { actor.dispose(); wall.geometry.dispose(); (wall.material as THREE.Material).dispose(); }
 });
+
+test('a fully blocked real-asset exit returns control and can retry after the obstruction moves', async () => {
+    const enclosure = new THREE.Object3D();
+    enclosure.userData = { halfW: 80, halfD: 80, halfH: 40, height: 80 };
+    enclosure.position.set(500, 20, 0);
+    let releases = 0, blocked = 0;
+    const actor = new ForgottenMecha([enclosure], [], 42, { impact() {}, stompPlayer() {}, gameOver() {},
+        pilotReleased() { releases++; }, exitBlocked() { blocked++; } });
+    actor.install(await loadIronmawTestAsset()); actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0;
+    try {
+        actor.damage(50); advance(actor, 6.1);
+        actor.beginBoarding(actor.seatAnchor.getWorldPosition(new THREE.Vector3()), new THREE.Quaternion()); advance(actor, 8.3);
+        const energy = actor.combat.energy = 0.4;
+        actor.pilot.pitch = 0.2;
+        assert.equal(actor.requestExit(), true);
+        enclosure.position.x = 0; // The final check must see a new obstruction.
+        advance(actor, 9);
+        assert.equal(actor.mode, 'piloted');
+        assert.equal(actor.controlsFrozen, false);
+        assert.equal(actor.targetingReady, true);
+        assert.equal(actor.pilot.pitch, 0.2);
+        assert.equal(blocked, 1); assert.equal(releases, 0);
+        assert.ok(actor.combat.energy >= energy, 'cancellation preserves rather than refills shield fuel');
+        assert.ok(actor.combat.energy < 1);
+        assert.equal(actor.requestExit(), false, 'a preflight failure does not start another shutdown');
+        assert.equal(actor.mode, 'piloted'); assert.equal(blocked, 2);
+        enclosure.position.x = 500;
+        assert.equal(actor.requestExit(), true);
+        advance(actor, 8);
+        assert.equal(actor.mode, 'dead'); assert.equal(releases, 1);
+        advance(actor, 3); assert.equal(releases, 1);
+    } finally { actor.dispose(); }
+});

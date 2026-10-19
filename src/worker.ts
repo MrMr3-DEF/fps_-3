@@ -1,5 +1,5 @@
 import { parseJsonBody } from './boundedJson.js';
-import { isUsername, isPeerId, isCapability } from './roomIdentity.js';
+import { isUsername, isPeerId, isCapability, isAdmissionGeneration } from './roomIdentity.js';
 import { MAX_PLAYERS, ROOM_CODE_LENGTH } from './config.js';
 import { TurnRoomStateMachine } from './turnRoom.js';
 
@@ -325,20 +325,23 @@ async function closeRoom(request: Request, env: Env, room: string): Promise<Resp
 }
 
 async function heartbeatRoom(request: Request, env: Env, room: string): Promise<Response> {
+    if (!isConfigured(env)) return json({ error: 'Secure multiplayer is unavailable.' }, 503);
     const token = getBearerToken(request);
     if (!token) return json({ error: 'Missing room heartbeat capability.' }, 401);
-    const body = await parseJsonBody<{ peerIds?: unknown }>(request);
-    if (!body || !Array.isArray(body.peerIds) || body.peerIds.length > MAX_PLAYERS || !body.peerIds.every(isPeerId)) return json({ error: 'Invalid roster.' }, 400);
+    const body = await parseJsonBody<{ peerIds?: unknown; admissionGeneration?: unknown }>(request);
+    if (!body || !Array.isArray(body.peerIds) || body.peerIds.length > MAX_PLAYERS || !body.peerIds.every(isPeerId) ||
+        !(body.admissionGeneration === undefined || isAdmissionGeneration(body.admissionGeneration))) return json({ error: 'Invalid roster.' }, 400);
 
     try {
         const stub = env.ACTIVE_TURN_ROOM.get(env.ACTIVE_TURN_ROOM.idFromName(room));
         const response = await stub.fetch('https://turn-room.internal/heartbeat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ closeToken: token, peerIds: body.peerIds, expiresAt: Date.now() + ROOM_LIFETIME_MS }),
+            body: JSON.stringify({ closeToken: token, peerIds: body.peerIds, admissionGeneration: body.admissionGeneration ?? 0, expiresAt: Date.now() + ROOM_LIFETIME_MS }),
         });
         if (response.status === 403) return json({ error: 'Invalid room heartbeat capability.' }, 403);
         if (response.status === 404) return json({ error: 'This room is not active or has expired.' }, 404);
+        if (response.status === 400) return json({ error: 'Invalid admission acknowledgement.' }, 400);
         if (!response.ok) return json({ error: 'Unable to refresh the room. Please retry.' }, 503);
         const result = await response.json() as { expiresAt?: unknown };
         return typeof result.expiresAt === 'number'
@@ -455,7 +458,7 @@ export class TurnRateLimiter {
         }
 
         const now = Date.now();
-        const current = await this.state.storage.get<{ startedAt: number; count: number }>('bucket');
+        const current = await this.state.storage.get<{ startedAt: number; count: number; expiresAt?: number }>('bucket');
         const reset = !current || now - current.startedAt >= windowMs;
         const bucket = reset ? { startedAt: now, count: 0 } : current;
         const retryAfterSeconds = Math.max(1, Math.ceil((bucket.startedAt + windowMs - now) / 1_000));
@@ -465,13 +468,19 @@ export class TurnRateLimiter {
         }
 
         bucket.count += 1;
+        bucket.expiresAt = bucket.startedAt + windowMs;
         await this.state.storage.put('bucket', bucket);
         await this.state.storage.setAlarm(bucket.startedAt + windowMs);
         return json({ allowed: true, retryAfterSeconds: 0 } satisfies RateLimitResponse);
     }
 
     async alarm(): Promise<void> {
-        await this.state.storage.deleteAll();
+        const bucket = await this.state.storage.get<{ expiresAt?: number }>('bucket');
+        // An expired alarm can be delivered after a request creates a newer
+        // window. Judge the stored window, not the alarm's delivery order.
+        if (bucket?.expiresAt !== undefined && bucket.expiresAt > Date.now()) {
+            await this.state.storage.setAlarm(bucket.expiresAt);
+        } else await this.state.storage.deleteAll();
     }
 }
 

@@ -24,8 +24,12 @@ export class GothChatEngine {
             throw new Error(`This GPU lacks shader-f16. In character.json, use ${fallback}, then refresh the page. That version uses 4-bit weights and does not need shader-f16.`);
         }
         this.worker = new Worker(new URL('./gothChat.worker.ts', import.meta.url), { type: 'module' });
-        this.engine = new WebWorkerMLCEngine(this.worker, { initProgressCallback: report => { this.touchTimeout?.(); progress(report.progress, report.text); }, logLevel: 'WARN' });
-        await this.guard(this.engine.reload(config.modelId, { context_window_size: characterContextSize(config.modelId) }), 300000);
+        this.engine = new WebWorkerMLCEngine(this.worker, { initProgressCallback: report => {
+            if (generation !== this.generation) return;
+            this.touchTimeout?.(); progress(report.progress, report.text);
+        }, logLevel: 'WARN' });
+        await this.guard(this.engine.reload(config.modelId, { context_window_size: characterContextSize() }), 300000);
+        if (generation !== this.generation) throw new Error('Local AI was stopped.');
         this.ready = true;
     }
 
@@ -51,9 +55,11 @@ export class GothChatEngine {
     async reply(messages: ChatMessage[], config: CharacterConfig, onToken: (text: string) => void): Promise<string> {
         if (!this.engine || !this.ready) throw new Error('Load the local model first.');
         const engine = this.engine;
+        const generation = this.generation;
         return this.guard((async () => {
             // Refresh RAG/KV state; the supplied messages retain this interaction’s conversation.
             await engine.resetChat();
+            if (generation !== this.generation) throw new Error('Local AI was stopped.');
             const stream = await engine.chat.completions.create({
                 messages, stream: true, temperature: config.temperature,
                 ...(config.modelId.startsWith('Qwen3.5-') ? { extra_body: { enable_thinking: true } } : {}),
@@ -62,6 +68,7 @@ export class GothChatEngine {
             let rawReply = '';
             let reply = '';
             for await (const chunk of stream) {
+                if (generation !== this.generation) throw new Error('Local AI was stopped.');
                 const token = chunk.choices[0]?.delta.content;
                 if (token) {
                     this.touchTimeout?.();

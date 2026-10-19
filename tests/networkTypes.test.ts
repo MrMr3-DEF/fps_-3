@@ -30,6 +30,8 @@ const validUpdate = {
     yaw: 0,
     pitch: 0,
     activeWeapon: 'PISTOL',
+    switchState: 'IDLE',
+    nextWeapon: null,
     isMouseDown: false,
     isDead: false,
     hookState: 'IDLE',
@@ -43,6 +45,16 @@ const validUpdate = {
 test('network parser accepts a valid update packet', () => {
     const parsed = parseNetworkPacket(validUpdate);
     assert.equal(parsed?.type, 'update');
+});
+
+test('weapon switching packets require canonical phases and equipped/next identities', () => {
+    assert.ok(parseNetworkPacket({ ...validUpdate, switchState: 'WITHDRAWING', nextWeapon: 'SNIPER' }));
+    assert.ok(parseNetworkPacket({ ...validUpdate, switchState: 'BRINGING_IN', nextWeapon: 'PISTOL' }));
+    for (const fields of [{ switchState: undefined }, { nextWeapon: undefined }, { switchState: 'READY' },
+        { switchState: 'IDLE', nextWeapon: 'SNIPER' }, { switchState: 'WITHDRAWING', nextWeapon: 'PISTOL' },
+        { switchState: 'BRINGING_IN', nextWeapon: 'SNIPER' }]) {
+        assert.equal(parseNetworkPacket({ ...validUpdate, ...fields }), null);
+    }
 });
 
 test('network parser requires canonical peer health consistent with life state', () => {
@@ -117,6 +129,7 @@ test('fire packets accept enemy homing locks but never sniper homing', () => {
     assert.equal(parseNetworkPacket({
         ...fire,
         homingTarget: { kind: 'peer', targetPeerId: 'peer-a', targetLifeId: 4 },
+        homingStartDistance: 25,
     })?.type, 'fire');
     assert.equal(parseNetworkPacket({
         ...fire,
@@ -124,6 +137,7 @@ test('fire packets accept enemy homing locks but never sniper homing', () => {
         homingTarget: { kind: 'npc', targetIndex: 3, targetRevision: 2 },
     }), null);
     assert.equal(parseNetworkPacket({ ...fire, homingStartDistance: 25 }), null);
+    assert.equal(parseNetworkPacket({ ...fire, homingTarget: { kind: 'peer', targetPeerId: 'peer-a', targetLifeId: 4 } }), null);
     assert.equal(parseNetworkPacket({
         ...fire,
         homingTarget: { kind: 'npc', targetIndex: 3, targetRevision: 2 },

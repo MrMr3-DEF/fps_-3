@@ -1,4 +1,4 @@
-import { resetHook } from './hookLifecycle.js';
+import { resetHook, setHookBadgeVisible } from './hookLifecycle.js';
 export { resetHook } from './hookLifecycle.js';
 import * as THREE from 'three';
 import { state } from './state.js';
@@ -26,21 +26,21 @@ const _pullDir = new THREE.Vector3();
 const _toHook = new THREE.Vector3();
 const _gunTip = new THREE.Vector3();
 const _midPoint = new THREE.Vector3();
-const _camDir = new THREE.Vector3();
 const _targetCandidates: THREE.Group[] = [];
 const _surfaceCandidates: THREE.Object3D[] = [];
+const _sightCandidates: THREE.Object3D[] = [];
 const _rayEnd = new THREE.Vector3();
 
 const _raycaster = new THREE.Raycaster();
+const _enemySight = new THREE.Raycaster();
 const _centerScreen = new THREE.Vector2(0, 0);
 
 export const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, GUN_TIP_Z);
 
-let hookBadgeEl: HTMLElement | null = null;
 
 // Fire from screen center. Enemy targets get a small aim-assist radius; surfaces
 // use exact ray hits so pillars and floor still feel precise.
-export function toggleGrapplingHook(): void {
+export function toggleGrapplingHook(aimRay?: THREE.Ray): void {
     if (forgottenMecha?.ownsPilot) return;
     if (!state.scene || !state.camera || !state.leftGun || !state.controls) return;
 
@@ -48,6 +48,7 @@ export function toggleGrapplingHook(): void {
         state.hookState = 'FIRING';
         state.hookIsEnemy = false;
         state.hookTargetEnemy = null;
+        state.hookTargetSurface = null;
         triggerMuzzleFlash(state.leftGun);
 
         if (state.leftGun && !state.isThirdPersonView) {
@@ -59,19 +60,19 @@ export function toggleGrapplingHook(): void {
         state.leftGun.localToWorld(barrelWorldPosition);
         state.hookPosition.copy(barrelWorldPosition);
 
-        _raycaster.setFromCamera(_centerScreen, state.camera);
+        if (aimRay) _raycaster.ray.copy(aimRay);
+        else _raycaster.setFromCamera(_centerScreen, state.camera);
         const ray = _raycaster.ray;
         const cockpit = forgottenMecha?.cockpitHit(ray, HOOK_MAX_RANGE);
-
-        const playerObj = state.controls.getObject();
 
         let bestEnemyHit: { target: THREE.Object3D; distance: number } | null = null;
         let closestEnemyDist = Infinity;
 
-        const targetCandidates = queryTargetsNear(playerObj.position.x, playerObj.position.z, HOOK_MAX_RANGE + 20, _targetCandidates);
+        const targetCandidates = queryTargetsNear(ray.origin.x, ray.origin.z, HOOK_MAX_RANGE + 20, _targetCandidates);
         const targetLen = targetCandidates.length;
         for (let j = 0; j < targetLen; j++) {
             const target = targetCandidates[j];
+            if (target.userData.hp <= 0) continue;
             const enemyPos = target.position;
 
             const distToRay = ray.distanceToPoint(enemyPos);
@@ -80,12 +81,16 @@ export function toggleGrapplingHook(): void {
             const magneticRadius = HOOK_MAGNETIC_RADIUS * enemyScale;
 
             if (distToRay <= magneticRadius) {
-                const distToPlayer = playerObj.position.distanceTo(enemyPos);
+                const distToPlayer = ray.origin.distanceTo(enemyPos);
 
-                _toEnemy.subVectors(enemyPos, playerObj.position);
+                _toEnemy.subVectors(enemyPos, ray.origin);
                 const dot = _toEnemy.dot(ray.direction);
 
                 if (dot > 0 && distToPlayer <= (HOOK_MAX_RANGE + enemyScale) && distToPlayer < closestEnemyDist) {
+                    _enemySight.set(ray.origin, _toEnemy.normalize());
+                    _enemySight.far = Math.max(0, distToPlayer - 0.01);
+                    const cover = queryObstaclesAlongSegment(ray.origin.x, ray.origin.z, enemyPos.x, enemyPos.z, _sightCandidates);
+                    if (_enemySight.intersectObjects(cover).length) continue;
                     closestEnemyDist = distToPlayer;
                     bestEnemyHit = {
                         target: target,
@@ -124,9 +129,12 @@ export function toggleGrapplingHook(): void {
             state.hookTarget.copy(bestSurfaceHit.point);
             state.hookWillHit = true;
             state.hookIsEnemy = false;
+            if (bestSurfaceHit.object.userData.damageTarget === 'forgotten-mecha') {
+                state.hookTargetSurface = bestSurfaceHit.object;
+                bestSurfaceHit.object.worldToLocal(state.hookSurfaceLocalPoint.copy(bestSurfaceHit.point));
+            }
         } else {
-            state.camera.getWorldDirection(_camDir);
-            state.hookTarget.copy(playerObj.position).addScaledVector(_camDir, HOOK_MAX_RANGE);
+            state.hookTarget.copy(ray.origin).addScaledVector(ray.direction, HOOK_MAX_RANGE);
             state.hookWillHit = false;
             state.hookIsEnemy = false;
         }
@@ -143,6 +151,12 @@ export function toggleGrapplingHook(): void {
 
 export function updateHook(delta: number): void {
     if (state.hookTargetCockpit && (!state.hookTargetCockpit.canMount || state.hookTargetCockpit.disposed)) { resetHook(); return; }
+    if (state.hookTargetSurface) {
+        const surface = state.hookTargetSurface;
+        if (!forgottenMecha || forgottenMecha.disposed || !forgottenMecha.solidColliders.includes(surface as THREE.Mesh)) { resetHook(); return; }
+        surface.localToWorld(state.hookTarget.copy(state.hookSurfaceLocalPoint));
+        if (state.hookState === 'PULLING') state.hookPosition.copy(state.hookTarget);
+    }
     if (state.hookState !== 'IDLE') {
         if (!state.controls) return;
         const playerObj = state.controls.getObject();
@@ -159,8 +173,7 @@ export function updateHook(delta: number): void {
                 state.hookPosition.copy(state.hookTarget);
                 if (state.hookWillHit) {
                     state.hookState = 'PULLING';
-                    if (!hookBadgeEl) hookBadgeEl = document.getElementById('hook-badge');
-                    if (hookBadgeEl) hookBadgeEl.style.display = 'inline-block';
+                    setHookBadgeVisible(true);
                 } else {
                     resetHook();
                 }

@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_FRAME_DELTA } from '../src/config.ts';
-import { clampFrameDelta, segmentAabbHitT, segmentSphereHitT } from '../src/gameplayMath.ts';
+import { clampFrameDelta, segmentAabbHitT, segmentSphereHitT, segmentGroundHitT } from '../src/gameplayMath.ts';
+
+test('ground contact distinguishes rays, projectile radius and upward/parallel travel', () => {
+    const at = (y: number) => ({ x: 0, y, z: 0 });
+    assert.equal(segmentGroundHitT(at(2), at(-2)), 0.5);
+    assert.equal(segmentGroundHitT(at(2), at(-2), 0.07), (2 - 0.07) / 4);
+    assert.equal(segmentGroundHitT(at(2), at(3), 0.07), null);
+    assert.equal(segmentGroundHitT(at(2), at(2), 0.07), null);
+    assert.equal(segmentGroundHitT(at(0.07), at(2), 0.07), 0);
+    assert.equal(segmentGroundHitT(at(-1), at(2)), 0);
+});
 
 test('clampFrameDelta rejects invalid and stalled frame durations', () => {
     assert.equal(clampFrameDelta(-1, MAX_FRAME_DELTA), 0);

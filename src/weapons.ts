@@ -15,6 +15,7 @@ import {
     PROJECTILE_RADIUS,
     GRAPPLE_BLUE,
     GUN_TIP_Z,
+    FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS,
 } from './config.js';
 import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './weaponNetworkPort.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
@@ -25,7 +26,8 @@ import { projectileData, targetData, obstacleData } from './userDataTypes.js';
 import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
 import { attachGrappleMuzzleShockwave, attachMuzzleShockwave, triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import { flashHitmarker } from './hitmarker.js';
-import { segmentPlayerHitboxHitT } from './playerHitbox.js';
+import { segmentPlayerHitboxHitT, PLAYER_BODY_CAMERA_OFFSET } from './playerHitbox.js';
+import { segmentGroundHitT } from './gameplayMath.js';
 import {
     getProjectileHomingTarget,
     isHomingTargetInRange,
@@ -447,7 +449,6 @@ export function createAkimboGuns(): void {
 // Normal weapons spawn simulated projectiles. The sniper is hitscan so it can
 // resolve occlusion immediately and draw a beam to the exact hit point.
 let nextShotId = 0;
-const FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS = 10;
 let minigunHomingDistanceSample: {
     target: ProjectileHomingTarget;
     startDistance: number;
@@ -569,6 +570,9 @@ export function fireProjectile(): void {
         data.pelletIndex = pelletIndex;
         data.homingTarget = homingTarget ?? undefined;
         data.homingStartDistance = homingStartDistance;
+        data.guidanceRemainder = 0;
+        if (homingTarget) (data.guidanceTargetPosition ??= new THREE.Vector3()).copy(_homingTargetPosition);
+        else data.guidanceTargetPosition = undefined;
 
         beginProjectileTrail(projectile, state.scene!, bulletColor);
 
@@ -603,9 +607,10 @@ export function fireProjectile(): void {
             _obstacleCandidates
         );
         const obstacleHits = _raycaster.intersectObjects(obstacleCandidates);
-        let closestObstacleDist = Infinity;
+        const floorHit = segmentGroundHitT(barrelWorldPosition, _rayEnd);
+        let closestObstacleDist = floorHit === null ? Infinity : floorHit * BULLET_TRAVEL_DISTANCE;
         if (obstacleHits.length > 0) {
-            closestObstacleDist = obstacleHits[0].distance;
+            closestObstacleDist = Math.min(closestObstacleDist, obstacleHits[0].distance);
         }
 
         let hitTargetIndex = -1;
@@ -645,7 +650,7 @@ export function fireProjectile(): void {
             for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
                 const peerData = state.peers[peerId];
-                if (peerData?.mesh.visible && peerData.hp > 0) {
+                if (peerData?.mesh && peerData.hp > 0) {
                     // Use the same body hit volume as bullets; labels and guns are not hitboxes.
                     const hit = segmentPlayerHitboxHitT(
                         barrelWorldPosition,
@@ -672,7 +677,7 @@ export function fireProjectile(): void {
             processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'shield' });
         } else if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestObstacleDist);
-            if (!state.isMultiplayer && obstacleData(obstacleHits[0].object).damageTarget === 'forgotten-mecha') processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'body' });
+            if (!state.isMultiplayer && obstacleHits[0]?.distance === closestObstacleDist && obstacleData(obstacleHits[0].object).damageTarget === 'forgotten-mecha') processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'body' });
             spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
         } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist && hitTargetGroup) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestTargetDist);
@@ -783,14 +788,18 @@ export function updateWeapons(delta: number): void {
     }
 
     // desiredWeaponName is set by input; this block starts the actual visual swap.
-    if (state.switchState === 'IDLE' && state.activeWeaponName !== state.desiredWeaponName) {
+    const startsSwitch = state.switchState === 'IDLE' && state.activeWeaponName !== state.desiredWeaponName;
+    if (startsSwitch) {
         state.nextWeaponName = state.desiredWeaponName;
         state.switchState = 'WITHDRAWING';
         state.switchTimer = 0;
     }
 
     if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh && state.sniperMesh && state.minigunMesh) {
-        state.switchTimer += delta;
+        // This frame's elapsed time preceded the newly observed switch intent.
+        // Counting it would shorten withdrawal, especially after a long frame,
+        // before the host can receive the first phase update.
+        if (!startsSwitch) state.switchTimer += delta;
         const t = Math.min(1.0, state.switchTimer / SWITCH_DURATION);
 
         const currentMesh = getWeaponMesh(state.activeWeaponName);
@@ -837,12 +846,7 @@ export function updateWeapons(delta: number): void {
     }
 
     if (state.playerMesh && state.controls && state.camera) {
-        const playerObj = state.controls.getObject();
-        state.playerMesh.position.copy(playerObj.position);
-        state.playerMesh.position.y -= 0.35;
-
         _camEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
-        state.playerMesh.rotation.y = _camEuler.y;
 
         if (state.isThirdPersonView) {
             if (state.leftGun) state.leftGun.rotation.x = _camEuler.x;
@@ -965,15 +969,42 @@ export function cancelInspect(): void {
     if (state.inspectState === 'INSPECTING') {
         state.inspectState = 'IDLE';
         state.inspectTimer = 0.0;
-        if (state.rightGunContainer && !state.isThirdPersonView) {
-            state.rightGunContainer.position.set(0.32, -0.22, -0.5);
-            state.rightGunContainer.rotation.set(0, 0, 0);
-        }
-        if (state.leftGun && !state.isThirdPersonView) {
-            state.leftGun.position.set(-0.32, -0.22, -0.5);
-            state.leftGun.rotation.set(0, 0, 0);
-        }
+        resetViewModelPose();
     }
+}
+
+function resetViewModelPose(): void {
+    const third = state.isThirdPersonView;
+    _camEuler.setFromQuaternion(state.camera?.quaternion ?? _identityQuaternion, 'YXZ');
+    if (state.leftGun) {
+        state.leftGun.position.set(third ? -0.7 : -0.32, third ? 0 : -0.22, -0.5);
+        state.leftGun.rotation.set(third ? _camEuler.x : 0, 0, 0);
+    }
+    if (state.rightGunContainer) {
+        state.rightGunContainer.position.set(third ? 0.7 : 0.32, third ? 0 : -0.22, -0.5);
+        state.rightGunContainer.rotation.set(third ? _camEuler.x : 0, 0, 0);
+    }
+}
+const _identityQuaternion = new THREE.Quaternion();
+
+/** A life reset retains equipped inventory but discards unfinished presentation. */
+export function resetWeaponPresentation(): void {
+    state.inspectState = 'IDLE'; state.inspectTimer = 0;
+    const active = getWeaponMesh(state.activeWeaponName);
+    state.rightGun = active;
+    for (const mesh of [state.pistolMesh, state.shotgunMesh, state.arMesh, state.sniperMesh, state.minigunMesh]) {
+        if (!mesh) continue;
+        mesh.visible = mesh === active; mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0);
+    }
+    resetViewModelPose();
+}
+
+/** Copy the accepted player pose after physics and hook translation, before
+ * shoulder-camera placement. Weapon simulation/firing retains its earlier order. */
+export function updatePlayerAvatarPose(): void {
+    if (forgottenMecha?.ownsPilot || !state.playerMesh || !state.controls || !state.camera) return;
+    state.playerMesh.position.copy(state.controls.getObject().position); state.playerMesh.position.y -= PLAYER_BODY_CAMERA_OFFSET;
+    _camEuler.setFromQuaternion(state.camera.quaternion, 'YXZ'); state.playerMesh.rotation.y = _camEuler.y;
 }
 
 // Shared player avatar factory for the local third-person mesh and remote peers.
@@ -1100,6 +1131,7 @@ export function syncThirdPersonPresentation(): void {
         return;
     }
     const enabled = shouldUseThirdPersonView(state.isThirdPerson, state.keyCActive);
+    const viewChanged = enabled !== state.isThirdPersonView;
     // A mounted session hides these containers. Release/respawn restores their
     // presentation rather than leaving an otherwise functional invisible gun.
     if (state.leftGun) state.leftGun.visible = state.playerHp > 0;
@@ -1124,6 +1156,7 @@ export function syncThirdPersonPresentation(): void {
             state.rightGunContainer.position.set(0.32, -0.22, -0.5);
         }
     }
+    if (viewChanged) { cancelInspect(); resetViewModelPose(); }
 }
 
 export function setThirdPerson(enabled: boolean): void {

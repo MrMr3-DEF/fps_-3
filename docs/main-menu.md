@@ -25,3 +25,21 @@ Color customization is unavailable throughout a match, including pause. The weap
 The 28 September 2026 redesign passed `npm run check` (241 tests) and `npm run build`. The in-app browser showed the main scan and its six squares at a narrow default window and an 821×400 landscape viewport; preset selection and custom color input both updated the preview, then the original Coral selection was restored. Weapons preview and Settings were also checked during the redesign. The fixed upper-right callout direction has a focused geometry test. Physical mobile devices and live multiplayer remain separate checks.
 
 The fixed-frame and fact-readout revision passed `npm run check` (244 tests), `npm run build`, and `git diff --check`. Browser checks covered the in-game colon labels, gun-specific scan sizes, a rotated minigun whose brackets did not move, typed stats after switching and reopening Weapons, and the 687×909 and 821×400 menu layouts. Focused geometry tests check the exact visible-vertex radius, different frame sizes under one camera, and containment through full yaw and pitch rotations at both viewport sizes.
+
+
+## Local chat download settings
+
+Consent authorizes local AI use and is remembered in the browser. An already
+approved player is not shown the consent notice again when enabling immediate
+downloads. That option remains a draft until Apply; declining or Discard starts
+no download. The consent dialog traps focus and returns it to the setting.
+
+The applied immediate-download setting owns a background model load. Closing
+chat detaches its UI while that load continues. With the setting off, closing
+chat cancels an unfinished interaction-owned knowledge fetch/import/worker load;
+reopening starts a fresh generation. A stale completion cannot replace the new
+engine or update its UI. Completed models may remain available within a match;
+leaving with immediate downloads disabled releases them. In-flight replies are
+interrupted on close, and conversation text is cleared. Cached model files may
+remain in browser storage. No GLB/model-weight cache was added by the October
+audit repairs.

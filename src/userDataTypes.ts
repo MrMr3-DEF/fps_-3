@@ -37,6 +37,9 @@ export interface ProjectileUserData {
     homingTarget?: ProjectileHomingTarget;
     /** Travel distance captured at fire time; steering begins after this threshold. */
     homingStartDistance?: number;
+    /** Fixed guidance clock remainder, cleared whenever this pool slot is fired. */
+    guidanceRemainder?: number;
+    guidanceTargetPosition?: THREE.Vector3;
 }
 
 export function targetData(target: THREE.Group): TargetUserData {

@@ -113,6 +113,14 @@ export const PROJECTILE_SPEED = 900;
 export const PROJECTILE_LIFETIME = 1.1;
 export const MAX_PROJECTILES = 220;
 export const PROJECTILE_RADIUS = 0.07;
+export const NETWORK_POSITION_RESPONSE = 14;
+export const PROJECTILE_GUIDANCE_STEP = 1 / 120;
+export const HOMING_HISTORY_SAMPLES = 128;
+export const HOMING_HISTORY_LAG_MS = 150;
+export const HOMING_REPLAY_CANDIDATES = 12;
+export const HOMING_VERIFICATION_STEPS_PER_SECOND = 40_000;
+export const HOMING_HIT_TOLERANCE = 0.35;
+export const FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS = 10;
 // Cap a stalled animation frame so physics and projectiles cannot skip through
 // the world after a tab is backgrounded or the renderer hitches.
 export const MAX_FRAME_DELTA = 0.05;
@@ -214,6 +222,11 @@ export const HOOK_OBJECT_RELEASE_DISTANCE = 12.0;
 export const HOOK_MAGNETIC_RADIUS = 3.5;
 export const HOOK_MIN_PULL_SPEED = 35.0;
 export const HOOK_MAX_SLINGSHOT_SPEED = 120.0;
+// Receipt-time host envelope: enemy grapples pull at 75% hook speed; ordinary
+// movement and the strongest jump can add to it. Slack is a single capped
+// 200 ms burst, not a fresh allowance for each packet.
+export const NETWORK_MOVEMENT_SPEED = Math.hypot(HOOK_SPEED * 0.75 + WALK_SPEED, JUMP_FORCE);
+export const NETWORK_MOVEMENT_BURST = NETWORK_MOVEMENT_SPEED * 0.2 + PLAYER_RADIUS * 2;
 export const HOOK_SLINGSHOT_ACCEL = 400.0;
 
 export const REGEN_DELAY_MS = 4000;

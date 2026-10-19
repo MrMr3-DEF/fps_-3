@@ -27,3 +27,29 @@ The local correction removes premature menu hiding from both multiplayer start h
 - Sequential foreground tabs were used for combat; this is not a latency, sustained concurrent-input, or background-host performance test.
 
 All test-created browser tabs were closed after testing. No deployment was performed during this test.
+
+## Local audit-repair acceptance — 19 October 2026
+
+This is a new local result; it does not refresh the deployed September result.
+Two native Chrome 155 browser clients used the actual application, PeerJS
+BinaryPack and encrypted RTC data channels through a temporary loopback TURN
+relay. Both selected candidate pairs were confirmed relay/relay over UDP.
+The actual Worker and SQLite Durable Objects ran locally with dummy credentials
+and mocked Turnstile/Cloudflare ICE responses; signalling used a local broker.
+
+The final run passed host/join, movement, Pistol/AR damage in both directions,
+attributed Sniper death and respawn, moving-peer homing under visual culling,
+Shotgun and Minigun damage, departure/avatar cleanup, rejoin, abrupt host
+signalling loss, exactly one renderer disposal per browser, and fresh room
+creation/cancellation. It reported no page errors. Input capture and positioning
+were controlled; the real combat, packet authorization and lifecycle code ran.
+
+Switch phases publish immediately and start their local clocks after intent,
+so a delayed movement update or preceding long frame does not shorten a phase
+relative to the host. Both TypeScript projects and 416 tests pass; the production
+build is regenerated. Clients in one room must use the same build.
+
+No deployment occurred. External service behavior, relay credential refresh,
+physical devices and changing-network recovery remain separate checks. See
+[audit-repair-progress.md](audit-repair-progress.md) for fixture details, bounded
+homing compensation and the complete acceptance record.

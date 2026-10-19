@@ -15,6 +15,8 @@ Feature guides below cover current behavior and manual checks.
 | [Development](development.md) | Prerequisites, scripts, tests, browser fixtures, CI, and generated output |
 | [Cloudflare operations](operations.md) | Deployment, bindings, TURN, Turnstile, API routes, and troubleshooting |
 | [Planned changes](to_be_changed.md) | Original feature requests and follow-up list |
+| [Audit repair plan](audit-repair-plan.md) | Crosschecked October audit findings, repair order, cleanup scope, and acceptance checks |
+| [Audit repair progress](audit-repair-progress.md) | Completed implementation, dated verification evidence and deployment/device limits |
 
 ## Features and assets
 
@@ -32,7 +34,7 @@ Feature guides below cover current behavior and manual checks.
 [Multiplayer live test](multiplayer-live-test.md) tracks deployed networking
 checks. Physical-device checks live in [Mobile controls](mobile-controls.md).
 
-[Code audit](code-audit.md) and [Audit resolution](audit-resolution.md) record
-the September audit and subsequent fixes. They are historical records rather
-than the current backlog. Dated verification results describe the environment
-and code tested at that time; use the development guide to verify a new change.
+The September audit documents were removed from this checkout; earlier versions
+remain in Git history. The October repair plan and progress record describe the
+current audit effort. Dated verification results describe the environment and
+code tested at that time; use the development guide to verify a new change.

@@ -6,7 +6,7 @@ import { state } from '../src/state.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { rebuildTargetHash } from '../src/world.ts';
-import { BULLET_TRAVEL_DISTANCE } from '../src/config.ts';
+import { BULLET_TRAVEL_DISTANCE, PROJECTILE_RADIUS } from '../src/config.ts';
 import { setDamageHandlers } from '../src/damage.ts';
 import { buildBeanModel } from '../src/weapons.ts';
 import { setWeaponNetworkPort } from '../src/weaponNetworkPort.ts';
@@ -60,6 +60,44 @@ test('invisible live targets retain projectile collision',()=>{
     updateProjectiles(.02,'Pilot');assert.equal(hits,1);resetProjectiles();state.targets=[];rebuildTargetHash();
 });
 
+test('ordinary and visual projectiles stop at floor contact before reaching anything below it', () => {
+    state.scene = new THREE.Scene(); state.isMultiplayer = false; state.peerIds = [];
+    state.targets = []; state.obstacles = []; rebuildTargetHash();
+    for (const visualOnly of [false, true]) {
+        const bullet = new THREE.Object3D(); bullet.position.set(0, 1, 0);
+        bullet.userData = { dx: 0, dy: -1, dz: 0, age: 0, damage: 1, visualOnly };
+        state.projectiles = [bullet]; updateProjectiles(0.01, 'Pilot');
+        assert.equal(state.projectiles.length, 0);
+        assert.ok(Math.abs(bullet.position.y - PROJECTILE_RADIUS) < 1e-9);
+    }
+    const target = new THREE.Group(); target.position.set(0, 5, 0); target.userData = { hp: 1, scale: 1, eliminationRevision: 0 };
+    state.targets = [target]; rebuildTargetHash();
+    const below = new THREE.Object3D(); below.position.set(0, -1, 0);
+    below.userData = { dx: 0, dy: 1, dz: 0, age: 0, visualOnly: false, damage: 1, homingStartDistance: 0,
+        homingTarget: { kind: 'npc', object: target, targetIndex: 0, targetRevision: 0 } };
+    state.projectiles = [below]; updateProjectiles(0.01, 'Pilot');
+    assert.equal(state.projectiles.length, 0, 'guidance cannot rescue a projectile from below the solid floor');
+    state.targets = []; rebuildTargetHash();
+    resetProjectiles(); state.projectilePool = [];
+});
+
+test('horizontal head clearance blocks a low overhang without snapping falling players downward', () => {
+    state.scene = new THREE.Scene(); state.camera = new THREE.PerspectiveCamera();
+    state.controls = { isLocked: true, getObject: () => state.camera } as any;
+    state.moveForward = state.moveBackward = state.moveLeft = state.moveRight = state.isShiftDown = state.isHovering = false;
+    state.isPlaying = true; state.hookState = 'IDLE';
+    const roof = new THREE.Object3D(); roof.position.set(2, 6.5, 0);
+    roof.userData = { halfW: 1, halfD: 2, halfH: 0.5, height: 1 }; state.obstacles = [roof];
+    state.camera.position.set(0.19, 5.9, 0); state.velocity.set(30, -1, 0);
+    updatePlayerPhysics(0.001);
+    assert.ok(state.camera.position.x <= 0.2, 'head clearance is part of horizontal admission');
+    assert.ok(state.camera.position.y > 5.85, 'falling does not invoke an upward ceiling snap');
+    state.camera.position.set(0.19, 5.8, 0); state.velocity.set(30, -1, 0);
+    updatePlayerPhysics(0.001);
+    assert.ok(state.camera.position.x > 0.2, 'enough clearance allows entry while falling');
+    state.obstacles = [];
+});
+
 test('projectiles cap their final swept segment at the shared bullet range',()=>{
     state.scene=new THREE.Scene();state.isMultiplayer=false;state.peerIds=[];state.obstacles=[];state.targets=[];rebuildTargetHash();
     state.projectilePool=[];
@@ -86,6 +124,7 @@ test('real projectile updates hit the top and bottom of the bean cuboid', () => 
     const mesh = buildBeanModel(0x8c7ae6, 0xff4757);
     mesh.scale.setScalar(1.5);
     mesh.position.set(0, 1.65, -5);
+    mesh.visible = false; // Render distance never removes a living hit volume.
     state.scene.add(mesh);
     state.peers = { remote: { mesh, hp: 10, lifeId: 4 } as any };
     state.peerIds = ['remote'];

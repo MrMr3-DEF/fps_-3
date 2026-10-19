@@ -1,9 +1,42 @@
-import { state } from './state.js';
+import type { HudPresentation } from './hudPresentation.js';
 
 const uiCache: Record<string, HTMLElement | null> = {};
 
 function getUI<T extends HTMLElement>(id: string): T | null {
     return (uiCache[id] || (uiCache[id] = document.getElementById(id))) as T | null;
+}
+
+/** All ordinary HUD visibility is applied here, including before paused/loading
+ * frame-loop returns. Content updates never decide visibility independently. */
+export function applyHudPresentation(presentation: HudPresentation, powerJumpEnabled: boolean): void {
+    const display = (id: string, visible: boolean, mode = 'block') => {
+        const element = getUI(id);
+        if (element) element.style.display = visible ? mode : 'none';
+    };
+    display('crosshair', presentation.crosshair);
+    display('ui', presentation.ordinary, 'flex');
+    for (const id of ['health-container', 'reload-container', 'hover-container']) display(id, presentation.ordinary);
+    display('pvp-stats', presentation.pvpStats);
+    display('hover-badge', false);
+    display('goggles-scope', presentation.scope);
+    const scope = getUI('goggles-scope');
+    if (scope) { scope.style.opacity = String(presentation.scopeOpacity); scope.classList.toggle('mecha-goggles', presentation.mechaScope); }
+    setFpsVisible(presentation.fps);
+    setAccelerometerVisible(presentation.accelerometer);
+    for (const [button, visible] of [
+        [getUI('powerjump-toggle'), presentation.powerJump],
+        [document.querySelector<HTMLElement>('#mobile-controls [data-control="powerJump"]'), presentation.touchPowerJump],
+    ] as const) {
+        if (!button) continue;
+        button.hidden = !visible;
+        button.textContent = powerJumpEnabled ? 'POWER JUMP ON' : 'POWER JUMP OFF';
+        button.setAttribute('aria-pressed', String(powerJumpEnabled));
+    }
+    if (!presentation.prompt) { const prompt = getUI('npc-interaction'); if (prompt) prompt.hidden = true; }
+    if (!presentation.border) {
+        const border = getUI('world-border-overlay');
+        if (border) { border.style.display = 'none'; border.style.opacity = '0'; }
+    }
 }
 
 let lastReloadProgress = -1;
@@ -16,22 +49,34 @@ let lastSpeedlineOpacity = -1;
 let lastSpeedlineSwapTime = 0;
 let lastGText = '';
 let lastGDotTransform = '';
+let healthFlashTimer: ReturnType<typeof setTimeout> | null = null;
+let healthFlashGeneration = 0;
+let healthFlashColor: string | null = null;
+
+export function resetHealthBarFlash(): void {
+    healthFlashGeneration++;
+    if (healthFlashTimer !== null) clearTimeout(healthFlashTimer);
+    healthFlashTimer = null; healthFlashColor = null;
+    const bar = getUI<HTMLElement>('health-bar');
+    if (bar) bar.style.backgroundColor = '#2ed573';
+}
 
 export function updateHealthBar(hpRatio: number, flashColor: string | null = null): void {
     const healthBar = getUI<HTMLElement>('health-bar');
     if (!healthBar) return;
     healthBar.style.width = `${hpRatio}%`;
     if (flashColor) {
-        healthBar.style.backgroundColor = flashColor;
-        setTimeout(() => {
-            const currentBar = getUI<HTMLElement>('health-bar');
-            if (state.playerHp > 0 && currentBar && currentBar.style.backgroundColor === flashColor) {
-                currentBar.style.backgroundColor = '#2ed573';
-            }
+        if (healthFlashTimer !== null) clearTimeout(healthFlashTimer);
+        const generation = ++healthFlashGeneration;
+        healthFlashColor = flashColor;
+        healthFlashTimer = setTimeout(() => {
+            if (generation !== healthFlashGeneration) return;
+            healthFlashTimer = null; healthFlashColor = null;
+            const bar = getUI<HTMLElement>('health-bar');
+            if (bar) bar.style.backgroundColor = '#2ed573';
         }, 100);
-    } else {
-        healthBar.style.backgroundColor = '#2ed573';
     }
+    healthBar.style.backgroundColor = healthFlashColor ?? '#2ed573';
 }
 
 export function updateHoverBar(fuelRatio: number, active: boolean): void {
@@ -131,10 +176,6 @@ function setSpeedlineLayers(active: boolean): void {
 export function updateSpeedlines(speed: number, visible: boolean): void {
     const speedlines = getUI<HTMLElement>('speedlines');
     if (!speedlines) return;
-
-    if (visible) {
-        ensureSpeedlineImages();
-    }
 
     const speedProgress = visible ? Math.max(0, Math.min(1, (speed - 225) / 175)) : 0;
     const opacity = speed >= 225 && visible ? Number((0.32 + speedProgress * 0.36).toFixed(3)) : 0;

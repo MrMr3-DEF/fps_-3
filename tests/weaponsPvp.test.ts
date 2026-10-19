@@ -30,7 +30,7 @@ test('sniper ignores dead bodies and decorations, and hits the live body with it
         state.scene!.add(mesh);
         return { mesh, hp, lifeId: 7 } as any;
     };
-    state.peers = { dead: peer(0, -5, 0, false), label: peer(10, -10, 10), live: peer(0, -20, 10) };
+    state.peers = { dead: peer(0, -5, 0, false), label: peer(10, -10, 10), live: peer(0, -20, 10, false) };
     state.peerIds = Object.keys(state.peers);
     state.scene.updateMatrixWorld(true);
     try {
@@ -47,4 +47,21 @@ test('sniper ignores dead bodies and decorations, and hits the live body with it
         disposePlayerVisuals();
         state.peers = {}; state.peerIds = []; state.isMultiplayer = false;
     }
+});
+
+test('sniper ends at the floor and cannot hit a body below it', () => {
+    state.scene = new THREE.Scene(); state.camera = new THREE.PerspectiveCamera(); state.camera.position.set(0, 5, 0);
+    state.camera.lookAt(0, 0, 0); state.isMultiplayer = true; createAkimboGuns();
+    state.activeWeaponName = 'SNIPER'; state.rightGun = state.sniperMesh;
+    const mesh = new THREE.Group(); mesh.position.set(0, -5, 0);
+    state.peers = { below: { mesh, hp: 10, lifeId: 1 } as any }; state.peerIds = ['below'];
+    state.scene.updateMatrixWorld(true);
+    let end: THREE.Vector3 | null = null;
+    const packets: NetworkPacket[] = [];
+    setWeaponNetworkPort({ broadcastToAll: p => packets.push(p), broadcastLocalFire: (_a, _b, hit) => { end = hit!.clone(); }, flashPeerMesh() {} });
+    try {
+        fireProjectile();
+        assert.ok(end); assert.ok(Math.abs(end.y) < 1e-9);
+        assert.equal(packets.some(p => p.type === 'player_hit'), false);
+    } finally { disposeParticles(); disposePlayerVisuals(); state.peers = {}; state.peerIds = []; state.isMultiplayer = false; }
 });

@@ -5,10 +5,12 @@ import { readFileSync } from 'node:fs';
 import { CHAT_CONSENT_KEY } from '../src/gothChatConsent.ts';
 
 // Exercise the real UI lifecycle without a browser, GPU or model downloads.
-const fakeEngine = `export class GothChatEngine {
+const fakeEngine = `await globalThis.engineImportGate;
+export class GothChatEngine {
+  disposed = false;
   ready = false;
   async load() { globalThis.modelLoads++; await globalThis.modelGate; if (globalThis.modelFailure) throw new Error("Simulated GPU loss"); this.ready = true; }
-  dispose() { globalThis.modelDisposals++; this.ready = false; }
+  dispose() { if (!this.disposed) globalThis.modelDisposals++; this.disposed = true; this.ready = false; }
 }`;
 registerHooks({
     resolve(specifier, context, next) {
@@ -43,6 +45,67 @@ class Element {
     replaceChildren() {}
     focus() {}
 }
+
+test('load ownership cancels fetch/import/worker work and stale completion cannot replace a new load', async () => {
+    const original = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+    let panel = new Element(), holdKnowledge = false, fetchAborts = 0;
+    let releaseImport!: () => void, releaseModel!: () => void;
+    Object.assign(globalThis, {
+        modelLoads: 0, modelDisposals: 0, modelFailure: false, modelGate: undefined,
+        engineImportGate: new Promise<void>(resolve => { releaseImport = resolve; }),
+        window: { localStorage: { getItem: () => 'accepted', setItem() {} }, addEventListener() {} },
+        document: { body: new Element(), createElement: (tag: string) => tag === 'section' ? (panel = new Element()) : new Element() },
+        fetch: async (url: string, options?: RequestInit) => {
+            if (holdKnowledge && url.endsWith('/character.json')) await new Promise<void>((_resolve, reject) => {
+                options?.signal?.addEventListener('abort', () => { fetchAborts++; reject(new DOMException('Cancelled', 'AbortError')); }, { once: true });
+            });
+            return new Response(readFileSync(new URL('../public' + url, import.meta.url), 'utf8'));
+        },
+    });
+    const tick = () => new Promise(resolve => setImmediate(resolve));
+    try {
+        const { GothChat } = await import('../src/gothChat.ts');
+        const hooks = { onOpen() {}, onClose() {}, onReplyStart() {} };
+        const chat = new GothChat(hooks), internal = chat as any;
+        chat.open(); await tick();
+        const oldImport = internal.preloadTask;
+        chat.close(); chat.open(); await tick();
+        const replacement = internal.preloadTask;
+        assert.notEqual(replacement, oldImport); assert.equal((globalThis as any).modelLoads, 0);
+        releaseImport(); await replacement; await oldImport;
+        assert.equal((globalThis as any).modelLoads, 1, 'only the current import may construct a worker');
+        assert.equal(internal.engine.ready, true);
+
+        chat.reset({ preserveLoadedModel: false }); holdKnowledge = true;
+        chat.open(); await tick(); const cancelledFetch = internal.preloadTask;
+        chat.close(); assert.equal(fetchAborts, 1);
+        holdKnowledge = false;
+        (globalThis as any).modelGate = new Promise<void>(resolve => { releaseModel = resolve; });
+        chat.open(); await tick(); const workerLoad = internal.preloadTask, abandonedEngine = internal.engine;
+        await cancelledFetch;
+        assert.equal(internal.preloadTask, workerLoad, 'old fetch finally cannot clear the new load');
+        chat.close(); assert.equal(abandonedEngine.disposed, true);
+        chat.open(); await tick(); const currentTask = internal.preloadTask, currentEngine = internal.engine;
+        assert.notEqual(currentEngine, abandonedEngine);
+        releaseModel(); await currentTask; await workerLoad;
+        assert.equal(internal.engine, currentEngine); assert.equal(currentEngine.ready, true);
+        assert.equal(abandonedEngine.ready, false); assert.equal(panel.querySelector('.goth-chat-status').textContent, '');
+        chat.reset({ preserveLoadedModel: false });
+
+        const automatic = new GothChat(hooks), background = automatic as any;
+        (globalThis as any).modelGate = new Promise<void>(resolve => { releaseModel = resolve; });
+        automatic.preload(); await tick(); const task = background.preloadTask;
+        automatic.open(); automatic.close();
+        assert.equal(background.preloadTask, task, 'applied background ownership survives closing chat');
+        assert.equal(background.engine.disposed, false);
+        releaseModel(); await task; assert.equal(background.engine.ready, true);
+        automatic.reset({ preserveLoadedModel: false }); assert.equal(background.engine, null);
+    } finally {
+        releaseImport(); releaseModel?.();
+        (globalThis as any).modelGate = undefined; (globalThis as any).engineImportGate = undefined;
+        Object.assign(globalThis, original);
+    }
+});
 
 test('automatic loading requires consent, shares its model with chat, and settings approval returns to settings', async () => {
     const original = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
@@ -91,9 +154,8 @@ test('automatic loading requires consent, shares its model with chat, and settin
         assert.equal((chat as unknown as { engine: unknown }).engine, null);
         assert.equal((globalThis as unknown as { modelDisposals: number }).modelDisposals, 1);
         chat.requestDownloadApproval(value => { approval = value; });
-        assert.equal(panel.querySelector('.goth-chat-notice').hidden, false, 'show the same notice even with saved approval');
-        chat.close();
-        assert.equal(approval, false);
+        assert.equal(approval, true, 'saved consent does not prompt again');
+        assert.equal(chat.isOpen, false, 'saved consent leaves focus in settings');
         let release!: () => void;
         Object.assign(globalThis, { modelGate: new Promise<void>(resolve => { release = resolve; }) });
         const waiting = new GothChat({ onOpen() {}, onClose() {}, onReplyStart() {} });
@@ -103,13 +165,13 @@ test('automatic loading requires consent, shares its model with chat, and settin
         waiting.open();
         release();
         await new Promise(resolve => setTimeout(resolve, 0));
-        assert.equal((globalThis as unknown as { modelLoads: number }).modelLoads, 2, 'reopening during a normal download shares one worker');
+        assert.equal((globalThis as unknown as { modelLoads: number }).modelLoads, 3, 'interaction-owned loading restarts after close' );
         waiting.close();
         Object.assign(globalThis, { modelFailure: true });
         const failed = new GothChat({ onOpen() {}, onClose() {}, onReplyStart() {} });
         failed.open();
         await new Promise(resolve => setTimeout(resolve, 0));
-        assert.equal((globalThis as unknown as { modelLoads: number }).modelLoads, 3, 'failed loads do not immediately allocate a second GPU session');
+        assert.equal((globalThis as unknown as { modelLoads: number }).modelLoads, 4, 'failed loads do not immediately allocate a second GPU session');
         assert.match(panel.querySelector('.goth-chat-status').textContent, /Simulated GPU loss/);
         failed.close();
     } finally {

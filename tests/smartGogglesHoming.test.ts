@@ -5,6 +5,7 @@ import { BULLET_TRAVEL_DISTANCE } from '../src/config.ts';
 import { HudElement } from './fakeHudDom.ts';
 import { isGogglesScanZoomReady, SmartGogglesHud } from '../src/smartGoggles.ts';
 import { getProjectileHomingTarget } from '../src/projectileHoming.ts';
+import { disposeWorld } from '../src/world.ts';
 
 (globalThis as any).document = {
     getElementById: (id: string) => id === 'goggles-anomaly-tear-a' ? {} : null,
@@ -39,6 +40,19 @@ function enemy(index = 0, x = 0): THREE.Group {
     target.updateMatrixWorld(true);
     return target;
 }
+
+test('a scoped world replacement releases old health-bar references before tracking the new world', () => {
+    const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
+    const previous = enemy(), next = enemy();
+    hud.update(view, view.position, view.position, [previous], {}, true, 0);
+    assert.equal(previous.userData.healthBarGroup.visible, false);
+    disposeWorld();
+    hud.update(view, view.position, view.position, [next], {}, true, 16);
+    assert.equal(previous.userData.healthBarGroup.visible, true);
+    assert.equal((hud as any).hiddenHealthBars.has(previous.userData.healthBarGroup), false);
+    assert.equal(next.userData.healthBarGroup.visible, false);
+    hud.reset(); assert.equal(next.userData.healthBarGroup.visible, true);
+});
 
 function record(layer: HudElement, targetKey: string): HudElement {
     const result = layer.children.find(child => child.dataset.targetKey === targetKey);

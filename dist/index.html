@@ -12,9 +12,9 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-DxhLp6oe.js"></script>
+  <script type="module" crossorigin src="/assets/index-BwjaM000.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-NpR_vkYY.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-CMfNuDHB.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-Bt8cHZIB.css">
 </head>
 
 <body>
@@ -30,6 +30,7 @@
     </div>
     <button type="button" id="npc-interaction" hidden aria-label="Talk to goth girlfriend"></button>
     <div id="mecha-approach-warning" role="status" aria-live="polite" aria-atomic="true" hidden>Something’s approaching...</div>
+    <div id="mecha-exit-warning" role="status" aria-live="polite" hidden>Exit blocked. Move the Mecha and try again.</div>
     <div id="mecha-head-screen" hidden aria-hidden="true">
         <div id="mecha-head-loading" hidden role="status" aria-live="polite">
             <span class="world-loading-boot-label">Loading...</span>
@@ -105,7 +106,7 @@
                                     aria-describedby="render-distance-tooltip">i</button>
                                 <span class="settings-tooltip" id="render-distance-tooltip" role="tooltip">
                                     Visibility radius measured in 200&times;200-unit world chunks. Applies to pillars,
-                                    lava, bushes, distant vegetation, enemies, and decorative lava. Does not affect
+                                    lava, bushes, enemies, town props, and the NPC presentation. Does not affect
                                     collisions, player models, projectiles, particles, the floor, or fog.
                                 </span>
                             </span>
@@ -121,7 +122,7 @@
                                     aria-describedby="webllm-download-tooltip">i</button>
                                 <span class="settings-tooltip" id="webllm-download-tooltip" role="tooltip">
                                     After approval and applying this setting, the model starts loading as soon as the page loads.
-                                    Missing model files are downloaded. Cached files are reused. The default model download is approximately 1.8 GB.
+                                    Missing model files are downloaded. Cached files are reused. With this setting on, closing chat keeps an unfinished download running. The default model download is approximately 1.8 GB.
                                 </span>
                             </span>
                         </div>
@@ -201,7 +202,7 @@
             <!-- Panel 3: Host Waiting Lobby -->
             <div id="panel-host-waiting" class="menu-panel">
                 <h2>Host Game</h2>
-                <button type="button" id="btn-copy-code" class="menu-btn room-code-field" disabled title="Copy room code">
+                <button type="button" id="btn-copy-code" class="menu-btn" disabled title="Copy room code">
                     <span id="room-code-display">--------</span>
                     <span id="room-code-copy-label" aria-live="polite">Copy</span>
                 </button>

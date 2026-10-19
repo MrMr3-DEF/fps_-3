@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { state } from './state.js';
 import { prepareParticleResources } from './particles.js';
-import { forgottenMecha, prepareWorldInstanceBuffers, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns } from './world.js';
+import { forgottenMecha, gothGirlfriend, prepareWorldInstanceBuffers, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns } from './world.js';
 import type { DayNightCycle } from './dayNightCycle.js';
 import { userSettings } from './settings.js';
 
@@ -27,7 +27,8 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     // Hidden weapon/effect geometry otherwise waits until the first switch/shot
     // to reach WebGL. Draw it only into the tiny offscreen preparation target.
     for (const object of [...representatives, state.leftGun, state.pistolMesh, state.shotgunMesh,
-        state.arMesh, state.sniperMesh, state.minigunMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group]) object?.traverse(warmObject);
+        state.arMesh, state.sniperMesh, state.minigunMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group,
+        gothGirlfriend?.group]) object?.traverse(warmObject);
     const textures = new Set<THREE.Texture>();
     scene.traverse(object => {
         const material = (object as THREE.Mesh).material;
@@ -50,7 +51,9 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
             await checkpoint();
             cycle.synchronizeElapsedSeconds(phase, true);
             const darkness = cycle.update(0, camera.position);
-            updateTownLanterns(0, darkness);
+            // Only this lighting variant bypasses the per-lantern chunk mask;
+            // warming it must not make the rest of the arena visible.
+            updateTownLanterns(0, darkness, true);
             updateLavaLights(0, camera.position, darkness, userSettings.lavaGlow);
             await renderer.compileAsync(scene, camera);
             await checkpoint();

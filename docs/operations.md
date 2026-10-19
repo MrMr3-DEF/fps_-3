@@ -83,10 +83,10 @@ All JSON responses use `Cache-Control: no-store` and `X-Content-Type-Options: no
 | `/api/security-config` | `GET` | None | Multiplayer availability, public site key, room-code length |
 | `/api/rooms` | `POST` | Turnstile token with `create-room` action | Creates a room; returns host close and TURN-session capabilities |
 | `/api/room-sessions` | `POST` | Turnstile token with `join-room` action | Reserves a room slot; returns a TURN-session capability |
-| `/api/rooms/:room` | `PATCH` | Host close capability as bearer token | Extends the room lifetime |
+| `/api/rooms/:room` | `PATCH` | Host close capability as bearer token | Renews the room with a roster and admission-generation acknowledgement |
 | `/api/rooms/:room` | `DELETE` | Host close capability as bearer token | Closes the room and deletes all sessions |
 | `/api/room-sessions/:room` | `DELETE` | Session capability as bearer token | Releases one session slot |
-| `/api/room-admissions/:room` | `POST` | Host close capability and peer-bound admission ticket | Consumes ticket; returns reserved name and host proof |
+| `/api/room-admissions/:room` | `POST` | Host close capability and peer-bound admission ticket | Consumes ticket; returns reserved name, host proof and server admission generation |
 | `/api/room-admissions/:room` | `DELETE` | Host close capability and peer ID | Releases a departed peer and its name |
 | `/api/turn?room=…&session=…` | `GET` | Session capability in query string, bound to requesting IP | Returns sanitized short-lived ICE servers |
 
@@ -101,7 +101,7 @@ Room codes use eight symbols from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`; ambiguous 
 3. The Worker validates the token, exact action, exact hostname, client IP, and room-creation rate limit.
 4. The room Durable Object stores the room expiry, close capability, and host's five-minute renewable TURN session, fixed peer identity, and case-insensitive username reservation.
 5. The Worker exchanges the host session for short-lived ICE servers.
-6. The host registers the stable room-derived PeerJS ID and begins a two-minute heartbeat carrying the connected/pending peer roster.
+6. The host registers the stable room-derived PeerJS ID and begins a two-minute heartbeat carrying the connected/pending peer roster and highest observed admission generation in one snapshot.
 7. The host generates the world seed and sends a snapshot to each opened client data channel.
 
 ### Join
@@ -127,7 +127,7 @@ The browser releases a join session on exit and the host closes the entire room.
 | TURN credential claims per session | 2 per five-minute issuance window |
 | Client/host ICE refresh cadence | 4 minutes; updates future and current peer connections |
 | Room capacity | 5 sessions including the host |
-| Room creations per IP | 3 per 30 minutes |
+| Room creations per IP | 10 per 30 minutes |
 | Join attempts per IP | 6 per 10 minutes |
 | TURN requests per IP | 30 per 10 minutes (allows a full room behind one IP to refresh) |
 | Turnstile verification timeout | 5 seconds |
@@ -138,7 +138,36 @@ The browser releases a join session on exit and the host closes the entire room.
 
 Expired pending sessions are pruned whenever their room Durable Object is read. Admitted name reservations survive a temporary relay-lease expiry; credential claims still require a live lease, and departure/room expiry removes the reservation. The room alarm deletes all storage at room expiry. Rate-limit Durable Objects delete their buckets when each window ends. Infrastructure failure in verification, rate limiting, room storage, or credential generation returns an error rather than bypassing protection.
 
-Only host-confirmed admitted peers receive session renewal. The host heartbeat supplies its active roster; dropped peers lose their names and session access. Pending joins expire without renewal. ICE credentials are refreshed every four minutes using the still-live, IP-bound session, under both session and per-IP quotas. Changing IP or losing the session requires a fresh verified join. Existing connections can remain alive when a refresh fails, but new relay-dependent connections may require leaving and rejoining. A live relay-network smoke test is still required after deployment.
+Only roster-listed admitted peers receive session renewal. A heartbeat can prune
+an omitted admission only when its generation is acknowledged, or when that
+omitted session has expired. This prevents a roster captured before admission
+from deleting the new capability. The host keeps pending channels in its snapshot
+because admission responses can arrive out of order. Explicit departure still
+releases a name immediately; unobserved orphan admissions expire within their
+five-minute lease. Delayed heartbeats cannot shorten the room lease or resurrect
+a departed session. Automatic guest allocation searches every free name from
+`Guest1` through `Guest5`, independently of the host's name.
+
+Existing room records receive server-owned generations on first read. A legacy
+heartbeat without the field is treated as acknowledgement zero: it can renew
+listed peers but cannot immediately prune newer admissions. New clients require
+a positive generation in admission responses, so deploy the matching Worker
+before serving the updated client. No Durable Object class migration is needed;
+capabilities and peer-bound single-use tickets retain their existing meaning.
+
+ICE credentials are refreshed every four minutes using the still-live, IP-bound
+session, under both session and per-IP quotas. Changing IP or losing the session
+requires a fresh verified join. Existing connections can remain alive when a
+refresh fails, but new relay-dependent connections may require leaving and
+rejoining. A live relay-network smoke test is still required after deployment.
+
+The limiter stores each bucket's expiry. Alarm delivery checks that stored
+expiry and reschedules a live replacement window instead of erasing it. Local
+workerd probes verified concurrent quota enforcement and forced a delayed alarm
+after renewal. The existing storage gates already protect the read/modify/write
+sequence; no additional request serialization was added. See Cloudflare's
+[storage gate documentation](https://developers.cloudflare.com/durable-objects/api/legacy-kv-storage-api/#get)
+and [alarm semantics](https://developers.cloudflare.com/durable-objects/api/alarms/).
 
 ## Security properties
 

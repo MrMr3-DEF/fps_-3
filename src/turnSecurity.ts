@@ -1,7 +1,7 @@
 async function timedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
     return fetch(input, { ...init, signal: AbortSignal.timeout(12_000) });
 }
-import { isCapability } from './roomIdentity.js';
+import { isAdmissionGeneration, isCapability, isUsername } from './roomIdentity.js';
 export interface SecurityConfig {
     multiplayerEnabled: boolean;
     turnstileSiteKey: string | null;
@@ -217,11 +217,11 @@ export async function closeTurnRoom(room: string, closeToken: string): Promise<v
     }
 }
 
-export async function heartbeatTurnRoom(room: string, closeToken: string, peerIds: string[]): Promise<void> {
+export async function heartbeatTurnRoom(room: string, closeToken: string, peerIds: string[], admissionGeneration = 0): Promise<void> {
     const response = await timedFetch(`/api/rooms/${encodeURIComponent(room)}`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${closeToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ peerIds }),
+        body: JSON.stringify({ peerIds, admissionGeneration }),
         cache: 'no-store',
     });
     await readJson<unknown>(response);
@@ -267,11 +267,14 @@ function validateRegistration<T extends RegisteredTurnSession>(value: T): T {
         ('closeToken' in value && !isCapability(value.closeToken))) throw new Error('Invalid room registration.');
     return value;
 }
-export async function admitRoomPeer(room: string, closeToken: string, peerId: string, admissionToken: string): Promise<{ username: string; admissionProof: string }> {
-    return readJson(await timedFetch(`/api/room-admissions/${encodeURIComponent(room)}`, {
+export async function admitRoomPeer(room: string, closeToken: string, peerId: string, admissionToken: string): Promise<{ username: string; admissionProof: string; admissionGeneration: number }> {
+    const result = await readJson<{ username: string; admissionProof: string; admissionGeneration: number }>(await timedFetch(`/api/room-admissions/${encodeURIComponent(room)}`, {
         method: 'POST', headers: { Authorization: `Bearer ${closeToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ peerId, admissionToken }),
     }));
+    if (!result || !isUsername(result.username) || !isCapability(result.admissionProof) ||
+        !isAdmissionGeneration(result.admissionGeneration) || result.admissionGeneration === 0) throw new Error('Invalid admission response.');
+    return result;
 }
 export async function departRoomPeer(room: string, closeToken: string, peerId: string): Promise<void> {
     const response = await timedFetch(`/api/room-admissions/${encodeURIComponent(room)}`, {

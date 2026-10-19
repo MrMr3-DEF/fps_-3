@@ -1,8 +1,9 @@
-import { state } from './state.js';
+import { state, resetHeldInput } from './state.js';
 
 const startListeners = new Set<() => void>();
 const endListeners = new Set<() => void>();
 let boundControls: typeof state.controls = null;
+let releasedControls: typeof state.controls = null;
 
 function emitStarted(): void {
     for (const listener of startListeners) listener();
@@ -18,10 +19,15 @@ function bindControls(): void {
     boundControls = controls;
     controls.addEventListener('lock', () => {
         if (state.controls !== controls) return;
+        releasedControls = null;
         emitStarted();
     });
     controls.addEventListener('unlock', () => {
-        if (state.controls === controls && !touchPlaying) emitEnded();
+        if (state.controls === controls && !touchPlaying && releasedControls !== controls) {
+            releasedControls = controls;
+            resetHeldInput();
+            emitEnded();
+        }
     });
 }
 
@@ -47,7 +53,7 @@ export function setTouchMode(enabled: boolean): void {
 }
 export function enableTouchMode(): void { setTouchMode(true); }
 export function isInputActive(): boolean {
-    return touchPlaying || Boolean(state.controls?.isLocked);
+    return touchPlaying || Boolean(state.controls?.isLocked && state.controls !== releasedControls);
 }
 export function beginInput(): void {
     if (state.matchEnded) return;
@@ -67,11 +73,24 @@ export function beginInput(): void {
     })();
 }
 export function endInput(): void {
+    const wasActive = isInputActive();
+    resetHeldInput();
     touchMove.x = touchMove.y = 0;
     if (touchPlaying) {
         touchPlaying = false;
         emitEnded();
-    } else state.controls?.unlock();
+    } else {
+        releasedControls = state.controls;
+        state.controls?.unlock();
+        if (wasActive) emitEnded();
+    }
+}
+
+/** Called after the runtime clears state.controls. Do not retain a disposed
+ * controls/camera/DOM graph until the next match binds another controller. */
+export function releaseInputControls(controls: typeof state.controls): void {
+    if (boundControls === controls) boundControls = null;
+    if (releasedControls === controls) releasedControls = null;
 }
 
 /** Closing an overlay does not produce another unlock event: input is already released.
