@@ -149,19 +149,35 @@ Grapple directly inside the defeated cockpit. Exact animated-armor rays validate
 the opening; exterior armor remains an ordinary surface grapple. The 375 m/s
 straight enemy pull ignores this mech's coarse body proxies, sweeps world
 obstacles and clamps arrival to the chest-owned seat. A uniformly fitted bean hides
-its weapons and turns forward over 0.45 seconds while the camera eases to a
+its weapons and turns forward over 0.45 seconds. First person eases to a
 separate interior head anchor at normal FOV. The complete 7.042-second Mount follows.
 The closed viewport is at the actual lens center; a second anchor sits 0.75 m behind
 it. Both belong to the chest, independent of the folding hinge and physical seat.
 First-person folding renders the interior helmet/lens faces, restoring material
 sides and visibility after drawing; third person retains the complete model.
-At Mount frame 27 (1.125 s), the helmet finishes closing and the view turns black.
+In first person, at Mount frame 27 (1.125 s), the helmet finishes closing and the view turns black.
 An orange (`#ff9a32`) spawn-style **Loading...** bar follows the remaining clip time
 and reaches 100% when the mech finishes standing. The camera moves to the eye
 under the opaque screen. Orange goggles fade in over black for 0.4 seconds, then
 a 0.3-second horizontal tearing/held-picture reveal restores live vision. Controls
 and startup protection remain until the reveal completes. The mounted yellow eye
 (`#ffd34d`) still powers on at frames 44–56; Blender previews retain their authored blue cue.
+
+Third-person entry captures the saved perspective, even when C/right-click is
+temporarily showing the cockpit. The camera swivels to the front during the
+existing 0.45-second boarding phase and shows the whole Mount animation. Framing
+uses the fitted mecha radius, 28 m height, FOV and aspect ratio with a 10% margin.
+World cover can shorten the view; both the boom and travel between camera frames
+are swept, excluding the mech's own proxies. The camera orbits back to the normal
+mecha follow view during the existing 0.3-second reveal. There is no boot bar,
+black hardware overlay, goggles or video tearing in this external sequence.
+Both perspectives become controllable on the same animation frame.
+
+P/View and temporary C/right-click/Aim perspective changes are ignored during
+entry, shutdown and the external release handoff. They are not queued; a held
+secondary mouse button must be released before it can zoom again. Input releases
+and pause still work. The captured render pose never replaces the logical pilot
+camera used by simulation.
 
 First-person goggles remain at normal FOV after startup;
 C/right-click zoom to configured scoped FOV. Third person uses a collision-safe
@@ -177,6 +193,12 @@ first plays the visible fold, then uses the same blackout/move/fade durations to
 return to the eye. These toggles do not repeat startup loading or tearing. Reversals
 inherit current hinge, camera and opacity values; windup toggles wait until release.
 Only helmet tracks are layered, so movement, look, shield and recoil continue.
+Health, reload, shield, FPS and eligible motion readouts also remain visible
+through the toggle in either perspective. The first-person camera cover sits
+below ordinary HUD; it does not reset the G-meter. Holding C/right-click keeps
+the same zoom intent/FOV through the blackout, while scans and reticles still
+require unobscured vision. Startup/shutdown and exit recovery retain their own
+full-screen presentation and ordinary-HUD visibility rules.
 Opening immediately disables acquisition and permanent goggles. Open/folding uses
 normal presentation and ordinary cyan scans while C/right-click is held, without
 red lock markers or homing. Fully closing and finishing the eye-view transition
@@ -259,8 +281,10 @@ aligns the torso with its legs. The startup video reveal then runs backward for
 Mount plays backward. Photosensitivity/reduced-motion modes use the same gentle
 fade as startup, in reverse. The actor is protected like startup. A black screen carries the orange **Shutting
 down...** bar from zero through 100%; camera relocation stays behind black, then
-the opening cabin becomes visible. Third person retains its selected view and
-also receives shutdown presentation. Pause freezes closure, reverse playback,
+the opening cabin becomes visible. Third person instead swivels to the front as
+shutdown begins, overlapping helmet closure and the existing preparation time.
+It shows the full reversed Mount without first-person shutdown presentation.
+Pause freezes closure, reverse playback, camera motion,
 presentation and release.
 
 After reverse Mount completes, a normal-sized living bean exits in front of the
@@ -269,9 +293,12 @@ geometry; static swept clearance prevents passing through nearby cover. A
 completely blocked exit shows a brief message and returns control so the pilot
 can reposition and retry. Clearance is checked before shutdown and again at
 release; a newly blocked release restores the standing cockpit behind the boot
-reveal without refilling shield energy. Ownership ends before the one-shot
+reveal in first person, or a brief neutral fade in third person, without
+refilling shield energy. Ownership ends before the one-shot
 release callback; HP, life, weapon, fuel, death count and selected view survive.
-The existing 0.3-second third-person camera handoff and normal gravity resume.
+The 0.3-second third-person camera handoff starts at the actual front camera pose
+and follows the released bean as normal gravity resumes. Destruction retains its
+original eye-boom handoff.
 The robot remains mountable at zero HP, and remounting restores the original
 50 HP/full shield. Mounted lethal destruction still uses immediate FinalDeath
 breakup and cannot remount.
@@ -290,7 +317,7 @@ preparation and disposed with the actor. All attack tuning lives in `config.ts`.
 dynamic proxy set to spatial queries without rebuilding the static world hash.
 Cancelled loads dispose late-arriving assets without attaching them to a new match.
 
-`mechaMovement.ts` owns fitted sweeps/slide/overlap escape separately from enemy navigation; `mechaPilotRelease.ts` restores the on-foot body/input without resetting player life. `thirdPersonCamera.ts` owns the bounded release boom transition.
+`mechaMovement.ts` owns fitted sweeps/slide/overlap escape separately from enemy navigation; `mechaPilotRelease.ts` restores the on-foot body/input without resetting player life. `thirdPersonCamera.ts` owns shared camera sweeps and the bounded release transition. The actor's `mechaTransitionCamera.ts` owns the captured perspective, swivel/return phases and scope-release latch; it advances only on the actor's simulation clock and resets on death/disposal. Main applies its pose only during drawing and restores the logical camera afterward.
 
 `mechaPilot.ts` owns timed pointer samples and actual view yaw and manual locomotion; its
 `mechaRockets.ts` owns immediate targeting, sixteen reusable rockets and 192
@@ -488,7 +515,57 @@ The user performs these checks; automated results do not mark them complete.
   releases should trigger the shield routine, with five seconds down before rebuild.
 - Die to laser/stomp: see the beam/contact before damage and behind the death screen.
 - Inspect the open-helmet pilot; exit with closed/open/folding helmet and near a wall.
-  Check reversed goggles animation, pause/resume, living release and remounting.
+  Check first-person reversed goggles, pause/resume, living release and remounting.
+- Toggle O/Helmet repeatedly in each perspective, including reversals and held
+  Aim. Health/reload/shield/FPS must stay steady; an eligible G-meter must not
+  reset. First-person vision still blacks out briefly below the readouts, while
+  third person stays clear. Check pause and resume during the toggle too.
+- In third person, board from several directions and while holding Aim: check the
+  quick front swivel, complete standing animation, visible pilot and smooth return
+  without boot overlays. Entry should become controllable at the same time as first person.
+- Exit in third person: check full reverse Mount, the front-to-bean handoff and
+  normal falling. Try P/View, C/Aim and right-click during both transitions and
+  pause in swivel/return/release; there must be no queued perspective change.
+- Repeat with portrait/wide viewports, different FOVs, cover near the camera and
+  blocked exits. Prefer collision clearance over whole-body framing when cramped;
+  a newly blocked exit should fade back to piloting without a stuck camera lock.
+
+### Third-person transition verification — 19 October 2026
+
+Automated camera checks cover fitted-envelope framing, swept movement, exact
+render-pose handoff, scope-release handling and actual-GLB control-timing parity
+at 30 FPS, 144 FPS and irregular frame steps. The production perspective setter,
+blocked third-person release/recovery, remount and disposal are also exercised.
+
+Local Chrome fixture checks sampled external startup, the complete standing pose,
+paused return, shutdown and paused release. The standing mecha remained fully
+visible without boot hardware; fixture P/C attempts retained the captured view.
+Release preserved third person, player HP and the mountable wreck. The browser
+reported no captured runtime errors. This fixture uses temporary touch input;
+physical pointer/touch feel and the full visual acceptance checklist remain open.
+
+Final validation passed both TypeScript projects and all 432 tests with
+`npm run check`. `npm run build` regenerated `dist/` with the existing large-chunk
+warning. Generated asset references, documentation links and whitespace checks
+passed; `to_be_changed.md` remained untouched.
+
+### Helmet-toggle HUD verification — 19 October 2026
+
+The follow-up keeps ordinary telemetry independent of helmet-camera blackout and
+preserves mounted ADS intent. Phase-sampled tests cover opening/closing, partial
+and full blackouts, rapid reversals, both perspectives, held aim, touch eligibility
+and retained HUD values. Existing lifecycle and terminal-HUD regressions remain.
+The focused run passed 19 tests; final `npm run check` passed both TypeScript
+projects and all 433 tests. The build regenerated `dist/` with the existing
+large-chunk warning.
+
+Local Chrome review held the production helmet clock at opaque cover: ordinary
+readouts stayed visible above the black first-person view, while third person
+kept its clear view and crosshair. Held aim continued zooming during blackout.
+Both opening and closing blackouts retained the readouts. Pause removed the
+helmet-cover modifier and hid HUD normally; leaving disposed the match, with no
+captured browser runtime errors. The fixture uses temporary touch input;
+physical input feel remains manual.
 
 ## Audit repair verification — 19 October 2026
 

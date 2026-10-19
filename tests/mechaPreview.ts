@@ -16,6 +16,7 @@ const heightInput = parent.document.getElementById('height') as HTMLInputElement
 const hoverInput = parent.document.getElementById('hover') as HTMLInputElement;
 const evadeInput = parent.document.getElementById('evade') as HTMLInputElement;
 const shieldInput = parent.document.getElementById('shield') as HTMLInputElement;
+const holdHeadBlack = parent.document.getElementById('hold-head-black') as HTMLInputElement;
 const pauseAt = parent.document.getElementById('pause-at') as HTMLSelectElement;
 const history = parent.document.getElementById('history')!;
 const transitions: string[] = [];
@@ -26,6 +27,7 @@ let walking = false, reversing = false, firing = false;
 let previouslyMounted = false;
 let turnUntil = 0, frontReview = false;
 let observedRenderer: THREE.WebGLRenderer | null = null;
+let observedMecha: typeof forgottenMecha = null;
 const frontCamera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 2000);
 // This is an in-memory fixture preference; no saved user setting is changed.
 userSettings.mobileInput = 'touch';
@@ -73,6 +75,13 @@ window.addEventListener('mecha-review-action', event => {
         hoverInput.checked = false; scanned = false;
     }
     if (action === 'grapple') toggleGrapplingHook();
+    if (action === 'exit') { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' })); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' })); }
+    if (action === 'view-lock') {
+        for (const code of ['KeyP', 'KeyC']) {
+            window.dispatchEvent(new KeyboardEvent('keydown', { code })); window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+        }
+        for (const [type, buttons] of [['mousedown', 2], ['mouseup', 0]] as const) document.dispatchEvent(new MouseEvent(type, { button: 2, buttons, bubbles: true }));
+    }
     if (action === 'turn') turnUntil = performance.now() + 1000;
     if (action === 'helmet') { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyO' })); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyO' })); }
     if (action === 'lava' && actor.mode === 'piloted') {
@@ -160,6 +169,14 @@ function pauseReview() {
 }
 function report() {
     const actor = forgottenMecha;
+    if (actor && actor !== observedMecha) {
+        observedMecha = actor;
+        const update = actor.update.bind(actor);
+        // Ordinary pause hides HUD by design. Hold only the actor's helmet
+        // clock at opaque cover so the real active HUD/layering stays reviewable.
+        actor.update = (delta, player) => update(holdHeadBlack.checked && actor.mode === 'piloted'
+            && actor.headView.blackout >= 1 - 1e-9 ? 0 : delta, player);
+    } else if (!actor) observedMecha = null;
     if (state.renderer && observedRenderer !== state.renderer) {
         observedRenderer = state.renderer;
         const draw = observedRenderer.render.bind(observedRenderer);
@@ -187,6 +204,11 @@ function report() {
         if (pauseAt.value === 'aligning' && actor.mode === 'aligning' || pauseAt.value === 'breakup' && actor.mode === 'destroying') { pauseReview(); pauseAt.value = 'none'; }
         if (pauseAt.value === 'rocket' && actor.firingTime >= 1.25 && actor.firingTime < 1.5 || pauseAt.value === 'helmet' && actor.helmetProgress > 0.4 && actor.helmetProgress < 0.6) { pauseReview(); pauseAt.value = 'none'; }
         const head = actor.headView;
+        const transition = actor.transitionCamera;
+        if (pauseAt.value === 'camera-swivel' && transition.external && transition.phase === 'swivel'
+            || pauseAt.value === 'camera-return' && transition.external && transition.phase === 'return'
+            || pauseAt.value === 'exit-mount' && actor.mode === 'shutting-down' && head.phase === 'shutdown' && actor.animationTime >= 2
+            || pauseAt.value === 'camera-release' && transition.phase === 'release') { pauseReview(); pauseAt.value = 'none'; }
         if (pauseAt.value === 'head-mount' && actor.mode === 'startup' && actor.animationTime >= 1.05 && head.phase === 'mount'
             || pauseAt.value === 'head-loading' && head.phase === 'loading' && head.loadingProgress >= 0.35
             || pauseAt.value === 'head-hud' && head.phase === 'hud' && head.hudOpacity >= 0.5
@@ -203,7 +225,7 @@ function report() {
             pauseReview(); pauseAt.value = 'none';
         }
     }
-    if (isInputActive()) state.keyCActive = scanned;
+    if (isInputActive()) state.keyCActive = scanned && !actor?.transitionCamera.locked;
     status.textContent = actor ? `Mode: ${actor.mode} | HP: ${actor.hp}/50 | Height: 28 m | Walk: ${actor.speed.toFixed(3)} m/s\nPosition: ${actor.group.position.x.toFixed(1)}, ${actor.group.position.z.toFixed(1)} | Player HP: ${state.playerHp} | Active: ${isInputActive()} | Ended: ${state.matchEnded}`
         : `No mecha | Playing: ${state.isPlaying} | Scene: ${Boolean(state.scene)} | Ended: ${state.matchEnded}`;
     if (actor && state.camera) {
@@ -212,6 +234,8 @@ function report() {
         const waist = actor.group.getObjectByName('CTRL_WaistYaw')?.quaternion;
         if (waist) status.textContent += `\nLeg heading: ${(actor.group.rotation.y * 180 / Math.PI).toFixed(1)}° | Torso offset: ${(Math.atan2(waist.z, waist.w) * 360 / Math.PI).toFixed(1)}°`;
         status.textContent += `\nHead view: ${actor.headView.phase} | Eye blend: ${actor.headView.eyeBlend.toFixed(2)} | Black: ${actor.headView.blackout.toFixed(2)} | Loading: ${(actor.headView.loadingProgress * 100).toFixed(1)}% | HUD: ${actor.headView.hudOpacity.toFixed(2)} | Reveal: ${actor.headView.revealProgress.toFixed(2)} | Target ready: ${actor.targetingReady} | Gentle reveal: ${userSettings.photosensitivityMode}`;
+        status.textContent += `\nTransition camera: ${actor.transitionCamera.phase} | View locked: ${actor.transitionCamera.locked} | External: ${actor.transitionCamera.external} | Exit recovery: ${actor.transitionCamera.recovering}`;
+        status.textContent += ` | Helmet clock held: ${holdHeadBlack.checked && actor.mode === 'piloted' && actor.headView.blackout >= 1 - 1e-9}`;
         const next = `${actor.combat.laserPhase}/${actor.combat.shieldPhase}/${state.playerHp}`;
         if (next !== previous) {
             transitions.push(`${actor.combat.clock.toFixed(2)}s ${next}`); if (transitions.length > 12) transitions.shift();

@@ -107,6 +107,15 @@ settings. Inspect first-person eye alignment, the physical interior fold, smooth
 reversal while moving, scoped open-head scans and unchanged third-person framing.
 `tests/mechaHeadView.test.ts` covers clip cues, protected startup, camera geometry,
 reversals across frame rates, paused clocks, bounded captures and render restoration.
+`tests/mechaTransitionCamera.test.ts` checks full-body exterior framing, swivel
+and return geometry, swept clearance, actual-GLB perspective timing parity,
+perspective locks, scope release and voluntary camera handoff. The existing
+preview adds Exit, Try perspective / scope, and pause events for camera swivel,
+return, reversed Mount and release. These use the production transition camera;
+leave Front asset review off when reviewing transitions.
+Hold helmet blackout freezes only the actor clock at opaque cover during active
+piloting. Unlike ordinary pause, it leaves the real HUD active so the camera
+cover's layering and held-Aim FOV can be inspected; uncheck it to continue.
 Front asset review changes only the
 fixture draw camera; turn it off for acquisition and first/third-person checks.
 `tests/mechaLifecycle.test.ts` checks fitted sweep/slide/escape/border behavior,

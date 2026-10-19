@@ -1124,13 +1124,14 @@ export function disposePlayerVisuals(): void {
 // First-person attaches guns to the camera; third-person reparents the same
 // objects onto the avatar so weapon state stays shared.
 export function syncThirdPersonPresentation(): void {
+    const transition = forgottenMecha?.transitionCamera;
     if (forgottenMecha?.ownsPilot) {
-        state.isThirdPersonView = (forgottenMecha.mode === 'piloted' || forgottenMecha.mode === 'shutting-down') && state.isThirdPerson && !state.keyCActive && !state.rightClickActive;
+        state.isThirdPersonView = transition?.locked ? transition.thirdPerson : state.isThirdPerson && !state.keyCActive && !state.rightClickActive;
         if (state.leftGun) state.leftGun.visible = false;
         if (state.rightGunContainer) state.rightGunContainer.visible = false;
         return;
     }
-    const enabled = shouldUseThirdPersonView(state.isThirdPerson, state.keyCActive);
+    const enabled = transition?.locked ? transition.thirdPerson : shouldUseThirdPersonView(state.isThirdPerson, state.keyCActive);
     const viewChanged = enabled !== state.isThirdPersonView;
     // A mounted session hides these containers. Release/respawn restores their
     // presentation rather than leaving an otherwise functional invisible gun.
@@ -1160,6 +1161,7 @@ export function syncThirdPersonPresentation(): void {
 }
 
 export function setThirdPerson(enabled: boolean): void {
+    if (forgottenMecha?.transitionCamera.locked) return;
     state.isThirdPerson = enabled;
     syncThirdPersonPresentation();
 }

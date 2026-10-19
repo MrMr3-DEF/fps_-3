@@ -132,7 +132,10 @@ function updateApproachWarning(delta: number, active: boolean): void {
 
 function clearMechaHeadPresentation(): void {
     const screen = document.getElementById('mecha-head-screen');
-    if (screen) { screen.hidden = true; screen.style.opacity = '0'; screen.setAttribute('aria-hidden', 'true'); }
+    if (screen) {
+        screen.hidden = true; screen.style.opacity = '0'; screen.setAttribute('aria-hidden', 'true');
+        screen.classList.remove('is-helmet-toggle');
+    }
     const loading = document.getElementById('mecha-head-loading');
     if (loading) loading.hidden = true;
     UI.gogglesScope?.classList.remove('mecha-head-display');
@@ -140,13 +143,27 @@ function clearMechaHeadPresentation(): void {
 
 function syncMechaHeadPresentation(): void {
     const actor = forgottenMecha, head = actor?.headView;
-    if (!actor?.ownsPilot || !head || head.phase === 'inactive' || state.isThirdPersonView && actor.mode !== 'shutting-down' || state.playerHp <= 0) {
+    if (!actor?.ownsPilot || !head || head.phase === 'inactive' || state.isThirdPersonView && !actor.transitionCamera.recovering || state.playerHp <= 0) {
         clearMechaHeadPresentation(); return;
+    }
+    if (state.isThirdPersonView) {
+        // Final exit clearance can fail after reverse Mount. Its protected
+        // recovery restores the standing pose immediately; mask that jump with
+        // a neutral fade, without replaying first-person boot hardware.
+        clearMechaHeadPresentation();
+        const screen = document.getElementById('mecha-head-screen');
+        const opacity = 1 - head.hudOpacity;
+        if (screen) { screen.hidden = opacity <= 1e-9; screen.style.opacity = String(opacity); }
+        return;
     }
     const safeReveal = userSettings.photosensitivityMode || reducedHeadMotion.matches;
     const opacity = (head.phase === 'reveal' || head.phase === 'shutdown-reveal') && safeReveal ? 1 - head.revealProgress : head.blackout;
     const screen = document.getElementById('mecha-head-screen');
-    if (screen) { screen.hidden = opacity <= 1e-9; screen.style.opacity = String(opacity); screen.setAttribute('aria-hidden', String(head.phase !== 'loading' && head.phase !== 'hud' && head.phase !== 'shutdown-hud' && head.phase !== 'shutdown')); }
+    if (screen) {
+        screen.hidden = opacity <= 1e-9; screen.style.opacity = String(opacity);
+        screen.classList.toggle('is-helmet-toggle', actor.mode === 'piloted');
+        screen.setAttribute('aria-hidden', String(head.phase !== 'loading' && head.phase !== 'hud' && head.phase !== 'shutdown-hud' && head.phase !== 'shutdown'));
+    }
     const loading = document.getElementById('mecha-head-loading');
     if (loading) {
         // The completed bar remains visible while boot content crossfades into
@@ -216,7 +233,12 @@ function onMechaPilotReleased(pose: MechaPilotRelease): void {
     releaseMechaPilot(pose);
     resetHook(); mountedFireRequested = false;
     mechaCameraHandoff.reset();
-    if (state.isThirdPerson && state.camera) mechaCameraHandoff.begin(pose.viewPosition, state.camera.position, pose.quaternion);
+    if (state.isThirdPerson && state.camera) {
+        const transition = forgottenMecha?.transitionCamera;
+        if (transition?.external && transition.phase === 'release') {
+            mechaCameraHandoff.beginFromPose(transition.position, transition.quaternion, state.camera.position);
+        } else mechaCameraHandoff.begin(pose.viewPosition, state.camera.position, pose.quaternion);
+    }
     syncMountedControls(false); smartGoggles?.reset(); syncThirdPersonPresentation();
     resetHealthBarFlash();
     updateHealthBar(state.playerHp / state.playerMaxHp * 100);
@@ -228,6 +250,8 @@ function onMechaPilotReleased(pose: MechaPilotRelease): void {
 const _logicalCameraPos = new THREE.Vector3();
 const _logicalCameraQuaternion = new THREE.Quaternion();
 const _thirdPersonAimTarget = new THREE.Vector3();
+const _mechaFollowPosition = new THREE.Vector3();
+const _mechaFollowQuaternion = new THREE.Quaternion();
 const _gogglesWeaponOrigin = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
 const _jumpBoosterPos = new THREE.Vector3();
@@ -808,7 +832,7 @@ function setupInputListeners(): void {
             case 'KeyR':
                 if (state.controls && isInputActive()) {
                     if (forgottenMecha?.ownsPilot) {
-                        if (forgottenMecha.requestExit()) {
+                        if (forgottenMecha.requestExit(state.isThirdPerson, state.rightClickActive)) {
                             state.isMouseDown = state.keyCActive = state.rightClickActive = state.isScoped = state.isShiftDown = false;
                             mountedFireRequested = false;
                         }
@@ -860,7 +884,7 @@ function setupInputListeners(): void {
                 }
                 break;
             case 'KeyC':
-                if (state.controls && isInputActive()) {
+                if (state.controls && isInputActive() && !forgottenMecha?.transitionCamera.locked) {
                     state.keyCActive = true;
                     syncThirdPersonPresentation();
                     refreshScopedState();
@@ -1010,7 +1034,7 @@ function currentHudPresentation() {
         scoped: state.isScoped, thirdPerson: state.isThirdPersonView, touch: touchMode,
         showFps: userSettings.showFps, multiplayer: state.isMultiplayer,
         pilot: pilot ? { mode: pilot.mode, phase: pilot.headView.phase, blackout: pilot.headView.blackout,
-            targetingReady: pilot.targetingReady, hudOpacity: pilot.hudOpacity } : null,
+            targetingReady: pilot.targetingReady, hudOpacity: pilot.hudOpacity, recoveringExit: pilot.transitionCamera.recovering } : null,
     });
 }
 
@@ -1328,13 +1352,20 @@ function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
         state.rightClickActive = buttons.secondary;
     }
 
+    if (forgottenMecha) state.rightClickActive = forgottenMecha.transitionCamera.acceptSecondary(state.rightClickActive);
+
     refreshScopedState();
 }
 
 function refreshScopedState(): void {
-    if (!isInputActive()) state.isScoped = false;
+    if (forgottenMecha?.transitionCamera.locked) {
+        state.keyCActive = state.rightClickActive = state.isScoped = false;
+        syncThirdPersonPresentation();
+    } else if (!isInputActive()) state.isScoped = false;
     else if (forgottenMecha?.ownsPilot) {
-        state.isScoped = forgottenMecha.mode === 'piloted' && forgottenMecha.headView.blackout <= 1e-9 && (state.rightClickActive || state.keyCActive);
+        // Keep ADS intent/FOV stable while O relocates the cockpit camera.
+        // Scan acquisition and reticles still require unobscured vision.
+        state.isScoped = forgottenMecha.mode === 'piloted' && (state.rightClickActive || state.keyCActive);
         syncThirdPersonPresentation();
     } else state.isScoped = resolveGogglesScopeAttempt(state.gogglesFailure, state.rightClickActive || state.keyCActive);
     syncGameHud();
@@ -1996,18 +2027,22 @@ function animate(): void {
                 if (state.rightGunContainer) state.rightGunContainer.visible = false;
             }
             if (state.isThirdPersonView && !gothChat?.isOpen) {
-
+                const actor = forgottenMecha, transition = actor?.transitionCamera;
+                const radius = transition?.external && actor?.ownsPilot
+                    ? transition.queryRadius(actor.group.position, actor.radius, state.camera.fov, state.camera.aspect)
+                    : mechaCameraHandoff.fromRenderPose ? mechaCameraHandoff.queryRadius
+                        : actor?.ownsPilot || mechaCameraHandoff.active ? 65 : THIRD_PERSON_CAMERA_QUERY_RADIUS;
+                // Framing/queryRadius is measured from the mech center, which
+                // differs from the animated cockpit eye during Mount.
+                const queryCenter = transition?.external && actor?.ownsPilot ? actor.group.position : logicalCameraPos;
+                const candidates = queryObstaclesNear(queryCenter.x, queryCenter.z, radius, _thirdPersonObstacleCandidates);
+                const obstacles = actor?.ownsPilot ? candidates.filter(object => object.userData.damageTarget !== 'forgotten-mecha') : candidates;
                 // Pull the shoulder camera forward when nearby architecture
                 // would otherwise enter the camera or block the player view.
                 resolveThirdPersonCameraPosition(
                     logicalCameraPos,
                     state.camera.quaternion,
-                    queryObstaclesNear(
-                        logicalCameraPos.x,
-                        logicalCameraPos.z,
-                        forgottenMecha?.ownsPilot || mechaCameraHandoff.active ? 65 : THIRD_PERSON_CAMERA_QUERY_RADIUS,
-                        _thirdPersonObstacleCandidates,
-                    ).filter(object => !forgottenMecha?.ownsPilot || object.userData.damageTarget !== 'forgotten-mecha'),
+                    obstacles,
                     state.camera.position,
                     forgottenMecha?.ownsPilot ? mechCameraDimensions : mechaCameraHandoff.active ? mechaCameraHandoff.dimensions : undefined,
                 );
@@ -2017,7 +2052,21 @@ function animate(): void {
                     _thirdPersonAimTarget,
                     forgottenMecha?.ownsPilot ? BULLET_TRAVEL_DISTANCE : undefined,
                 ));
+                if (transition?.external && actor?.ownsPilot) {
+                    _mechaFollowPosition.copy(state.camera.position); _mechaFollowQuaternion.copy(state.camera.quaternion);
+                    transition.resolve(actor.group.position, actor.group.rotation.y, actor.radius,
+                        state.camera.fov, state.camera.aspect, _mechaFollowPosition, _mechaFollowQuaternion,
+                        obstacles);
+                    state.camera.position.copy(transition.position); state.camera.quaternion.copy(transition.quaternion);
+                } else if (mechaCameraHandoff.fromRenderPose) {
+                    mechaCameraHandoff.applyPose(logicalCameraPos, obstacles, state.camera.position, state.camera.quaternion);
+                }
             }
+
+            // Capture the actual external pose before cosmetic shake. Boarding
+            // may begin in the next simulation frame, after the grapple snaps
+            // the logical player eye to the seat.
+            forgottenMecha?.transitionCamera.recordView(state.camera.position, state.camera.quaternion);
 
             // Match the exact camera pose used for this draw. In third person,
             // distance still comes from the logical player position rather than
@@ -2080,7 +2129,7 @@ function animate(): void {
             );
             if (gogglesBrickedThisFrame) syncGogglesFailureVisuals();
 
-            if ((pilot?.headView.phase === 'reveal' || pilot?.headView.phase === 'shutdown-reveal') && !userSettings.photosensitivityMode && !reducedHeadMotion.matches) {
+            if (!state.isThirdPersonView && (pilot?.headView.phase === 'reveal' || pilot?.headView.phase === 'shutdown-reveal') && !userSettings.photosensitivityMode && !reducedHeadMotion.matches) {
                 pilot.headEffects.render(state.renderer, state.scene, state.camera, pilot.headView.revealProgress);
             } else state.renderer.render(state.scene, state.camera);
             forgottenMecha?.acknowledgeRendered();
@@ -2128,6 +2177,7 @@ export function triggerDeath(gameOver = false): void {
     clearApproachWarning();
     forgottenMecha?.clearPendingDamage();
     forgottenMecha?.pilot.rockets.clear();
+    forgottenMecha?.transitionCamera.reset();
     mechaCameraHandoff.reset();
     clearMechaHeadPresentation();
     if (gameOver) state.matchEnded = true;

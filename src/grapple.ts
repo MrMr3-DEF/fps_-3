@@ -203,7 +203,7 @@ export function updateHook(delta: number): void {
                 state.velocity.set(0, 0, 0);
                 if (blocked) { resetHook(); return; }
                 playerObj.position.copy(_rayEnd);
-                if (distance <= travel + 0.001) { playerObj.position.copy(state.hookTarget); actor.beginBoarding(playerObj.position, playerObj.quaternion); resetHook(); return; }
+                if (distance <= travel + 0.001) { playerObj.position.copy(state.hookTarget); actor.beginBoarding(playerObj.position, playerObj.quaternion, state.isThirdPerson, state.rightClickActive); resetHook(); return; }
             } else if (state.hookIsEnemy && state.hookTargetEnemy) {
                 state.hookTarget.copy(state.hookTargetEnemy.position);
                 _toEnemy.subVectors(state.hookTarget, playerObj.position);

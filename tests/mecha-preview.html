@@ -17,7 +17,7 @@
     <label>Body height (m) <input id="height" type="number" value="2" min="0" max="80" style="width:60px"></label>
     <label><input id="hover" type="checkbox"> Hold height</label>
     <label><input id="evade" type="checkbox"> Evade charged shots</label>
-    <label>Pause at <select id="pause-at"><option value="none">No event</option><option value="aligning">Defeat torso alignment</option><option value="breakup">Immediate breakup / release</option><option value="charging">Charged sphere</option><option value="firing">Beam firing</option><option value="down">Shield drop</option><option value="rebuilding">Shield rebuilding</option><option value="rocket">Rocket windup</option><option value="helmet">Helmet folding</option><option value="head-mount">Mount helmet closure</option><option value="head-loading">Orange loading</option><option value="head-hud">Black goggles boot</option><option value="head-reveal">Video tearing</option><option value="head-black">Helmet blackout</option></select></label>
+    <label>Pause at <select id="pause-at"><option value="none">No event</option><option value="aligning">Defeat torso alignment</option><option value="breakup">Immediate breakup / release</option><option value="charging">Charged sphere</option><option value="firing">Beam firing</option><option value="down">Shield drop</option><option value="rebuilding">Shield rebuilding</option><option value="rocket">Rocket windup</option><option value="helmet">Helmet folding</option><option value="head-mount">Mount helmet closure</option><option value="head-loading">Orange loading</option><option value="head-hud">Black goggles boot</option><option value="head-reveal">Video tearing</option><option value="head-black">Helmet blackout</option><option value="camera-swivel">Camera swivel</option><option value="camera-return">Camera return</option><option value="exit-mount">Reversed Mount</option><option value="camera-release">Release camera handoff</option></select></label>
     <button data-action="dodge">Dodge sideways</button>
     <button data-action="scan">Toggle goggles</button>
     <button data-action="noon">Noon lighting</button>
@@ -27,8 +27,11 @@
     <button data-action="cockpit">Aim into cockpit</button>
     <button data-action="cockpit-ground">Ground cabin approach</button>
     <button data-action="grapple">Grapple cockpit</button>
+    <button data-action="exit">Exit mecha (R)</button>
+    <button data-action="view-lock">Try perspective / scope</button>
     <button data-action="turn">Turn right for 1s</button>
     <button data-action="helmet">Toggle helmet (O)</button>
+    <label><input id="hold-head-black" type="checkbox"> Hold helmet blackout</label>
     <button data-action="head-safe">Toggle gentle reveal</button>
     <button data-action="lava">Place feet in lava</button>
     <button data-action="pillar-clearance">Fitted pillar approach</button>

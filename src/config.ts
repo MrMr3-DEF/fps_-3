@@ -74,6 +74,7 @@ export const MECHA_RELEASE_CAMERA_TIME = 0.3;
 export const MECHA_CAMERA_DISTANCE = 45;
 export const MECHA_CAMERA_HEIGHT = 10;
 export const MECHA_CAMERA_SHOULDER = 8;
+export const MECHA_TRANSITION_CAMERA_MARGIN = 1.1;
 export const MECHA_ROCKET_SPEED = 120;
 export const MECHA_ROCKET_RADIUS = 0.95;
 export const MECHA_ROCKET_BORE_FIT = 0.9;

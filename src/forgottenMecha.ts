@@ -12,6 +12,7 @@ import { MECHA_BOARD_TIME, MECHA_HUD_FADE_TIME, MECHA_VISION_REVEAL_TIME, MECHA_
 import { MechaPilot } from './mechaPilot.js';
 import { MechaHeadView } from './mechaHeadView.js';
 import { MechaHeadEffects } from './mechaHeadEffects.js';
+import { MechaTransitionCamera } from './mechaTransitionCamera.js';
 import type { RocketObstacleQuery, RocketPlayer } from './mechaRockets.js';
 import { MECHA_ENEMY_ROCKET_DAMAGE, MECHA_ENEMY_ROCKET_TURN_SPEED, MECHA_ENEMY_ROCKET_GUIDANCE_RESPONSE, MECHA_ROCKET_SPEED } from './config.js';
 import { MechaMovement } from './mechaMovement.js';
@@ -54,6 +55,7 @@ export class ForgottenMecha {
     readonly pilot = new MechaPilot();
     readonly headView = new MechaHeadView();
     readonly headEffects = new MechaHeadEffects();
+    readonly transitionCamera = new MechaTransitionCamera();
     readonly seatAnchor = new THREE.Group();
     readonly pilotAnchor = new THREE.Group();
     readonly pilotScale = 2;
@@ -379,6 +381,7 @@ export class ForgottenMecha {
         this.hp = Math.max(0, this.hp - amount);
         const killed = this.hp === 0;
         if (killed) {
+            this.transitionCamera.reset();
             this.clearPendingDamage(); this.cancelPilotLayers(); this.pilot.rockets.clear();
             this.revision++;
             if (this.mode === 'piloted') {
@@ -452,8 +455,9 @@ export class ForgottenMecha {
         this.ray.intersectObjects(this.meshes, false, this.rayHits);
         return this.rayHits.length ? null : { point: this.target.clone(), distance };
     }
-    beginBoarding(position: THREE.Vector3, quaternion: THREE.Quaternion): boolean {
+    beginBoarding(position: THREE.Vector3, quaternion: THREE.Quaternion, thirdPerson = false, secondaryHeld = false): boolean {
         if (!this.canMount) return false;
+        this.transitionCamera.begin('entry', thirdPerson, position, quaternion, secondaryHeld);
         this.pilotAnchor.getWorldPosition(this.exitLocalStart);
         this.group.worldToLocal(this.exitLocalStart);
         this.clearPendingDamage(); this.combat.stop(); this.hp = this.maxHp; this.revision++;
@@ -481,10 +485,11 @@ export class ForgottenMecha {
         if (hit.lifeId !== lifeId || this.disposed || this.hp <= 0) return;
         if (hit.kind === 'stomp') this.events.stompPlayer(); else this.events.laserPlayer?.(hit.damage);
     }
-    requestExit(): boolean {
+    requestExit(thirdPerson = false, secondaryHeld = false): boolean {
         if (this.mode !== 'piloted') return false;
         this.group.localToWorld(this.exitStart.copy(this.exitLocalStart));
         if (!this.findPilotExit(this.exitStart, this.target)) { this.events.exitBlocked?.(); return false; }
+        this.transitionCamera.begin('exit', thirdPerson, this.pilot.cameraPosition, this.pilot.cameraQuaternion, secondaryHeld);
         this.exitPitch = this.pilot.pitch; this.exitYaw = this.pilot.yaw; this.exitHelmetOpen = this.headView.wantedOpen;
         this.clearPendingDamage(); this.combat.stop(); this.pilot.rockets.clear(); this.pilot.clearLookMotion();
         this.fireTime = Infinity; this.releasePending = this.released = this.queuedHelmetToggle = false;
@@ -534,6 +539,7 @@ export class ForgottenMecha {
             this.releasePose.position.copy(this.target);
             this.hp = 0; this.revision++; this.mode = 'dead'; this.deathEye.copy(this.grayEye); this.deathEyeIntensity = 0; this.deathTime = 2;
             this.cancelPilotLayers(); this.updateEye();
+            this.transitionCamera.release();
             this.events.pilotReleased?.(this.releasePose);
         }
     }
@@ -800,6 +806,14 @@ export class ForgottenMecha {
         return this.rayHits.length === 0;
     }
     update(delta: number, player: MechaPlayer): void {
+        if (!this.ready || this.disposed || !Number.isFinite(delta) || delta <= 0) return;
+        // Advance before simulation so a release born in this frame starts at
+        // zero, matching the composition root's render-camera handoff clock.
+        this.transitionCamera.update(delta);
+        this.updateActor(delta, player);
+        this.transitionCamera.sync(this.mode, this.headView.phase, this.headView.revealProgress, this.recoveringExit);
+    }
+    private updateActor(delta: number, player: MechaPlayer): void {
         if (this.rocketPlayer.lifeId !== (player.lifeId ?? 0) || !player.alive) this.clearPendingDamage();
         if (player.velocity) this.rocketPlayer.velocity.copy(player.velocity);
         else if (this.playerSampled && delta > 0) {
@@ -1002,6 +1016,7 @@ export class ForgottenMecha {
         geometries.forEach(value => value.dispose()); materials.forEach(value => value.dispose()); textures.forEach(value => value.dispose()); skeletons.forEach(value => value.dispose());
     }
     dispose(): void {
+        this.transitionCamera.reset();
         if (this.disposed) return;
         this.clearPendingDamage();
         this.cancelPilotLayers();

@@ -86,7 +86,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `forgottenMecha.ts`, `mechaNavigation.ts`, `mechaFootPlant.ts`, `mechaCombat.ts`, `mechaCombatEffects.ts` | Singleplayer siege robot, seeded border routes, animation/AI, torso laser, spherical shield cycle, planted feet, moving body proxies and reusable effects |
 | `cameraShake.ts` | Temporary impact rotation applied only to the render camera pose |
 | `mechaPilot.ts`, `mechaRockets.ts`, `lookInput.ts` | Offline cockpit boarding support, sampled pilot view/leg steering, immediate vehicle targeting, continuous pooled rocket guidance and shared timed touch/pointer look routing |
-| `mechaHeadView.ts`, `mechaHeadEffects.ts` | Actor-owned simulation-clock helmet/camera and orange boot presentation, prewarmed bounded video tearing; DOM composition stays in main |
+| `mechaHeadView.ts`, `mechaHeadEffects.ts`, `mechaTransitionCamera.ts` | Actor-owned simulation-clock helmet/boot and exterior entry/exit camera phases; main owns DOM composition and temporary render-pose application |
 | `gothChat.ts`, `gothChatEngine.ts`, `gothChat.worker.ts` | Conversation UI, local WebLLM lifecycle, and inference worker |
 | `gothKnowledge.ts`, `gothChatConsent.ts` | Character-file retrieval/prompt context and first-use model consent |
 | `settings.ts` | Settings schema, validation, persistence, renderer settings, particle scaling |
@@ -231,7 +231,10 @@ again before drawing. `hud.ts` applies ordinary visibility without letting value
 updates decide it. The prepared boot reveal initializes the G-meter and Power
 Jump with the other HUD elements while simulation remains frozen. Respawn uses
 the same policy without replaying boot. Boarding/startup/shutdown hide the motion
-readout; active piloting restores it. Mecha hardware fades retain their authored
+readout; active piloting restores it. Helmet camera blackouts during piloting
+leave ordinary telemetry visible and preserve ADS intent; scans/reticles still
+require a clear view. The helmet-toggle cover sits below ordinary HUD, while
+boot/shutdown retain their original layering. Mecha hardware fades retain their authored
 phases but cannot overlay pause, chat, death or disposal.
 
 World replacement increments `worldGeneration`; gameplay goggles release old
@@ -359,6 +362,11 @@ The host is authoritative enough to reject many fabricated hits and target mutat
 - The fitted visible pilot, grapple seat and optical views have separate anchors.
   Voluntary shutdown reverses the goggles video/HUD and Mount under actor-owned presentation clocks and
   releases a living bean into a mountable wreck; lethal destruction remains FinalDeath.
+- Entry/exit capture the saved perspective and lock P/View plus temporary scope
+  overrides until completion. Third-person swivels overlap existing animation
+  clocks; external camera motion never delays control ownership. Apply and restore
+  its pose in the render-camera try/finally boundary. Voluntary release starts
+  its handoff at the last rendered front pose; destruction keeps the eye boom.
 - Put tunable shared values in `config.ts`, not inline in several consumers.
 - Put pure collision or input logic in a DOM-free helper so Node tests can import it.
 - Update reset and disposal paths whenever state, timers, Three.js resources, connections, or listeners gain a lifecycle.
