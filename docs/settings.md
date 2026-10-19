@@ -21,7 +21,13 @@ and bring it into view. Selecting a category starts its content at the top. Sett
 hides the game title and has no visible Settings heading. Controls adapt to the
 content area's width, including stacked labels and sliders on narrow screens.
 
-- **Gameplay:** sensitivity, normal/scoped FOV, immediate chat-model download.
+- **Gameplay:** sensitivity, raw mouse input, optional mouse spike protection,
+  normal/scoped FOV, immediate chat-model download. Raw input and spike protection
+  default to Off. Both mice and trackpads use adaptive aim smoothing; high-polling
+  mice use a correspondingly short interpolation window. Raw input bypasses system
+  acceleration; spike protection is only for erroneous extreme jumps and may
+  discard genuine flicks. Scoped gain follows perspective projection throughout
+  zoom. See [Desktop pointer input](pointer-input.md).
 - **Graphics:** render scale, render distance, particles, shadows and quality,
   lava glow, muzzle flashes, bullet trails, FPS counter.
 - **Accessibility:** photosensitivity mode.

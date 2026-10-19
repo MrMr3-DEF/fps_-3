@@ -15,7 +15,7 @@ import { setupMobileControls } from './mobileControls.js';
 import { MobileControlsEditor } from './mobileControlsEditor.js';
 import { cloneTouchLayout } from './mobileControlLayout.js';
 import { onInputStarted, onInputEnded, isInputActive, resumeInputAfterOverlay, beginInput, endInput, releaseInputControls, touchMode, touchMove } from './inputSession.js';
-import { setLookInputHandler } from './lookInput.js';
+import { scopedPointerSensitivity, setLookInputHandler } from './lookInput.js';
 import { getEscapePauseAction, shouldPauseOfflineSimulation } from './pauseShortcut.js';
 import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
@@ -165,6 +165,7 @@ function syncMechaHeadPresentation(): void {
 function syncMountedControls(mounted: boolean): void {
     if (!mounted) { UI.gogglesScope?.classList.remove('mecha-goggles'); clearMechaHeadPresentation(); }
     if (mounted === mountedControlsPresented) return;
+    state.controls?.resetLook();
     resetHealthBarFlash();
     lastMountedHp = null;
     mountedControlsPresented = mounted;
@@ -262,6 +263,10 @@ const UI = {
     get worldBorderOverlay() { return getUI<HTMLElement>('world-border-overlay'); },
     get sensSlider() { return getUI<HTMLInputElement>('sensitivity'); },
     get sensValue() { return getUI<HTMLElement>('sens-value'); },
+    get settingRawMouseInput() { return getUI<HTMLInputElement>('setting-raw-mouse-input'); },
+    get settingRawMouseInputValue() { return getUI<HTMLElement>('setting-raw-mouse-input-value'); },
+    get settingMouseSpikeProtection() { return getUI<HTMLInputElement>('setting-mouse-spike-protection'); },
+    get settingMouseSpikeProtectionValue() { return getUI<HTMLElement>('setting-mouse-spike-protection-value'); },
     get settingFov() { return getUI<HTMLInputElement>('setting-fov'); },
     get settingFovValue() { return getUI<HTMLElement>('setting-fov-value'); },
     get settingScopedFov() { return getUI<HTMLInputElement>('setting-scoped-fov'); },
@@ -1175,6 +1180,7 @@ function leaveCurrentGame(): void {
 }
 
 function performPlayerReset(resetMatch = false): void {
+    state.controls?.resetLook();
     resetHealthBarFlash();
     clearApproachWarning();
     forgottenMecha?.clearPendingDamage(); forgottenMecha?.pilot.rockets.clear();
@@ -1354,6 +1360,8 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.touchFireMode === b.touchFireMode &&
         JSON.stringify(a.touchLayout) === JSON.stringify(b.touchLayout) &&
         a.sensitivity === b.sensitivity &&
+        a.rawMouseInput === b.rawMouseInput &&
+        a.mouseSpikeProtection === b.mouseSpikeProtection &&
         a.fov === b.fov &&
         a.scopedFov === b.scopedFov &&
         a.renderScale === b.renderScale &&
@@ -1386,6 +1394,10 @@ function updateSettingsActions(): void {
 function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     if (UI.sensSlider) UI.sensSlider.value = settings.sensitivity.toFixed(1);
     if (UI.sensValue) UI.sensValue.innerText = settings.sensitivity.toFixed(1);
+    if (UI.settingRawMouseInput) UI.settingRawMouseInput.checked = settings.rawMouseInput;
+    setCheckboxLabel(UI.settingRawMouseInputValue, settings.rawMouseInput);
+    if (UI.settingMouseSpikeProtection) UI.settingMouseSpikeProtection.checked = settings.mouseSpikeProtection;
+    setCheckboxLabel(UI.settingMouseSpikeProtectionValue, settings.mouseSpikeProtection);
     if (UI.settingFov) UI.settingFov.value = settings.fov.toFixed(0);
     if (UI.settingFovValue) UI.settingFovValue.innerText = settings.fov.toFixed(0);
     if (UI.settingScopedFov) UI.settingScopedFov.value = settings.scopedFov.toFixed(0);
@@ -1455,7 +1467,10 @@ function applyLiveSettings(): void {
     }
 
     if (state.controls && state.camera) {
-        state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / userSettings.fov);
+        state.controls.resetLook();
+        state.controls.rawMouseInput = userSettings.rawMouseInput;
+        state.controls.mouseSpikeProtection = userSettings.mouseSpikeProtection;
+        state.controls.pointerSpeed = scopedPointerSensitivity(state.baseSensitivity, state.camera.fov, userSettings.fov);
     }
 
     if (state.renderer) {
@@ -1490,6 +1505,13 @@ function setupSettingsControls(): void {
         updatePendingSettings((settings) => {
             settings.sensitivity = clampNumber(val, 0.1, 3.0, DEFAULT_USER_SETTINGS.sensitivity);
         });
+    });
+
+    UI.settingRawMouseInput?.addEventListener('change', (e) => {
+        updatePendingSettings(settings => { settings.rawMouseInput = (e.target as HTMLInputElement).checked; });
+    });
+    UI.settingMouseSpikeProtection?.addEventListener('change', (e) => {
+        updatePendingSettings(settings => { settings.mouseSpikeProtection = (e.target as HTMLInputElement).checked; });
     });
 
     UI.settingFov?.addEventListener('input', (e) => {
@@ -1746,6 +1768,7 @@ function animate(): void {
     requestAnimationFrame(animate);
     syncGameHud();
     if (mobileControlsEditor.isOpen) {
+        state.controls?.resetLook();
         updateApproachWarning(0, false);
         state.prevTime = performance.now();
         return;
@@ -1753,8 +1776,11 @@ function animate(): void {
     if (!isWorldLoading) updateMenuPreview();
 
     const time = performance.now();
-    if (state.matchEnded) { clearApproachWarning(); state.prevTime = time; return; }
+    if (state.matchEnded) { state.controls?.resetLook(); clearApproachWarning(); state.prevTime = time; return; }
     if (isWorldLoading) {
+        // Start may already hold pointer lock. Movement during boot/reveal must
+        // not collect into a delayed turn on the first playable frame.
+        state.controls?.resetLook();
         updateApproachWarning(0, false);
         if (isWorldReveal && state.scene && state.camera && state.renderer) {
             state.renderer.render(state.scene, state.camera);
@@ -1940,7 +1966,7 @@ function animate(): void {
         // Scope zoom also reduces pointer speed so aiming does not feel twitchy.
         if (state.controls) {
             if (state.camera.fov !== lastFov) {
-                state.controls.pointerSpeed = state.baseSensitivity * (state.camera.fov / userSettings.fov);
+                state.controls.pointerSpeed = scopedPointerSensitivity(state.baseSensitivity, state.camera.fov, userSettings.fov);
                 lastFov = state.camera.fov;
             }
         }
@@ -1949,6 +1975,10 @@ function animate(): void {
 
     syncGameHud();
     if (state.renderer && state.scene && state.camera) {
+        // Actions above and between frames use the last published view and its
+        // homing lock. Advance the shared aim immediately before goggles/drawing,
+        // so smoothing never creates a separate hidden firing or grapple direction.
+        state.controls?.update();
         // The shoulder boom stays centered on the eye; the cabin camera blend
         // belongs only to first-person viewing of the physical folding helmet.
         if (state.isThirdPersonView && forgottenMecha?.ownsPilot) forgottenMecha.viewAnchor.getWorldPosition(state.camera.position);

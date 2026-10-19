@@ -14,6 +14,8 @@ export interface UserSettings {
     keybinds: Keybinds;
     crosshair: CrosshairSettings;
     sensitivity: number;
+    rawMouseInput: boolean;
+    mouseSpikeProtection: boolean;
     fov: number;
     scopedFov: number;
     renderScale: number;
@@ -37,6 +39,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     keybinds: { ...DEFAULT_KEYBINDS },
     crosshair: { ...DEFAULT_CROSSHAIR },
     sensitivity: 1.0,
+    rawMouseInput: false,
+    mouseSpikeProtection: false,
     fov: DEFAULT_FOV,
     scopedFov: SCOPED_FOV,
     renderScale: 1.0,
@@ -84,6 +88,8 @@ export function loadUserSettings(): UserSettings {
             userSettings.keybinds = readKeybinds(parsed.keybinds);
             userSettings.crosshair = readCrosshair(parsed.crosshair);
             userSettings.sensitivity = clamp(parsed.sensitivity ?? DEFAULT_USER_SETTINGS.sensitivity, 0.1, 3.0);
+            userSettings.rawMouseInput = readBoolean(parsed.rawMouseInput, DEFAULT_USER_SETTINGS.rawMouseInput);
+            userSettings.mouseSpikeProtection = readBoolean(parsed.mouseSpikeProtection, DEFAULT_USER_SETTINGS.mouseSpikeProtection);
             userSettings.fov = clamp(parsed.fov ?? DEFAULT_USER_SETTINGS.fov, 55, 105);
             userSettings.scopedFov = clamp(parsed.scopedFov ?? DEFAULT_USER_SETTINGS.scopedFov, 8, 35);
             userSettings.renderScale = clamp(parsed.renderScale ?? DEFAULT_USER_SETTINGS.renderScale, 0.5, 1.0);

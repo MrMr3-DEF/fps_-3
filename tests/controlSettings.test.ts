@@ -72,6 +72,8 @@ test('legacy storage retains existing values and adds new defaults; new settings
     try {
         loadUserSettings();
         assert.equal(userSettings.sensitivity, 2);
+        assert.equal(userSettings.rawMouseInput, false);
+        assert.equal(userSettings.mouseSpikeProtection, false);
         assert.equal(userSettings.fov, 90);
         assert.equal(userSettings.shadows, false);
         assert.equal(userSettings.muzzleFlashes, true);
@@ -83,6 +85,8 @@ test('legacy storage retains existing values and adds new defaults; new settings
         userSettings.crosshair = { ...DEFAULT_CROSSHAIR, style: 'cross', color: '#00ffff' };
         userSettings.muzzleFlashOpacity = 0.35;
         userSettings.bulletTrails = false;
+        userSettings.rawMouseInput = true;
+        userSettings.mouseSpikeProtection = true;
         saveUserSettings();
         Object.assign(userSettings, cloneSettings(DEFAULT_USER_SETTINGS));
         loadUserSettings();
@@ -91,6 +95,8 @@ test('legacy storage retains existing values and adds new defaults; new settings
         assert.equal(userSettings.crosshair.color, '#00ffff');
         assert.equal(userSettings.muzzleFlashOpacity, 0.35);
         assert.equal(userSettings.bulletTrails, false);
+        assert.equal(userSettings.rawMouseInput, true);
+        assert.equal(userSettings.mouseSpikeProtection, true);
     } finally {
         Object.assign(userSettings, previousSettings);
         if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);

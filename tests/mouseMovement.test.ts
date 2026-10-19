@@ -38,3 +38,12 @@ test('reset discards pending movement and invalid input cannot poison later samp
     assert.equal(filter.sample(NaN, 0, 11), null);
     assert.deepEqual(filter.sample(1, 2, 12), { x: 1, y: 2 });
 });
+
+test('ordinary first samples survive and disabled spike protection never withholds a fast flick', () => {
+    const filter = new MouseMovementFilter();
+    assert.deepEqual(filter.sample(4, 2, 0, false), { x: 4, y: 2 });
+    assert.deepEqual(filter.sample(300, 0, 2, false), { x: 300, y: 0 });
+    assert.deepEqual(filter.sample(100, 0, 4, false), { x: 100, y: 0 });
+    filter.reset();
+    assert.equal(filter.sample(835, 442, 10, false), null, 'extreme lock-entry warp remains protected');
+});

@@ -170,6 +170,8 @@ The test suite focuses on deterministic logic and security boundaries that can r
 | `config.test.ts` | Valid weapon statistics and projectile-budget assumptions |
 | `gameplayMath.test.ts` | Frame-delta clamping and swept sphere/AABB collision |
 | `mouseButtons.test.ts` | Simultaneous pointer buttons and safe bitmask decoding |
+| `pointerLockControls.test.ts`, `mouseMovement.test.ts` | Mouse/trackpad resampling across input/render rates, zoom gain, cancellation and optional spike protection |
+| `pointerAimIntegration.test.ts` | Published crosshair, actual homing acquisition/firing, sniper exclusion and grappling agree during queued turns |
 | `multiplayerVisuals.test.ts` | Overlapping remote damage pulses and material restoration |
 | `networkTypes.test.ts` | Accepted packets and rejection of malformed or excessive network data |
 | `town.test.ts` | 1,000 seeded layouts, street/door clearance, real world rebuilds/disposal, hazard exclusion, collision, ceilings, rooftop edges, projectile/grapple geometry, culling and enemy placement |

@@ -131,7 +131,7 @@ Three.js objects carry typed metadata through the accessors in `userDataTypes.ts
 6. Animate visible targets and particles.
 7. Send a multiplayer state update when required.
 8. Update border warnings, FPS, FOV/scope UI, and pointer sensitivity.
-9. Copy the final accepted player pose to the on-foot avatar, resolve the collision-safe over-the-shoulder camera, project smart-goggles locks from that exact render pose, render, then restore the logical player position. Preserve the rendered center ray for third-person grappling input.
+9. Publish adaptively resampled mouse/trackpad aim using the current zoom gain, copy the final accepted player pose to the on-foot avatar, resolve the collision-safe over-the-shoulder camera, project smart-goggles locks from that exact render pose, render, then restore the logical player position. Actions before this publication use the previous visible aim and homing lock; there is no separate smoothed render-only input pose. Preserve the rendered center ray for third-person grappling input. See [Desktop pointer input](pointer-input.md).
 
 Moving damage or collision work across the networking or rendering steps can change authority, visual timing, and hit positions.
 

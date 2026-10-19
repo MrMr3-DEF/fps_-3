@@ -12,7 +12,7 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-BwjaM000.js"></script>
+  <script type="module" crossorigin src="/assets/index-80bM6Ity.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-NpR_vkYY.js">
   <link rel="stylesheet" crossorigin href="/assets/index-Bt8cHZIB.css">
 </head>
@@ -76,6 +76,16 @@
                         <label for="sensitivity">Aim Sensitivity</label>
                         <input type="range" id="sensitivity" min="0.1" max="3.0" step="0.1" value="1.0">
                         <span class="settings-value" id="sens-value">1.0</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-raw-mouse-input" title="Bypass system pointer acceleration. Both mice and trackpads use adaptive aim smoothing.">Raw mouse input</label>
+                        <input type="checkbox" id="setting-raw-mouse-input">
+                        <span class="settings-value" id="setting-raw-mouse-input-value">Off</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="setting-mouse-spike-protection" title="Only enable for sudden erroneous mouse jumps. Can discard genuine extreme flicks.">Mouse spike protection</label>
+                        <input type="checkbox" id="setting-mouse-spike-protection">
+                        <span class="settings-value" id="setting-mouse-spike-protection-value">Off</span>
                     </div>
                     <div class="settings-row">
                         <label for="setting-fov">FOV</label>

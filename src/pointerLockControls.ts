@@ -1,18 +1,22 @@
 import { Camera, EventDispatcher } from 'three';
-import { MouseMovementFilter } from './mouseMovement.js';
+import { MouseMovementFilter, MouseMovementResampler } from './mouseMovement.js';
 import { applyLookInput } from './lookInput.js';
+import { POINTER_RADIANS_PER_UNIT } from './config.js';
 
 type LockElement = HTMLElement & {
     requestPointerLock(options?: { unadjustedMovement?: boolean }): Promise<void> | void;
 };
 
-/** Pointer-lock camera input with raw-input negotiation and movement-spike protection. */
+/** Shared mouse/trackpad aim with adaptive resampling and optional raw input. */
 export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {}; change: {} }> {
     isLocked = false;
     pointerSpeed = 1;
+    rawMouseInput = false;
+    mouseSpikeProtection = false;
     minPolarAngle = 0;
     maxPolarAngle = Math.PI;
     private readonly filter = new MouseMovementFilter();
+    private readonly resampler = new MouseMovementResampler();
     private pending = false;
     private generation = 0;
 
@@ -41,7 +45,8 @@ export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {};
     private async request(generation: number): Promise<void> {
         try {
             try {
-                await (this.domElement as LockElement).requestPointerLock({ unadjustedMovement: true });
+                if (this.rawMouseInput) await (this.domElement as LockElement).requestPointerLock({ unadjustedMovement: true });
+                else await this.domElement.requestPointerLock();
             } catch (error) {
                 // Unsupported raw input can fall back; focus/permission failures cannot.
                 if (!(error instanceof Error) || error.name !== 'NotSupportedError' || generation !== this.generation) throw error;
@@ -57,6 +62,7 @@ export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {};
     unlock(): void {
         this.generation++;
         this.pending = false;
+        this.resetLook();
         this.domElement.ownerDocument.exitPointerLock();
     }
 
@@ -66,19 +72,32 @@ export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {};
         doc.removeEventListener('mousemove', this.onMove);
         doc.removeEventListener('pointerlockchange', this.onLockChange);
         doc.removeEventListener('pointerlockerror', this.onLockError);
-        this.filter.reset();
+        this.resetLook();
+    }
+
+    resetLook(): void { this.filter.reset(); this.resampler.reset(); }
+
+    /** Publish one aim pose for rendering, homing and every between-frame action. */
+    update(time = performance.now()): void {
+        if (!this.isLocked) return;
+        const movement = this.resampler.advance(time);
+        if (!movement.x && !movement.y) return;
+        applyLookInput(this.camera, -movement.x * POINTER_RADIANS_PER_UNIT * this.pointerSpeed,
+            -movement.y * POINTER_RADIANS_PER_UNIT * this.pointerSpeed,
+            Math.PI / 2 - this.maxPolarAngle, Math.PI / 2 - this.minPolarAngle, time);
+        this.dispatchEvent({ type: 'change' });
     }
 
     private onLockError = (): void => {
         // Some browsers report failure through the event without settling the
         // returned promise. A subsequent Resume click must be allowed to retry.
         this.pending = false;
-        this.filter.reset();
+        this.resetLook();
     };
 
     private onLockChange = (): void => {
         const locked = this.domElement.ownerDocument.pointerLockElement === this.domElement;
-        this.filter.reset();
+        this.resetLook();
         if (locked === this.isLocked) return;
         // Set state before listeners update the HUD or inspect input activation.
         this.isLocked = locked;
@@ -87,10 +106,8 @@ export class PointerLockControls extends EventDispatcher<{ lock: {}; unlock: {};
 
     private onMove = (event: MouseEvent): void => {
         if (!this.isLocked) return;
-        const movement = this.filter.sample(event.movementX, event.movementY, event.timeStamp);
+        const movement = this.filter.sample(event.movementX, event.movementY, event.timeStamp, this.mouseSpikeProtection);
         if (!movement) return;
-        applyLookInput(this.camera, -movement.x * 0.002 * this.pointerSpeed, -movement.y * 0.002 * this.pointerSpeed,
-            Math.PI / 2 - this.maxPolarAngle, Math.PI / 2 - this.minPolarAngle, event.timeStamp);
-        this.dispatchEvent({ type: 'change' });
+        this.resampler.add(movement.x, movement.y, event.timeStamp, performance.now());
     };
 }

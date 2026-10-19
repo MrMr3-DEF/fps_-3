@@ -1,4 +1,8 @@
 export const MAP_SIZE = 2000;
+export const POINTER_RADIANS_PER_UNIT = 0.002;
+export const POINTER_RESAMPLE_MAX_MS = 1000 / 60;
+export const POINTER_RESAMPLE_INITIAL_MS = 1000 / 120;
+export const POINTER_RESAMPLE_RESET_GAP_MS = 100;
 export const PILLAR_COUNT = 900;
 export const PILLAR_WIDTH = 6.0;
 
