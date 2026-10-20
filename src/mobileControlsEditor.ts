@@ -3,6 +3,8 @@ import { createTouchControls, applyTouchLayout, getTouchBounds } from './mobileC
 
 export class MobileControlsEditor {
     isOpen = false;
+    private cancelOpen: (() => void) | null = null;
+    cancel(): void { this.cancelOpen?.(); }
 
     open(savedLayout: TouchLayout, savedFireMode: TouchFireMode, onApply: (layout: TouchLayout, fireMode: TouchFireMode) => void): void {
         if (this.isOpen) return;
@@ -94,9 +96,10 @@ export class MobileControlsEditor {
             root.close();
             confirm.remove();
             root.remove();
-            this.isOpen = false;
+            this.isOpen = false; this.cancelOpen = null;
             previousFocus?.focus();
         };
+        this.cancelOpen = close;
         const requestExit = () => {
             releaseDrag();
             // Applying establishes a new baseline without closing the preview.

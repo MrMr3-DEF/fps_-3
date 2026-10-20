@@ -1,17 +1,20 @@
 import * as THREE from 'three';
 import { state } from './state.js';
 import { resolveThirdPersonCameraPosition, resolveThirdPersonAimTarget } from './thirdPersonCamera.js';
-import { forgottenMecha, queryObstaclesNear, queryObstaclesAlongSegment } from './world.js';
+import { forgottenMecha, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment } from './world.js';
 import { MECHA_ROCKET_SHOT_TIME, MECHA_ROCKET_FIRE_TIME, MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE, NETWORK_TICK_MS, MECHA_NETWORK_INPUT_TIMEOUT_MS, MECHA_NETWORK_REFRESH_MS, PLAYER_HEIGHT, PLAYER_MAX_HP, NETWORK_POSITION_RESPONSE } from './config.js';
 import { PLAYER_BODY_CAMERA_OFFSET } from './playerHitbox.js';
 import type { ForgottenMecha, MechaEvents, MechaPlayer } from './forgottenMecha.js';
 import type { MechaPilotRelease } from './mechaPilotRelease.js';
 import type { MechaBoardPacket, MechaInputPacket, MechaState, MechaEvent, MechaEventPacket } from './mechaNetworkTypes.js';
+import { MechaEndingAuthority, type MechaEndingState } from './mechaEndingTimeline.js';
+import type { MechaEndingReadyPacket } from './mechaNetworkTypes.js';
 import type { NetworkPacket } from './networkTypes.js';
 
 export interface MechaNetworkPort {
     send(packet: NetworkPacket): void;
     players(): MechaPlayer[];
+    endingPeers?(): string[];
     hitTarget(index: number, damage: number, owner: string | null): void;
     acceptedDamage(peerId: string, lifeId: number, attacker: string | null): void;
 }
@@ -19,7 +22,10 @@ export interface MechaPresentation {
     impact: MechaEvents['impact']; release(pose: MechaPilotRelease): void; blocked(): void;
     damage(damage: number, attackerPeerId: string | null): void; gameOver(): void;
     hit(killed: boolean, score: number, local: boolean): void;
+    ending?(scene: MechaEndingState): void;
 }
+let endingAuthority: MechaEndingAuthority | null = null;
+let endingId = 0;
 let activeActor: ForgottenMecha | null = null;
 let port: MechaNetworkPort | null = null;
 let presentation: MechaPresentation | null = null;
@@ -43,7 +49,7 @@ const aimObstacles: THREE.Object3D[] = [];
 export function setMechaNetworkPort(next: MechaNetworkPort): void { port = next; }
 export function setMechaPresentation(next: MechaPresentation): void { presentation = next; }
 export function resetMechaNetwork(): void {
-    activeActor = null;
+    activeActor = null; endingAuthority = null; endingId = 0;
     sequence = eventSequence = inputSequence = 0; receivedSequence = receivedEvent = -1;
     lastPublish = lastInputSent = lastInputReceived = -Infinity; previousFingerprint = previousPhase = '';
     replica = input = null; boardStart = null; yaw = pitch = 0; helmet = exit = false;
@@ -51,8 +57,39 @@ export function resetMechaNetwork(): void {
 }
 export function captureMechaSnapshot(): MechaState | undefined {
     const actor = activeActor;
-    return actor?.ready && actor.networked ? actor.captureNetworkState(++sequence, state.matchEnded) : undefined;
+    return actor?.ready && actor.networked ? endingSnapshot(actor.captureNetworkState(++sequence, state.matchEnded)) : undefined;
 }
+function endingSnapshot(snapshot: MechaState): MechaState {
+    if (endingAuthority) snapshot.ending = endingAuthority.snapshot(performance.now());
+    return snapshot;
+}
+function commitEnding(): void {
+    const actor = activeActor;
+    if (!state.isHost || state.matchEnded || !actor) return;
+    state.matchEnded = true;
+    actor.clearPendingDamage(); actor.pilot.rockets.clear(); pendingDamage.length = 0; input = null;
+    const seed = getWorldSeed();
+    endingAuthority = new MechaEndingAuthority({ id: ++endingId, seed, effectsSeed: (seed ^ 0x6d2b79f5) >>> 0,
+        position: vector(actor.group.position), heading: actor.group.rotation.y,
+        lightingElapsed: ((state.dayNightElapsedSeconds % 480) + 480) % 480 }, performance.now(),
+        port?.endingPeers?.() ?? port?.players().flatMap(p => p.peerId && p.peerId !== state.peer?.id ? [p.peerId] : []) ?? []);
+    publish(true);
+}
+export function markMechaEndingReady(id: number): void {
+    if (!activeActor || id !== (endingAuthority?.snapshot(performance.now()).id ?? replica?.ending?.id)) return;
+    if (state.isHost) {
+        if (endingAuthority?.markLocalReady(performance.now())) publish(true);
+    } else port?.send({ type: 'mecha_ending_ready', id, revision: activeActor.revision });
+}
+/** Admission is checked by the router; ownership and scene identity are checked
+ * here as well. Readiness is independent of the viewer's player life/health. */
+export function acceptMechaEndingReady(peerId: string, packet: MechaEndingReadyPacket): boolean {
+    if (!state.isHost || !endingAuthority || !activeActor || packet.revision !== activeActor.revision ||
+        packet.senderPeerId !== undefined && packet.senderPeerId !== peerId ||
+        packet.id !== endingAuthority.snapshot(performance.now()).id || !endingAuthority.markPeerReady(peerId)) return false;
+    publish(true); return true;
+}
+export function updateMechaEndingNetwork(): void { if (state.isHost && endingAuthority) publish(); }
 function publish(force = false): void {
     const actor = activeActor, now = performance.now();
     if (!actor?.ready || !state.isHost) return;
@@ -60,14 +97,15 @@ function publish(force = false): void {
     const phase = `${firing}:${actor.pilot.rockets.activeCount}:${actor.revision}:${actor.mode}:${actor.combat.laserPhase}:${actor.combat.shieldPhase}:${actor.pilotPeerId}:${actor.headView.phase}`;
     force ||= phase !== previousPhase;
     if (!force && now - lastPublish < NETWORK_TICK_MS) return;
-    const snapshot = actor.captureNetworkState(sequence + 1, state.matchEnded);
+    const snapshot = endingSnapshot(actor.captureNetworkState(sequence + 1, state.matchEnded));
     const fingerprint = JSON.stringify({ ...snapshot, sequence: 0 });
     if (!force && fingerprint === previousFingerprint && now - lastPublish < MECHA_NETWORK_REFRESH_MS) return;
     sequence++; previousPhase = phase; previousFingerprint = fingerprint; lastPublish = now;
     port?.send({ type: 'mecha_state', state: snapshot });
+    if (snapshot.ending) presentation?.ending?.(snapshot.ending);
 }
 function emit(event: MechaEvent): void {
-    if (!state.isHost) return;
+    if (!state.isHost || endingAuthority) return;
     const snapshot = captureMechaSnapshot(); if (!snapshot) return;
     const packet: MechaEventPacket = { type: 'mecha_event', sequence: ++eventSequence, state: snapshot, event };
     if (event.kind === 'damage') port?.acceptedDamage(event.peerId, event.lifeId, event.attackerPeerId);
@@ -78,6 +116,7 @@ export function multiplayerMechaEvents(): MechaEvents {
     return {
         impact: (impact, position) => emit({ kind: 'impact', impact, position: vector(position) }),
         stompPlayer() {},
+        wallPunchStarted: commitEnding,
         playerHit: (player, damage, attack, attackerPeerId = null) => {
             if (player.peerId) emit({ kind: 'damage', peerId: player.peerId, lifeId: player.lifeId ?? 0, damage: attack === 'stomp' ? PLAYER_MAX_HP : damage, attack, attackerPeerId });
         },
@@ -99,6 +138,11 @@ export function initializeNetworkMecha(actor = forgottenMecha): void {
 }
 export function receiveMechaState(snapshot: MechaState): void {
     if (snapshot.sequence <= receivedSequence || !activeActor?.ready) return;
+    // Once committed, a delayed normal snapshot cannot resume the match or
+    // replace the scene identity. Sequence checks alone do not express this.
+    if (replica?.ending && (!snapshot.ending || snapshot.ending.id !== replica.ending.id ||
+        snapshot.ending.elapsed < replica.ending.elapsed ||
+        JSON.stringify({ ...snapshot.ending, phase: '', elapsed: 0 }) !== JSON.stringify({ ...replica.ending, phase: '', elapsed: 0 }))) return;
     receivedSequence = snapshot.sequence;
     const actor = activeActor, previousMode = actor.mode, wasLocal = actor.ownsLocalPilot, changed = !replica || actor.mode !== snapshot.mode || actor.revision !== snapshot.revision;
     replica = snapshot; actor.localPeerId = state.peer?.id ?? null;
@@ -111,13 +155,17 @@ export function receiveMechaState(snapshot: MechaState): void {
         actor.localPilotPresentation = true; boardStart = null;
         actor.transitionCamera.begin('entry', state.isThirdPerson, state.camera.position, state.camera.quaternion, state.rightClickActive);
     }
-    if (snapshot.matchEnded) { state.matchEnded = true; presentation?.gameOver(); }
+    if (snapshot.ending) {
+        state.matchEnded = true; pendingDamage.length = 0; actor.clearPendingDamage(); actor.pilot.rockets.clear();
+        presentation?.ending?.(snapshot.ending);
+    } else if (snapshot.matchEnded) { state.matchEnded = true; presentation?.gameOver(); }
 }
 export function receiveMechaEvent(packet: MechaEventPacket): void {
     if (packet.sequence <= receivedEvent) return;
     receivedEvent = packet.sequence; receiveMechaState(packet.state); applyEvent(packet);
 }
 function applyEvent(packet: MechaEventPacket): void {
+    if (endingAuthority || replica?.ending) return;
     const event = packet.event;
     if (event.kind === 'end') { state.matchEnded = true; presentation?.gameOver(); return; }
     if (event.kind === 'impact') { presentation?.impact(event.impact, new THREE.Vector3(event.position.x, event.position.y, event.position.z)); return; }
@@ -160,6 +208,7 @@ export function acknowledgeMechaRender(): void {
     }
 }
 export function flushMechaDamage(): void {
+    if (state.matchEnded) { pendingDamage.length = 0; return; }
     for (let i = 0; i < pendingDamage.length;) {
         const hit = pendingDamage[i], event = hit.packet.event;
         if (event.kind !== 'damage' || event.lifeId !== state.lifeId || state.playerHp <= 0 || hit.packet.state.revision !== activeActor?.revision) { pendingDamage.splice(i, 1); continue; }
@@ -241,6 +290,7 @@ export function syncRemoteMechaPilot(): void {
     }
 }
 export function mechaPeerLeft(peerId: string): void {
+    if (endingAuthority) { endingAuthority.removePeer(peerId); publish(true); }
     approaches.delete(peerId); commandSequences.delete(peerId);
     if (state.isHost && activeActor?.pilotPeerId === peerId) { detachRemotePilot(peerId); activeActor.abandonPilot(); input = null; publish(true); }
 }

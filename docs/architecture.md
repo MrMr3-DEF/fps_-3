@@ -62,7 +62,8 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `dayNightCycle.ts` | Eight-minute sky cycle, moving sun/moon, ambient lighting, fog color, and camera-following sun shadows |
 | `config.ts` | Shared gameplay constants, world counts, network limits, weapon statistics |
 | `state.ts` | Mutable client runtime state and reset helpers |
-| `world.ts` | Deterministic staged/synchronous arena construction, procedural textures, render chunks, spatial indexes, targets, town/lava lighting, world disposal |
+| `world.ts` | Deterministic staged/synchronous arena construction, render chunks, spatial indexes, targets, town/lava lighting, world disposal |
+| `seededScenery.ts` | Shared grass/pillar/lava/vegetation recipes and original RNG order, with explicit rendering/collision ownership ports |
 | `worldLoading.ts` | Loading-overlay paint, stage checkpoints, and cancellation generation |
 | `renderPreparation.ts` | Offscreen WebGL resource upload and day/night shader preparation before play |
 | `lavaGlow.ts` | Per-world texture baking for continuous lava light spill and source-chunk visibility |
@@ -91,6 +92,8 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `gothKnowledge.ts`, `gothChatConsent.ts` | Character-file retrieval/prompt context and first-use model consent |
 | `settings.ts` | Settings schema, validation, persistence, renderer settings, particle scaling |
 | `multiplayer.ts` | PeerJS lifecycle, host/client topology, packet authorization and relay, world synchronization, peer avatars and interpolation |
+| `mechaEndingTimeline.ts`, `mechaEndingPlayback.ts`, `mechaGameOverScene.ts`, `mechaEndingCastle.ts` | Shared terminal clock/readiness, async presentation lifecycle, deterministic on-demand castle destruction and fixed cinematic camera |
+| `mechaEndingScenery.ts`, `mechaEndingDebris.ts`, `mechaEndingCamera.ts` | Seeded ending landscape, bounded precomputed pillar contacts and obstruction-aware close camera |
 | `mechaNetwork.ts`, `mechaNetworkTypes.ts` | Host-owned mecha commands/state/events, exclusive pilot ownership, bounded replication, victim render acknowledgment |
 | `networkTypes.ts` | Packet types and runtime validation of untrusted WebRTC data |
 | `turnSecurity.ts` | Browser calls to the Worker and explicit Turnstile widget lifecycle |
@@ -183,8 +186,13 @@ Each match prepares one [Forgotten Mecha](forgotten-mecha.md) before
 renderer preparation. It navigates from a reachable random border point toward an
 outer castle wall, stops to track visible nearby players, and can stomp grounded
 players or beans touching its animated legs at impact. Initial defeat aligns the
-torso to the legs at 90 degrees/s, then Death holds its solid final pose; finishing an invulnerable wall punch
-sets the terminal match latch and opens Game Over. Dynamic body proxies are
+torso to the legs at 90 degrees/s, then Death holds its solid final pose. Wall arrival
+commits an invulnerable loss before the punch advances. A separate terminal frame
+branch freezes gameplay and plays the shared ending, then opens Game Over after
+the full punch and three-second aftermath. The cinematic castle is created only
+under black at activation; seeded world geometry/collision remain intact. Host
+snapshots and a bounded viewer-readiness barrier own the ending timeline. Late
+viewers seek that clock after preparation instead of restarting the punch. Dynamic body proxies are
 appended to spatial queries without changing static collision or visibility
 indexes. The actor and its reflection texture belong to the match and are
 disposed even when startup is cancelled. Multiplayer starts its host simulation

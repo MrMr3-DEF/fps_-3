@@ -9,7 +9,8 @@ import { state } from '../src/state.ts';
 import { MechaRockets, type RocketPlayer } from '../src/mechaRockets.ts';
 import { initializeNetworkMecha, resetMechaNetwork, setMechaNetworkPort, setMechaPresentation, updateMechaNetwork,
     acceptMechaCommand, mechaPeerLeft, receiveMechaState, receiveMechaEvent, acknowledgeMechaRender, flushMechaDamage,
-    multiplayerMechaEvents } from '../src/mechaNetwork.ts';
+    multiplayerMechaEvents, captureMechaSnapshot, markMechaEndingReady, acceptMechaEndingReady, updateMechaEndingNetwork } from '../src/mechaNetwork.ts';
+import { MECHA_ENDING_DURATION, type MechaEndingState } from '../src/mechaEndingTimeline.ts';
 import type { MechaInputPacket, MechaEventPacket, MechaState } from '../src/mechaNetworkTypes.ts';
 
 const absent = { position: new THREE.Vector3(), alive: false, grounded: false };
@@ -35,6 +36,78 @@ function command(a: ForgottenMecha, sequence: number, rest: Partial<MechaInputPa
         shield: false, fire: false, helmet: false, exit: false, thirdPerson: false, secondaryHeld: false, viewThirdPerson: false, fov: 75, aspect: 1, ...rest };
 }
 function cleanup(a: ForgottenMecha) { resetMechaNetwork(); a.dispose(); state.isMultiplayer = state.isHost = state.isPlaying = false; state.matchEnded = false; state.peer = null; }
+
+test('wall arrival commits loss before the first punch tick and shares readiness with paused/dead viewers', async t => {
+    let now = 1000; t.mock.method(performance, 'now', () => now);
+    const a = await actor(multiplayerMechaEvents());
+    const viewers = [player('paused', 800, 2, 800), { ...player('dead', 800, 2, 800), alive: false }];
+    const packets = host(a, viewers), endings: MechaEndingState[] = [];
+    let overlays = 0;
+    setMechaPresentation({ impact() {}, release() {}, blocked() {}, damage() {}, gameOver: () => overlays++, hit() {}, ending: s => endings.push(s) });
+    try {
+        state.dayNightElapsedSeconds = 780;
+        const goal = a.route!.points.at(-1)!;
+        a.group.position.set(goal.x, 0, goal.z); a.followRoute({ points: [goal, goal], heading: a.route!.heading });
+        updateMechaNetwork(1 / 60);
+        assert.equal(state.matchEnded, true); assert.equal(a.mode, 'punching'); assert.equal(a.elapsed, 0);
+        assert.equal(overlays, 0); assert.equal(endings.length, 1);
+        assert.equal(endings[0].lightingElapsed, 300);
+        assert.deepEqual(endings[0].position, { x: goal.x, y: 0, z: goal.z });
+        assert.ok(parseNetworkPacket(unpack(await pack(packets.at(-1)))));
+        assert.equal(a.damage(50).accepted, false, 'loss cannot be reversed after commitment');
+        now = 1500; markMechaEndingReady(endings[0].id);
+        const ready = { type: 'mecha_ending_ready' as const, id: endings[0].id, revision: a.revision };
+        assert.equal(acceptMechaEndingReady('intruder', ready), false);
+        assert.equal(acceptMechaEndingReady('paused', { ...ready, senderPeerId: 'dead' }), false);
+        assert.equal(acceptMechaEndingReady('paused', { ...ready, revision: a.revision + 1 }), false);
+        assert.equal(acceptMechaEndingReady('paused', { ...ready, id: ready.id + 1 }), false);
+        assert.equal(acceptMechaEndingReady('paused', ready), true);
+        assert.equal(acceptMechaEndingReady('paused', ready), false);
+        assert.equal(captureMechaSnapshot()!.ending!.phase, 'preparing');
+        mechaPeerLeft('dead');
+        assert.equal(captureMechaSnapshot()!.ending!.phase, 'playing');
+        now += 4000; updateMechaEndingNetwork();
+        assert.equal(captureMechaSnapshot()!.ending!.elapsed, 4.45);
+        assert.equal(a.elapsed, 0); assert.equal(overlays, 0);
+        now += 6000;
+        const lateJoin = captureMechaSnapshot()!;
+        assert.equal(lateJoin.ending!.elapsed, MECHA_ENDING_DURATION);
+        assert.equal(lateJoin.ending!.phase, 'complete'); assert.ok(parseNetworkPacket({ type: 'mecha_state', state: lateJoin }));
+        resetMechaNetwork(); initializeNetworkMecha(a);
+        assert.equal(captureMechaSnapshot()!.ending, undefined, 'new session cannot carry an old ending');
+    } finally { cleanup(a); }
+});
+
+test('ending metadata is validated and late replicas suppress old damage and immediate end overlays', async () => {
+    const a = await actor(); host(a, []); state.isHost = false; state.playerHp = 0;
+    const scenes: MechaEndingState[] = []; let overlays = 0, damage = 0;
+    setMechaPresentation({ impact() {}, release() {}, blocked() {}, damage: () => damage++, gameOver: () => overlays++, hit() {}, ending: s => scenes.push(s) });
+    try {
+        const base = a.captureNetworkState(1, true); base.mode = 'punching'; base.heading = Math.PI / 2;
+        base.ending = { id: 1, seed: 42, effectsSeed: 123, position: { ...base.position }, heading: base.heading, lightingElapsed: 150, phase: 'playing', elapsed: 4 };
+        assert.ok(parseNetworkPacket(unpack(await pack({ type: 'mecha_state', state: base }))));
+        for (const change of [
+            (s: MechaState) => { s.ending!.elapsed = Infinity; }, (s: MechaState) => { s.ending!.elapsed = -1; },
+            (s: MechaState) => { s.ending!.seed = -1; }, (s: MechaState) => { s.ending!.position.x++; },
+            (s: MechaState) => { s.ending!.phase = 'preparing'; }, (s: MechaState) => { s.ending!.phase = 'complete'; },
+            (s: MechaState) => { s.matchEnded = false; }, (s: MechaState) => { s.mode = 'walking'; },
+            (s: MechaState) => { s.ending!.heading = .3; }, (s: MechaState) => { s.ending!.effectsSeed = 2 ** 32; },
+            (s: MechaState) => { s.ending!.lightingElapsed = 481; },
+        ]) { const next = structuredClone(base); change(next); assert.equal(parseNetworkPacket({ type: 'mecha_state', state: next }), null); }
+        assert.equal(parseNetworkPacket({ type: 'mecha_ending_ready', id: 0, revision: 0 }), null);
+        assert.equal(parseNetworkPacket({ type: 'mecha_ending_ready', id: 1, revision: -1 }), null);
+        assert.ok(parseNetworkPacket({ type: 'mecha_ending_ready', id: 1, revision: 0 }));
+        receiveMechaState(base); assert.equal(state.matchEnded, true); assert.equal(overlays, 0); assert.equal(scenes.at(-1)!.elapsed, 4);
+        receiveMechaState(base); assert.equal(scenes.length, 1);
+        receiveMechaState({ ...base, sequence: 2, ending: undefined }); assert.equal(scenes.length, 1);
+        receiveMechaState({ ...base, sequence: 3, ending: { ...base.ending!, elapsed: 3 } }); assert.equal(scenes.length, 1);
+        receiveMechaEvent({ type: 'mecha_event', sequence: 1, state: base, event: { kind: 'end' } });
+        receiveMechaEvent({ type: 'mecha_event', sequence: 2, state: base, event: { kind: 'damage', peerId: 'host', lifeId: 0, damage: 10, attack: 'stomp', attackerPeerId: null } });
+        acknowledgeMechaRender(); flushMechaDamage(); assert.equal(damage, 0); assert.equal(overlays, 0);
+        receiveMechaState({ ...base, sequence: 4, ending: { ...base.ending!, elapsed: MECHA_ENDING_DURATION, phase: 'complete' } });
+        assert.equal(scenes.at(-1)!.phase, 'complete'); assert.equal(overlays, 0, 'presentation owns the final overlay after local readiness');
+    } finally { cleanup(a); }
+});
 
 test('actual rig snapshots round-trip through BinaryPack and strict packet parsing, including active rockets', async () => {
     const a = await actor(); host(a, []);

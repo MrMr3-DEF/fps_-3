@@ -1,4 +1,6 @@
-import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork } from './mechaNetwork.js';
+import { MechaEndingAuthority, type MechaEndingState } from './mechaEndingTimeline.js';
+import { MechaEndingPlayback } from './mechaEndingPlayback.js';
+import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork } from './mechaNetwork.js';
 import { deriveHudPresentation } from './hudPresentation.js';
 import { cancelWorldLoading, isWorldLoading, isWorldReveal, withWorldLoading, type WorldLoadingMode } from './worldLoading.js';
 import { prepareRenderer } from './renderPreparation.js';
@@ -85,6 +87,9 @@ import { resolveThirdPersonAimTarget, resolveThirdPersonCameraPosition, MechaCam
 import { releaseMechaPilot, type MechaPilotRelease } from './mechaPilotRelease.js';
 import { applyHitmarkerSettings, flashHitmarker } from './hitmarker.js';
 
+let endingPlayback: MechaEndingPlayback | null = null;
+let offlineEnding: MechaEndingAuthority | null = null;
+let endingCover: HTMLDivElement | null = null;
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
 let dayNightCycle: DayNightCycle | null = null;
@@ -758,6 +763,7 @@ function setupInputListeners(): void {
     // Reacquire after key release so Escape cannot immediately unlock the new session.
     let resumeOnEscapeUp = false;
     const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }, code = e.code) => {
+        if (state.matchEnded) return;
         // O is a vehicle-only binding, outside the bean's rebindable actions.
         if (e.code === 'KeyO' && forgottenMecha?.ownsLocalPilot) code = 'KeyO';
         if (e.code === 'Tab' && state.isMultiplayer && state.isPlaying && isInputActive()) {
@@ -1065,6 +1071,9 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
     if (disposingGameRuntime) return;
     disposingGameRuntime = true;
     try {
+        endingPlayback?.dispose(); endingPlayback = null; offlineEnding = null;
+        endingCover?.remove(); endingCover = null; document.body.classList.remove('mecha-ending');
+        mobileControlsEditor.cancel();
         clearApproachWarning();
         hasRenderedAim = false;
         mechaCameraHandoff.reset();
@@ -1149,6 +1158,7 @@ async function loadPreparedWorld(
             laserPlayer: damage => takePlayerDamage(damage, 'Forgotten Mecha'),
             rocketPlayer: damage => takePlayerDamage(damage, 'Forgotten Mecha'),
             gameOver: () => triggerDeath(true),
+            wallPunchStarted: commitOfflineMechaEnding,
             pilotReleased: pose => { if (state.scene === scene) onMechaPilotReleased(pose); },
             exitBlocked: () => { if (state.scene === scene) exitWarningRemaining = 3; },
         }, checkpoint);
@@ -1654,6 +1664,7 @@ function setupSettingsControls(): void {
 function init(): void {
     setDamageHandlers(processTargetHit, takePlayerDamage, processMechaDamage);
     setMechaPresentation({ impact: mechaImpact, release: onMechaPilotReleased,
+        ending: startMechaEnding,
         blocked: () => { exitWarningRemaining = 3; }, gameOver: () => triggerDeath(true),
         damage: (damage, attacker) => takePlayerDamage(damage, attacker ? state.lobbyPlayers.find(p => p.peerId === attacker)?.username ?? 'Guest' : 'Forgotten Mecha', attacker ?? undefined),
         hit: (killed, score, local) => { if (local) flashHitmarker(killed); if (UI.score) UI.score.innerText = String(score); },
@@ -1808,11 +1819,67 @@ function init(): void {
     animate();
 }
 
+/** A committed loss freezes the live canvas immediately. Asset preparation may
+ * overlap fade-out, but castle duplication and GPU warming start only under black. */
+function startMechaEnding(scene: MechaEndingState): void {
+    const now = performance.now();
+    if (endingPlayback) { endingPlayback.receive(scene, now); return; }
+    state.matchEnded = true;
+    document.body.classList.add('mecha-ending');
+    mobileControlsEditor.cancel();
+    endInput(); setPlayerListVisible(false); clearApproachWarning(); clearMechaHeadPresentation();
+    mountedFireRequested = false; hasRenderedAim = false;
+    cameraShake.reset(); mechaCameraHandoff.reset(); conversationCamera.cancel();
+    gothChat?.close(false); smartGoggles?.reset(); resetHook(); cancelInspect();
+    state.velocity.set(0, 0, 0); state.isHovering = false;
+    for (const panel of [UI.blocker, UI.panelMain, UI.panelSettings, UI.panelMp, UI.panelPause, UI.panelHostWaiting, UI.panelJoinRoom, UI.deathOverlay]) {
+        if (panel) panel.style.display = 'none';
+    }
+    const gameOver = document.getElementById('game-over-overlay');
+    if (gameOver) gameOver.style.display = 'none';
+    endingCover = document.createElement('div'); endingCover.id = 'mecha-ending-cover';
+    endingCover.setAttribute('aria-hidden', 'true'); document.body.append(endingCover);
+    syncGameHud();
+    endingPlayback = new MechaEndingPlayback(scene, now, {
+        prepare: async committed => {
+            const { MechaGameOverScene } = await import('./mechaGameOverScene.js');
+            return MechaGameOverScene.prepare({ seed: committed.seed, effectsSeed: committed.effectsSeed,
+                position: new THREE.Vector3(committed.position.x, committed.position.y, committed.position.z),
+                heading: committed.heading, wallOffset: 0, lightingElapsed: committed.lightingElapsed,
+                particleAmount: userSettings.particleAmount, photosensitivity: userSettings.photosensitivityMode,
+                reducedMotion: reducedHeadMotion.matches, seededScenery: true });
+        },
+        cover: opacity => { if (endingCover) endingCover.style.opacity = String(opacity); },
+        ready: id => {
+            if (state.isMultiplayer) markMechaEndingReady(id);
+            else offlineEnding?.markLocalReady(performance.now());
+        },
+        complete: () => triggerDeath(true),
+        failed: error => console.error('Unable to prepare the mecha ending', error),
+    });
+}
+function commitOfflineMechaEnding(): void {
+    const actor = forgottenMecha;
+    if (!actor || state.matchEnded) return;
+    const seed = getWorldSeed();
+    offlineEnding = new MechaEndingAuthority({ id: 1, seed, effectsSeed: (seed ^ 0x6d2b79f5) >>> 0,
+        position: { x: actor.group.position.x, y: actor.group.position.y, z: actor.group.position.z },
+        heading: actor.group.rotation.y, lightingElapsed: ((state.dayNightElapsedSeconds % 480) + 480) % 480 }, performance.now());
+    startMechaEnding(offlineEnding.snapshot(performance.now()));
+}
+
 // Main frame loop. Order matters: input-driven systems update first, then gameplay
 // collisions/damage, then remote sync and rendering.
 function animate(): void {
     requestAnimationFrame(animate);
     syncGameHud();
+    // This terminal presentation bypasses ordinary pause, death and input gates.
+    if (endingPlayback && state.renderer) {
+        const now = performance.now();
+        if (state.isMultiplayer) updateMechaEndingNetwork();
+        else if (offlineEnding) endingPlayback.receive(offlineEnding.snapshot(now), now);
+        endingPlayback.update(now, state.renderer); state.prevTime = now; return;
+    }
     if (mobileControlsEditor.isOpen) {
         state.controls?.resetLook();
         updateApproachWarning(0, false);
@@ -1948,6 +2015,7 @@ function animate(): void {
             state.isMouseDown || mountedFireRequested, isInputActive() && state.playerHp > 0);
         updateMechaNetwork(delta);
     }
+    if (state.matchEnded) { state.prevTime = time; return; }
     const mountedActor = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
     syncMountedControls(Boolean(mountedActor));
     if (mountedActor && state.camera) {
@@ -2166,7 +2234,7 @@ function animate(): void {
 }
 
 export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {
-    if (!state.isPlaying || state.playerHp <= 0) return;
+    if (!state.isPlaying || state.matchEnded || state.playerHp <= 0) return;
     if (forgottenMecha?.ownsLocalPilot) { processMechaDamage(damage); return; }
 
     state.playerHp = Math.max(0, state.playerHp - damage);
@@ -2194,6 +2262,7 @@ export function takePlayerDamage(damage: number, attackerName: string, attackerP
 }
 
 export function triggerDeath(gameOver = false): void {
+    if (state.matchEnded && !gameOver) return;
     resetHealthBarFlash();
     clearApproachWarning();
     if (!state.isMultiplayer) {

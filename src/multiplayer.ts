@@ -1,4 +1,4 @@
-import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, resetMechaNetwork, acceptMechaCommand, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
+import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, resetMechaNetwork, acceptMechaCommand, acceptMechaEndingReady, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
 import type { MechaHitPacket } from './mechaNetworkTypes.js';
 import { TargetMotionHistory, type HomingFireContext } from './projectileFlight.js';
 import { hasLineOfSightToOrientedBox } from './targetVisibility.js';
@@ -165,6 +165,7 @@ function enterMultiplayerMatch(): void {
     // requestAnimationFrame can stop in a paused/background tab. This timer
     // catches healing up from elapsed time and publishes only confirmed changes.
     healthInterval = setInterval(() => {
+        if (state.matchEnded) return;
         if (forgottenMecha?.ownsLocalPilot) state.regenUpdatedAt = performance.now();
         else if (state.isMultiplayer && state.isPlaying && updateHealthRegen(0)) sendLocalState(true);
     }, 250);
@@ -1458,6 +1459,10 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
 
     let msg: NetworkPacket = parsed;
     if (state.isHost) {
+        if (msg.type === 'mecha_ending_ready') {
+            if (isKnownClient(fromPeerId)) acceptMechaEndingReady(fromPeerId, msg);
+            return;
+        }
         if (msg.type === 'mecha_input' || msg.type === 'mecha_board') {
             if (isKnownClient(fromPeerId)) acceptMechaCommand(fromPeerId, msg);
             return;
@@ -1549,6 +1554,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             state.dayNightElapsedSeconds = msg.dayNightElapsedSeconds;
             state.dayNightSyncPending = true;
         }
+        if (state.matchEnded) return;
         if (!clientWorldSynchronized || (!state.isPlaying && msg.type !== 'kill_target')) return;
     }
 
@@ -2170,6 +2176,7 @@ export function authorizeMechaHit(peerId: string, packet: MechaHitPacket): boole
 setMechaNetworkPort({
     send: broadcastToAll,
     players: mechaPlayers,
+    endingPeers: () => state.connections.filter(conn => conn.open && isKnownClient(conn.peer)).map(conn => conn.peer),
     hitTarget: (index, damage, owner) => processTargetHit(index, damage, owner ?? undefined),
     acceptedDamage: (peerId, lifeId, attacker) => {
         mechaDamageByVictim.set(peerId, { lifeId, attacker, at: performance.now() });

@@ -257,3 +257,5 @@ export const MAX_RENDER_DISTANCE_CHUNKS = 16;
 export const MECHA_NETWORK_INPUT_TIMEOUT_MS = 250;
 export const MECHA_NETWORK_REFRESH_MS = 250;
 export const MECHA_NETWORK_MAX_BONES = 192;
+// A connected but unresponsive viewer must not hold the ending indefinitely.
+export const MECHA_ENDING_READY_TIMEOUT_MS = 10000;

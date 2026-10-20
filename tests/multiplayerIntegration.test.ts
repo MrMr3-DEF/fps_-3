@@ -672,3 +672,49 @@ test('real host authorizes mecha shield/body claims once, rejects fabricated dam
         ForgottenMecha.prototype.load = originalLoad; world.disposeWorld(); disconnectMultiplayer(); globalThis.document = originalDocument;
     }
 });
+
+test('actual router rejects guest ending authority, accepts admitted readiness after loss and snapshots late viewers', async t => {
+    const { ForgottenMecha } = await import('../src/forgottenMecha.ts');
+    const { loadIronmawTestAsset } = await import('./ironmawTestAsset.ts');
+    const world = await import('../src/world.ts');
+    const coordinator = await import('../src/mechaNetwork.ts');
+    const originalLoad = ForgottenMecha.prototype.load, originalDocument = globalThis.document;
+    const context = new Proxy({}, { get: () => () => {} });
+    (globalThis as any).document = { getElementById: () => null, createElement: () => ({ getContext: () => context }) };
+    ForgottenMecha.prototype.load = async function () { this.install(await loadIronmawTestAsset()); };
+    let now = 1000; t.mock.method(performance, 'now', () => now);
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room'); Peer.latest.emit('open', state.peer!.id);
+        const admission = await registerTurnSession('ABCDEFGH', 'join-room', 'Viewer', 'ending-viewer');
+        const viewer = new Connection('ending-viewer', { admissionToken: admission.admissionToken });
+        Peer.latest.emit('connection', viewer); await tick(); await tick(); startHostMatch();
+        state.scene = new THREE.Scene(); world.rebuildEnvironmentWithSeed(42);
+        await world.prepareForgottenMecha(coordinator.multiplayerMechaEvents(), async () => {}); coordinator.initializeNetworkMecha();
+        const actor = world.forgottenMecha!, goal = actor.route!.points.at(-1)!;
+        const forged = actor.captureNetworkState(999, true); forged.mode = 'punching'; forged.heading = 0;
+        forged.ending = { id: 1, seed: 42, effectsSeed: 7, position: { ...forged.position }, heading: 0, lightingElapsed: 150, phase: 'complete', elapsed: .45 + .6 + .5 + 85 / 24 + 3 };
+        assert.ok(parseNetworkPacket({ type: 'mecha_state', state: forged }));
+        viewer.emit('data', { type: 'mecha_state', state: forged });
+        assert.equal(state.matchEnded, false, 'a syntactically valid ending still cannot be guest-authoritative');
+        actor.group.position.set(goal.x, 0, goal.z); actor.followRoute({ points: [goal, goal], heading: actor.route!.heading });
+        coordinator.updateMechaNetwork(1 / 60); assert.equal(state.matchEnded, true);
+        const ending = coordinator.captureMechaSnapshot()!.ending!;
+        now = 1500; coordinator.markMechaEndingReady(ending.id);
+        assert.equal(coordinator.captureMechaSnapshot()!.ending!.phase, 'preparing');
+        viewer.emit('data', { type: 'mecha_ending_ready', id: ending.id, revision: actor.revision, senderPeerId: 'someone-else' });
+        assert.equal(coordinator.captureMechaSnapshot()!.ending!.phase, 'preparing');
+        viewer.emit('data', { type: 'mecha_ending_ready', id: ending.id, revision: actor.revision });
+        assert.equal(coordinator.captureMechaSnapshot()!.ending!.phase, 'playing');
+        const count = viewer.sent.length;
+        viewer.emit('data', { type: 'mecha_ending_ready', id: ending.id, revision: actor.revision });
+        assert.equal(viewer.sent.length, count, 'duplicate acknowledgments do not amplify broadcasts');
+        now += 4200; coordinator.updateMechaEndingNetwork();
+        const lateAdmission = await registerTurnSession('ABCDEFGH', 'join-room', 'Late', 'ending-late');
+        const late = new Connection('ending-late', { admissionToken: lateAdmission.admissionToken });
+        Peer.latest.emit('connection', late); await tick(); await tick();
+        const snapshot = late.sent.find(p => p.type === 'world_snapshot');
+        assert.ok(parseNetworkPacket(snapshot)); assert.equal(snapshot.mecha.ending.id, ending.id);
+        assert.equal(snapshot.mecha.ending.elapsed, 4.65); assert.equal(snapshot.mecha.ending.phase, 'playing');
+    } finally { ForgottenMecha.prototype.load = originalLoad; world.disposeWorld(); disconnectMultiplayer(); globalThis.document = originalDocument; }
+});

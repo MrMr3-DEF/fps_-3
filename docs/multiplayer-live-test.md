@@ -90,3 +90,59 @@ TypeScript projects and all 450 tests, and the production build is regenerated.
 Production asset references, changed documentation links and whitespace pass;
 the protected follow-up list remains unchanged. All fixture browser pages and
 local signalling, Worker and TURN services were closed afterward.
+
+
+## Shared Game Over cutscene — 20 October 2026
+
+The approved close camera and whole-castle explosion are connected to actual
+wall arrival. Three embedded browser pages exercised production client code and
+real PeerJS RTC channels through the temporary loopback TURN/signalling fixture.
+The Worker and SQLite Durable Objects ran locally with dummy credentials and
+mocked external Turnstile/ICE responses; production security configuration was
+unchanged. Test controls placed the actor at its actual route destination and
+selected viewer pause/death; the real wall-commit callback and network lifecycle ran.
+
+A paused host and dead guest both hid their prior overlays and completed the
+shared cutscene. A four-second delayed guest preparation held the host's scene
+before reveal. A subsequent three-viewer run covered a waiting/paused guest and
+a third browser joining during destruction: it caught up to the current shot
+and reached the final Game Over without replaying the punch. Rejoining after
+completion recovered the final shot directly. Host departure
+removed all active renderers and cleared the committed loss. The successful
+runs reported no browser warnings/errors. The temporary loader was corrected
+before the final late-join run to avoid importing the composition root twice.
+
+Both TypeScript projects and all 469 tests pass. The production build regenerated
+tracked `dist/`, including a lazy presentation chunk; its existing large-chunk
+warning remains. Focused regressions cover malformed/forged ending packets,
+duplicate readiness, stale events, mid-scene/final snapshots, readiness timeout,
+async cancellation, deterministic destruction and renderer/resource ownership.
+These are local results; no deployment or external-service/device verification
+was performed for this change. All temporary browser pages and loopback services
+were closed after validation.
+
+## Seeded ending scenery integration — 20 October 2026
+
+After visual approval, gameplay enables the same seeded scenery and baked pillar
+contacts as the preview. Three embedded browsers ran the production wall-arrival
+path through the loopback Worker, SQLite Durable Objects, signalling and TURN
+fixture described above. Temporary controls placed the actor at its real route
+goal, selected pause/death and delayed one guest's asset preparation by four seconds.
+
+The host, dead guest and mid-scene late joiner produced identical camera,
+complete contact-list and final instance-matrix fingerprints. For world seed
+3291961222 and effects seed 2837196403, each viewer built 2168 castle fragments,
+900 real pillars, 177 bounces, 50 shattered pillars and 200 secondary chunks.
+Preparation began and completed under opaque black, with zero breakable/scenery
+resources allocated by asset preparation. All viewers reached the same final
+Game Over; leaving and rejoining afterward recovered that shot directly. Host
+departure cleared the loss and released all three presentation resources/renderers.
+No console warnings or errors were recorded. A second room covered both host and
+guest already paused before commitment. Offline completion, new-match reset and
+cancellation during delayed preparation were also checked.
+
+Both TypeScript projects and all 482 tests pass; the production build regenerates
+tracked `dist/`, retaining the existing chunk-size warning. The fixture used dummy
+credentials and mocked external verification/ICE responses. No deployment or
+production security configuration changed; external services and physical-device
+performance remain unverified. Temporary acceptance tabs and services were closed.

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Castle annihilation · Cutscene review</title>
+    <link rel="stylesheet" href="/src/gameUI.css">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; height: 100dvh; overflow: auto; background: #111516; color: #e6e9e6; font: 13px/1.5 system-ui, sans-serif; }
+        main { display: flex; flex-direction: column; max-width: 1800px; min-height: 100%; margin: auto; padding: 22px 28px; gap: 18px; }
+        header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+        h1 { margin: 2px 0 0; color: #eff1e9; font: 600 25px/1.3 var(--ui-font); letter-spacing: -.8px; }
+        .eyebrow { color: #bbbdaf; font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+        .badge { padding: 5px 10px; border: 1px solid #464d3c; color: #c3cf9b; font-size: 11px; border-radius: 20px; white-space: nowrap; }
+        #stage { position: relative; width: min(100%, calc((100dvh - 265px) * 16 / 9)); aspect-ratio: 16 / 9; min-height: 220px; margin-inline: auto; background: #000; overflow: hidden; border: 1px solid #313736; }
+        #stage[data-viewport="portrait"] { width: min(100%, calc((100dvh - 265px) * 9 / 16)); aspect-ratio: 9 / 16; }
+        #stage[data-viewport="landscape"] { width: min(100%, calc((100dvh - 265px) * 19.5 / 9)); aspect-ratio: 19.5 / 9; }
+        canvas { width: 100%; height: 100%; display: block; }
+        #loading { position: absolute; inset: 0; display: grid; place-content: center; background: #000; color: #d1d9bb; font: 14px var(--ui-font); }
+        #loading[hidden] { display: none; }
+        #stage #game-over-overlay { pointer-events: none; }
+        #stage #game-over-overlay button { pointer-events: auto; }
+        #stage .death-title { font-family: var(--ui-font); }
+        #transport { display: flex; align-items: center; gap: 8px; }
+        button, select, input[type="number"] { border: 1px solid #414b47; background: #202824; color: #e6e9e6; font: inherit; border-radius: 4px; padding: 7px 10px; }
+        button { cursor: pointer; }
+        button:hover { background: #313d32; border-color: #859c62; }
+        button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #b9d48d; outline-offset: 3px; }
+        #play { min-width: 80px; background: #bacd8e; border-color: #bacd8e; color: #11180b; font-weight: 650; }
+        #timeline { flex: 1; min-width: 60px; accent-color: #bacd8e; cursor: pointer; }
+        #clock { min-width: 90px; font-variant-numeric: tabular-nums; color: #bac3b6; text-align: right; }
+        #beats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+        #beats button { padding: 3px 9px; font-size: 11px; color: #aeb9af; background: transparent; }
+        #beats button[aria-current="step"] { border-color: #bacd8e; color: #d9edb0; }
+        #controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; border-top: 1px solid #303835; padding-top: 14px; }
+        #controls label { display: flex; align-items: center; gap: 8px; color: #aeb9af; font-size: 12px; }
+        #seed { width: 105px; }
+        #particles { width: 85px; accent-color: #bacd8e; }
+        #gentle { accent-color: #bacd8e; }
+        footer { display: flex; justify-content: space-between; gap: 12px; color: #839185; font-size: 11px; }
+        #status { margin: 0; color: #c7d1bb; }
+        #metrics { font-variant-numeric: tabular-nums; text-align: right; }
+        @media (max-width: 700px) {
+            main { padding: 14px 12px; gap: 12px; }
+            header { align-items: flex-start; } h1 { font-size: 19px; }
+            .badge { max-width: 150px; white-space: normal; font-size: 10px; }
+            #stage { width: 100%; min-height: 190px; }
+            #controls { gap: 10px 14px; } footer { flex-direction: column; gap: 4px; } #metrics { text-align: left; }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <header>
+        <div><div class="eyebrow">Ironmaw / scene review</div><h1>Castle annihilation</h1></div>
+        <span class="badge">Approved scene · shared with gameplay</span>
+    </header>
+    <div id="stage" aria-label="Mecha cutscene preview">
+        <canvas id="scene" aria-label="Animated 3D castle explosion"></canvas>
+        <div id="loading" role="status">Preparing the castle and Ironmaw…</div>
+        <div id="game-over-overlay" role="dialog" aria-labelledby="game-over-title">
+            <strong class="death-title" id="game-over-title">GAME OVER</strong>
+            <p>Forgotten Mecha reached the castle.</p>
+            <div class="menu-actions-column"><button class="menu-btn secondary" id="preview-leave">Back to Main Menu</button></div>
+        </div>
+    </div>
+    <section aria-label="Playback">
+        <div id="transport">
+            <button id="play" disabled>Play</button><button id="replay" disabled>Replay</button>
+            <input id="timeline" type="range" min="0" max="8.1" step="0.001" value="0" aria-label="Cutscene timeline" disabled>
+            <output id="clock">0.00 / —</output>
+        </div>
+        <div id="beats" aria-label="Jump to scene moment">
+            <button data-beat="fade-out">Fade out</button><button data-beat="fade-in">Wide shot</button>
+            <button data-beat="establish">Hold</button><button data-beat="punch">Wind-up</button>
+            <button data-beat="contact">Contact</button><button data-beat="chain">Chain reaction</button><button data-beat="explosion">Main detonation</button>
+            <button data-beat="pillar-bounce">Pillar bounce</button>
+            <button data-beat="pillar-breakup">Pillar breakup</button>
+            <button data-beat="aftermath">Aftermath</button><button data-beat="game-over">Game Over</button>
+        </div>
+    </section>
+    <section id="controls" aria-label="Scene variants">
+        <label>Approach <select id="approach"><option value="0">North wall</option><option value="-1.5707963267948966">East wall</option><option value="3.141592653589793">South wall</option><option value="1.5707963267948966">West wall</option></select></label>
+        <label>Offset <select id="offset"><option value="40">+40 m</option><option value="56">+56 m</option><option value="-40">−40 m</option><option value="-56">−56 m</option></select></label>
+        <label>Lighting <select id="lighting"><option value="150">Daylight</option><option value="285">Sunset</option><option value="390">Night</option></select></label>
+        <label>World seed <input id="seed" type="number" min="0" max="4294967295" step="1" value="42"></label>
+        <label>Viewport <select id="viewport"><option value="wide">16:9</option><option value="portrait">Phone portrait</option><option value="landscape">Phone landscape</option></select></label>
+        <label>Particles <input id="particles" type="range" min="0.2" max="1" step="0.2" value="1"><output id="particle-value">100%</output></label>
+        <label><input id="gentle" type="checkbox"> Gentle effects</label>
+    </section>
+    <footer><p id="status" role="status" aria-live="polite">Loading…</p><span id="metrics"></span></footer>
+</main>
+<script type="module" src="/tests/mechaCutscenePreview.ts"></script>
+</body>
+</html>

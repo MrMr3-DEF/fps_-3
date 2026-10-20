@@ -87,7 +87,8 @@ Stop any development or preview server with `Ctrl+C` in the terminal that owns i
 
 For the offline siege-robot presentation, `/tests/mecha-preview.html` reviews the real
 match with controls for finding/scanning the robot, firing, stomps, death, wall
-punch and cleanup. Body height, automatic sideways evasion, phase history and
+punch and cleanup. Place at wall exercises the production cutscene and final overlay;
+leave/restart checks cancellation and clean replacement. Body height, automatic sideways evasion, phase history and
 event pauses review laser pitching, horizontal misses, shield drop and rebuild.
 It uses temporary touch input without saving settings; use a
 landscape viewport. See [Forgotten Mecha](forgotten-mecha.md) for gameplay and
@@ -130,6 +131,23 @@ layering/reversal, sampled pointer stopping, grounded lava ticks, yellow eye cue
 and normal cockpit grappling/occlusion.
 
 ### Offline gameplay and client UI
+
+For the shared whole-castle Game Over presentation, open
+`/tests/mecha-cutscene-preview.html` with the Vite server running. This standalone
+review loads the production Ironmaw GLB and seeded town geometry without starting
+a match. The approved seeded landscape and pillar collisions run on actual wall
+arrival in singleplayer and multiplayer, using the same presentation as the preview.
+Replay runs fade-out, on-demand activation under black, close-shot reveal,
+punch, castle-wide chain reaction, main detonation and aftermath;
+the timeline and moment buttons support paused inspection and backwards seeks.
+Pillar bounce and Pillar breakup jump to recorded contacts visible in the shot.
+The footer reports baked bounce/breakup totals, activation time and the bounded
+camera adjustment. The preview derives its effects seed the same way as the host.
+Approach, wall offset, seed, lighting, viewport, particle amount and gentle-effects controls
+are temporary preview preferences and never save settings. The frame stays 16:9
+with letterboxing. See [Forgotten Mecha](forgotten-mecha.md#game-over-cutscene-preview)
+for production takeover, synchronization and timing. This fixture is served by Vite in development
+and is not included in the production bundle.
 
 Run `npm run dev` and open the Vite URL. Offline singleplayer, rendering, settings, input, and most menu work do not require the Worker.
 

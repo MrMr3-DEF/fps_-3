@@ -1,3 +1,4 @@
+import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, type MechaEndingState } from './mechaEndingTimeline.js';
 import { isPeerId } from './roomIdentity.js';
 import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES } from './config.js';
 import type { Vec3Packet } from './networkTypes.js';
@@ -18,7 +19,7 @@ export interface MechaState {
     combat: { clock: number; laserPhase: LaserPhase; shieldPhase: ShieldPhase; manual: boolean; energy: number;
         manualBuild: number; collapse: number; build: number; eyePower: number; orbRadius: number; beamRadius: number;
         beamLength: number; beamOrigin: Vec3Packet; beamDirection: Vec3Packet; orbPosition: Vec3Packet; shieldCenter: Vec3Packet };
-    rockets: MechaRocketState[]; matchEnded: boolean;
+    rockets: MechaRocketState[]; matchEnded: boolean; ending?: MechaEndingState;
 }
 interface MechaSender { senderPeerId?: string }
 export interface MechaInputPacket extends MechaSender {
@@ -40,7 +41,8 @@ export type MechaEvent =
     | { kind: 'end' };
 export interface MechaEventPacket extends MechaSender { type: 'mecha_event'; sequence: number; state: MechaState; event: MechaEvent }
 export interface MechaStatePacket extends MechaSender { type: 'mecha_state'; state: MechaState }
-export type MechaPacket = MechaInputPacket | MechaBoardPacket | MechaHitPacket | MechaEventPacket | MechaStatePacket;
+export interface MechaEndingReadyPacket extends MechaSender { type: 'mecha_ending_ready'; id: number; revision: number }
+export type MechaPacket = MechaEndingReadyPacket | MechaInputPacket | MechaBoardPacket | MechaHitPacket | MechaEventPacket | MechaStatePacket;
 
 const record = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const number = (x: unknown, min: number, max: number): x is number => typeof x === 'number' && Number.isFinite(x) && x >= min && x <= max;
@@ -51,6 +53,14 @@ const direction = (x: unknown) => isMechaVector(x) && number(x.x ** 2 + x.y ** 2
 const quaternion = (x: unknown) => Array.isArray(x) && x.length === 4 && x.every(v => number(v, -1.000001, 1.000001)) && number(x.reduce((s, v) => s + v * v, 0), 0.99, 1.01);
 const modes = ['walking', 'tracking', 'rocketing', 'stomping', 'punching', 'aligning', 'dying', 'dead', 'game-over', 'boarding', 'startup', 'piloted', 'shutting-down', 'destroying', 'destroyed'];
 const phases = ['inactive', 'mount', 'loading', 'hud', 'reveal', 'ready', 'opening-black', 'opening-move', 'opening', 'open', 'closing', 'closing-black', 'closing-move', 'closing-reveal', 'shutdown-reveal', 'shutdown-hud', 'shutdown', 'shutdown-opening'];
+export function isMechaEnding(x: unknown): x is MechaEndingState {
+    return record(x) && integer(x.id) && x.id > 0 && integer(x.seed, 0xffffffff) && integer(x.effectsSeed, 0xffffffff) &&
+        isMechaVector(x.position) && number(x.heading, -Math.PI * 4, Math.PI * 4) &&
+        Math.abs(x.heading / (Math.PI / 2) - Math.round(x.heading / (Math.PI / 2))) < 1e-8 &&
+        number(x.lightingElapsed, 0, 480) && number(x.elapsed, 0, MECHA_ENDING_DURATION) &&
+        (x.phase === 'preparing' ? x.elapsed <= MECHA_ENDING_TIMING.fadeOut :
+            x.phase === 'playing' ? x.elapsed >= MECHA_ENDING_TIMING.fadeOut : x.phase === 'complete' && x.elapsed === MECHA_ENDING_DURATION);
+}
 export function isMechaState(x: unknown): x is MechaState {
     if (!record(x) || !integer(x.sequence) || !integer(x.revision) || !modes.includes(x.mode as string) || !number(x.elapsed, 0, 86400) ||
         !isMechaVector(x.position) || !number(x.heading, -Math.PI * 4, Math.PI * 4) || !number(x.hp, 0, MECHA_HP) ||
@@ -60,6 +70,9 @@ export function isMechaState(x: unknown): x is MechaState {
         !x.bones.every(b => Array.isArray(b) && b.length === 11 && integer(b[0], (x.boneCount as number) - 1) &&
             b.slice(1, 4).every(v => number(v, -5000, 5000)) && quaternion(b.slice(4, 8)) && b.slice(8).every(v => number(v, 0, 100))) ||
         new Set(x.bones.map(b => b[0])).size !== x.bones.length || !Array.isArray(x.eye) || x.eye.length !== 7 || !x.eye.every(v => number(v, 0, 20))) return false;
+    const ending = x.ending;
+    if (ending !== undefined && (!isMechaEnding(ending) || !x.matchEnded || !['punching', 'game-over'].includes(x.mode as string) ||
+        ending.heading !== x.heading || ['x', 'y', 'z'].some(k => ending.position[k as keyof Vec3Packet] !== (x.position as Vec3Packet)[k as keyof Vec3Packet]))) return false;
     const h = x.head, c = x.combat;
     if (!record(h) || !phases.includes(h.phase as string) || !bool(h.wantedOpen) ||
         !['fold', 'eyeBlend', 'blackout', 'loadingProgress', 'hudOpacity', 'revealProgress'].every(k => number(h[k], 0, 1))) return false;
@@ -87,6 +100,7 @@ function isEvent(e: unknown): e is MechaEvent {
     return e.kind === 'release' && record(e.pose) && isMechaVector(e.pose.position) && isMechaVector(e.pose.viewPosition) && quaternion(e.pose.quaternion);
 }
 export function parseMechaPacket(x: Record<string, unknown>): MechaPacket | null {
+    if (x.type === 'mecha_ending_ready') return integer(x.id) && x.id > 0 && integer(x.revision) ? x as unknown as MechaEndingReadyPacket : null;
     if (x.type === 'mecha_state') return isMechaState(x.state) ? x as unknown as MechaStatePacket : null;
     if (x.type === 'mecha_event') return integer(x.sequence) && isMechaState(x.state) && isEvent(x.event) ? x as unknown as MechaEventPacket : null;
     if (x.type === 'hit_mecha') return integer(x.revision) && integer(x.shotId) && integer(x.pelletIndex, 4) && number(x.damage, 0.01, 100) ? x as unknown as MechaHitPacket : null;

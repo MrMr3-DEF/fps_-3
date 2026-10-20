@@ -25,7 +25,7 @@ import type { MechaPilotRelease } from './mechaPilotRelease.js';
 export type MechaMode = 'walking' | 'tracking' | 'rocketing' | 'stomping' | 'punching' | 'aligning' | 'dying' | 'dead' | 'game-over' | 'boarding' | 'startup' | 'piloted' | 'shutting-down' | 'destroying' | 'destroyed';
 export type MechaImpact = 'step' | 'stomp' | 'knees' | 'fists' | 'punch';
 export interface MechaPlayer { peerId?: string; position: THREE.Vector3; yaw?: number; alive: boolean; grounded: boolean; lifeId?: number; velocity?: THREE.Vector3 }
-export interface MechaEvents { impact(kind: MechaImpact, position: THREE.Vector3): void; stompPlayer(): void; gameOver(): void; laserPlayer?(damage: number): void; rocketPlayer?(damage: number): void; pilotReleased?(pose: MechaPilotRelease): void; exitBlocked?(): void; playerHit?(player: MechaPlayer, damage: number, attack: 'stomp' | 'laser' | 'rocket', attackerPeerId?: string | null): void }
+export interface MechaEvents { impact(kind: MechaImpact, position: THREE.Vector3): void; stompPlayer(): void; gameOver(): void; wallPunchStarted?(): void; laserPlayer?(damage: number): void; rocketPlayer?(damage: number): void; pilotReleased?(pose: MechaPilotRelease): void; exitBlocked?(): void; playerHit?(player: MechaPlayer, damage: number, attack: 'stomp' | 'laser' | 'rocket', attackerPeerId?: string | null): void }
 type ObstacleQuery = (startX: number, startZ: number, endX: number, endZ: number, out: THREE.Object3D[], padding?: number) => THREE.Object3D[];
 const modelUrl = new URL('../blender_assets/ironmaw/ironmaw_siege_robot.glb', import.meta.url).href;
 const LOOP = 4 / 3;
@@ -176,6 +176,7 @@ export class ForgottenMecha {
     private readonly obstacles: THREE.Object3D[];
     private readonly lava: readonly THREE.Object3D[];
     private readonly seed: number;
+    private wallPunchHeld = false;
     private readonly events: MechaEvents;
     private readonly obstacleQuery?: ObstacleQuery;
     private readonly sightCandidates: THREE.Object3D[] = [];
@@ -938,6 +939,7 @@ export class ForgottenMecha {
         this.rocketPlayer.position.copy(player.position); this.rocketPlayer.position.y -= PLAYER_BODY_CAMERA_OFFSET;
         this.rocketPlayer.yaw = player.yaw ?? 0; this.rocketPlayer.lifeId = player.lifeId ?? 0; this.rocketPlayer.alive = player.alive;
         this.playerSampled = true;
+        if (this.wallPunchHeld) return;
         if (!this.ready || this.disposed || !this.mixer || !Number.isFinite(delta) || delta <= 0 || this.mode === 'game-over' || this.mode === 'dead' || this.mode === 'destroyed') return;
         if (this.mode === 'shutting-down') { this.updateShutdown(delta); return; }
         if (this.ownsPilot) { this.updatePilot(delta); return; }
@@ -972,6 +974,7 @@ export class ForgottenMecha {
             }
             else this.move(delta, detected || this.combat.rangedCommitted || this.combat.aimFrozen);
         }
+        if (this.wallPunchHeld) return;
         if (!this.combat.aimFrozen && (this.mode === 'tracking' || this.mode === 'stomping' || this.mode === 'rocketing' && !this.released && this.hasLineOfSight(player))) {
             const desired = Math.atan2(player.position.x - this.group.position.x, player.position.z - this.group.position.z) - this.group.rotation.y;
             this.turnWaist(desired, delta);
@@ -1043,6 +1046,9 @@ export class ForgottenMecha {
             this.group.rotation.y = this.route.heading;
             this.waistYaw = 0;
             this.begin('punching', 'HeavyPunch');
+            // The presentation takes ownership before even the first animation
+            // tick. The authoritative body/collision stays frozen at commitment.
+            if (this.events.wallPunchStarted) { this.wallPunchHeld = true; this.events.wallPunchStarted(); }
             return;
         }
         const desired = Math.atan2(this.target.x, this.target.z);

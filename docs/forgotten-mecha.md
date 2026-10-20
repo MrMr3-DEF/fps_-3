@@ -18,8 +18,9 @@ retain their existing recovery/cancellation rules. Stomps and lasers test every
 physical player body, and rocket blasts test every eligible player within the
 cover-blocked blast radius. Each attack damages each contacted life once.
 Enemy kills count as deaths with `Forgotten Mecha` attribution and award no PvP
-kill. Completing HeavyPunch sends Game Over to the entire room, including dead,
-paused and late-joining players.
+kill. Committing the wall punch locks the loss for the entire room. All viewers,
+including dead, paused and late-joining players, receive the shared ending scene;
+Game Over appears after the punch and three-second destruction hold.
 
 The first valid cockpit arrival accepted by the host owns the single seat.
 Other players keep their own camera, controls, HUD and weapons; their view shows
@@ -113,9 +114,163 @@ singleplayer-only.
   out, and the final open, kneeling pose remains solid. Normal gameplay continues;
   there is no robot respawn or victory overlay. The cockpit becomes mountable
   after the whole Death clip completes.
-- Reaching the wall starts HeavyPunch and immediately makes the robot immune to
-  damage. The fist creates debris at contact. Only completion of the whole clip
-  ends the match, opening Game Over with one Back to Main Menu button.
+- Reaching the wall commits the loss before the first HeavyPunch animation tick
+  and makes the robot immune to damage. Ordinary simulation/input stop, then the
+  shared cutscene destroys the castle. Its final Game Over screen retains the
+  existing Back to Main Menu button.
+
+## Game Over cutscene preview
+
+The approved whole-castle ending now runs in singleplayer and multiplayer. The
+standalone `/tests/mecha-cutscene-preview.html` fixture uses the same presentation
+for replay/scrubbing and further visual review, without starting a match.
+
+`wallPunchStarted` commits the loss before advancing HeavyPunch. `main.ts` starts
+`MechaEndingPlayback`, releases input, hides HUD/chat/settings/pause/death overlays,
+and freezes the live canvas while fading it to black. The terminal frame branch
+continues cinematic rendering independently of player life and input/pause state;
+ordinary weapons, physics, hazards and network combat stop immediately. The final
+Game Over overlay is a separate transition, so the committed loss never skips the
+punch or aftermath. Leaving, disconnecting or replacing a match disposes playback,
+including async preparation that completes after cancellation.
+
+`mechaEndingTimeline.ts` owns the authored clock and host readiness barrier.
+Validated `MechaState.ending` snapshots carry a scene ID, world/effects seeds,
+committed position/heading, frozen day/night phase, preparation/play/completion
+phase and elapsed time. Each connected admitted viewer sends a scene/revision
+acknowledgment after local activation, even if paused or dead. The host holds
+black until its own scene and those viewers are ready; a departed viewer is
+removed, and a ten-second timeout after host readiness bounds a stalled viewer.
+Late joiners are not added to this initial barrier. They prepare under local black
+and seek the latest host time, including the final shot if the scene has finished.
+Only the admitted host can supply ending snapshots. Readiness cannot commit a
+loss; duplicate/stale packets cannot restart or change its camera/identity.
+Clients extrapolate elapsed time between snapshots and never rewind the shot.
+
+`MechaGameOverScene.prepare()` loads and fits the real Ironmaw asset, measures
+its fist at the existing `35 / 24` second contact cue, and prepares the cameras.
+It creates no castle geometry, fragment buffers, particles or blast lights.
+`begin(renderer?, checkpoint?)` is the explicit activation boundary. Call it
+only once the cutscene's 0.45-second fade-out has reached black. It builds the
+replacement in cooperative batches, warms shaders, and keeps the public clock
+at opaque cover until ready. Duplicate calls share the activation promise;
+cancellation or failure disposes partial resources and cannot restart playback.
+The original gameplay castle and collision data are never converted or modified.
+
+The cinematic copy preserves all four walls, lookouts, seeded building positions,
+the church tower/cross and recognizable roof silhouettes. Interiors use coarse
+hollow building shells, three-tier pitched roofs and shared flat-color materials;
+furniture, room detail, small ornamentation and stairs are omitted. Ground paving
+remains static. All above-ground geometry belongs to material-batched instanced
+fragments created at activation, with a hard 4,096-fragment cap. Seed 42 uses
+2,176 fragments. Positions, spins, blast times and ballistic trajectories are
+sampled from absolute time, so backwards scrubbing reconstructs the entire castle.
+
+After preparation, the wide shot fades in over 0.6 seconds and holds for 0.5
+seconds before the unchanged 3.542-second HeavyPunch. Contact triggers the first
+blast; the chain reaction crosses the compound over 0.8 seconds. A huge central
+detonation follows at 0.85 seconds. Every wall, tower, house, church shell and
+above-ground fixture has detonated within one second of contact. The mecha stays
+intact. The original close, low three-quarter camera frames the full mecha and
+struck wall section while the explosion spreads through the rest of the castle.
+Three seconds after the punch ends, the existing Game Over
+presentation appears. The timeline lasts about 8.092 seconds, plus any black hold
+needed for preparation; the shot stays 16:9 within other viewport shapes.
+
+Effects are bounded at 96 fire puffs, 112 smoke/dust puffs, 480 sparks and four
+unshadowed blast lights. Particle quality reduces cosmetic density without
+changing castle destruction. Photosensitivity Mode/reduced motion remove sparks,
+soften light/glow onset and reduce shockwave brightness; there is no camera shake.
+All meshes share geometry/material batches, and debris uses analytic movement
+rather than rigid-body simulation. Preparation and disposal own all cinematic
+buffers, textures, skeletons and lighting. Rendering restores viewport/scissor
+and clear state.
+
+The fixture initially activates under its black loading cover. Replay fades the
+intact stand-in view out, rebuilds under black, then resumes the reveal only after
+readiness. Review shortcuts include Contact, Chain reaction, Main detonation,
+Aftermath and Game Over. Controls cover four approach directions/offsets, seeded
+layouts, day/sunset/night, phone viewports, particles and gentle effects. Preview
+preferences never save settings. The footer reports fragment count, geometry/
+activation time and playback FPS/draw calls.
+
+`tests/mechaGameOverScene.test.ts` covers allocation-free asset preparation,
+readiness gating, shared activation, partial cancellation/failure cleanup,
+actual fist contact and close impact framing at all sixteen route goals, complete
+compound destruction across seeds, deterministic replay/settled rubble, quality
+invariants, resource caps and renderer restoration. `tests/mechaEnding.test.ts`
+covers preparation/clock barriers, late playback, duplicates, final overlay timing,
+failed preparation and async cancellation. Real-GLB network tests cover immediate
+commitment, snapshot validation, paused/dead readiness, departure and stale events;
+the actual router integration checks guest authority rejection and late snapshots.
+
+### Seeded scenery and pillar collisions
+
+The preview and gameplay both set `MechaGameOverOptions.seededScenery: true`
+following visual approval. Singleplayer, host, client and late-joining viewers use
+the same activation and trajectory bake, derived from the committed world/effects
+seeds. The camera, explosion timing and original castle-fragment budget remain in
+place; no additional collision packets are needed.
+
+`seededScenery.ts` extracts the original grass, horizon, pillar, lava and vegetation
+stages behind explicit ownership ports. Gameplay retains chunk batching, collision
+registries and disposal. Texture recipes and placement deliberately consume the
+same random stream in the same order: splitting those streams would change old
+seeds. Complete-world baseline fingerprints cover seeds 0, 1, 42, 91234 and
+4294967295, including enemies generated after scenery. The cinematic adapter owns
+an isolated scene graph and private collision bounds, clones shared plant assets,
+and builds only during activation under black. It never rebuilds or edits the
+live world. Plants and distant billboard pillars remain decorative.
+
+`mechaEndingDebris.ts` bakes fixed 120 Hz swept contacts against a spatial index.
+Contacts are resolved chronologically, with stable fragment/pillar IDs for ties.
+Every distinct impact has a deterministic 20% breakup / 80% bounce roll derived
+from the effects seed and contact ordinal. A surviving pillar may break on a later
+impact; remaining inside a contact does not reroll. Reflections retain 0.8 of the
+tangential velocity and use 0.45 normal restitution. Each real pillar shatters at
+most once, launching four coarse wooden sections that use the same contact rules
+and ignore their own source. Castle fragments remain capped at 4096, pillar chunks
+at four per real pillar (at most 3600), and pillar contacts at eight per fragment.
+After the bake, rendering samples analytic trajectory segments and destruction
+timestamps; replay, backwards seeks and late viewers need no live physics
+or additional network events. Particle quality and gentle mode do not affect paths.
+
+The camera checks the body area and fist connection against real pillar bounds.
+It chooses one deterministic pose under black within ±15 degrees, +10 m height and
+10% extra distance of the approved close shot. If dense scenery prevents complete
+clearance, it selects the least-obstructed composition while retaining mecha framing;
+props are never moved or hidden to clear the camera. The camera remains fixed
+throughout destruction. Pillar bounce/breakup preview buttons select recorded
+visible contacts, and the footer shows counts, preparation time and camera adjustment.
+
+Regression coverage includes original seed fingerprints, matching live/cinematic
+pillars/plants/lava/horizon, contact probability, repeated hits, secondary chunks,
+chronological/tied collisions, tunneling, resource caps, all sixteen approaches,
+quality-independent replay, restored pillars and cancellation/texture ownership.
+
+Preview verification (20 October 2026): both TypeScript projects and all 482 tests
+pass. Browser review covered seeds 0 and 42, daylight/night, gentle effects at
+20% particles, portrait/landscape letterboxing, changing controls during activation,
+contact shortcuts and replay. The preview reported no console warnings/errors;
+observed activation was about 0.7–0.9 seconds on this desktop. Normal offline
+startup, actor combat and departure cleanup were also smoke-tested after the
+shared extraction. The production build was regenerated for that refactor, with
+the seeded ending option still disabled in gameplay until visual approval.
+
+Integration verification (20 October 2026, after approval): seeded scenery is
+enabled in the common singleplayer/multiplayer presentation factory. Three local
+RTC viewers, including a dead guest and mid-scene late joiner, produced identical
+camera, contact and final instance-matrix fingerprints. This seed generated
+2168 castle fragments, 900 real pillars, 177 bounces, 50 shattered pillars and 200
+secondary chunks. A guest delayed four seconds kept preparation under black;
+every viewer allocated zero castle/scenery/effect buffers before activation.
+Rejoining a completed ending recovered the same final shot. Host departure disposed
+all three scenes/renderers and reset the loss. A second room covered a host and
+guest already paused before commitment; an offline ending, new match and
+departure during delayed preparation also passed. Both TypeScript projects and
+all 482 tests pass, and tracked `dist/` is regenerated. The existing large-chunk
+build warning remains. These are local runtime checks; no deployment or physical
+device performance verification was performed.
 
 ## Eye laser and shield
 
@@ -407,9 +562,9 @@ particle setting and remaining graphics budget, without extra lights.
 render quaternion; the logical camera pose is restored after each draw.
 
 Pause and player death freeze the offline actor, effects and cooldown. Player
-respawn keeps the same robot; leaving disposes it. Game Over sets `matchEnded`,
-freezes the completed match and blocks input reacquisition. A new match resets
-that latch and creates a fresh actor.
+respawn keeps the same robot; leaving disposes it. Wall-punch commitment sets
+`matchEnded` and blocks input reacquisition while the separate cinematic continues.
+A new match resets that latch and creates a fresh actor.
 
 ## Verification
 
@@ -659,7 +814,7 @@ record and limits.
   destruction. It should recover the live pose without gaining cockpit controls.
 - Verify pilot rocket kill credit, ordinary respawn, voluntary exit/remount,
   pilot disconnect and living release during lethal destruction.
-- Complete the wall punch and inspect Game Over while active, paused, dead and
+- Reach the wall and inspect the shared cutscene and delayed Game Over while active, paused, dead and
   joining. Leave the room and create another match with fresh state.
 - Repeat with low render distance and relay-required connections. Local fixture
   results do not verify external TURN credential refresh or physical input feel.
