@@ -6,18 +6,19 @@ import { distanceToOrientedBox } from './smartGogglesMath.js';
 import { obstacleData, targetData } from './userDataTypes.js';
 import { getParticleLimit, scaleParticleCount, userSettings } from './settings.js';
 import { state } from './state.js';
+import type { MechaRocketState } from './mechaNetworkTypes.js';
 import { closestPlayerBodyPoint, segmentPlayerHitboxHitT } from './playerHitbox.js';
 
 export interface RocketLock { object: THREE.Group; index: number; revision: number }
 export type RocketObstacleQuery = (sx: number, sz: number, ex: number, ez: number, out: THREE.Object3D[], padding?: number) => THREE.Object3D[];
 export type RocketFlightMode = 'guided' | 'straight' | 'wandering';
-export interface RocketPlayer { position: THREE.Vector3; yaw: number; lifeId: number; alive: boolean; velocity: THREE.Vector3 }
+export interface RocketPlayer { peerId?: string; position: THREE.Vector3; yaw: number; lifeId: number; alive: boolean; velocity: THREE.Vector3 }
 export interface RocketLaunch { mode: RocketFlightMode; target?: RocketLock | null; seed?: number;
-    player?: RocketPlayer; damage?: number; turnSpeed?: number; guidanceResponse?: number }
+    player?: RocketPlayer; peerTarget?: RocketPlayer | null; ownerPeerId?: string | null; damage?: number; turnSpeed?: number; guidanceResponse?: number }
 interface Rocket { mesh: THREE.Group; active: boolean; start: THREE.Vector3; position: THREE.Vector3; forward: THREE.Vector3;
     end: THREE.Vector3; direction: THREE.Vector3; target: RocketLock | null; travel: number; age: number; smoke: number;
     mode: RocketFlightMode; targetPosition: THREE.Vector3; velocity: THREE.Vector3; landingDistance: number; noise: number;
-    enemy: boolean; playerLife: number | null; player: RocketPlayer | null; damage: number; turnSpeed: number; response: number; }
+    ownerPeerId: string | null; playerPeerId: string | null; enemy: boolean; playerLife: number | null; player: RocketPlayer | null; damage: number; turnSpeed: number; response: number; }
 interface Spark { position: THREE.Vector3; velocity: THREE.Vector3; age: number; life: number; size: number; smoke: boolean }
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const IDENTITY = new THREE.Quaternion();
@@ -29,6 +30,8 @@ export class MechaRockets {
     readonly group = new THREE.Group();
     selected: RocketLock | null = null;
     clock = 0;
+    replica = false;
+    onExplosion: ((position: THREE.Vector3) => void) | null = null;
     private readonly rockets: Rocket[] = [];
     private readonly sparks: Spark[] = Array.from({ length: 192 }, () => ({ position: new THREE.Vector3(), velocity: new THREE.Vector3(), age: 10, life: 0, size: 0, smoke: false }));
     private readonly particles: THREE.InstancedMesh;
@@ -67,7 +70,7 @@ export class MechaRockets {
             const mesh = new THREE.Group(); const a = new THREE.Mesh(body, hull), b = new THREE.Mesh(tip, nose), c = new THREE.Mesh(flameGeo, flameMat);
             b.position.z = 1.6; c.position.z = -1.5; c.scale.set(1, 1, 2); mesh.add(a, b, c); mesh.visible = false; this.group.add(mesh);
             this.rockets.push({ mesh, active: false, start: new THREE.Vector3(), position: new THREE.Vector3(), forward: new THREE.Vector3(), end: new THREE.Vector3(), direction: new THREE.Vector3(), target: null, travel: 0, age: 0, smoke: 0, mode: 'straight', targetPosition: new THREE.Vector3(), velocity: new THREE.Vector3(), landingDistance: 85, noise: 0,
-                enemy: false, playerLife: null, player: null, damage: WEAPON_STATS.SNIPER.damage, turnSpeed: MECHA_ROCKET_TURN_SPEED, response: MECHA_ROCKET_GUIDANCE_RESPONSE });
+                ownerPeerId: null, playerPeerId: null, enemy: false, playerLife: null, player: null, damage: WEAPON_STATS.SNIPER.damage, turnSpeed: MECHA_ROCKET_TURN_SPEED, response: MECHA_ROCKET_GUIDANCE_RESPONSE });
         }
         this.setRadius(this.radius);
         this.particles = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45, depthWrite: false }), this.sparks.length);
@@ -101,12 +104,12 @@ export class MechaRockets {
         if (end.y < radius && end.y < start.y) { const t = Math.max(0, (start.y - radius) / (start.y - end.y)); if (nearest === null || t < nearest) nearest = t; }
         return nearest;
     }
-    select(camera: THREE.PerspectiveCamera, origin: THREE.Vector3, targets: readonly THREE.Group[], query: RocketObstacleQuery): RocketLock | null {
+    select(camera: THREE.PerspectiveCamera, origin: THREE.Vector3, targets: readonly THREE.Group[], query: RocketObstacleQuery, physicalTargets = false): RocketLock | null {
         camera.updateMatrixWorld(true); this.projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); this.frustum.setFromProjectionMatrix(this.projection);
         let score = Infinity; this.selected = null;
         for (const target of targets) {
             const d = targetData(target), body = d.bodyMesh;
-            if (d.hp <= 0 || !target.visible || !body?.visible) continue;
+            if (d.hp <= 0 || !body || !physicalTargets && (!target.visible || !body.visible)) continue;
             body.updateWorldMatrix(true, false); if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
             if (!this.frustum.intersectsObject(body) || distanceToOrientedBox(origin, body.geometry.boundingBox!, body.matrixWorld) > BULLET_TRAVEL_DISTANCE) continue;
             body.geometry.boundingBox!.getCenter(this.point).applyMatrix4(body.matrixWorld);
@@ -130,6 +133,39 @@ export class MechaRockets {
         }
         return this.selected;
     }
+    selectPlayer(camera: THREE.PerspectiveCamera, origin: THREE.Vector3, players: readonly RocketPlayer[], query: RocketObstacleQuery, owner: string | null): RocketPlayer | null {
+        let score = Infinity, result: RocketPlayer | null = null;
+        if (this.selected) {
+            this.projected.copy(this.selected.object.position).project(camera);
+            score = this.projected.x ** 2 + this.projected.y ** 2;
+        }
+        for (const player of players) {
+            if (!player.alive || player.peerId === owner) continue;
+            closestPlayerBodyPoint(origin, player.position, player.yaw, this.point);
+            if (origin.distanceTo(this.point) > BULLET_TRAVEL_DISTANCE) continue;
+            this.projected.copy(player.position).project(camera);
+            const next = this.projected.x ** 2 + this.projected.y ** 2;
+            if (this.projected.z < -1 || this.projected.z > 1 || Math.abs(this.projected.x) > 1 || Math.abs(this.projected.y) > 1 || next >= score || this.obstacleT(origin, this.point, query) !== null) continue;
+            score = next; result = player;
+        }
+        return result;
+    }
+    captureNetworkState(): MechaRocketState[] {
+        const vector = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+        return this.rockets.flatMap((r, slot) => r.active ? [{ slot, position: vector(r.position), direction: vector(r.direction) }] : []);
+    }
+    applyNetworkState(states: readonly MechaRocketState[], alpha = 1): void {
+        this.replica = true;
+        for (let slot = 0; slot < this.rockets.length; slot++) {
+            const r = this.rockets[slot], s = states.find(s => s.slot === slot), wasActive = r.active;
+            r.active = r.mesh.visible = !!s;
+            if (s) {
+                r.position.lerp(this.point.set(s.position.x, s.position.y, s.position.z), wasActive ? alpha : 1); r.direction.set(s.direction.x, s.direction.y, s.direction.z).normalize();
+                r.mesh.position.copy(r.position); r.mesh.quaternion.setFromUnitVectors(FORWARD, r.direction);
+            }
+        }
+    }
+    showExplosion(point: THREE.Vector3): void { this.emit(point, 48, false); this.emit(point, 24, true); }
     fire(origin: THREE.Vector3, direction: THREE.Vector3, targets: readonly THREE.Group[], launch: RocketLaunch = { mode: 'guided' }): boolean {
         const rocket = this.rockets.find(r => !r.active); if (!rocket) return false;
         rocket.active = rocket.mesh.visible = true; rocket.start.copy(origin); rocket.position.copy(origin);
@@ -140,8 +176,10 @@ export class MechaRockets {
         // Profiles and target lives belong to each launch. A later mount or
         // helmet toggle cannot change a rocket already in flight.
         rocket.enemy = launch.player !== undefined;
-        rocket.playerLife = launch.player?.lifeId ?? null;
-        rocket.player = launch.mode === 'guided' ? launch.player ?? null : null;
+        rocket.ownerPeerId = launch.ownerPeerId ?? null;
+        rocket.playerPeerId = (launch.player ?? launch.peerTarget)?.peerId ?? null;
+        rocket.playerLife = (launch.player ?? launch.peerTarget)?.lifeId ?? null;
+        rocket.player = launch.mode === 'guided' ? launch.player ?? launch.peerTarget ?? null : null;
         rocket.damage = launch.damage ?? WEAPON_STATS.SNIPER.damage;
         rocket.turnSpeed = launch.turnSpeed ?? MECHA_ROCKET_TURN_SPEED;
         rocket.response = launch.guidanceResponse ?? MECHA_ROCKET_GUIDANCE_RESPONSE;
@@ -205,9 +243,18 @@ export class MechaRockets {
             const a = this.nextSpark * 2.399963; p.velocity.set(Math.cos(a), (i % 5) / 5, Math.sin(a)).multiplyScalar(smoke ? 1.2 : 12); p.size = smoke ? 0.8 : 0.45; p.smoke = smoke; }
     }
     private explode(rocket: Rocket, point: THREE.Vector3, targets: readonly THREE.Group[], query: RocketObstacleQuery, hit: (index: number, damage: number) => void,
-        player: RocketPlayer | undefined, playerHit: (damage: number) => void): void {
-        this.emit(point, 48, false); this.emit(point, 24, true);
-        if (rocket.enemy) {
+        player: RocketPlayer | undefined, playerHit: (damage: number) => void,
+        players?: readonly RocketPlayer[], hitPlayer?: (player: RocketPlayer, damage: number, owner: string | null) => void): void {
+        this.showExplosion(point); this.onExplosion?.(point);
+        if (players) {
+            for (const victim of players) {
+                if (!victim.alive || victim.peerId === rocket.ownerPeerId) continue;
+                closestPlayerBodyPoint(point, victim.position, victim.yaw, this.point);
+                if (point.distanceTo(this.point) <= MECHA_ROCKET_BLAST_RADIUS && this.obstacleT(point, this.point, query) === null) hitPlayer?.(victim, rocket.damage, rocket.ownerPeerId);
+            }
+            if (rocket.enemy) return;
+        }
+        if (rocket.enemy && !players) {
             if (player?.alive && player.lifeId === rocket.playerLife) {
                 closestPlayerBodyPoint(point, player.position, player.yaw, this.point);
                 if (point.distanceTo(this.point) <= MECHA_ROCKET_BLAST_RADIUS && this.obstacleT(point, this.point, query) === null) playerHit(rocket.damage);
@@ -225,14 +272,24 @@ export class MechaRockets {
         for (const index of victims) hit(index, rocket.damage);
     }
     update(delta: number, targets: readonly THREE.Group[], query: RocketObstacleQuery, hit: (index: number, damage: number) => void,
-        player?: RocketPlayer, playerHit: (damage: number) => void = () => {}): void {
+        player?: RocketPlayer, playerHit: (damage: number) => void = () => {},
+        players?: readonly RocketPlayer[], hitPlayer?: (player: RocketPlayer, damage: number, owner: string | null) => void): void {
         if (!Number.isFinite(delta) || delta <= 0) return; this.clock += delta;
         for (const rocket of this.rockets) {
             if (!rocket.active) continue;
-            if (rocket.enemy && (!player?.alive || player.lifeId !== rocket.playerLife)) {
+            if (this.replica) {
+                rocket.smoke += delta;
+                if (rocket.smoke >= 0.025) { this.emit(rocket.position, 2, true); rocket.smoke = 0; }
+                continue;
+            }
+            const trackedPlayer = players ? players.find(p => p.peerId === rocket.playerPeerId && p.lifeId === rocket.playerLife) : player;
+            if (rocket.enemy && (!trackedPlayer?.alive || trackedPlayer.lifeId !== rocket.playerLife)) {
                 rocket.active = rocket.mesh.visible = false; rocket.player = null; continue;
             }
-            if (rocket.player && player) { rocket.player = player; rocket.velocity.copy(player.velocity); }
+            if (rocket.player) {
+                if (trackedPlayer?.alive && trackedPlayer.lifeId === rocket.playerLife) { rocket.player = trackedPlayer; rocket.velocity.copy(trackedPlayer.velocity); }
+                else rocket.player = null;
+            }
             rocket.age += delta;
             if (rocket.target && !this.valid(rocket.target, targets)) rocket.target = null;
             if (rocket.target) {
@@ -256,8 +313,9 @@ export class MechaRockets {
                     this.localEnd.copy(this.next).addScaledVector(rocket.direction, offset);
                     const obstacle = this.obstacleT(this.localStart, this.localEnd, query, this.radius);
                     if (obstacle !== null && (contact === null || obstacle < contact)) contact = obstacle;
-                    if (rocket.enemy && player) {
-                        const value = segmentPlayerHitboxHitT(this.localStart, this.localEnd, player.position, player.yaw, this.radius);
+                    for (const victim of players ?? (rocket.enemy && player ? [player] : [])) {
+                        if (!victim.alive || victim.peerId && victim.peerId === rocket.ownerPeerId) continue;
+                        const value = segmentPlayerHitboxHitT(this.localStart, this.localEnd, victim.position, victim.yaw, this.radius);
                         if (value !== null && (contact === null || value < contact)) contact = value;
                     }
                     for (const target of rocket.enemy ? [] : targets) {
@@ -274,7 +332,7 @@ export class MechaRockets {
                     // Place the blast on the contacted hull surface. This avoids
                     // exploding on the far side of thin cover due to the nose.
                     const impact = rocket.position.clone().lerp(this.next, contact);
-                    this.explode(rocket, impact, targets, query, hit, player, playerHit); rocket.active = false;
+                    this.explode(rocket, impact, targets, query, hit, player, playerHit, players, hitPlayer); rocket.active = false;
                 } else { rocket.position.copy(this.next); rocket.travel += distance; }
                 if (rocket.travel >= BULLET_TRAVEL_DISTANCE - 1e-6 || rocket.age > 8) rocket.active = false;
                 remainingTime -= step;

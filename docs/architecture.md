@@ -83,14 +83,15 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `smartGogglesMath.ts` | Rotation-independent target-envelope projection, adaptive 45-degree callout layout, and target-surface distance math |
 | `smartGogglesPeerMath.ts` | Stable avatar-envelope, visibility, and distance helpers for remote players |
 | `gothGirlfriend.ts` | Rigged character loading, placement, animation, and fixed gameplay hitbox |
-| `forgottenMecha.ts`, `mechaNavigation.ts`, `mechaFootPlant.ts`, `mechaCombat.ts`, `mechaCombatEffects.ts` | Singleplayer siege robot, seeded border routes, animation/AI, torso laser, spherical shield cycle, planted feet, moving body proxies and reusable effects |
+| `forgottenMecha.ts`, `mechaNavigation.ts`, `mechaFootPlant.ts`, `mechaCombat.ts`, `mechaCombatEffects.ts` | Shared siege robot, seeded border routes, animation/AI, torso laser, spherical shield cycle, planted feet, moving body proxies and reusable effects |
 | `cameraShake.ts` | Temporary impact rotation applied only to the render camera pose |
-| `mechaPilot.ts`, `mechaRockets.ts`, `lookInput.ts` | Offline cockpit boarding support, sampled pilot view/leg steering, immediate vehicle targeting, continuous pooled rocket guidance and shared timed touch/pointer look routing |
+| `mechaPilot.ts`, `mechaRockets.ts`, `lookInput.ts` | Cockpit boarding support, sampled pilot view/leg steering, immediate vehicle targeting, continuous pooled rocket guidance and shared timed touch/pointer look routing |
 | `mechaHeadView.ts`, `mechaHeadEffects.ts`, `mechaTransitionCamera.ts` | Actor-owned simulation-clock helmet/boot and exterior entry/exit camera phases; main owns DOM composition and temporary render-pose application |
 | `gothChat.ts`, `gothChatEngine.ts`, `gothChat.worker.ts` | Conversation UI, local WebLLM lifecycle, and inference worker |
 | `gothKnowledge.ts`, `gothChatConsent.ts` | Character-file retrieval/prompt context and first-use model consent |
 | `settings.ts` | Settings schema, validation, persistence, renderer settings, particle scaling |
 | `multiplayer.ts` | PeerJS lifecycle, host/client topology, packet authorization and relay, world synchronization, peer avatars and interpolation |
+| `mechaNetwork.ts`, `mechaNetworkTypes.ts` | Host-owned mecha commands/state/events, exclusive pilot ownership, bounded replication, victim render acknowledgment |
 | `networkTypes.ts` | Packet types and runtime validation of untrusted WebRTC data |
 | `turnSecurity.ts` | Browser calls to the Worker and explicit Turnstile widget lifecycle |
 | `worker.ts` | Public API routing, Turnstile verification, rate limiting, room/session capabilities, TURN credential exchange, asset serving |
@@ -178,7 +179,7 @@ The render-distance slider is a chunk radius from 1 to 16, with 4 as the default
 
 The local player supports walking, jumping, air hover with rechargeable fuel, grapple movement, five weapons, aim-down-sights, inspection, and a presentation-only third-person view. Core values live in `config.ts`; avoid duplicating weapon or movement numbers elsewhere.
 
-Singleplayer additionally prepares one [Forgotten Mecha](forgotten-mecha.md) before
+Each match prepares one [Forgotten Mecha](forgotten-mecha.md) before
 renderer preparation. It navigates from a reachable random border point toward an
 outer castle wall, stops to track visible nearby players, and can stomp grounded
 players or beans touching its animated legs at impact. Initial defeat aligns the
@@ -186,7 +187,8 @@ torso to the legs at 90 degrees/s, then Death holds its solid final pose; finish
 sets the terminal match latch and opens Game Over. Dynamic body proxies are
 appended to spatial queries without changing static collision or visibility
 indexes. The actor and its reflection texture belong to the match and are
-disposed even when startup is cancelled. Multiplayer has no robot.
+disposed even when startup is cancelled. Multiplayer starts its host simulation
+with the match and replicates the actor to every client.
 Detection and acquisition share `classifyMechaAttack` in `mechaCombat.ts`, using
 the existing player-position anchor relative to the actor’s ground position.
 The 0–28 m cylinder selects stomp at ≤25 m, rockets at >25–<60 m and laser at
@@ -198,8 +200,8 @@ torso yaw, then freezes a pitched 700 m beam. A chest-centered
 grappling unaffected. Shot origin and impact context select shield/body damage;
 four actual laser/rocket releases in an active minute trigger warning, five
 seconds of shield downtime and the existing half-second rebuild.
-Robot-owned combat clocks and GPU effects survive respawn and freeze on pause
-or player death. Piloted movement uses height-aware part sweeps and sliding independently of enemy navigation. Mounted zero HP immediately releases the living pilot and plays FinalDeath from its breakup cue, retaining third person with a short camera-boom handoff. See the behavior document for exact phase and cancellation rules.
+Robot-owned combat clocks and GPU effects survive respawn. Offline pause or
+player death freezes them; multiplayer keeps the shared actor running. Piloted movement uses height-aware part sweeps and sliding independently of enemy navigation. Mounted zero HP immediately releases the living pilot and plays FinalDeath from its breakup cue, retaining third person with a short camera-boom handoff. See the behavior document for exact phase and cancellation rules.
 
 Projectile weapons reuse a preallocated pool. Every weapon has the sniper's 700-meter travel distance; simulated projectiles track muzzle-inclusive distance and clamp their final swept segment to that exact limit. When enabled in Graphics settings, each bullet also owns a pooled additive tracer that records its recent world-space path and fades briefly after impact, making direction changes visible without affecting collision. Guided projectiles use fixed 1/120-second steps, interpolate their target observations between render frames, cap angular turn speed and move along the midpoint of the old and new headings. Cubic tracer samples preserve the visible arc. Every guidance step owns one swept collision query; straight projectiles retain their single frame sweep. Collision checks sweep each projectile's previous-to-next segment against nearby obstacle AABBs, targets, and peer hit volumes. When a scoped shot is fired after the visual homing lock has completed, the selected NPC or opponent and its current life/revision are captured for the shot. The bullet flies straight until it has covered one-third of the target distance measured at fire time, then applies strong but finite steering toward the target's current position. At full minigun speed, one initial-distance sample is shared by each batch of ten bullets and a target change forces an immediate new sample; every other firing state samples each shot. The sampled threshold travels with multiplayer fire packets so all peers render the same delayed turn. Steering does not bypass obstacles or range, does not guarantee a hit, and never applies to the hitscan sniper, the sun, the moon, or the girlfriend. Each player hit volume is one solid yaw-oriented cuboid whose width, height and depth exactly match the complete bean body's maximum bounds, including the visor and booster but excluding weapons and name tags. The cuboid's empty corner space is hittable. Simulated bullets expand it by their actual 0.07-unit radius; sniper rays use the unexpanded bounds. The sniper uses a hitscan ray with the same range. Target damage is applied locally in offline play and only by the host in multiplayer. A killed target respawns with authoritative position, class, health, scale, color, and score.
 
@@ -281,6 +283,9 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 | `lobby_color` | Admitted client before play | Updates only that client's suit color and republishes the host-owned roster |
 | `lobby_roster` | Host only | Synchronizes the ordered waiting-room lineup, including names and suit colors |
 | `player_list` | Host only | Synchronizes the ordered active-match names, suit colors and confirmed kills/deaths |
+| `mecha_input`, `mecha_board` | Admitted live player | Checks sequence, life, revision, cockpit arrival and exclusive ownership; applies host simulation inputs |
+| `hit_mecha` | Shooter | Consumes an accepted shot/pellet against canonical armor/shield/world contacts and firing revision |
+| `mecha_state`, `mecha_event` | Host only | Replicates actor pose, cockpit owner, attacks, player damage, release and terminal match state |
 | `jump` | Any player | Relays as a visual event after an initial state update exists |
 | `world_snapshot` | Host only | Initializes a joining client's deterministic world |
 | `target_state` | Host only | Replicates target health and other incremental state |
@@ -376,3 +381,25 @@ The host is authoritative enough to reject many fabricated hits and target mutat
 - For a settings change, update the interface, defaults, persisted-value validation, UI controls, pending/apply synchronization, and renderer/runtime consumer.
 
 Build and verification requirements are documented in [Development](development.md). Cloudflare credential and room behavior is documented in [Cloudflare operations](operations.md).
+
+## Multiplayer mecha ownership
+
+The host advances one actor after match start independently of local input and
+player death. Clients interpolate host bone poses and effects without running
+actor simulation. `ownsPilot` means the shared seat is occupied;
+`ownsLocalPilot` gates local cameras, input, HUD, weapons, physics and damage
+routing. Ordinary avatar interpolation cannot move a seated remote bean.
+
+The coordinator gets accepted player poses from multiplayer's runtime, in lobby
+admission order. Acquisition retains one eligible target; physical attacks test
+all affected lives. Rocket targeting reconstructs the actual pilot perspective
+and queries physical targets independently of the host's render chunks. The
+existing local damage and weapon-network ports remain the integration seams.
+
+Initial world snapshots include the complete current mecha presentation and
+terminal state. State, commands and events have independent bounded sequence
+checks; actor revisions retire pre-defeat/pre-boarding shots. Remote input is
+neutral after 250 ms without refresh. Host simulation never waits for a render
+acknowledgment; each victim queues its authoritative laser/stomp contact until
+local drawing, with actual beam drawing required for laser damage. Disconnect,
+reset and disposal invalidate coordinator state together with the world.

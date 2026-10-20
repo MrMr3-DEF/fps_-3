@@ -4,6 +4,7 @@ import { targetData } from './userDataTypes.js';
 import { classifyOutOfRange, distanceToOrientedBox } from './smartGogglesMath.js';
 import { closestPlayerBodyPoint, PLAYER_HITBOX_BOUNDING_RADIUS } from './playerHitbox.js';
 const _closestBodyPoint = new THREE.Vector3();
+import { forgottenMecha } from './world.js';
 import type { ForgottenMecha } from './forgottenMecha.js';
 
 /** Strong enough to correct a near miss, but finite so fast/close targets can escape. */
@@ -108,8 +109,8 @@ export function resolveProjectileHomingTarget(
 }
 
 export function toHomingTargetPacket(target: ProjectileHomingTarget | null): HomingTargetPacket | undefined {
-    // The offline-only actor has no network identity and cannot enter a packet.
-    if (!target || target.kind === 'mecha') return undefined;
+    if (!target) return undefined;
+    if (target.kind === 'mecha') return target.actor.networked ? { kind: 'mecha', targetRevision: target.targetRevision } : undefined;
     return target.kind === 'npc'
         ? { kind: 'npc', targetIndex: target.targetIndex, targetRevision: target.targetRevision }
         : { kind: 'peer', targetPeerId: target.targetPeerId, targetLifeId: target.targetLifeId };
@@ -121,6 +122,7 @@ export function fromHomingTargetPacket(
     peers: Readonly<Record<string, { mesh: THREE.Group; hp: number; lifeId?: number }>>,
 ): ProjectileHomingTarget | null {
     if (!packet) return null;
+    if (packet.kind === 'mecha') return forgottenMecha?.ready && forgottenMecha.hp > 0 && forgottenMecha.revision === packet.targetRevision ? { kind: 'mecha', object: forgottenMecha.group, actor: forgottenMecha, targetRevision: packet.targetRevision } : null;
     if (packet.kind === 'npc') {
         const object = npcTargets[packet.targetIndex];
         if (!object || targetData(object).hp <= 0 ||

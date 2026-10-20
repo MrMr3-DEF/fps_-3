@@ -53,3 +53,40 @@ No deployment occurred. External service behavior, relay credential refresh,
 physical devices and changing-network recovery remain separate checks. See
 [audit-repair-progress.md](audit-repair-progress.md) for fixture details, bounded
 homing compensation and the complete acceptance record.
+
+## Multiplayer mecha local acceptance — 20 October 2026
+
+Three native Chrome 155 pages exercised the actual application over encrypted
+PeerJS data channels through the loopback TURN fixture. The final connected host
+and late-joining client both reported relay/relay selected candidate pairs; the
+relay forwarded 30,975 channel-data datagrams during the run. Local Worker and
+SQLite Durable Objects used dummy credentials with mocked external verification
+and ICE responses. No production service configuration or deployment changed.
+
+The final run passed shared actor preparation/pose/health, external Sniper shield
+absorption, five actual inside-shield Sniper hits, complete enemy defeat, actual
+grapple boarding by a guest, and independent host controls. A guest-piloted rocket
+killed the host and credited the guest; simulation continued while the host was
+dead. A third client joined during piloting and recovered the occupied cockpit
+without gaining local ownership. Voluntary shutdown released the living pilot,
+remounting worked, pilot departure restored a mountable wreck, and lethal piloted
+destruction released the surviving replacement pilot into ordinary play. The
+host terminal event reached the dead host and third client, and host departure
+disposed both remaining scenes/renderers. The final run recorded no page errors.
+
+Input capture, travel and encounter phases were controlled by the fixture. The
+weapon hits, cockpit grapple, rocket damage, attribution, serialization, host
+commands and teardown used production code. Final destruction and terminal
+broadcast were triggered directly to review their lifecycle; exact wall-punch
+completion and enemy multi-player contacts are covered separately by real-asset
+Node tests. This is local runtime evidence, not external Cloudflare/PeerJS,
+credential-refresh, changing-network or physical-control verification.
+
+The run exposed a synchronous shutdown-input revocation race; the repair and its
+regression were included in the successful replay. A subsequent inspection added
+replication of the blocked-exit camera recovery flag, covered by a focused owning
+client/observer regression. Final current-source validation passes both
+TypeScript projects and all 450 tests, and the production build is regenerated.
+Production asset references, changed documentation links and whitespace pass;
+the protected follow-up list remains unchanged. All fixture browser pages and
+local signalling, Worker and TURN services were closed afterward.

@@ -495,7 +495,7 @@ function sampleHomingStartDistance(
 }
 
 export function fireProjectile(): void {
-    if (forgottenMecha?.ownsPilot) return;
+    if (forgottenMecha?.ownsLocalPilot) return;
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
 
     if (state.activeWeaponName === 'MINIGUN' && state.minigunRamp < MINIGUN_SHOOT_DELAY) {
@@ -650,6 +650,7 @@ export function fireProjectile(): void {
             for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
                 const peerData = state.peers[peerId];
+            if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerId) continue;
                 if (peerData?.mesh && peerData.hp > 0) {
                     // Use the same body hit volume as bullets; labels and guns are not hitboxes.
                     const hit = segmentPlayerHitboxHitT(
@@ -669,15 +670,19 @@ export function fireProjectile(): void {
 
         const hitPoint = _hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, BULLET_TRAVEL_DISTANCE);
         let sniperFireBroadcast = false;
-        const shieldT = !state.isMultiplayer ? forgottenMecha?.combat.shieldContactT(barrelWorldPosition, _rayEnd, barrelWorldPosition) : null;
+        const shieldT = forgottenMecha?.combat.shieldContactT(barrelWorldPosition, _rayEnd, barrelWorldPosition);
         const shieldDist = shieldT != null ? shieldT * BULLET_TRAVEL_DISTANCE : Infinity;
 
         if (shieldDist < closestObstacleDist && shieldDist < closestTargetDist && shieldDist < closestPeerDist) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, shieldDist);
-            processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'shield' });
+            if (state.isMultiplayer) { broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed); sniperFireBroadcast = true; }
+            processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'shield', shotId, pelletIndex: 0 });
         } else if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestObstacleDist);
-            if (!state.isMultiplayer && obstacleHits[0]?.distance === closestObstacleDist && obstacleData(obstacleHits[0].object).damageTarget === 'forgotten-mecha') processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'body' });
+            if (obstacleHits[0]?.distance === closestObstacleDist && obstacleData(obstacleHits[0].object).damageTarget === 'forgotten-mecha') {
+                if (state.isMultiplayer) { broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed); sniperFireBroadcast = true; }
+                processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'body', shotId, pelletIndex: 0 });
+            }
             spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
         } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist && hitTargetGroup) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestTargetDist);
@@ -753,7 +758,7 @@ export function fireProjectile(): void {
 }
 
 export function updateWeapons(delta: number): void {
-    if (forgottenMecha?.ownsPilot) return;
+    if (forgottenMecha?.ownsLocalPilot) return;
     updateMuzzleFlash(state.leftGun, delta);
     updateMuzzleFlash(state.rightGun, delta);
 
@@ -1002,7 +1007,7 @@ export function resetWeaponPresentation(): void {
 /** Copy the accepted player pose after physics and hook translation, before
  * shoulder-camera placement. Weapon simulation/firing retains its earlier order. */
 export function updatePlayerAvatarPose(): void {
-    if (forgottenMecha?.ownsPilot || !state.playerMesh || !state.controls || !state.camera) return;
+    if (forgottenMecha?.ownsLocalPilot || !state.playerMesh || !state.controls || !state.camera) return;
     state.playerMesh.position.copy(state.controls.getObject().position); state.playerMesh.position.y -= PLAYER_BODY_CAMERA_OFFSET;
     _camEuler.setFromQuaternion(state.camera.quaternion, 'YXZ'); state.playerMesh.rotation.y = _camEuler.y;
 }
@@ -1124,8 +1129,8 @@ export function disposePlayerVisuals(): void {
 // First-person attaches guns to the camera; third-person reparents the same
 // objects onto the avatar so weapon state stays shared.
 export function syncThirdPersonPresentation(): void {
-    const transition = forgottenMecha?.transitionCamera;
-    if (forgottenMecha?.ownsPilot) {
+    const transition = forgottenMecha?.localTransition;
+    if (forgottenMecha?.ownsLocalPilot) {
         state.isThirdPersonView = transition?.locked ? transition.thirdPerson : state.isThirdPerson && !state.keyCActive && !state.rightClickActive;
         if (state.leftGun) state.leftGun.visible = false;
         if (state.rightGunContainer) state.rightGunContainer.visible = false;
@@ -1161,7 +1166,7 @@ export function syncThirdPersonPresentation(): void {
 }
 
 export function setThirdPerson(enabled: boolean): void {
-    if (forgottenMecha?.transitionCamera.locked) return;
+    if (forgottenMecha?.localTransition?.locked) return;
     state.isThirdPerson = enabled;
     syncThirdPersonPresentation();
 }

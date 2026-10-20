@@ -1,3 +1,4 @@
+import { parseMechaPacket, isMechaState, type MechaPacket, type MechaState } from './mechaNetworkTypes.js';
 import { isUsername, isPeerId } from './roomIdentity.js';
 import { MAX_PLAYERS, PLAYER_MAX_HP } from './config.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
@@ -61,6 +62,7 @@ export interface FirePacket {
 }
 
 export type HomingTargetPacket =
+    | { kind: 'mecha'; targetRevision: number }
     | { kind: 'npc'; targetIndex: number; targetRevision: number }
     | { kind: 'peer'; targetPeerId: string; targetLifeId: number };
 
@@ -100,7 +102,7 @@ export interface PlayerHitPacket {
 export interface PlayerDiedPacket {
     type: 'player_died';
     lifeId: number;
-    cause: 'player' | 'lava';
+    cause: 'player' | 'lava' | 'mecha';
     killerPeerId: string | null;
     senderPeerId?: string;
     victimName: string;
@@ -139,6 +141,7 @@ export interface WorldSnapshotPacket {
     score: number;
     dayNightElapsedSeconds: number;
     targets: TargetState[];
+    mecha?: MechaState;
 }
 
 export interface PeerLeftPacket { type: 'peer_left'; peerId: string; senderPeerId?: string; }
@@ -152,6 +155,7 @@ export interface PlayerListEntry extends LobbyPlayer { kills: number; deaths: nu
 export interface PlayerListPacket { type: 'player_list'; players: PlayerListEntry[]; senderPeerId?: string; }
 
 export type NetworkPacket =
+    | MechaPacket
     | { type: 'start_game'; senderPeerId?: string }
     | PeerLeftPacket
     | LobbyRosterPacket
@@ -193,6 +197,7 @@ function isHookState(value: unknown): value is HookState {
 
 function isHomingTarget(value: unknown): value is HomingTargetPacket {
     if (!isRecord(value)) return false;
+    if (value.kind === 'mecha') return isInteger(value.targetRevision, 0, Number.MAX_SAFE_INTEGER);
     if (value.kind === 'npc') {
         return isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
             isInteger(value.targetRevision, 0, Number.MAX_SAFE_INTEGER);
@@ -297,8 +302,8 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
 
         case 'player_died':
             return isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) &&
-                ((value.cause === 'lava' && value.killerPeerId === null) || (value.cause === 'player' && isPeerId(value.killerPeerId))) && isUsername(value.victimName) &&
-                (value.killerName === 'Lava' || isUsername(value.killerName)) &&
+                (((value.cause === 'lava' || value.cause === 'mecha') && value.killerPeerId === null) || (value.cause === 'player' && isPeerId(value.killerPeerId))) && isUsername(value.victimName) &&
+                (value.killerName === 'Lava' || value.killerName === 'Forgotten Mecha' || isUsername(value.killerName)) &&
                 (value.victimPeerId === undefined || isPeerId(value.victimPeerId))
                 ? value as unknown as PlayerDiedPacket : null;
 
@@ -337,10 +342,10 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 !isInteger(value.spawnHouseSlot, 1, MAX_PLAYERS - 1) ||
                 !isFiniteNumber(value.dayNightElapsedSeconds, 0, MAX_DAY_NIGHT_ELAPSED_SECONDS) ||
                 !Array.isArray(value.targets) || value.targets.length > MAX_TARGETS_IN_SNAPSHOT ||
-                !value.targets.every(isTargetState)) return null;
+                !value.targets.every(isTargetState) || !(value.mecha === undefined || isMechaState(value.mecha))) return null;
             return value as unknown as WorldSnapshotPacket;
 
         default:
-            return null;
+            return parseMechaPacket(value);
     }
 }

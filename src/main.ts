@@ -1,3 +1,4 @@
+import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork } from './mechaNetwork.js';
 import { deriveHudPresentation } from './hudPresentation.js';
 import { cancelWorldLoading, isWorldLoading, isWorldReveal, withWorldLoading, type WorldLoadingMode } from './worldLoading.js';
 import { prepareRenderer } from './renderPreparation.js';
@@ -143,7 +144,7 @@ function clearMechaHeadPresentation(): void {
 
 function syncMechaHeadPresentation(): void {
     const actor = forgottenMecha, head = actor?.headView;
-    if (!actor?.ownsPilot || !head || head.phase === 'inactive' || state.isThirdPersonView && !actor.transitionCamera.recovering || state.playerHp <= 0) {
+    if (!actor?.ownsLocalPilot || !head || head.phase === 'inactive' || state.isThirdPersonView && !actor.transitionCamera.recovering || state.playerHp <= 0) {
         clearMechaHeadPresentation(); return;
     }
     if (state.isThirdPersonView) {
@@ -215,11 +216,16 @@ function mechaImpact(kind: MechaImpact, position: THREE.Vector3): void {
 }
 
 function processMechaDamage(damage: number, context?: import('./damage.js').MechaWeaponHit): void {
-    const mounted = forgottenMecha?.ownsPilot;
+    if (state.isMultiplayer) {
+        if (context?.shotId !== undefined && forgottenMecha) broadcastToAll({ type: 'hit_mecha', revision: forgottenMecha.revision,
+            shotId: context.shotId, pelletIndex: context.pelletIndex ?? 0, damage });
+        return;
+    }
+    const mounted = forgottenMecha?.ownsLocalPilot;
     const hit = forgottenMecha?.damage(damage, context);
     if (!hit?.accepted) return;
     if (mounted) {
-        if (forgottenMecha!.ownsPilot) {
+        if (forgottenMecha!.ownsLocalPilot) {
             lastMountedHp = forgottenMecha!.hp;
             updateHealthBar(forgottenMecha!.hp / forgottenMecha!.maxHp * 100, '#ff4757');
         }
@@ -745,15 +751,15 @@ function setupMenuListeners(): void {
 function setupInputListeners(): void {
     setLookInputHandler((yaw, pitch, time) => {
         const actor = forgottenMecha;
-        if (!actor?.ownsPilot) return false;
-        actor.look(yaw, pitch, time);
+        if (!actor?.ownsLocalPilot) return false;
+        if (state.isMultiplayer) queueMechaLook(yaw, pitch); else actor.look(yaw, pitch, time);
         return true;
     });
     // Reacquire after key release so Escape cannot immediately unlock the new session.
     let resumeOnEscapeUp = false;
     const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }, code = e.code) => {
         // O is a vehicle-only binding, outside the bean's rebindable actions.
-        if (e.code === 'KeyO' && forgottenMecha?.ownsPilot) code = 'KeyO';
+        if (e.code === 'KeyO' && forgottenMecha?.ownsLocalPilot) code = 'KeyO';
         if (e.code === 'Tab' && state.isMultiplayer && state.isPlaying && isInputActive()) {
             e.preventDefault?.();
             if (!gothChat?.isOpen) setPlayerListVisible(true);
@@ -764,7 +770,7 @@ function setupInputListeners(): void {
         if (e.repeat || gothChat?.isOpen) return;
         if (code !== 'Escape' && !isInputActive()) return;
         if (code && code !== 'Escape') e.preventDefault?.();
-        if (forgottenMecha?.ownsPilot && !['Escape', 'KeyW', 'KeyS', 'KeyC', 'KeyP', 'KeyO', 'KeyR', 'ShiftLeft', 'ShiftRight'].includes(code)) return;
+        if (forgottenMecha?.ownsLocalPilot && !['Escape', 'KeyW', 'KeyS', 'KeyC', 'KeyP', 'KeyO', 'KeyR', 'ShiftLeft', 'ShiftRight'].includes(code)) return;
 
         switch (code) {
             case 'Escape':
@@ -791,7 +797,7 @@ function setupInputListeners(): void {
                 }
                 break;
             case 'KeyW': state.moveForward = true; break;
-            case 'KeyO': forgottenMecha?.toggleHelmet(); break;
+            case 'KeyO': if (state.isMultiplayer) requestMechaAction('helmet'); else forgottenMecha?.toggleHelmet(); break;
             case 'KeyA': state.moveLeft = true; break;
             case 'KeyS': state.moveBackward = true; break;
             case 'KeyD': state.moveRight = true; break;
@@ -831,7 +837,8 @@ function setupInputListeners(): void {
                 break;
             case 'KeyR':
                 if (state.controls && isInputActive()) {
-                    if (forgottenMecha?.ownsPilot) {
+                    if (forgottenMecha?.ownsLocalPilot) {
+                        if (state.isMultiplayer) { requestMechaAction('exit'); break; }
                         if (forgottenMecha.requestExit(state.isThirdPerson, state.rightClickActive)) {
                             state.isMouseDown = state.keyCActive = state.rightClickActive = state.isScoped = state.isShiftDown = false;
                             mountedFireRequested = false;
@@ -884,7 +891,7 @@ function setupInputListeners(): void {
                 }
                 break;
             case 'KeyC':
-                if (state.controls && isInputActive() && !forgottenMecha?.transitionCamera.locked) {
+                if (state.controls && isInputActive() && !forgottenMecha?.localTransition?.locked) {
                     state.keyCActive = true;
                     syncThirdPersonPresentation();
                     refreshScopedState();
@@ -938,7 +945,7 @@ function setupInputListeners(): void {
         keyUp: code => onKeyUp({ code }),
         fire: held => {
             state.isMouseDown = held;
-            if (forgottenMecha?.ownsPilot) { mountedFireRequested ||= held; return; }
+            if (forgottenMecha?.ownsLocalPilot) { mountedFireRequested ||= held; return; }
             if (held && isInputActive() && state.fireCooldown <= 0 && state.switchState === 'IDLE') { cancelInspect(); fireProjectile(); }
         },
     });
@@ -948,7 +955,7 @@ function setupInputListeners(): void {
         interactWithGirlfriend();
     });
     document.getElementById('powerjump-toggle')?.addEventListener('click', () => {
-        if (isInputActive() && !forgottenMecha?.ownsPilot) state.powerJumpEnabled = !state.powerJumpEnabled;
+        if (isInputActive() && !forgottenMecha?.ownsLocalPilot) state.powerJumpEnabled = !state.powerJumpEnabled;
     });
     window.addEventListener('keydown', e => onKeyDown(e, gameplayCode(e.code, userSettings.keybinds)));
     window.addEventListener('keyup', e => onKeyUp(e, gameplayCode(e.code, userSettings.keybinds)));
@@ -968,7 +975,7 @@ function setupInputListeners(): void {
 }
 
 function interactWithGirlfriend(trigger?: { code: string; preventDefault?: () => void }): void {
-    if (forgottenMecha?.ownsPilot) return;
+    if (forgottenMecha?.ownsLocalPilot) return;
     if (!state.camera || !state.isPlaying || state.playerHp <= 0 || !isInputActive() || gothChat?.isOpen) return;
     if (!canUseGothChat(state) || !gothGirlfriend?.interact(state.camera, state.obstacles)) return;
     chatCharacter = gothGirlfriend;
@@ -1025,7 +1032,7 @@ interface DisposeGameRuntimeOptions {
 let disposingGameRuntime = false;
 
 function currentHudPresentation() {
-    const pilot = forgottenMecha?.ownsPilot ? forgottenMecha : null;
+    const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
     return deriveHudPresentation({
         runtime: Boolean(state.scene && state.camera && state.renderer && state.controls),
         playing: state.isPlaying, input: isInputActive(), alive: state.playerHp > 0,
@@ -1044,7 +1051,7 @@ function syncGameHud(): void {
     if (!presentation.accelerometer || !motionHudInitialized) updateLocalAccelerometer(0);
     updateSpeedlines(state.velocity.length(), presentation.speedlines);
     updateWorldBorderOverlay(presentation.border);
-    const pilot = forgottenMecha?.ownsPilot ? forgottenMecha : null;
+    const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
     const stats = WEAPON_STATS[state.activeWeaponName];
     updateHealthBar(pilot ? pilot.hp / pilot.maxHp * 100 : state.playerHp / state.playerMaxHp * 100);
     updateReloadBar(Math.max(0, Math.min(1, 1 - (pilot ? pilot.pilot.cooldown / WEAPON_STATS.SNIPER.fireRate : state.fireCooldown / (stats?.fireRate ?? 0.1)))));
@@ -1063,6 +1070,7 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
         mechaCameraHandoff.reset();
         mountedFireRequested = false;
         syncMountedControls(false);
+        resetMechaNetwork();
         cancelWorldLoading();
         state.isPlaying = false;
         state.pendingPlay = false;
@@ -1135,7 +1143,7 @@ async function loadPreparedWorld(
             if (state.scene !== scene || !current()) throw new DOMException('Loading cancelled', 'AbortError');
         };
         await createEnvironmentAsync(seed, checkpoint);
-        if (!state.isMultiplayer) await prepareForgottenMecha({
+        await prepareForgottenMecha(state.isMultiplayer ? multiplayerMechaEvents() : {
             impact: mechaImpact,
             stompPlayer: () => takePlayerDamage(state.playerMaxHp, 'Forgotten Mecha'),
             laserPlayer: damage => takePlayerDamage(damage, 'Forgotten Mecha'),
@@ -1144,6 +1152,7 @@ async function loadPreparedWorld(
             pilotReleased: pose => { if (state.scene === scene) onMechaPilotReleased(pose); },
             exitBlocked: () => { if (state.scene === scene) exitWarningRemaining = 3; },
         }, checkpoint);
+        if (state.isMultiplayer) initializeNetworkMecha();
         if (dayNightCycle) await prepareRenderer(dayNightCycle, checkpoint);
         if (onPrepared) {
             if (state.scene !== scene || !current()) throw new DOMException('Loading cancelled', 'AbortError');
@@ -1207,7 +1216,7 @@ function performPlayerReset(resetMatch = false): void {
     state.controls?.resetLook();
     resetHealthBarFlash();
     clearApproachWarning();
-    forgottenMecha?.clearPendingDamage(); forgottenMecha?.pilot.rockets.clear();
+    if (!state.isMultiplayer) { forgottenMecha?.clearPendingDamage(); forgottenMecha?.pilot.rockets.clear(); }
     resetPlayerAtTownSpawn(getWorldSeed(), resetMatch ? 'house' : 'church');
     syncMountedControls(false);
     syncThirdPersonPresentation();
@@ -1222,7 +1231,7 @@ function broadcastPlayerDeath(victimName: string, killerName: string, killerPeer
     if (!state.isMultiplayer) return;
     const packet: PlayerDiedPacket = {
         type: 'player_died',
-        lifeId: state.lifeId, cause: killerPeerId ? 'player' : 'lava', killerPeerId,
+        lifeId: state.lifeId, cause: killerPeerId ? 'player' : killerName === 'Forgotten Mecha' ? 'mecha' : 'lava', killerPeerId,
         victimName: victimName,
         killerName: killerName,
         victimPeerId: state.peer?.id
@@ -1262,7 +1271,7 @@ function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
     updateMouseButtonStateFromChange(e);
 
     if (!wasMouseDown && state.isMouseDown) {
-        if (forgottenMecha?.ownsPilot) { mountedFireRequested = true; return; }
+        if (forgottenMecha?.ownsLocalPilot) { mountedFireRequested = true; return; }
         if (state.inspectState === 'INSPECTING') {
             cancelInspect();
         }
@@ -1287,7 +1296,7 @@ function handleWeaponWheel(e: WheelEvent): void {
 }
 
 function cycleWeapon(direction: number): void {
-    if (forgottenMecha?.ownsPilot) return;
+    if (forgottenMecha?.ownsLocalPilot) return;
     const currentIndex = WEAPON_CYCLE.indexOf(state.desiredWeaponName);
     const safeIndex = currentIndex >= 0 ? currentIndex : WEAPON_CYCLE.indexOf(state.activeWeaponName);
     const nextIndex = (safeIndex + Math.sign(direction) + WEAPON_CYCLE.length) % WEAPON_CYCLE.length;
@@ -1352,17 +1361,17 @@ function updateMouseButtonStateFromChange(e: MouseEvent | PointerEvent): void {
         state.rightClickActive = buttons.secondary;
     }
 
-    if (forgottenMecha) state.rightClickActive = forgottenMecha.transitionCamera.acceptSecondary(state.rightClickActive);
+    if (forgottenMecha?.localTransition) state.rightClickActive = forgottenMecha.localTransition.acceptSecondary(state.rightClickActive);
 
     refreshScopedState();
 }
 
 function refreshScopedState(): void {
-    if (forgottenMecha?.transitionCamera.locked) {
+    if (forgottenMecha?.localTransition?.locked) {
         state.keyCActive = state.rightClickActive = state.isScoped = false;
         syncThirdPersonPresentation();
     } else if (!isInputActive()) state.isScoped = false;
-    else if (forgottenMecha?.ownsPilot) {
+    else if (forgottenMecha?.ownsLocalPilot) {
         // Keep ADS intent/FOV stable while O relocates the cockpit camera.
         // Scan acquisition and reticles still require unobscured vision.
         state.isScoped = forgottenMecha.mode === 'piloted' && (state.rightClickActive || state.keyCActive);
@@ -1374,9 +1383,9 @@ function refreshScopedState(): void {
 function syncGogglesFailureVisuals(): void {
     const scope = UI.gogglesScope;
     if (!scope) return;
-    const shuttingDown = !forgottenMecha?.ownsPilot && state.gogglesFailure.shutdownUntil > 0;
+    const shuttingDown = !forgottenMecha?.ownsLocalPilot && state.gogglesFailure.shutdownUntil > 0;
     scope.classList.toggle('is-tv-off', shuttingDown);
-    scope.classList.toggle('is-bricked-noise', !forgottenMecha?.ownsPilot && state.gogglesFailure.bricked && !shuttingDown);
+    scope.classList.toggle('is-bricked-noise', !forgottenMecha?.ownsLocalPilot && state.gogglesFailure.bricked && !shuttingDown);
     scope.classList.toggle('is-photosensitivity-mode', userSettings.photosensitivityMode);
 }
 
@@ -1644,6 +1653,11 @@ function setupSettingsControls(): void {
 
 function init(): void {
     setDamageHandlers(processTargetHit, takePlayerDamage, processMechaDamage);
+    setMechaPresentation({ impact: mechaImpact, release: onMechaPilotReleased,
+        blocked: () => { exitWarningRemaining = 3; }, gameOver: () => triggerDeath(true),
+        damage: (damage, attacker) => takePlayerDamage(damage, attacker ? state.lobbyPlayers.find(p => p.peerId === attacker)?.username ?? 'Guest' : 'Forgotten Mecha', attacker ?? undefined),
+        hit: (killed, score, local) => { if (local) flashHitmarker(killed); if (UI.score) UI.score.innerText = String(score); },
+    });
     loadUserSettings();
     setupSettingsControls();
     applyLiveSettings();
@@ -1710,10 +1724,11 @@ function init(): void {
     });
 
     onInputEnded(() => {
+        if (state.isMultiplayer) releaseMechaInput();
         if (disposingGameRuntime) return;
         updateApproachWarning(0, false);
         mountedFireRequested = false;
-        forgottenMecha?.pilot.clearLookMotion();
+        if (!state.isMultiplayer || forgottenMecha?.ownsLocalPilot) forgottenMecha?.pilot.clearLookMotion();
         setPlayerListVisible(false);
         const isDead = state.matchEnded || UI.deathOverlay?.style.display === 'flex';
         if (UI.blocker) UI.blocker.style.display = gothChat?.isOpen || isDead ? 'none' : 'flex';
@@ -1835,13 +1850,14 @@ function animate(): void {
         state.prevTime = time;
         return;
     }
-    if (state.isPlaying && state.playerHp > 0 && isInputActive() && !gothChat?.isOpen) {
+    if (state.isMultiplayer) flushMechaDamage();
+    if (!state.isMultiplayer && state.isPlaying && state.playerHp > 0 && isInputActive() && !gothChat?.isOpen) {
         forgottenMecha?.flushRenderedDamage(state.lifeId);
         // Keep the already rendered lethal beam/contact as the death backdrop.
         // Advancing the actor here would shrink it before the frozen screen.
         if (state.playerHp <= 0) { state.prevTime = time; return; }
     }
-    updateApproachWarning(delta, !state.isMultiplayer && state.isPlaying && state.playerHp > 0 && isInputActive() && !gothChat?.isOpen);
+    updateApproachWarning(delta, state.isPlaying && state.playerHp > 0 && isInputActive() && !gothChat?.isOpen);
     finishGogglesShutdown(state.gogglesFailure, time);
     refreshScopedState();
     syncGogglesFailureVisuals();
@@ -1886,7 +1902,7 @@ function animate(): void {
         // The conversation owns the player pose; gravity must not fight the eased move.
         conversationCamera.update(delta);
         state.velocity.set(0, 0, 0);
-    } else if (!forgottenMecha?.ownsPilot && !(state.hookTargetCockpit && state.hookState === 'PULLING')) {
+    } else if (!forgottenMecha?.ownsLocalPilot && !(state.hookTargetCockpit && state.hookState === 'PULLING')) {
         updatePlayerPhysics(delta);
     }
     if (state.controls) {
@@ -1896,11 +1912,11 @@ function animate(): void {
     if (state.camera) {
         updateLavaLights(time / 1000, state.camera.position, lanternStrength, userSettings.lavaGlow);
     }
-    updateHoverBar(forgottenMecha?.ownsPilot ? forgottenMecha.combat.energy : state.hoverFuel,
-        isInputActive() && (forgottenMecha?.ownsPilot ? forgottenMecha.combat.shieldActive : state.isHovering));
+    updateHoverBar(forgottenMecha?.ownsLocalPilot ? forgottenMecha.combat.energy : state.hoverFuel,
+        isInputActive() && (forgottenMecha?.ownsLocalPilot ? forgottenMecha.combat.shieldActive : state.isHovering));
     updateLocalAccelerometer(delta);
 
-    if (!forgottenMecha?.ownsPilot) { checkLavaDamage(); updateHealthRegen(delta); }
+    if (!forgottenMecha?.ownsLocalPilot) { checkLavaDamage(); updateHealthRegen(delta); }
 
     updateHook(delta);
     updateRemotePeers(delta);
@@ -1916,9 +1932,9 @@ function animate(): void {
     const npcInputActive = state.isPlaying && state.playerHp > 0 && isInputActive();
     if (npcInputActive) mechaCameraHandoff.update(delta);
     forgottenMecha?.updateLighting(lanternStrength);
-    forgottenMecha?.setPilotInput((state.moveForward ? 1 : 0) - (state.moveBackward ? 1 : 0) - touchMove.y, state.isShiftDown);
+    if (!state.isMultiplayer) forgottenMecha?.setPilotInput((state.moveForward ? 1 : 0) - (state.moveBackward ? 1 : 0) - touchMove.y, state.isShiftDown);
     gothGirlfriend?.update(npcInputActive || gothChat?.isOpen ? delta : 0);
-    if (npcInputActive && state.controls) forgottenMecha?.update(delta, {
+    if (!state.isMultiplayer && npcInputActive && state.controls) forgottenMecha?.update(delta, {
         position: state.controls.getObject().position,
         yaw: state.controls.getObject().rotation.y,
         alive: state.playerHp > 0,
@@ -1927,7 +1943,12 @@ function animate(): void {
         // floor transmits this shockwave. A jump/hover is checked at impact.
         grounded: state.canJump && state.controls.getObject().position.y <= PLAYER_HEIGHT + 0.15,
     });
-    const mountedActor = forgottenMecha?.ownsPilot ? forgottenMecha : null;
+    if (state.isMultiplayer) {
+        submitMechaInput((state.moveForward ? 1 : 0) - (state.moveBackward ? 1 : 0) - touchMove.y, state.isShiftDown,
+            state.isMouseDown || mountedFireRequested, isInputActive() && state.playerHp > 0);
+        updateMechaNetwork(delta);
+    }
+    const mountedActor = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
     syncMountedControls(Boolean(mountedActor));
     if (mountedActor && state.camera) {
         state.velocity.set(0, 0, 0);
@@ -1951,7 +1972,7 @@ function animate(): void {
         lastMountedHp = mountedActor.hp;
         updateReloadBar(Math.max(0, 1 - mountedActor.pilot.cooldown / WEAPON_STATS.SNIPER.fireRate));
     }
-    if (forgottenMecha && npcInputActive) forgottenMecha.updateRockets(delta, state.targets, queryObstaclesAlongSegment, processTargetHit);
+    if (!state.isMultiplayer && forgottenMecha && npcInputActive) forgottenMecha.updateRockets(delta, state.targets, queryObstaclesAlongSegment, processTargetHit);
     cameraShake.update(delta);
     const interactionPrompt = getUI<HTMLElement>('npc-interaction');
     if (interactionPrompt) {
@@ -1981,9 +2002,9 @@ function animate(): void {
 
     if (state.camera) {
         const targetFov = state.isScoped ? userSettings.scopedFov : userSettings.fov;
-        if (forgottenMecha?.mode === 'startup') {
+        if (forgottenMecha?.ownsLocalPilot && forgottenMecha.mode === 'startup') {
             state.camera.fov = userSettings.fov; state.camera.updateProjectionMatrix();
-        } else if (forgottenMecha?.mode === 'boarding') {
+        } else if (forgottenMecha?.ownsLocalPilot && forgottenMecha.mode === 'boarding') {
             const t = forgottenMecha.boardProgress;
             state.camera.fov = THREE.MathUtils.lerp(mountedBoardFov, userSettings.fov, t * t * (3 - 2 * t)); state.camera.updateProjectionMatrix();
         } else if (Math.abs(state.camera.fov - targetFov) > 0.1) {
@@ -2012,7 +2033,7 @@ function animate(): void {
         state.controls?.update();
         // The shoulder boom stays centered on the eye; the cabin camera blend
         // belongs only to first-person viewing of the physical folding helmet.
-        if (state.isThirdPersonView && forgottenMecha?.ownsPilot) forgottenMecha.viewAnchor.getWorldPosition(state.camera.position);
+        if (state.isThirdPersonView && forgottenMecha?.ownsLocalPilot) forgottenMecha.viewAnchor.getWorldPosition(state.camera.position);
         updatePlayerAvatarPose();
         const logicalCameraPos = _logicalCameraPos.copy(state.camera.position);
         _logicalCameraQuaternion.copy(state.camera.quaternion);
@@ -2027,16 +2048,16 @@ function animate(): void {
                 if (state.rightGunContainer) state.rightGunContainer.visible = false;
             }
             if (state.isThirdPersonView && !gothChat?.isOpen) {
-                const actor = forgottenMecha, transition = actor?.transitionCamera;
-                const radius = transition?.external && actor?.ownsPilot
+                const actor = forgottenMecha, transition = actor?.localTransition;
+                const radius = transition?.external && actor?.ownsLocalPilot
                     ? transition.queryRadius(actor.group.position, actor.radius, state.camera.fov, state.camera.aspect)
                     : mechaCameraHandoff.fromRenderPose ? mechaCameraHandoff.queryRadius
-                        : actor?.ownsPilot || mechaCameraHandoff.active ? 65 : THIRD_PERSON_CAMERA_QUERY_RADIUS;
+                        : actor?.ownsLocalPilot || mechaCameraHandoff.active ? 65 : THIRD_PERSON_CAMERA_QUERY_RADIUS;
                 // Framing/queryRadius is measured from the mech center, which
                 // differs from the animated cockpit eye during Mount.
-                const queryCenter = transition?.external && actor?.ownsPilot ? actor.group.position : logicalCameraPos;
+                const queryCenter = transition?.external && actor?.ownsLocalPilot ? actor.group.position : logicalCameraPos;
                 const candidates = queryObstaclesNear(queryCenter.x, queryCenter.z, radius, _thirdPersonObstacleCandidates);
-                const obstacles = actor?.ownsPilot ? candidates.filter(object => object.userData.damageTarget !== 'forgotten-mecha') : candidates;
+                const obstacles = actor?.ownsLocalPilot ? candidates.filter(object => object.userData.damageTarget !== 'forgotten-mecha') : candidates;
                 // Pull the shoulder camera forward when nearby architecture
                 // would otherwise enter the camera or block the player view.
                 resolveThirdPersonCameraPosition(
@@ -2044,15 +2065,15 @@ function animate(): void {
                     state.camera.quaternion,
                     obstacles,
                     state.camera.position,
-                    forgottenMecha?.ownsPilot ? mechCameraDimensions : mechaCameraHandoff.active ? mechaCameraHandoff.dimensions : undefined,
+                    forgottenMecha?.ownsLocalPilot ? mechCameraDimensions : mechaCameraHandoff.active ? mechaCameraHandoff.dimensions : undefined,
                 );
                 state.camera.lookAt(resolveThirdPersonAimTarget(
                     logicalCameraPos,
                     _logicalCameraQuaternion,
                     _thirdPersonAimTarget,
-                    forgottenMecha?.ownsPilot ? BULLET_TRAVEL_DISTANCE : undefined,
+                    forgottenMecha?.ownsLocalPilot ? BULLET_TRAVEL_DISTANCE : undefined,
                 ));
-                if (transition?.external && actor?.ownsPilot) {
+                if (transition?.external && actor?.ownsLocalPilot) {
                     _mechaFollowPosition.copy(state.camera.position); _mechaFollowQuaternion.copy(state.camera.quaternion);
                     transition.resolve(actor.group.position, actor.group.rotation.y, actor.radius,
                         state.camera.fov, state.camera.aspect, _mechaFollowPosition, _mechaFollowQuaternion,
@@ -2078,7 +2099,7 @@ function animate(): void {
             lastRenderedAimRay.origin.copy(state.camera.position);
             state.camera.getWorldDirection(lastRenderedAimRay.direction);
             hasRenderedAim = true;
-            const pilot = forgottenMecha?.ownsPilot ? forgottenMecha : null;
+            const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
             if (pilot) {
                 if (state.playerMesh && !state.isThirdPersonView) state.playerMesh.visible = false;
                 pilot.preparePilotView(!state.isThirdPersonView);
@@ -2086,7 +2107,7 @@ function animate(): void {
                 if (pilot.mode === 'piloted') {
                     if (pilot.targetingReady) pilot.pilot.rockets.select(state.camera, _gogglesWeaponOrigin, state.targets, queryObstaclesAlongSegment);
                     else pilot.pilot.rockets.selected = null;
-                    if (isInputActive()) {
+                    if (!state.isMultiplayer && isInputActive()) {
                         pilot.fireRocket(state.camera, state.targets, queryObstaclesAlongSegment);
                         if (state.isMouseDown || mountedFireRequested) pilot.requestRocket();
                     }
@@ -2132,7 +2153,7 @@ function animate(): void {
             if (!state.isThirdPersonView && (pilot?.headView.phase === 'reveal' || pilot?.headView.phase === 'shutdown-reveal') && !userSettings.photosensitivityMode && !reducedHeadMotion.matches) {
                 pilot.headEffects.render(state.renderer, state.scene, state.camera, pilot.headView.revealProgress);
             } else state.renderer.render(state.scene, state.camera);
-            forgottenMecha?.acknowledgeRendered();
+            if (state.isMultiplayer) acknowledgeMechaRender(); else forgottenMecha?.acknowledgeRendered();
         } finally {
             forgottenMecha?.restorePilotView();
             if (state.playerMesh && playerVisible !== undefined) state.playerMesh.visible = playerVisible;
@@ -2146,7 +2167,7 @@ function animate(): void {
 
 export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {
     if (!state.isPlaying || state.playerHp <= 0) return;
-    if (forgottenMecha?.ownsPilot) { processMechaDamage(damage); return; }
+    if (forgottenMecha?.ownsLocalPilot) { processMechaDamage(damage); return; }
 
     state.playerHp = Math.max(0, state.playerHp - damage);
     state.regenTimer = 0;
@@ -2175,9 +2196,9 @@ export function takePlayerDamage(damage: number, attackerName: string, attackerP
 export function triggerDeath(gameOver = false): void {
     resetHealthBarFlash();
     clearApproachWarning();
-    forgottenMecha?.clearPendingDamage();
-    forgottenMecha?.pilot.rockets.clear();
-    forgottenMecha?.transitionCamera.reset();
+    if (!state.isMultiplayer) {
+        forgottenMecha?.clearPendingDamage(); forgottenMecha?.pilot.rockets.clear(); forgottenMecha?.transitionCamera.reset();
+    }
     mechaCameraHandoff.reset();
     clearMechaHeadPresentation();
     if (gameOver) state.matchEnded = true;

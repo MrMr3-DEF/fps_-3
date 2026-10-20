@@ -169,7 +169,7 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
         }
     }
 
-    const shieldT = !visualOnly && !state.isMultiplayer
+    const shieldT = !visualOnly
         ? forgottenMecha?.combat.shieldContactT(_segmentStart, _segmentEnd, data.shotOrigin, PROJECTILE_RADIUS) : null;
     if (shieldT != null && shieldT < closestHitT) {
         closestHitT = shieldT; hitObstacle = null; hitShield = true;
@@ -203,6 +203,7 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
         for (let j = 0; j < peerIdsLen; j++) {
             const peerId = peerIds[j];
             const peerData = state.peers[peerId];
+            if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerId) continue;
             if (peerData?.mesh && peerData.hp > 0) {
                 const hitT = segmentPlayerHitboxHitT(
                     _segmentStart,
@@ -253,10 +254,10 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
                 projectileHit = true;
             }
         } else if (hitShield) {
-            processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'shield' });
+            processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'shield', shotId: data.shotId, pelletIndex: data.pelletIndex });
             projectileHit = true;
         } else if (hitObstacle) {
-            if (!visualOnly && !state.isMultiplayer && obstacleData(hitObstacle).damageTarget === 'forgotten-mecha') processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'body' });
+            if (!visualOnly && obstacleData(hitObstacle).damageTarget === 'forgotten-mecha') processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'body', shotId: data.shotId, pelletIndex: data.pelletIndex });
             spawnParticles(_impactPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
             projectileHit = true;
         } else {

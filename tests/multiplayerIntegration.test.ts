@@ -592,3 +592,83 @@ test('client queues match start and clock updates while its world is preparing',
         state.scene = null;
     }
 });
+
+test('real host authorizes mecha shield/body claims once, rejects fabricated damage and retires shots across mounting', async t => {
+    const { ForgottenMecha } = await import('../src/forgottenMecha.ts');
+    const { loadIronmawTestAsset } = await import('./ironmawTestAsset.ts');
+    const world = await import('../src/world.ts');
+    const coordinator = await import('../src/mechaNetwork.ts');
+    const { authorizeMechaHit } = await import('../src/multiplayer.ts');
+    const originalLoad = ForgottenMecha.prototype.load, originalDocument = globalThis.document;
+    const context = new Proxy({}, { get: () => () => {} });
+    (globalThis as any).document = { getElementById: () => null, createElement: () => ({ getContext: () => context }) };
+    ForgottenMecha.prototype.load = async function () { this.install(await loadIronmawTestAsset()); };
+    let now = 1000; t.mock.method(performance, 'now', () => now);
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        Peer.latest.emit('open', state.peer!.id);
+        const admission = await registerTurnSession('ABCDEFGH', 'join-room', 'Shooter', 'mecha-shooter');
+        const connection = new Connection('mecha-shooter', { admissionToken: admission.admissionToken });
+        Peer.latest.emit('connection', connection); await tick(); await tick(); startHostMatch();
+        state.scene = new THREE.Scene(); world.rebuildEnvironmentWithSeed(42);
+        await world.prepareForgottenMecha(coordinator.multiplayerMechaEvents(), async () => {});
+        coordinator.initializeNetworkMecha();
+        const actor = world.forgottenMecha!;
+        const forged = actor.captureNetworkState(999, true);
+        connection.emit('data', { type: 'mecha_state', state: forged });
+        connection.emit('data', { type: 'mecha_event', sequence: 999, state: forged, event: { kind: 'end' } });
+        assert.equal(state.matchEnded, false); assert.equal(actor.hp, 50);
+        const origin = actor.combat.shieldCenter.clone().add(new THREE.Vector3(0, 60, 0));
+        assert.ok(authorizeClientPacket('mecha-shooter', { ...update('Shooter'), pos: { x: origin.x, y: origin.y, z: origin.z } }));
+        const fire = (shotId: number) => authorizeClientPacket('mecha-shooter', { type: 'fire', shotId, spreadSeed: 1, weapon: 'SNIPER',
+            barrelPos: { x: origin.x, y: origin.y, z: origin.z }, dir: { x: 0, y: -1, z: 0 } });
+        const claim = (shotId: number, damage = 10) => ({ type: 'hit_mecha' as const, revision: actor.revision, shotId, pelletIndex: 0, damage });
+        assert.ok(fire(1)); assert.equal(authorizeMechaHit('mecha-shooter', claim(1, 1)), false);
+        assert.equal(authorizeMechaHit('mecha-shooter', claim(1)), true); assert.equal(actor.hp, 50);
+        assert.equal(authorizeMechaHit('mecha-shooter', claim(1)), false);
+        assert.equal(authorizeMechaHit('mecha-shooter', claim(999)), false);
+        const weaponPort = await import('../src/weaponNetworkPort.ts');
+        const savedConnections = state.connections, savedControls = state.controls, savedCamera = state.camera;
+        const soloOrigin = origin.clone().add(new THREE.Vector3(0, 0, 8));
+        state.connections = []; state.camera = new THREE.PerspectiveCamera(); state.camera.position.copy(soloOrigin);
+        state.controls = { getObject: () => state.camera! } as any; state.activeWeaponName = 'SNIPER'; state.switchState = 'IDLE';
+        weaponPort.broadcastLocalFire(soloOrigin, actor.combat.shieldCenter.clone().sub(soloOrigin).normalize(), null, 500, 1);
+        assert.equal(authorizeMechaHit(state.peer!.id, claim(500)), true, 'a room host can fight the mecha with no guests connected');
+        state.camera.position.x += 50; sendLocalState(true);
+        state.connections = savedConnections; state.controls = savedControls; state.camera = savedCamera;
+
+        actor.combat.shieldPhase = 'down'; now += 2100; assert.ok(fire(2));
+        assert.equal(authorizeMechaHit('mecha-shooter', claim(2)), true); assert.equal(actor.hp, 40);
+        assert.ok(connection.sent.some(p => p.type === 'mecha_event' && p.event.kind === 'shield'));
+        assert.ok(connection.sent.some(p => p.type === 'mecha_state' && p.state.hp === 40));
+        now += 2100; assert.ok(fire(3)); actor.damage(40);
+        for (let i = 0; i < 400; i++) actor.update(1 / 60, { position: origin, alive: false, grounded: false });
+        actor.pilotPeerId = 'other-pilot'; actor.pilotLifeId = 0;
+        assert.equal(actor.beginBoarding(actor.seatAnchor.getWorldPosition(new THREE.Vector3()), new THREE.Quaternion()), true);
+        for (let i = 0; i < 500; i++) actor.update(1 / 60, { position: origin, alive: false, grounded: false });
+        assert.equal(actor.mode, 'piloted'); assert.equal(authorizeMechaHit('mecha-shooter', claim(3)), false); assert.equal(actor.hp, 50);
+        const { setThirdPerson } = await import('../src/weapons.ts');
+        state.isThirdPerson = false; setThirdPerson(true);
+        assert.equal(state.isThirdPerson, true, 'another pilot transition cannot lock the host perspective');
+        const guidedAdmission = await registerTurnSession('ABCDEFGH', 'join-room', 'Guided', 'mecha-guided');
+        Peer.latest.emit('connection', new Connection('mecha-guided', { admissionToken: guidedAdmission.admissionToken })); await tick(); await tick();
+        const observedCenter = actor.hitbox.position.clone(), guidedOrigin = observedCenter.clone().add(new THREE.Vector3(0, 60, 12));
+        assert.ok(authorizeClientPacket('mecha-guided', { ...update('Guided'), activeWeapon: 'AR', pos: { x: guidedOrigin.x, y: guidedOrigin.y, z: guidedOrigin.z } }));
+        state.camera = new THREE.PerspectiveCamera(); state.camera.position.copy(soloOrigin).add(new THREE.Vector3(50, 0, 0));
+        state.controls = { getObject: () => state.camera! } as any;
+        sendLocalState(true); now += 33; actor.group.position.x += 0.6;
+        actor.update(1 / 60, { position: guidedOrigin, alive: false, grounded: false }); sendLocalState(true);
+        const direction = observedCenter.clone().sub(guidedOrigin).normalize();
+        assert.ok(authorizeClientPacket('mecha-guided', { type: 'fire', shotId: 1, spreadSeed: 1, weapon: 'AR',
+            barrelPos: { x: guidedOrigin.x, y: guidedOrigin.y, z: guidedOrigin.z }, dir: { x: direction.x, y: direction.y, z: direction.z },
+            homingTarget: { kind: 'mecha', targetRevision: actor.revision }, homingStartDistance: guidedOrigin.distanceTo(observedCenter) / 3 }),
+            'the first guided shot can use the host history collected before firing');
+        state.controls = savedControls; state.camera = savedCamera;
+
+
+        assert.equal(authorizeClientPacket('mecha-shooter', { type: 'player_died', lifeId: 0, cause: 'mecha', killerPeerId: null, victimName: 'Shooter', killerName: 'Forgotten Mecha' }), null);
+    } finally {
+        ForgottenMecha.prototype.load = originalLoad; world.disposeWorld(); disconnectMultiplayer(); globalThis.document = originalDocument;
+    }
+});

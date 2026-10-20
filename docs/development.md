@@ -85,7 +85,7 @@ Stop any development or preview server with `Ctrl+C` in the terminal that owns i
 
 ## Local run modes
 
-For the singleplayer siege robot, `/tests/mecha-preview.html` reviews the real
+For the offline siege-robot presentation, `/tests/mecha-preview.html` reviews the real
 match with controls for finding/scanning the robot, firing, stomps, death, wall
 punch and cleanup. Body height, automatic sideways evasion, phase history and
 event pauses review laser pitching, horizontal misses, shield drop and rebuild.
@@ -309,3 +309,18 @@ TypeScript projects and all 349 tests after correcting two older high-altitude
 defeat fixtures. One production build regenerated `dist/` successfully with the
 existing large-chunk warning; whitespace checks passed. Interactive acceptance
 remains with the user, and `to_be_changed.md` was untouched.
+
+### Multiplayer mecha checks
+
+`tests/mechaNetwork.test.ts` covers real-asset sparse-pose replication, bounded
+BinaryPack packets, target retention, multi-player stomp/laser/rocket contact,
+exclusive boarding, stale commands, input expiry, pilot departure, host-death
+simulation and victim render acknowledgment. The real host integration suite
+also checks shield/body claims, damage fabrication, duplicate pellets and shots
+from before mounting. Existing mecha suites retain offline lifecycle coverage.
+
+Run the focused suites during iteration, then `npm run check` and
+`npm run build`. Browser acceptance requires two actual clients and a third late
+joiner; use the checklist in [Forgotten Mecha](forgotten-mecha.md#multiplayer-acceptance).
+Update [Multiplayer live test](multiplayer-live-test.md) with dated results and
+separate local fixtures from deployed service/device verification.

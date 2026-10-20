@@ -40,10 +40,10 @@ export let forgottenMecha: ForgottenMecha | null = null;
 /** Changes only at a real world replacement/disposal boundary. */
 export let worldGeneration = 0;
 
-/** Asset preparation is awaited by offline startup; cancellation disposes even
+/** Asset preparation is awaited by match startup; cancellation disposes even
  * a model that finishes downloading after its match has already been replaced. */
 export async function prepareForgottenMecha(events: MechaEvents, checkpoint: () => Promise<void>): Promise<void> {
-    if (state.isMultiplayer || !state.scene) return;
+    if (!state.scene) return;
     const scene = state.scene;
     const actor = new ForgottenMecha([...state.obstacles], [...state.lavaPools], worldSeed, events, queryObstaclesAlongSegment);
     forgottenMecha = actor;

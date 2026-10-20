@@ -1,3 +1,4 @@
+import { requestMechaBoard, rememberMechaApproach } from './mechaNetwork.js';
 import { resetHook, setHookBadgeVisible } from './hookLifecycle.js';
 export { resetHook } from './hookLifecycle.js';
 import * as THREE from 'three';
@@ -41,10 +42,11 @@ export const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, GUN_TIP_Z);
 // Fire from screen center. Enemy targets get a small aim-assist radius; surfaces
 // use exact ray hits so pillars and floor still feel precise.
 export function toggleGrapplingHook(aimRay?: THREE.Ray): void {
-    if (forgottenMecha?.ownsPilot) return;
+    if (forgottenMecha?.ownsLocalPilot) return;
     if (!state.scene || !state.camera || !state.leftGun || !state.controls) return;
 
     if (state.hookState === 'IDLE') {
+        if (state.isMultiplayer) rememberMechaApproach();
         state.hookState = 'FIRING';
         state.hookIsEnemy = false;
         state.hookTargetEnemy = null;
@@ -203,7 +205,7 @@ export function updateHook(delta: number): void {
                 state.velocity.set(0, 0, 0);
                 if (blocked) { resetHook(); return; }
                 playerObj.position.copy(_rayEnd);
-                if (distance <= travel + 0.001) { playerObj.position.copy(state.hookTarget); actor.beginBoarding(playerObj.position, playerObj.quaternion, state.isThirdPerson, state.rightClickActive); resetHook(); return; }
+                if (distance <= travel + 0.001) { playerObj.position.copy(state.hookTarget); if (state.isMultiplayer) requestMechaBoard(); else actor.beginBoarding(playerObj.position, playerObj.quaternion, state.isThirdPerson, state.rightClickActive); resetHook(); return; }
             } else if (state.hookIsEnemy && state.hookTargetEnemy) {
                 state.hookTarget.copy(state.hookTargetEnemy.position);
                 _toEnemy.subVectors(state.hookTarget, playerObj.position);

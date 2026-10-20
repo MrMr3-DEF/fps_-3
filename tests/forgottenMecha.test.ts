@@ -318,7 +318,7 @@ test('world preparation registers moving body proxies, routes bullets to health,
         assert.equal(actor.colliders.length, 0);
         state.isMultiplayer = true;
         await prepareForgottenMecha(events, async () => {});
-        assert.equal(forgottenMecha, null, 'multiplayer cannot create a robot');
+        assert.equal(forgottenMecha?.ready, true, 'multiplayer prepares the same fitted actor');
         state.isMultiplayer = false;
     } finally { ForgottenMecha.prototype.load = originalLoad; disposeWorld(); }
 });

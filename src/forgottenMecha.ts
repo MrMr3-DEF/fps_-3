@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MECHA_HEIGHT, MECHA_HP, MECHA_STOMP_RADIUS, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE } from './config.js';
+import { MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, PLAYER_MAX_HP, MECHA_STOMP_RADIUS, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE } from './config.js';
 import { obstacleData } from './userDataTypes.js';
 import { MechaNavigation, type NavigationBox, type MechaRoute } from './mechaNavigation.js';
 import { MechaFootPlant } from './mechaFootPlant.js';
@@ -17,13 +17,15 @@ import type { RocketObstacleQuery, RocketPlayer } from './mechaRockets.js';
 import { MECHA_ENEMY_ROCKET_DAMAGE, MECHA_ENEMY_ROCKET_TURN_SPEED, MECHA_ENEMY_ROCKET_GUIDANCE_RESPONSE, MECHA_ROCKET_SPEED } from './config.js';
 import { MechaMovement } from './mechaMovement.js';
 import { MECHA_MOVEMENT_MARGIN, MECHA_DEFEAT_YAW_SPEED, MECHA_DEFEAT_ALIGNMENT, MECHA_FINAL_BREAKUP_TIME } from './config.js';
+import type { MechaState } from './mechaNetworkTypes.js';
+import { segmentPlayerBeamHitT } from './playerHitbox.js';
 import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_BOUNDING_RADIUS, playerTouchesWorldBox } from './playerHitbox.js';
 import type { MechaPilotRelease } from './mechaPilotRelease.js';
 
 export type MechaMode = 'walking' | 'tracking' | 'rocketing' | 'stomping' | 'punching' | 'aligning' | 'dying' | 'dead' | 'game-over' | 'boarding' | 'startup' | 'piloted' | 'shutting-down' | 'destroying' | 'destroyed';
 export type MechaImpact = 'step' | 'stomp' | 'knees' | 'fists' | 'punch';
-export interface MechaPlayer { position: THREE.Vector3; yaw?: number; alive: boolean; grounded: boolean; lifeId?: number; velocity?: THREE.Vector3 }
-export interface MechaEvents { impact(kind: MechaImpact, position: THREE.Vector3): void; stompPlayer(): void; gameOver(): void; laserPlayer?(damage: number): void; rocketPlayer?(damage: number): void; pilotReleased?(pose: MechaPilotRelease): void; exitBlocked?(): void }
+export interface MechaPlayer { peerId?: string; position: THREE.Vector3; yaw?: number; alive: boolean; grounded: boolean; lifeId?: number; velocity?: THREE.Vector3 }
+export interface MechaEvents { impact(kind: MechaImpact, position: THREE.Vector3): void; stompPlayer(): void; gameOver(): void; laserPlayer?(damage: number): void; rocketPlayer?(damage: number): void; pilotReleased?(pose: MechaPilotRelease): void; exitBlocked?(): void; playerHit?(player: MechaPlayer, damage: number, attack: 'stomp' | 'laser' | 'rocket', attackerPeerId?: string | null): void }
 type ObstacleQuery = (startX: number, startZ: number, endX: number, endZ: number, out: THREE.Object3D[], padding?: number) => THREE.Object3D[];
 const modelUrl = new URL('../blender_assets/ironmaw/ironmaw_siege_robot.glb', import.meta.url).href;
 const LOOP = 4 / 3;
@@ -44,7 +46,7 @@ export function navigationBoxes(objects: readonly THREE.Object3D[]): NavigationB
     });
 }
 
-/** A single offline actor owns its model, navigation and animation clock.
+/** One actor owns its model, navigation, simulation clock and replica pose.
  * It never consumes world RNG or uses wall-clock timers, so offline pause
  * freezes movement, animation events and the post-stomp cooldown together. */
 export class ForgottenMecha {
@@ -60,6 +62,17 @@ export class ForgottenMecha {
     readonly pilotAnchor = new THREE.Group();
     readonly pilotScale = 2;
     readonly rocketPlayer: RocketPlayer = { position: new THREE.Vector3(), yaw: 0, lifeId: 0, alive: false, velocity: new THREE.Vector3() };
+    networked = false;
+    localPeerId: string | null = null;
+    localPilotPresentation = false;
+    pilotPeerId: string | null = null;
+    pilotLifeId = 0;
+    private targetPeerId: string | null = null;
+    private multiplayerPlayers: readonly MechaPlayer[] = [];
+    private readonly rocketPlayers = new Map<string, RocketPlayer>();
+    private readonly laserVictims = new Set<string>();
+    private readonly replicaPosition = new THREE.Vector3();
+    private readonly replicaQuaternion = new THREE.Quaternion();
     private playerSampled = false;
     private pendingHit: { kind: 'stomp' | 'laser'; damage: number; lifeId: number; beamDraw: number; rendered: boolean } | null = null;
     private enemyReload = 0;
@@ -128,6 +141,7 @@ export class ForgottenMecha {
     private readonly meshes: THREE.SkinnedMesh[] = [];
     private readonly skeletons = new Set<THREE.Skeleton>();
     private readonly bones = new Map<string, THREE.Bone>();
+    private networkRest: { position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3 }[] = [];
     private footPlant: MechaFootPlant | null = null;
     private eye: THREE.MeshStandardMaterial | null = null;
     private environment: THREE.WebGLRenderTarget | null = null;
@@ -323,6 +337,7 @@ export class ForgottenMecha {
         this.cockpitBox.min.z = 0.7; this.cockpitBox.max.z -= 0.25;
         this.mixer.stopAllAction(); this.action = null; this.play('Idle', true); this.mixer.update(0); this.updateSkin();
         this.group.rotation.y = Math.atan2(next.x - spawn.x, next.z - spawn.z);
+        this.networkRest = [...this.bones.values()].map(b => ({ position: b.position.clone(), quaternion: b.quaternion.clone(), scale: b.scale.clone() }));
         this.ready = true;
         this.updateColliders();
         this.updateCombatAnchors();
@@ -407,6 +422,20 @@ export class ForgottenMecha {
         }
         return { accepted: true, killed };
     }
+    weaponContact(start: THREE.Vector3, end: THREE.Vector3, origin: THREE.Vector3, radius: number): { t: number; surface: 'shield' | 'body'; point: THREE.Vector3 } | null {
+        let t = this.combat.shieldContactT(start, end, origin, radius) ?? Infinity;
+        let surface: 'shield' | 'body' = 'shield';
+        for (const collider of this.solidColliders) {
+            const d = obstacleData(collider);
+            this.beamMin.set(collider.position.x - d.halfW, collider.position.y - d.halfH, collider.position.z - d.halfD);
+            this.beamMax.set(collider.position.x + d.halfW, collider.position.y + d.halfH, collider.position.z + d.halfD);
+            const hit = segmentRoundedBoxHitT(start, end, this.beamMin, this.beamMax, radius);
+            if (hit !== null && hit < t) { t = hit; surface = 'body'; }
+        }
+        return t === Infinity ? null : { t, surface, point: new THREE.Vector3().lerpVectors(start, end, t) };
+    }
+    get localTransition(): MechaTransitionCamera | undefined { return !this.networked || this.localPilotPresentation ? this.transitionCamera : undefined; }
+    get ownsLocalPilot(): boolean { return this.ownsPilot && (!this.networked || this.pilotPeerId === this.localPeerId); }
     get canMount(): boolean { return this.ready && !this.disposed && this.mode === 'dead'; }
     get ownsPilot(): boolean { return ['boarding', 'startup', 'piloted', 'shutting-down'].includes(this.mode); }
     get pilotVisible(): boolean { return this.ownsPilot; }
@@ -468,6 +497,7 @@ export class ForgottenMecha {
     }
     setPilotInput(direction: number, shield: boolean): void { this.pilotDirection = Math.sign(direction); this.shieldHeld = shield; }
     private captureHit(kind: 'laser' | 'stomp', damage: number): void {
+        if (this.networked) return;
         if (!this.pendingHit) this.pendingHit = { kind, damage, lifeId: this.rocketPlayer.lifeId, beamDraw: this.combat.effects.beamDraws, rendered: false };
     }
     acknowledgeRendered(): void {
@@ -574,8 +604,9 @@ export class ForgottenMecha {
         this.muzzleAnchor.getWorldPosition(this.target);
         this.barrelDirection.set(0, 0, 1).transformDirection(this.muzzleAnchor.matrixWorld);
         const closed = this.targetingReady;
-        const target = closed ? this.pilot.rockets.select(camera, this.target, targets, query) : null;
-        const fired = this.pilot.rockets.fire(this.target, this.barrelDirection, targets, { mode: closed ? 'guided' : 'wandering', target });
+        const target = closed ? this.pilot.rockets.select(camera, this.target, targets, query, this.networked) : null;
+        const peerTarget = closed && this.networked ? this.pilot.rockets.selectPlayer(camera, this.target, [...this.rocketPlayers.values()], query, this.pilotPeerId) : null;
+        const fired = this.pilot.rockets.fire(this.target, this.barrelDirection, targets, { mode: closed ? 'guided' : 'wandering', target: peerTarget ? null : target, peerTarget, ownerPeerId: this.pilotPeerId });
         this.pilot.cooldown = WEAPON_STATS.SNIPER.fireRate;
         if (this.queuedHelmetToggle) { this.queuedHelmetToggle = false; this.toggleHelmet(); }
         return fired;
@@ -711,7 +742,7 @@ export class ForgottenMecha {
             this.muzzleAnchor.getWorldPosition(this.target);
             this.barrelDirection.set(0, 0, 1).transformDirection(this.muzzleAnchor.matrixWorld);
             const fired = this.pilot.rockets.fire(this.target, this.barrelDirection, [], {
-                mode: visible ? 'guided' : 'wandering', target: null, player: this.rocketPlayer,
+                mode: visible ? 'guided' : 'wandering', target: null, player: this.networked ? this.rocketPlayers.get(player.peerId!) : this.rocketPlayer,
                 damage: MECHA_ENEMY_ROCKET_DAMAGE, turnSpeed: visible ? MECHA_ENEMY_ROCKET_TURN_SPEED : undefined,
                 guidanceResponse: visible ? MECHA_ENEMY_ROCKET_GUIDANCE_RESPONSE : undefined,
             });
@@ -724,7 +755,91 @@ export class ForgottenMecha {
         }
     }
     updateRockets(delta: number, targets: readonly THREE.Group[], query: RocketObstacleQuery, hit: (index: number, damage: number) => void): void {
-        this.pilot.rockets.update(delta, targets, query, hit, this.rocketPlayer, damage => this.events.rocketPlayer?.(damage));
+        this.pilot.rockets.update(delta, targets, query, hit, this.rocketPlayer, damage => this.events.rocketPlayer?.(damage),
+            this.networked ? [...this.rocketPlayers.values()] : undefined,
+            (victim, damage, owner) => {
+                const player = this.multiplayerPlayers.find(p => p.peerId === victim.peerId && p.lifeId === victim.lifeId);
+                if (player) this.events.playerHit?.(player, damage, 'rocket', owner);
+            });
+    }
+    /** Host-only selection consumes accepted poses, never culled avatar meshes. */
+    updatePlayers(delta: number, players: readonly MechaPlayer[]): void {
+        this.multiplayerPlayers = players;
+        const present = new Set<string>();
+        for (const player of players) {
+            if (!player.peerId) continue;
+            present.add(player.peerId);
+            let sample = this.rocketPlayers.get(player.peerId);
+            if (!sample || sample.lifeId !== player.lifeId) {
+                sample = { peerId: player.peerId, position: new THREE.Vector3(), yaw: 0, lifeId: player.lifeId ?? 0, alive: false, velocity: new THREE.Vector3() };
+                this.rocketPlayers.set(player.peerId, sample);
+            }
+            sample.position.copy(player.position); sample.position.y -= PLAYER_BODY_CAMERA_OFFSET;
+            sample.yaw = player.yaw ?? 0; sample.alive = player.alive && player.peerId !== this.pilotPeerId;
+            sample.velocity.copy(player.velocity ?? new THREE.Vector3());
+        }
+        for (const [id, sample] of this.rocketPlayers) if (!present.has(id)) { sample.alive = false; this.rocketPlayers.delete(id); }
+        const eligible = (p: MechaPlayer) => p.alive && p.peerId !== this.pilotPeerId && classifyMechaAttack(this.group.position, p.position) !== null && this.hasLineOfSight(p);
+        let target = players.find(p => p.peerId === this.targetPeerId && eligible(p));
+        if (!target && !this.combat.rangedCommitted && this.mode !== 'rocketing' && this.mode !== 'stomping') {
+            let distance = Infinity;
+            for (const p of players) if (eligible(p)) {
+                const d = p.position.distanceToSquared(this.group.position);
+                if (d < distance) { distance = d; target = p; }
+            }
+            this.targetPeerId = target?.peerId ?? null;
+        }
+        // A committed windup keeps its original identity, even behind cover.
+        target ??= players.find(p => p.peerId === this.targetPeerId);
+        this.update(delta, target ?? { position: this.group.position, alive: false, grounded: false });
+    }
+    abandonPilot(): void {
+        if (!this.ownsPilot) return;
+        this.pilotPeerId = null; this.clearPendingDamage(); this.cancelPilotLayers(); this.pilot.rockets.clear(); this.combat.stop();
+        this.hp = 0; this.revision++; this.mode = 'dead'; this.waistYaw = 0; this.deathTime = 2;
+        this.play('Death', false, 0); this.action!.time = this.action!.getClip().duration; this.mixer!.update(0);
+        this.bones.get('CTRL_WaistYaw')!.quaternion.identity(); this.updateColliders(); this.updateEye(); this.transitionCamera.reset();
+    }
+    captureNetworkState(sequence: number, matchEnded = false): MechaState {
+        const vector = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+        const h = this.headView;
+        return { sequence, revision: this.revision, mode: this.mode, elapsed: this.elapsed, position: vector(this.group.position), heading: this.group.rotation.y, hp: this.hp, recoveringExit: this.recoveringExit,
+            pilotPeerId: this.ownsPilot ? this.pilotPeerId : null, pilotLifeId: this.pilotLifeId, pilotYaw: this.pilot.yaw, pilotPitch: this.pilot.pitch, cooldown: this.pilot.cooldown,
+            boneCount: this.bones.size,
+            // Sparse local transforms keep ordinary walking snapshots small;
+            // FinalDeath can still reproduce every detached armor fragment.
+            bones: [...this.bones.values()].flatMap((b, i) => {
+                const rest = this.networkRest[i];
+                return b.position.distanceToSquared(rest.position) < 1e-12 && b.quaternion.angleTo(rest.quaternion) < 1e-6 && b.scale.distanceToSquared(rest.scale) < 1e-12
+                    ? [] : [[i, ...b.position.toArray(), ...b.quaternion.toArray(), ...b.scale.toArray()]];
+            }),
+            eye: this.eye ? [...this.eye.color.toArray(), ...this.eye.emissive.toArray(), this.eye.emissiveIntensity] : [0, 0, 0, 0, 0, 0, 0],
+            head: { phase: h.phase, fold: h.fold, wantedOpen: h.wantedOpen, eyeBlend: h.eyeBlend, blackout: h.blackout, loadingProgress: h.loadingProgress, hudOpacity: h.hudOpacity, revealProgress: h.revealProgress },
+            combat: this.combat.captureNetworkState(), rockets: this.pilot.rockets.captureNetworkState(), matchEnded };
+    }
+    /** Replicas evaluate no AI, collision damage, cooldowns or ownership changes.
+     * Interpolate the fitted pose so armor and observer visuals stay together. */
+    applyNetworkState(s: MechaState, alpha = 1): void {
+        if (!this.ready || this.disposed || s.boneCount !== this.bones.size) return;
+        this.mode = s.mode; this.revision = s.revision; this.hp = s.hp; this.elapsed = s.elapsed; this.recoveringExit = s.recoveringExit;
+        this.pilotPeerId = s.pilotPeerId; this.pilotLifeId = s.pilotLifeId;
+        this.group.position.lerp(this.replicaPosition.set(s.position.x, s.position.y, s.position.z), alpha);
+        this.group.rotation.y += Math.atan2(Math.sin(s.heading - this.group.rotation.y), Math.cos(s.heading - this.group.rotation.y)) * alpha;
+        this.pilot.yaw = s.pilotYaw; this.pilot.pitch = s.pilotPitch; this.pilot.cooldown = s.cooldown;
+        let index = 0;
+        for (const bone of this.bones.values()) {
+            const i = index++, pose = s.bones.find(p => p[0] === i), rest = this.networkRest[i];
+            this.replicaPosition.copy(rest.position); this.replicaQuaternion.copy(rest.quaternion);
+            if (pose) { this.replicaPosition.fromArray(pose, 1); this.replicaQuaternion.fromArray(pose, 4); }
+            bone.position.lerp(this.replicaPosition, alpha); bone.quaternion.slerp(this.replicaQuaternion, alpha);
+            this.replicaPosition.copy(rest.scale); if (pose) this.replicaPosition.fromArray(pose, 8);
+            bone.scale.lerp(this.replicaPosition, alpha);
+        }
+        Object.assign(this.headView, s.head); this.combat.applyNetworkState(s.combat);
+        this.pilot.rockets.applyNetworkState(s.rockets, alpha);
+        this.updateColliders(); this.updatePilotCamera(); this.updateEye();
+        // Replicas have no private defeat/shutdown clocks or material history.
+        if (this.eye) { this.eye.color.fromArray(s.eye); this.eye.emissive.fromArray(s.eye, 3); this.eye.emissiveIntensity = s.eye[6]; }
     }
     preparePilotView(firstPerson: boolean, warmInterior = false): void {
         this.restorePilotView();
@@ -875,18 +990,34 @@ export class ForgottenMecha {
         if (this.mode === 'walking' || this.mode === 'tracking') this.footPlant?.update(this.phase, this.locomotion === 'Idle', delta);
         this.updateColliders();
         this.updateCombatAnchors();
+        const previousLaserPhase = this.combat.laserPhase;
         this.combat.updateLaser(delta, {
             robotPosition: this.group.position, playerPosition: player.position, playerYaw: player.yaw ?? 0,
             playerAlive: player.alive, visible: this.hasLineOfSight(player), canCharge: this.mode === 'tracking',
             yaw: this.group.rotation.y + this.waistYaw,
             obstacleDistance: this.beamObstacleDistance,
         });
+        if (this.networked) {
+            if (previousLaserPhase !== 'firing' && previousLaserPhase !== 'fading') this.laserVictims.clear();
+            if (this.combat.laserPhase === 'firing' || this.combat.laserPhase === 'fading') {
+                for (const candidate of this.multiplayerPlayers) {
+                    const key = `${candidate.peerId}:${candidate.lifeId}`;
+                    if (!candidate.alive || this.laserVictims.has(key)) continue;
+                    if (segmentPlayerBeamHitT(this.combat.beamOrigin, this.combat.beamEnd, candidate.position, candidate.yaw ?? 0, this.combat.beamRadius) !== null) {
+                        this.laserVictims.add(key); this.events.playerHit?.(candidate, MECHA_LASER_DAMAGE, 'laser');
+                    }
+                }
+            }
+        }
         this.combat.updateEffects();
         this.updateEye();
         if (this.mode === 'stomping' && !this.impactFired && this.elapsed >= STOMP_IMPACT) {
             this.impactFired = true;
             this.emitImpact('stomp', 'CTRL_Ankle_L');
             // Re-evaluate grounding and range at impact, not when wind-up starts.
+            if (this.networked) for (const candidate of this.multiplayerPlayers) {
+                if (candidate.alive && (candidate.grounded && Math.hypot(candidate.position.x - this.group.position.x, candidate.position.z - this.group.position.z) <= MECHA_STOMP_RADIUS || this.playerTouchesLegs(candidate))) this.events.playerHit?.(candidate, PLAYER_MAX_HP, 'stomp');
+            }
             if (player.alive && (player.grounded && Math.hypot(player.position.x - this.group.position.x, player.position.z - this.group.position.z) <= MECHA_STOMP_RADIUS || this.playerTouchesLegs(player))) this.captureHit('stomp', 0);
         }
         if (this.mode === 'dying') {

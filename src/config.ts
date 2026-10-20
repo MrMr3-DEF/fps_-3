@@ -252,3 +252,8 @@ export const DESCENT_FALL_RATIO_CAP = 45.0;
 export const GROUND_VISUAL_SIZE = 3500;
 export const RENDER_CHUNK_SIZE = 200;
 export const MAX_RENDER_DISTANCE_CHUNKS = 16;
+
+// A lost pilot input stream must not leave movement, shielding or firing held.
+export const MECHA_NETWORK_INPUT_TIMEOUT_MS = 250;
+export const MECHA_NETWORK_REFRESH_MS = 250;
+export const MECHA_NETWORK_MAX_BONES = 192;

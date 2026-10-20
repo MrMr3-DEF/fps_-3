@@ -1,3 +1,5 @@
+import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, resetMechaNetwork, acceptMechaCommand, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
+import type { MechaHitPacket } from './mechaNetworkTypes.js';
 import { TargetMotionHistory, type HomingFireContext } from './projectileFlight.js';
 import { hasLineOfSightToOrientedBox } from './targetVisibility.js';
 import { updateHealthRegen } from './healthRegen.js';
@@ -14,6 +16,7 @@ import { state, resetPlayerState, resetMatchStats, type DataConnectionLike, type
 import { placePlayerAtTownSpawn } from './playerSpawn.js';
 import { disposeParticles, spawnParticles, createLaserBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
 import {
+    forgottenMecha,
     generateWorldSeed,
     getWorldSeed,
     queryObstaclesAlongSegment,
@@ -162,7 +165,8 @@ function enterMultiplayerMatch(): void {
     // requestAnimationFrame can stop in a paused/background tab. This timer
     // catches healing up from elapsed time and publishes only confirmed changes.
     healthInterval = setInterval(() => {
-        if (state.isMultiplayer && state.isPlaying && updateHealthRegen(0)) sendLocalState(true);
+        if (forgottenMecha?.ownsLocalPilot) state.regenUpdatedAt = performance.now();
+        else if (state.isMultiplayer && state.isPlaying && updateHealthRegen(0)) sendLocalState(true);
     }, 250);
     sendLocalState(true);
     if (state.isHost) publishPlayerList();
@@ -260,6 +264,7 @@ export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | nu
         const latest = state.peer ? lastDamageByVictim.get(state.peer.id) : null;
         packet = { ...packet, senderPeerId: state.peer?.id, killerPeerId: packet.cause === 'player' ? latest?.attackerPeerId ?? null : null };
     }
+    if (state.isHost && packet.type === 'hit_mecha' && state.peer) { authorizeMechaHit(state.peer.id, packet); return; }
     const recipients = [...state.connections];
     const connLen = recipients.length;
     for (let i = 0; i < connLen; i++) {
@@ -497,6 +502,7 @@ function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): vo
             targetStateFingerprints.set(i, targetStateFingerprint(target));
         }
     }
+    const mecha = captureMechaSnapshot();
     const packet: WorldSnapshotPacket = {
         type: 'world_snapshot',
         gameStarted: state.isPlaying,
@@ -506,7 +512,8 @@ function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): vo
         spawnHouseSlot,
         score: state.score,
         dayNightElapsedSeconds: state.dayNightElapsedSeconds,
-        targets
+        targets,
+        ...(mecha ? { mecha } : {})
     };
     try {
         conn.send(packet);
@@ -540,6 +547,7 @@ export function setMultiplayerWorldLoader(loader: typeof multiplayerWorldLoader)
 
 function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void {
     if (!prepared) rebuildEnvironmentWithSeed(packet.seed);
+    if (forgottenMecha?.networked && !packet.mecha) throw new Error('Multiplayer requires the same client build. Reload both players.');
     state.dayNightElapsedSeconds = packet.dayNightElapsedSeconds;
     state.dayNightSyncPending = true;
     state.dayNightSyncImmediate = true;
@@ -556,6 +564,7 @@ function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void
     if (!packet.gameStarted) state.connections[0]?.send({ type: 'lobby_color',
         bodyColor: Number.parseInt(characterColor.slice(1), 16) });
     if (packet.gameStarted) enterMultiplayerMatch();
+    if (packet.mecha) receiveMechaState(packet.mecha);
 }
 
 function isExpectedHost(fromPeerId: string): boolean {
@@ -580,6 +589,7 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function resetLocalMatch(): void {
+    resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null; mechaDamageByVictim.clear();
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     state.playerList = [];
     setPlayerListVisible(false);
@@ -782,6 +792,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     if (disconnecting) return;
     const hadSession = state.isMultiplayer || peerInstance !== null;
     disconnecting = true;
+    resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null; mechaDamageByVictim.clear();
     if (healthInterval) clearInterval(healthInterval);
     healthInterval = null;
     const roomToRelease = state.roomCode;
@@ -1038,12 +1049,14 @@ function getPeerRuntime(peerId: string): PeerRuntimeState | null {
 }
 
 /** Host obstruction uses the shot's radius in both spatial and exact queries. */
-export function shotObstructionT(start: THREE.Vector3, end: THREE.Vector3, radius: number): number | null {
+export function shotObstructionT(start: THREE.Vector3, end: THREE.Vector3, radius: number, ignoreMecha = false): number | null {
     let closest = segmentGroundHitT(start, end, radius) ?? Infinity;
+    if (!ignoreMecha) closest = Math.min(closest, forgottenMecha?.combat.shieldContactT(start, end, start, radius) ?? Infinity);
     const obstacleCandidates = queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, _shotObstacleCandidates, radius);
     for (let index = 0; index < obstacleCandidates.length; index++) {
         const obstacle = obstacleCandidates[index];
         const data = obstacleData(obstacle);
+        if (ignoreMecha && data.damageTarget === 'forgotten-mecha') continue;
         const halfW = (data.halfW || PILLAR_WIDTH / 2) + radius;
         const halfD = (data.halfD || PILLAR_WIDTH / 2) + radius;
         const halfH = (data.halfH || data.height / 2) + radius;
@@ -1061,20 +1074,21 @@ function shotIsBlocked(start: THREE.Vector3, end: THREE.Vector3, radius = 0): bo
 
 /** Guided sweeps also stop at intervening bodies. The claimed victim and
  * shooter are excluded; peer poses come from the same bounded observation time. */
-function guidedPathBlocker(shooter: string, victim: HomingTargetPacket) {
+function guidedPathBlocker(shooter: string, victim: HomingTargetPacket, ignoreMecha = false) {
     const targets: THREE.Group[] = [];
     return (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered = false): boolean => {
-        if (shotIsBlocked(start, end, radius)) return true;
+        const obstacle = shotObstructionT(start, end, radius, ignoreMecha);
+        if (obstacle !== null && obstacle < 1 - 1e-6) return true;
         // Ordinary straight claims keep their existing intersection policy.
         // A zero-length contact cannot have a different body strictly before it.
-        if (at === undefined || start.distanceToSquared(end) < 1e-12) return false;
+        if ((!ignoreMecha && at === undefined) || start.distanceToSquared(end) < 1e-12) return false;
         queryTargetsAlongSegment(start.x, start.z, end.x, end.z, targets, radius);
         for (const object of targets) {
             const data = targetData(object);
             if (data.hp <= 0 || victim.kind === 'npc' && data.index === victim.targetIndex) continue;
             if (segmentSphereHitT(start, end, object.position, TARGET_HIT_RANGE_MULTIPLIER * (data.scale || 1) + radius) !== null) return true;
         }
-        return peerBodiesBlockSegment(shooter, victim, start, end, radius, at, filtered);
+        return peerBodiesBlockSegment(shooter, victim, start, end, radius, at ?? performance.now(), filtered);
     };
 }
 
@@ -1082,12 +1096,13 @@ const _peerOcclusionPoint = new THREE.Vector3();
 function peerBodiesBlockSegment(shooter: string, victim: HomingTargetPacket, start: THREE.Vector3, end: THREE.Vector3,
     radius: number, at: number, filtered: boolean): boolean {
     for (const [id, runtime] of peerRuntime) {
+        if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === id) continue;
         if (id === shooter || victim.kind === 'peer' && id === victim.targetPeerId || runtime.wasDead) continue;
         const yaw = runtime.motion.sample(at, _peerOcclusionPoint, filtered);
         const hit = segmentPlayerHitboxHitT(start, end, _peerOcclusionPoint, yaw, radius);
         if (hit !== null && hit < 1 - 1e-6) return true;
     }
-    if (state.peer?.id !== shooter && !(victim.kind === 'peer' && victim.targetPeerId === state.peer?.id) && state.playerHp > 0 && localMotion.samples.length) {
+    if (!(forgottenMecha?.ownsLocalPilot) && state.peer?.id !== shooter && !(victim.kind === 'peer' && victim.targetPeerId === state.peer?.id) && state.playerHp > 0 && localMotion.samples.length) {
         const yaw = localMotion.sample(at, _peerOcclusionPoint, filtered);
         const hit = segmentPlayerHitboxHitT(start, end, _peerOcclusionPoint, yaw, radius);
         if (hit !== null && hit < 1 - 1e-6) return true;
@@ -1132,6 +1147,25 @@ function homingFireContext(fromPeerId: string, packet: FirePacket, now: number):
     for (const target of state.targets) {
         const data = targetData(target);
         if (data.hp > 0 && data.bodyMesh) { target.updateWorldMatrix(true, true); occluders.push(data.bodyMesh); }
+    }
+    if (lock.kind === 'mecha') {
+        const actor = forgottenMecha;
+        if (!actor?.ready || actor.hp <= 0 || actor.revision !== lock.targetRevision) return null;
+        if (!mechaMotion || mechaMotion.actor !== actor || mechaMotion.revision !== actor.revision) mechaMotion = { actor, revision: actor.revision, history: new TargetMotionHistory() };
+        mechaMotion.history.add(now, actor.hitbox.position, actor.group.rotation.y);
+        const body = actor.hitbox; body.updateMatrixWorld(true); body.geometry.computeBoundingSphere(); body.geometry.computeBoundingBox();
+        const radius = body.geometry.boundingSphere!.radius * body.matrixWorld.getMaxScaleOnAxis();
+        const query = (sx: number, sz: number, ex: number, ez: number, out: THREE.Object3D[], padding?: number) => {
+            queryObstaclesAlongSegment(sx, sz, ex, ez, out, padding);
+            for (let i = out.length - 1; i >= 0; i--) if (obstacleData(out[i]).damageTarget === 'forgotten-mecha') out.splice(i, 1);
+            return out;
+        };
+        const observed = body.matrixWorld.clone();
+        return { history: mechaMotion.history, kind: 'sphere', radius, aimRadius: radius,
+            canAcquire: (position, _yaw, at, filtered) => {
+                observed.setPosition(position);
+                return hasLineOfSightToOrientedBox(origin, body.geometry.boundingBox!, observed, query, occluders, body, peersBlock(at, filtered));
+            } };
     }
     if (lock.kind === 'npc') {
         const object = state.targets[lock.targetIndex];
@@ -1194,10 +1228,12 @@ function canonicalSniperBeamEnd(
 }
 
 export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket): NetworkPacket | null {
-    if (!isKnownClient(fromPeerId)) return null;
+    if (!isKnownClient(fromPeerId) || state.matchEnded) return null;
     const now = performance.now();
 
     if (packet.type === 'update') {
+        const mounted = mountedPeerPosition(fromPeerId);
+        if (mounted) packet = { ...packet, pos: { x: mounted.x, y: mounted.y, z: mounted.z }, isMouseDown: false, hookState: 'IDLE', hookPos: null, isHovering: false };
         const reservedName = admittedNames.get(fromPeerId);
         if (!reservedName) return null;
         packet = { ...packet, username: reservedName };
@@ -1232,7 +1268,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
                 runtime.travelAllowance + Math.max(0, now - runtime.lastUpdateAt) / 1000 * NETWORK_MOVEMENT_SPEED);
             const nextPosition = _targetPos.set(packet.pos.x, packet.pos.y, packet.pos.z);
             const travel = nextPosition.distanceTo(runtime.position);
-            if (!newLife && travel > allowance + 1e-6) return null;
+            if (!mounted && !newLife && travel > allowance + 1e-6) return null;
             if (newLife && ((packet.activeWeapon !== runtime.weaponState.activeWeapon && packet.activeWeapon !== runtime.weaponState.nextWeapon) ||
                 packet.switchState !== 'IDLE' || packet.nextWeapon !== null)) return null;
             const weaponState = newLife ? initialWeaponState(packet.activeWeapon) : advanceWeaponState(runtime.weaponState, packet, now);
@@ -1256,12 +1292,13 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     if (!runtime) return null;
 
     if (packet.type === 'fire') {
+        if (forgottenMecha?.pilotPeerId === fromPeerId && forgottenMecha.ownsPilot) return null;
         const stats = WEAPON_STATS[packet.weapon];
         if (!stats || packet.weapon !== runtime.weaponState.activeWeapon || runtime.weaponState.switchState !== 'IDLE' || runtime.wasDead) return null;
         _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
         if (_barrelPos.distanceTo(runtime.position) > 5 || shotIsBlocked(runtime.position, _barrelPos, packet.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)) return null;
         const firePacket = packet;
-        if (!runtime.shots.record(firePacket, now, runtime.wasDead, () => homingFireContext(fromPeerId, firePacket, now))) return null;
+        if (!runtime.shots.record(firePacket, now, runtime.wasDead, () => homingFireContext(fromPeerId, firePacket, now), forgottenMecha?.revision)) return null;
         if (packet.weapon === 'SNIPER') {
             _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
             canonicalSniperBeamEnd(_barrelPos, _baseFireDir, packet.hitPoint, _targetPos);
@@ -1305,6 +1342,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     }
 
     if (packet.type === 'player_hit') {
+        if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === packet.targetPeerId) return null;
         const targetsHost = packet.targetPeerId === state.peer?.id;
         const targetPosition = getPeerHitPosition(packet.targetPeerId);
         const targetYaw = getPeerHitYaw(packet.targetPeerId);
@@ -1337,7 +1375,11 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     }
 
     if (packet.type === 'player_died') {
-        let killerName = 'Lava';
+        let killerName = packet.cause === 'mecha' ? 'Forgotten Mecha' : 'Lava';
+        if (packet.cause === 'mecha') {
+            const hit = mechaDamageByVictim.get(fromPeerId);
+            if (!hit || hit.lifeId !== packet.lifeId || hit.attacker !== null || now - hit.at > 10000) return null;
+        }
         let killerPeerId: string | null = null;
         if (packet.cause === 'player') {
             const latestDamage = lastDamageByVictim.get(fromPeerId);
@@ -1416,6 +1458,11 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
 
     let msg: NetworkPacket = parsed;
     if (state.isHost) {
+        if (msg.type === 'mecha_input' || msg.type === 'mecha_board') {
+            if (isKnownClient(fromPeerId)) acceptMechaCommand(fromPeerId, msg);
+            return;
+        }
+        if (msg.type === 'hit_mecha') { if (isKnownClient(fromPeerId)) authorizeMechaHit(fromPeerId, msg); return; }
         if (msg.type === 'lobby_color') {
             if (!state.isPlaying && isKnownClient(fromPeerId)) {
                 const player = state.lobbyPlayers.find(item => item.peerId === fromPeerId);
@@ -1426,7 +1473,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             }
             return;
         }
-        if (!state.isPlaying) return;
+        if (!state.isPlaying || state.matchEnded) return;
         const authorized = authorizeClientPacket(fromPeerId, parsed);
         if (!authorized) return;
         msg = authorized;
@@ -1454,6 +1501,8 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             } else if (msg.type !== 'world_snapshot') pendingWorldPackets.push({ peer: fromPeerId, packet: msg });
             return;
         }
+        if (msg.type === 'mecha_state') { receiveMechaState(msg.state); return; }
+        if (msg.type === 'mecha_event') { receiveMechaEvent(msg); return; }
         if (msg.type === 'start_game') {
             if (clientWorldSynchronized) enterMultiplayerMatch();
             return;
@@ -1754,6 +1803,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
 // Peer avatars own cloned weapon/name-tag resources, so leaving a room must
 // dispose those objects instead of only removing them from the scene.
 function removePeer(peerId: string): void {
+    mechaPeerLeft(peerId);
     const peerData = state.peers[peerId];
     if (peerData) {
         clearDamagePulse(peerData);
@@ -1782,11 +1832,16 @@ function removePeer(peerId: string): void {
 }
 
 export function sendLocalState(force = false): void {
-    if (!state.isMultiplayer || !state.isPlaying || state.connections.length === 0 || !state.controls || !state.camera) return;
+    if (!state.isMultiplayer || !state.isPlaying || state.matchEnded || (!state.isHost && state.connections.length === 0) || !state.controls || !state.camera) return;
 
     const now = performance.now();
     if (!force && now - lastSentTime < NETWORK_TICK_MS) return;
     if (state.isHost) {
+        hostMechaShots.updateTrigger(state.isMouseDown && state.activeWeaponName === 'MINIGUN' && state.switchState === 'IDLE', now);
+        if (forgottenMecha?.ready) {
+            if (!mechaMotion || mechaMotion.actor !== forgottenMecha || mechaMotion.revision !== forgottenMecha.revision) mechaMotion = { actor: forgottenMecha, revision: forgottenMecha.revision, history: new TargetMotionHistory() };
+            mechaMotion.history.add(now, forgottenMecha.hitbox.position, forgottenMecha.group.rotation.y);
+        }
         syncHostTargetStates();
         if (state.peer) peerMotion(state.peer.id, now);
         for (const index of npcMotion.keys()) targetMotion(index, now);
@@ -1891,6 +1946,7 @@ export function updateRemotePeers(delta: number): void {
 
         // Health is replicated by the victim. Predicting regeneration here can
         // resurrect a stale health value and makes inspection disagree with combat.
+        if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerIds[i]) continue;
         peerData.mesh.position.lerp(peerData.targetPosition, alpha);
 
         const currentYaw = peerData.mesh.rotation.y;
@@ -1915,7 +1971,7 @@ function broadcastLocalFire(
     homingTarget?: HomingTargetPacket,
     homingStartDistance?: number,
 ): void {
-    if (!state.isMultiplayer || state.connections.length === 0) return;
+    if (!state.isMultiplayer || (!state.isHost && state.connections.length === 0)) return;
     sendLocalState(true);
     const weapon = getActiveWeaponName();
 
@@ -1937,6 +1993,10 @@ function broadcastLocalFire(
         packet.hitPoint = { x: hitPoint.x, y: hitPoint.y, z: hitPoint.z };
     }
 
+    if (state.isHost && forgottenMecha?.networked) {
+        hostMechaShots.updateTrigger(state.isMouseDown && weapon === 'MINIGUN', performance.now());
+        hostMechaShots.record(packet, performance.now(), state.playerHp <= 0, () => homingFireContext(state.peer!.id, packet, performance.now()), forgottenMecha?.revision);
+    }
     broadcastToAll(packet);
 }
 
@@ -2070,3 +2130,50 @@ function createPeerBean(username: string): PeerData {
         maxHp: PLAYER_MAX_HP,
     };
 }
+
+
+let hostMechaShots = new ShotLedger();
+let mechaMotion: { actor: NonNullable<typeof forgottenMecha>; revision: number; history: TargetMotionHistory } | null = null;
+const mechaDamageByVictim = new Map<string, { lifeId: number; attacker: string | null; at: number }>();
+function mechaPlayers() {
+    return state.lobbyPlayers.flatMap(entry => {
+        if (entry.peerId === state.peer?.id) {
+            const object = state.controls?.getObject();
+            return object ? [mechaPlayer(entry.peerId, object.position.clone(), object.rotation.y, state.lifeId, state.playerHp > 0, state.velocity)] : [];
+        }
+        const runtime = peerRuntime.get(entry.peerId);
+        if (!runtime) return [];
+        const samples = runtime.motion.samples, previous = samples.at(-2), latest = samples.at(-1);
+        const velocity = previous && latest && latest.at > previous.at ? latest.position.clone().sub(previous.position).multiplyScalar(1000 / (latest.at - previous.at)) : new THREE.Vector3();
+        return [mechaPlayer(entry.peerId, runtime.position.clone(), runtime.yaw, runtime.lifeId, !runtime.wasDead, velocity)];
+    });
+}
+export function authorizeMechaHit(peerId: string, packet: MechaHitPacket): boolean {
+    const actor = forgottenMecha, host = peerId === state.peer?.id;
+    const runtime = peerRuntime.get(peerId), ledger = host ? hostMechaShots : runtime?.shots;
+    if (!state.isHost || !state.isPlaying || state.matchEnded || !actor?.networked || actor.revision !== packet.revision || actor.hp <= 0 || !ledger ||
+        (host ? state.playerHp <= 0 : !runtime || runtime.wasDead) || actor.ownsPilot && actor.pilotPeerId === peerId) return false;
+    let contact: ReturnType<typeof actor.weaponContact> = null;
+    let origin = new THREE.Vector3();
+    const accepted = ledger.consumeMechaHit(packet.shotId, packet.pelletIndex, packet.revision, packet.damage, performance.now(),
+        (start, end, shotOrigin, radius) => { origin = shotOrigin; contact = actor.weaponContact(start, end, shotOrigin, radius); return contact?.t ?? null; },
+        guidedPathBlocker(peerId, { kind: 'mecha', targetRevision: packet.revision }, true));
+    if (!accepted || !contact) return false;
+    const hit = contact as { t: number; surface: 'body' | 'shield'; point: THREE.Vector3 };
+    if (hit.surface === 'shield') { announceMechaShield(hit.point); return true; }
+    const mounted = actor.ownsPilot;
+    const result = actor.damage(packet.damage, { origin, point: hit.point, surface: hit.surface });
+    if (!result.accepted) return false;
+    if (result.killed && !mounted) state.score++;
+    announceMechaHit(peerId, result.killed); return true;
+}
+setMechaNetworkPort({
+    send: broadcastToAll,
+    players: mechaPlayers,
+    hitTarget: (index, damage, owner) => processTargetHit(index, damage, owner ?? undefined),
+    acceptedDamage: (peerId, lifeId, attacker) => {
+        mechaDamageByVictim.set(peerId, { lifeId, attacker, at: performance.now() });
+        if (attacker) lastDamageByVictim.set(peerId, { attackerPeerId: attacker, at: performance.now() });
+        else lastDamageByVictim.delete(peerId);
+    },
+});

@@ -9,7 +9,7 @@ or join a small peer-to-peer multiplayer room.
 
 - A seeded procedural arena with a walled town, wilderness, and lava hazards.
 - Five weapons, smart goggles, grappling, air hover, and third-person view.
-- A singleplayer siege robot with a mountable cockpit.
+- A shared siege robot with enemy combat and a pilotable cockpit in singleplayer and multiplayer.
 - Keyboard/mouse and customizable touch controls.
 - WebRTC multiplayer with Cloudflare-backed room admission and TURN credentials.
 - An optional NPC conversation system that runs a language model in the browser.

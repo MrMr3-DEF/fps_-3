@@ -10,6 +10,7 @@ import {
 } from './config.js';
 import { segmentSphereHitT, type Vec3Like } from './gameplayMath.js';
 import { segmentPlayerBeamHitT } from './playerHitbox.js';
+import type { MechaState } from './mechaNetworkTypes.js';
 import { MechaCombatEffects } from './mechaCombatEffects.js';
 
 export type LaserPhase = 'idle' | 'charging' | 'firing' | 'fading' | 'cancelling';
@@ -203,6 +204,25 @@ export class MechaCombat {
             collapse: this.shieldPhase === 'down' ? Math.min(1, this.shieldElapsed / MECHA_SHIELD_COLLAPSE_TIME) : 0,
             build: this.manual ? this.manualBuild : this.shieldPhase === 'rebuilding' ? Math.min(1, this.shieldElapsed / MECHA_SHIELD_BUILD_TIME) : 0,
         });
+    }
+    captureNetworkState(): MechaState['combat'] {
+        const vector = (v: THREE.Vector3) => ({ x: v.x, y: v.y, z: v.z });
+        return { clock: this.clock, laserPhase: this.laserPhase, shieldPhase: this.shieldPhase, manual: this.manual,
+            energy: this.energy, manualBuild: this.manualBuild, eyePower: this.eyePower,
+            collapse: this.shieldPhase === 'down' ? Math.min(1, this.shieldElapsed / MECHA_SHIELD_COLLAPSE_TIME) : 0,
+            build: this.manual ? this.manualBuild : this.shieldPhase === 'rebuilding' ? Math.min(1, this.shieldElapsed / MECHA_SHIELD_BUILD_TIME) : 0,
+            orbRadius: this.orbRadius, beamRadius: this.beamRadius, beamLength: this.beamLength,
+            beamOrigin: vector(this.beamOrigin), beamDirection: vector(this.beamDirection), orbPosition: vector(this.fired ? this.beamOrigin : this.orbPosition), shieldCenter: vector(this.shieldCenter) };
+    }
+    applyNetworkState(c: MechaState['combat']): void {
+        this.clock = c.clock; this.laserPhase = c.laserPhase; this.shieldPhase = c.shieldPhase; this.manual = c.manual;
+        this.energy = c.energy; this.manualBuild = c.manualBuild; this.orbRadius = c.orbRadius;
+        this.beamRadius = c.beamRadius; this.beamLength = c.beamLength;
+        for (const key of ['beamOrigin', 'beamDirection', 'orbPosition', 'shieldCenter'] as const) this[key].set(c[key].x, c[key].y, c[key].z);
+        this.beamEnd.copy(this.beamOrigin).addScaledVector(this.beamDirection, this.beamLength);
+        this.effects.update({ time: c.clock, orbPosition: this.orbPosition, orbRadius: c.orbRadius, charging: c.laserPhase === 'charging',
+            beamOrigin: this.beamOrigin, beamDirection: this.beamDirection, beamRadius: c.beamRadius, beamLength: c.beamLength,
+            shieldCenter: this.shieldCenter, shieldPhase: c.shieldPhase, collapse: c.collapse, build: c.build });
     }
     enterManualShield(): void {
         this.stop(); this.manual = true; this.energy = 1; this.manualBuild = 0; this.exhausted = false;

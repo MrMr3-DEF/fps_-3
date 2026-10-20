@@ -58,6 +58,7 @@ export function spreadDirection(base: THREE.Vector3, seed: number, pelletIndex: 
 }
 interface Shot {
     at: number;
+    mechaRevision?: number;
     weapon: WeaponName;
     origin: THREE.Vector3;
     directions: THREE.Vector3[];
@@ -94,7 +95,7 @@ export class ShotLedger {
         this.triggerHeld = held;
     }
     reset(): void { this.shots.clear(); this.nextFireAt = -Infinity; this.fireGraceMs = 0; this.triggerHeld = false; this.triggerRampMs = 0; this.triggerUpdatedAt = null; this.minigunSample = null; }
-    record(packet: FirePacket, now: number, dead: boolean, context?: HomingFireContext | (() => HomingFireContext | null)): boolean {
+    record(packet: FirePacket, now: number, dead: boolean, context?: HomingFireContext | (() => HomingFireContext | null), mechaRevision?: number): boolean {
         const stats = WEAPON_STATS[packet.weapon];
         let interval = stats.fireRate * 1000;
         if (packet.weapon === 'MINIGUN') {
@@ -144,7 +145,7 @@ export class ShotLedger {
         for (const [id, shot] of this.shots) if (now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS) this.shots.delete(id);
         const base = new THREE.Vector3(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
         const count = packet.weapon === 'SHOTGUN' ? stats.pellets! : 1;
-        this.shots.set(packet.shotId, { at: now, weapon: packet.weapon,
+        this.shots.set(packet.shotId, { at: now, mechaRevision, weapon: packet.weapon,
             origin: new THREE.Vector3(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z),
             directions: Array.from({ length: count }, (_, i) => spreadDirection(base, packet.spreadSeed, i, stats.spread)),
             used: new Set(),
@@ -165,6 +166,7 @@ export class ShotLedger {
         const shot = this.shots.get(shotId);
         if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS || damage !== WEAPON_STATS[shot.weapon].damage) return false;
         if (identity && shot.homingTarget?.kind === identity.kind) {
+            if (identity.kind === 'mecha' && shot.homingTarget.kind === 'mecha' && identity.targetRevision !== shot.homingTarget.targetRevision) return false;
             if (identity.kind === 'npc' && shot.homingTarget.kind === 'npc' && identity.targetIndex === shot.homingTarget.targetIndex && identity.targetRevision !== shot.homingTarget.targetRevision) return false;
             if (identity.kind === 'peer' && shot.homingTarget.kind === 'peer' && identity.targetPeerId === shot.homingTarget.targetPeerId && identity.targetLifeId !== shot.homingTarget.targetLifeId) return false;
         }
@@ -192,6 +194,15 @@ export class ShotLedger {
         blocked: (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered?: boolean) => boolean, identity?: HomingTargetPacket): boolean {
         return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
             (start, end) => segmentSphereHitT(start, end, target, radius + (this.shots.get(shotId)?.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)), identity);
+    }
+    consumeMechaHit(shotId: number, pelletIndex: number, revision: number, damage: number, now: number,
+        contact: (start: THREE.Vector3, end: THREE.Vector3, origin: THREE.Vector3, radius: number) => number | null,
+        blocked: (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered?: boolean) => boolean): boolean {
+        const shot = this.shots.get(shotId);
+        if (!shot || shot.mechaRevision !== undefined && shot.mechaRevision !== revision) return false;
+        const radius = shot.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS;
+        return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
+            (start, end) => contact(start, end, shot.origin, radius), { kind: 'mecha', targetRevision: revision });
     }
     consumePlayerHitbox(shotId: number, pelletIndex: number, target: THREE.Vector3, yaw: number, damage: number, now: number,
         blocked: (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered?: boolean) => boolean, identity?: HomingTargetPacket): boolean {

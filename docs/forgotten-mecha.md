@@ -1,9 +1,70 @@
 # Forgotten Mecha
 
-Singleplayer creates one Ironmaw siege robot during match preparation. The model
+Every match prepares one Ironmaw siege robot. Multiplayer activates it when the host starts play. The model
 is `blender_assets/ironmaw/ironmaw_siege_robot.glb`; its rig and authored animation
-events are documented in that directory's README. Multiplayer does not create
-the robot or transmit any robot state.
+events are documented in that directory's README. The host owns multiplayer simulation; joining clients prepare the same asset and apply its replicated pose.
+
+## Multiplayer
+
+The host simulates the shared actor, armor collision, attacks, lava damage and
+rockets throughout an active match, including while its own player is paused or
+dead. Preparing the lobby leaves the actor idle. Ordinary player movement and
+health still use the existing client simulation and host plausibility checks;
+this is a browser-hosted room, not a dedicated authoritative server.
+
+Enemy acquisition chooses the nearest eligible living player in host admission
+order and retains that identity while detection and LOS hold. Committed attacks
+retain their existing recovery/cancellation rules. Stomps and lasers test every
+physical player body, and rocket blasts test every eligible player within the
+cover-blocked blast radius. Each attack damages each contacted life once.
+Enemy kills count as deaths with `Forgotten Mecha` attribution and award no PvP
+kill. Completing HeavyPunch sends Game Over to the entire room, including dead,
+paused and late-joining players.
+
+The first valid cockpit arrival accepted by the host owns the single seat.
+Other players keep their own camera, controls, HUD and weapons; their view shows
+the seated pilot's correctly colored bean. A lost boarding race restores the
+requester's approach pose and reports that they should reposition and retry.
+The pilot sends movement/look, shield, fire, helmet and exit intent; the host
+applies the normal collision, angular limits, animation cues and cooldowns.
+There is no speculative shared-state prediction. First/third-person presentation
+uses the pilot's own saved view, and host rocket acquisition reconstructs that
+view using physical targets rather than the host's render mask.
+
+Piloted rockets target NPCs and other players. Player weapons can damage the
+mecha, while its seated pilot is protected. PvP rocket kills credit the launching
+pilot. Defeating the enemy adds one shared NPC score; destroying a piloted mecha
+adds no NPC score and releases its living pilot without a PvP death. Voluntary
+shutdown retains the collision-checked exit/recovery loop and permits remounting.
+A pilot disconnect immediately cancels attacks and returns the actor to its
+mountable defeated pose at the current location. FinalDeath remains permanently
+unavailable for boarding.
+
+`mechaNetwork.ts` owns commands, sequencing, input expiry, replication and the
+victim-side render queue. `mechaNetworkTypes.ts` owns bounded state/command/event
+DTOs and their parser. Changed bone transforms, including scale during breakup,
+are sent sparsely against the asset's neutral pose. Client copies interpolate
+armor and observer visuals and never run AI or apply collision damage. The
+initial world snapshot includes ownership, health, combat/head phases, active
+rockets and terminal match state; ordered updates wait for world preparation.
+Snapshots normally follow the 33 ms network tick, transitions send immediately,
+and quiet state refreshes within 250 ms. Held inputs expire after 250 ms without
+a refresh, and releasing local input sends neutral controls immediately.
+
+Weapon claims reference the host's existing shot/pellet ledger. The host checks
+exact weapon damage, range, geometry, terrain, the nearest body/shield contact,
+and the actor revision captured at firing. Homing serializes a mecha revision
+and uses bounded host history/replay. A stale shot cannot damage a newly mounted
+revision. Enemy-mecha death reports require a recent host-issued damage event.
+Laser/stomp damage waits for a corresponding local draw; laser requires its
+actual mesh draw callback. This presentation queue never gates host simulation.
+Respawning clears stale local-life effects without clearing other players'
+rockets or rebuilding the shared actor.
+
+All participants must use the same build. Existing secure admission, room
+capacity and host-disconnection behavior apply. No Worker credentials or room
+capabilities are added to gameplay packets. The approach warning remains
+singleplayer-only.
 
 ## Behavior
 
@@ -324,7 +385,7 @@ Cancelled loads dispose late-arriving assets without attaching them to a new mat
 instanced smoke/blast slots. The actor owns seat/visual-pilot/view/muzzle anchors and the
 boarding/startup/piloted/shutdown/destruction modes, masked animation layers, firing/helmet phases and lava tick time. `lookInput.ts` routes both pointer-lock
 and touch intent. Manual shielding reuses combat's surface/effects without
-running enemy shutdown logic. Pause freezes all these simulation clocks and
+running enemy shutdown logic. Offline pause freezes these simulation clocks and
 leaving disposes them; externally owned bean visuals detach before GLB disposal.
 
 Projectile and sniper obstacle hits dispatch through the `damage.ts` seam. Goggles
@@ -334,8 +395,8 @@ remain; they never acquire a homing lock. Photosensitivity/reduced motion makes
 the hint steady. Detection uses the physical envelope independently of chunk
 visibility, and the hint applies only to a living enemy actor. An
 oversized body keeps its callout inside the scope viewport. Their
-offline homing identity is invalidated on death and is never serialized into a
-WebRTC packet. The scan ignores the robot's own proxies but other queries retain
+homing identity is invalidated on defeat or boarding. Multiplayer serializes only
+the actor revision, never a Three.js object. The scan ignores the robot's own proxies but other queries retain
 them, including movement, weapons, grappling and camera collision.
 
 Metallic armor receives one match-owned, prefiltered reflection texture, baked
@@ -583,3 +644,42 @@ pause. Input capture and phase stepping were controlled by the fixture. These
 results do not complete the physical-control and visual-art checklist above.
 See [audit-repair-progress.md](audit-repair-progress.md) for the full verification
 record and limits.
+
+### Multiplayer acceptance
+
+- With two current-build clients, compare pose, health, shield transitions and
+  impacts; pause or kill the host player while the shared actor keeps running.
+- Use ordinary, sniper and guided weapons against external shields and internal
+  body contacts. Check terrain interception, shield ripples and shared defeat.
+- Race two real grapples into the defeated cockpit. Exactly one wins; the other
+  keeps ordinary controls. Inspect the visible pilot from another client.
+- Pilot with normal/scoped first person and third person, open/close the helmet,
+  shield, fire at NPCs/players, release input, and exercise blocked exit/recovery.
+- Join a third client during startup, a laser, rocket flight, active piloting and
+  destruction. It should recover the live pose without gaining cockpit controls.
+- Verify pilot rocket kill credit, ordinary respawn, voluntary exit/remount,
+  pilot disconnect and living release during lethal destruction.
+- Complete the wall punch and inspect Game Over while active, paused, dead and
+  joining. Leave the room and create another match with fresh state.
+- Repeat with low render distance and relay-required connections. Local fixture
+  results do not verify external TURN credential refresh or physical input feel.
+
+### Multiplayer automated verification — 20 October 2026
+
+Both TypeScript projects and all 450 tests pass with `npm run check`.
+`npm run build` regenerated the tracked production output with the existing
+large-chunk warning. Production HTML asset references, changed documentation
+links and Git whitespace checks pass. The protected follow-up file is unchanged.
+
+New coverage uses the real 160-joint rig, sparse pose/scale replication and
+BinaryPack. It checks physical multi-player contacts, host-only packet authority,
+exclusive boarding, pilot departure in boarding/startup/play, 250 ms input
+expiry, synchronous shutdown release, stale boarding replies after respawn,
+solo-host weapon claims, mounted revision retirement, first-shot homing history,
+observer camera ownership and late laser/startup/breakup snapshots. Existing
+offline mecha and multiplayer security regressions remain passing.
+
+The local three-client relay acceptance is recorded in
+[Multiplayer live test](multiplayer-live-test.md). A final focused regression
+also verifies that a blocked-exit recovery flag reaches the owning client
+camera without taking over an observer camera.
