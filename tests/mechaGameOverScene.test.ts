@@ -126,6 +126,9 @@ test('letterboxing and render failures preserve caller renderer state; disposal 
     scene.render(fake);
     near(renderedViewports[0][2] / renderedViewports[0][3], 16 / 9);
     assert.equal(draws, 2, 'world and black cover both draw at the hidden camera switch');
+    scene.seek(scene.impactTime + .9);
+    const rotation = scene.camera.quaternion.toArray(), cameraMatrix = scene.camera.matrixWorld.toArray();
+    const inverse = scene.camera.matrixWorldInverse.toArray();
     for (const throwOnDraw of [false, true]) {
         fail = throwOnDraw;
         if (fail) assert.throws(() => scene.render(fake), /draw failed/); else scene.render(fake);
@@ -133,6 +136,9 @@ test('letterboxing and render failures preserve caller renderer state; disposal 
         assert.deepEqual(scissor.toArray(), [4, 5, 200, 300]);
         assert.equal(scissorTest, true); assert.equal(fake.autoClear, true); near(alpha, .3);
         assert.equal(color.getHex(), 0x123456);
+        assert.deepEqual(scene.camera.quaternion.toArray(), rotation);
+        assert.deepEqual(scene.camera.matrixWorld.toArray(), cameraMatrix);
+        assert.deepEqual(scene.camera.matrixWorldInverse.toArray(), inverse);
     }
     const geometry = (scene.scene.getObjectByName('ending-fragments-stone') as THREE.Mesh).geometry;
     let disposals = 0; geometry.addEventListener('dispose', () => disposals++);
@@ -293,5 +299,70 @@ test('cancellation during seeded construction or collision baking disposes priva
         assert.equal(scene.ready, false); assert.equal(scene.scene.children.length, 0); assert.equal(scene.resources.pillars, 0);
         if (duringBake) { assert.ok(texture); assert.equal(disposals, 1); }
         scene.dispose(); if (duringBake) assert.equal(disposals, 1);
+    }
+});
+
+function captureCamera(scene: MechaGameOverScene): THREE.Quaternion {
+    let rotation: THREE.Quaternion | undefined;
+    const renderer = {
+        autoClear: true,
+        getViewport: (v: THREE.Vector4) => v.set(0, 0, 1600, 900),
+        getScissor: (v: THREE.Vector4) => v.set(0, 0, 1600, 900), getScissorTest: () => false,
+        getClearColor: (c: THREE.Color) => c.set(0), getClearAlpha: () => 1,
+        getSize: (v: THREE.Vector2) => v.set(1600, 900),
+        setViewport() {}, setScissor() {}, setScissorTest() {}, setClearColor() {}, clear() {},
+        render: (world: THREE.Scene, camera: THREE.Camera) => {
+            if (world === scene.scene) rotation = camera.quaternion.clone();
+        },
+    } as unknown as THREE.WebGLRenderer;
+    scene.render(renderer);
+    assert.ok(rotation); return rotation;
+}
+
+test('cinematic shake survives seeks and repeated draws, follows actual fire lifetimes at both particle qualities', async () => {
+    for (const particleAmount of [1, .2]) {
+        const scene = await prepare({ particleAmount });
+        try {
+            const base = scene.camera.quaternion.clone();
+            scene.seek(scene.impactTime - .001);
+            assert.deepEqual(captureCamera(scene).toArray(), base.toArray());
+            scene.seek(scene.impactTime);
+            assert.ok(captureCamera(scene).angleTo(base) > .01);
+            const time = scene.impactTime + .93;
+            scene.seek(time); const shaken = captureCamera(scene).toArray();
+            assert.deepEqual(captureCamera(scene).toArray(), shaken);
+            scene.seek(scene.duration); scene.seek(0); scene.seek(time);
+            assert.deepEqual(captureCamera(scene).toArray(), shaken);
+            assert.deepEqual(scene.camera.quaternion.toArray(), base.toArray());
+            const fire = scene.scene.getObjectByName('ending-fire') as THREE.InstancedMesh;
+            let lateFire = false;
+            for (let age = 1.5; age <= 4.75; age += .05) {
+                scene.seek(scene.impactTime + age);
+                const puffs = fire.geometry.getAttribute('puff');
+                const burning = Array.from({ length: puffs.count }, (_, i) => puffs.getX(i)).some(alpha => alpha > .005);
+                if (burning) {
+                    assert.ok(captureCamera(scene).angleTo(base) > 1e-6, `fire still active at ${age}`);
+                    lateFire ||= age > 3.5;
+                }
+            }
+            assert.ok(lateFire, 'exercise fireballs well after the blast triggers finish');
+            scene.seek(scene.impactTime + 4.7);
+            assert.deepEqual(captureCamera(scene).toArray(), base.toArray());
+            scene.seek(scene.duration);
+            assert.deepEqual(captureCamera(scene).toArray(), base.toArray());
+        } finally { scene.dispose(); }
+    }
+});
+
+test('photosensitivity and reduced motion each disable cinematic shake', async () => {
+    for (const options of [{ photosensitivity: true }, { reducedMotion: true }]) {
+        const scene = await prepare(options);
+        try {
+            const base = scene.camera.quaternion.toArray();
+            for (const age of [0, .4, .85, 1.2, 3.8]) {
+                scene.seek(scene.impactTime + age);
+                assert.deepEqual(captureCamera(scene).toArray(), base);
+            }
+        } finally { scene.dispose(); }
     }
 });

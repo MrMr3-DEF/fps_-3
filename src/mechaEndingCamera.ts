@@ -42,3 +42,16 @@ export function avoidEndingPillars(camera: THREE.PerspectiveCamera, target: THRE
     }
     camera.position.copy(bestPosition); camera.lookAt(target); camera.updateMatrixWorld(true); return bestResult;
 }
+
+/** Absolute-time envelope: fire lifetimes, rather than trigger durations, own
+ * the sustained rumble so seeking never loses an earlier explosion's shake. */
+export function sampleEndingShake(age: number, blasts: readonly { birth: number; power: number }[], fireEnd: number): number {
+    if (age < 0 || age >= fireEnd) return 0;
+    let amplitude = .05;
+    for (const blast of blasts) {
+        const elapsed = age - blast.birth;
+        if (elapsed >= 0 && elapsed < .65) amplitude += .015 * blast.power * (1 - elapsed / .65) ** 2;
+    }
+    const tail = THREE.MathUtils.clamp((fireEnd - age) / .6, 0, 1);
+    return Math.min(.11, amplitude) * tail * tail * (3 - 2 * tail);
+}

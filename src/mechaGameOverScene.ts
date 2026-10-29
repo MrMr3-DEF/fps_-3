@@ -6,8 +6,9 @@ import type { TownBox, TownMaterial } from './town.js';
 import { createEndingCastle } from './mechaEndingCastle.js';
 import { MechaEndingScenery } from './mechaEndingScenery.js';
 import { prepareEndingDebris, sampleEndingStone, type EndingStone, type EndingDebrisPaths, type PillarContact } from './mechaEndingDebris.js';
-import { avoidEndingPillars, type EndingCameraAdjustment } from './mechaEndingCamera.js';
+import { avoidEndingPillars, sampleEndingShake, type EndingCameraAdjustment } from './mechaEndingCamera.js';
 import { DayNightCycle } from './dayNightCycle.js';
+import { CameraShake } from './cameraShake.js';
 
 import { MECHA_ENDING_TIMING, sampleMechaEnding, type MechaEndingFrame } from './mechaEndingTimeline.js';
 export { MECHA_ENDING_TIMING, sampleMechaEnding } from './mechaEndingTimeline.js';
@@ -149,6 +150,10 @@ export class MechaGameOverScene {
     private readonly cycle: DayNightCycle;
     private readonly fragmentBatches: FragmentBatch[] = [];
     private readonly fires: Puff[] = [];
+    private readonly blasts: Blast[] = [];
+    private fireEnd = 0;
+    private readonly shake = new CameraShake();
+    private readonly unshakenRotation = new THREE.Quaternion();
     private readonly smoke: Puff[] = [];
     private fireMesh: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null = null;
     private glowMesh: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.ShaderMaterial> | null = null;
@@ -393,7 +398,8 @@ export class MechaGameOverScene {
         const random = randomStream((this.options.effectsSeed ?? this.options.seed) ^ 0x424c4153);
         const amount = clamp(this.options.particleAmount ?? 1, .2, 1);
         const birthAt = (x: number, z: number) => clamp(Math.hypot(x - this.contact.x, z - this.contact.z) / 245, 0, 1) * .8;
-        const blasts: Blast[] = [{ position: this.contact.clone().addScaledVector(this.forward, -10), birth: 0, power: 1 }];
+        const blasts = this.blasts;
+        blasts.push({ position: this.contact.clone().addScaledVector(this.forward, -10), birth: 0, power: 1 });
         for (const x of [-78, 0, 78]) for (const z of [-78, 0, 78]) {
             blasts.push({ position: new THREE.Vector3(x, 20 + random() * 24, z), birth: birthAt(x, z), power: 1.15 });
         }
@@ -409,6 +415,7 @@ export class MechaGameOverScene {
                 velocity: new THREE.Vector3((random() - .5) * 7, 10 + random() * 13, (random() - .5) * 7),
                 radius: (13 + random() * 12) * blast.power, stretch: .85 + random() * .5, seed: random() * 200 });
         }
+        this.fireEnd = Math.max(...this.fires.map(puff => puff.birth + puff.life));
         for (let i = 0; i < Math.ceil(MECHA_ENDING_LIMITS.smoke * amount); i++) {
             const dust = i % 3 === 0, angle = random() * Math.PI * 2;
             const radius = dust ? 75 + random() * 25 : random() * 95;
@@ -552,15 +559,25 @@ export class MechaGameOverScene {
         renderer.getSize(this.size);
         const width = Math.min(this.size.x, this.size.y * MECHA_ENDING_ASPECT), height = width / MECHA_ENDING_ASPECT;
         const x = (this.size.x - width) / 2, y = (this.size.y - height) / 2;
+        this.unshakenRotation.copy(this.camera.quaternion);
         try {
             renderer.autoClear = false; renderer.setScissorTest(false);
             renderer.setViewport(0, 0, this.size.x, this.size.y); renderer.setClearColor(0, 1); renderer.clear();
             renderer.setViewport(x, y, width, height); renderer.setScissor(x, y, width, height); renderer.setScissorTest(true);
             if (this.ready) {
+                if (!this.gentle && !this.frame.gameOver) {
+                    this.shake.applyAt(this.camera, this.frame.impactAge,
+                        sampleEndingShake(this.frame.impactAge, this.blasts, this.fireEnd));
+                    this.camera.updateMatrixWorld(true);
+                }
                 renderer.render(this.scene, this.frame.phase === 'fade-out' ? this.introCamera : this.camera);
                 if (this.frame.blackout > 0) renderer.render(this.coverScene, this.coverCamera);
             }
         } finally {
+            // The camera also serves framing checks and preview seeks. Never
+            // let a cosmetic draw offset become the next logical camera pose.
+            this.camera.quaternion.copy(this.unshakenRotation);
+            this.camera.updateMatrixWorld(true);
             renderer.setViewport(this.viewport); renderer.setScissor(this.scissor); renderer.setScissorTest(scissorTest);
             renderer.setClearColor(this.clearColor, alpha); renderer.autoClear = autoClear;
         }
@@ -589,7 +606,8 @@ export class MechaGameOverScene {
         materials.forEach(material => material.dispose()); geometries.forEach(geometry => geometry.dispose());
         this.environment?.dispose(); this.environment = null;
         this.scene.clear(); this.coverScene.clear();
-        this.fragmentBatches.length = this.fires.length = this.smoke.length = this.sparks.length = this.blastLights.length = 0;
+        this.fragmentBatches.length = this.fires.length = this.smoke.length = this.sparks.length = this.blastLights.length = this.blasts.length = 0;
+        this.fireEnd = 0;
         this.fireMesh = this.glowMesh = this.smokeMesh = null; this.sparkMesh = null;
         this.shockwave = this.groundWave = null; this.scenery = null; this.debrisPaths = null;
     }

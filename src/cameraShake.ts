@@ -19,7 +19,10 @@ export class CameraShake {
     apply(camera: THREE.Camera): void {
         let amplitude = 0;
         for (const pulse of this.pulses) amplitude += pulse.strength * Math.pow(1 - (this.time - pulse.start) / pulse.duration, 2);
-        const t = this.time;
+        this.applyAt(camera, this.time, amplitude);
+    }
+    /** Sample the same impact pattern without advancing gameplay pulse state. */
+    applyAt(camera: THREE.Camera, t: number, amplitude: number): void {
         camera.quaternion.multiply(this.rotation.setFromEuler(this.euler.set(
             Math.sin(t * 91) * amplitude, Math.sin(t * 113 + 1) * amplitude * 0.6, Math.sin(t * 79) * amplitude * 0.4,
         )));

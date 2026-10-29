@@ -180,7 +180,13 @@ needed for preparation; the shot stays 16:9 within other viewport shapes.
 Effects are bounded at 96 fire puffs, 112 smoke/dust puffs, 480 sparks and four
 unshadowed blast lights. Particle quality reduces cosmetic density without
 changing castle destruction. Photosensitivity Mode/reduced motion remove sparks,
-soften light/glow onset and reduce shockwave brightness; there is no camera shake.
+soften light/glow onset, reduce shockwave brightness and disable camera shake.
+Otherwise, heavy stomp-style rotational shake runs from contact through the last
+fireball, with extra blast pulses and a stronger main detonation. Its final 0.6
+seconds fade smoothly to zero before the smoke-only aftermath. The envelope uses
+actual fire-puff lifetimes and absolute cutscene time, so replay, backwards seeks
+and late joins reproduce the same shake. Rotation is applied only during rendering
+and restored afterward, including on rendering errors.
 All meshes share geometry/material batches, and debris uses analytic movement
 rather than rigid-body simulation. Preparation and disposal own all cinematic
 buffers, textures, skeletons and lighting. Rendering restores viewport/scissor
