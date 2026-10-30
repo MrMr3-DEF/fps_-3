@@ -246,6 +246,16 @@ export const MINIGUN_MAX_RPM = 1000.0;
 
 export const MAX_PARTICLES = 500;
 
+export const MECHA_ARMOR_IMPACT = {
+    sparks: 14, dust: 6,
+    sparkLife: [0.25, 0.55], dustLife: [0.4, 0.8],
+    sparkSpeed: [9, 18], dustSpeed: [1.5, 3.5], sparkSpread: 1.5, dustSpread: 1.1,
+    sparkWidth: [0.07, 0.13], sparkLength: [0.3, 0.65], dustSize: [0.4, 0.85],
+    sparkGravity: 18, dustGravity: 0.8,
+    sparkColors: [0xffe66a, 0xffb52e, 0xff8a18], dustColors: [0x938976, 0x756f65],
+    cooledSparkColor: 0xc75a13, surfaceOffset: 0.12,
+} as const;
+
 export const AIR_DRAG = 0.25;
 export const GROUND_ACCEL_RATE = 10.0;
 export const APEX_VELOCITY_THRESHOLD = 20.0;

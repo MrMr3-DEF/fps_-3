@@ -2161,8 +2161,13 @@ export function authorizeMechaHit(peerId: string, packet: MechaHitPacket): boole
         (host ? state.playerHp <= 0 : !runtime || runtime.wasDead) || actor.ownsPilot && actor.pilotPeerId === peerId) return false;
     let contact: ReturnType<typeof actor.weaponContact> = null;
     let origin = new THREE.Vector3();
+    const direction = new THREE.Vector3();
     const accepted = ledger.consumeMechaHit(packet.shotId, packet.pelletIndex, packet.revision, packet.damage, performance.now(),
-        (start, end, shotOrigin, radius) => { origin = shotOrigin; contact = actor.weaponContact(start, end, shotOrigin, radius); return contact?.t ?? null; },
+        (start, end, shotOrigin, radius) => {
+            origin = shotOrigin; contact = actor.weaponContact(start, end, shotOrigin, radius);
+            direction.subVectors(end, start).normalize();
+            return contact?.t ?? null;
+        },
         guidedPathBlocker(peerId, { kind: 'mecha', targetRevision: packet.revision }, true));
     if (!accepted || !contact) return false;
     const hit = contact as { t: number; surface: 'body' | 'shield'; point: THREE.Vector3 };
@@ -2171,7 +2176,7 @@ export function authorizeMechaHit(peerId: string, packet: MechaHitPacket): boole
     const result = actor.damage(packet.damage, { origin, point: hit.point, surface: hit.surface });
     if (!result.accepted) return false;
     if (result.killed && !mounted) state.score++;
-    announceMechaHit(peerId, result.killed); return true;
+    announceMechaHit(peerId, result.killed, hit.point, direction); return true;
 }
 setMechaNetworkPort({
     send: broadcastToAll,

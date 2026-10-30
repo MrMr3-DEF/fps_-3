@@ -126,6 +126,18 @@ losing the mecha restores the equipped player's weapon icon.
 - Stomp impact creates radial dust, stone chips and a shockwave. Heavy camera
   shake reaches 50 m from the body's horizontal center and fades with distance.
   Ordinary steps have small dust bursts without camera shake.
+- Accepted player-weapon hits on vulnerable armor throw fourteen yellow/orange
+  sparks and six gray/brown dust particles at full particle quality. Sparks
+  scatter back along the final incoming flight segment, fall under gravity and
+  cool toward orange over 0.25–0.55 seconds; dust expands and disappears over
+  0.4–0.8 seconds. Sniper, straight and homing bullets use the same burst per
+  accepted bullet/pellet, including the killing hit. Shield hits retain their
+  blue ripple. Rejected hits and context-free damage such as lava add no burst.
+  These world-space effects share the existing pooled particle budget and pause/
+  disposal paths; they add no camera shake, lights, sound or damage changes.
+  Multiplayer's host-issued hit event carries the canonical contact position
+  and normalized incoming direction. Every viewer draws it once; replicated
+  visual bullets do not add another burst. Clients cannot supply effect contacts.
 - At zero HP, Death cancels navigation and any pending attack. Its knee and fist
   impacts each create debris and lighter shake within 50 m. Eye emission fades
   out, and the final open, kneeling pose remains solid. Normal gameplay continues;
@@ -579,7 +591,7 @@ them, including movement, weapons, grappling and camera collision.
 
 Metallic armor receives one match-owned, prefiltered reflection texture, baked
 during preparation and dimmed at night. Ground particles share the existing
-instance pool. Combat particles use a fixed instance buffer scaled by the applied
+instance pool with armor-hit sparks and dust. Combat particles use a fixed instance buffer scaled by the applied
 particle setting and remaining graphics budget, without extra lights.
 `cameraShake.ts` changes only the temporary
 render quaternion; the logical camera pose is restored after each draw.
@@ -590,6 +602,22 @@ respawn keeps the same robot; leaving disposes it. Wall-punch commitment sets
 A new match resets that latch and creates a fresh actor.
 
 ## Verification
+
+`tests/mechaArmorImpact.test.ts` covers spark direction, gravity, orientation,
+color cooling, dust/spark quality scaling, the shared cap, expiry and disposal.
+Weapon and network tests cover straight/sniper/homing body contacts, lethal and
+rejected hits, visual-only duplicates, canonical host contacts, strict event
+parsing, guest authority rejection and event replay suppression.
+
+For visual review in `/tests/mecha-preview.html`, start singleplayer, choose
+distance/body height and Hold height, then use Armor hit setup. It holds only
+the actor still with its shield down; Fire weapon and Fire / stop bullets run
+the real weapon, damage and particle paths. Equip sniper switches the actual
+weapon. Pause on armor hit freezes the match shortly after a confirmed impact
+for inspection. Uncheck it and resume before reviewing continuous fire. Noon/
+Night lighting and the 100%/20% particle selector affect only the preview's
+in-memory preferences. Leaving or starting a new match clears review firing and
+the held actor; no graphics settings are saved.
 
 `tests/forgottenMecha.test.ts` uses the actual GLB skin and baked clips, stripping
 only browser image decoding for Node tests. Coverage includes fitting, border

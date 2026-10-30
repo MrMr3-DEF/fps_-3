@@ -9,7 +9,10 @@ import { state } from '../src/state.ts';
 import { MechaRockets, type RocketPlayer } from '../src/mechaRockets.ts';
 import { initializeNetworkMecha, resetMechaNetwork, setMechaNetworkPort, setMechaPresentation, updateMechaNetwork,
     acceptMechaCommand, mechaPeerLeft, receiveMechaState, receiveMechaEvent, acknowledgeMechaRender, flushMechaDamage,
-    multiplayerMechaEvents, captureMechaSnapshot, markMechaEndingReady, acceptMechaEndingReady, updateMechaEndingNetwork } from '../src/mechaNetwork.ts';
+    multiplayerMechaEvents, captureMechaSnapshot, markMechaEndingReady, acceptMechaEndingReady, updateMechaEndingNetwork, announceMechaHit } from '../src/mechaNetwork.ts';
+import { disposeParticles } from '../src/particles.ts';
+import { MECHA_ARMOR_IMPACT } from '../src/config.ts';
+import { userSettings } from '../src/settings.ts';
 import { MECHA_ENDING_DURATION, type MechaEndingState } from '../src/mechaEndingTimeline.ts';
 import type { MechaInputPacket, MechaEventPacket, MechaState } from '../src/mechaNetworkTypes.ts';
 
@@ -36,6 +39,36 @@ function command(a: ForgottenMecha, sequence: number, rest: Partial<MechaInputPa
         shield: false, fire: false, helmet: false, exit: false, thirdPerson: false, secondaryHeld: false, viewThirdPerson: false, fov: 75, aspect: 1, ...rest };
 }
 function cleanup(a: ForgottenMecha) { resetMechaNetwork(); a.dispose(); state.isMultiplayer = state.isHost = state.isPlaying = false; state.matchEnded = false; state.peer = null; }
+
+test('confirmed armor hit events validate contacts and show one world-space burst on host and guest, including death', async () => {
+    const a = await actor(), packets = host(a, []), amount = userSettings.particleAmount;
+    userSettings.particleAmount = 1;
+    setMechaPresentation({ impact() {}, release() {}, blocked() {}, damage() {}, gameOver() {}, hit() {} });
+    try {
+        const position = new THREE.Vector3(5, 20, 3), direction = new THREE.Vector3(0, 0, -1);
+        a.damage(50); assert.equal(a.hp, 0);
+        announceMechaHit('host', true, position, direction);
+        const packet = packets.find(p => p.type === 'mecha_event') as MechaEventPacket;
+        assert.ok(parseNetworkPacket(unpack(await pack(packet))));
+        assert.equal(state.activeParticles.filter(p => p.kind === 'armor-spark').length, 14);
+        assert.equal(state.activeParticles.filter(p => p.kind === 'dust').length, 6);
+        const hostPositions = state.activeParticles.map(p => [p.x, p.y, p.z]);
+        assert.ok(hostPositions.every(p => p[0] === 5 && p[1] === 20 && p[2] === 3 + MECHA_ARMOR_IMPACT.surfaceOffset));
+        for (const change of [
+            (e: any) => { delete e.position; }, (e: any) => { e.position.x = Infinity; },
+            (e: any) => { e.position.z = 5001; }, (e: any) => { delete e.direction; },
+            (e: any) => { e.direction = { x: 0, y: 0, z: 0 }; },
+            (e: any) => { e.direction = { x: 0, y: 0, z: 2 }; },
+            (e: any) => { e.direction.y = NaN; },
+        ]) { const malformed = structuredClone(packet); change(malformed.event); assert.equal(parseNetworkPacket(malformed), null); }
+        disposeParticles(); resetMechaNetwork(); initializeNetworkMecha(a); state.isHost = false;
+        a.group.position.x += 30;
+        receiveMechaEvent(packet);
+        assert.deepEqual(state.activeParticles.map(p => [p.x, p.y, p.z]), hostPositions);
+        receiveMechaEvent(packet); receiveMechaEvent({ ...packet, sequence: packet.sequence - 1 });
+        assert.equal(state.activeParticles.length, 20, 'duplicate and older events cannot replay effects');
+    } finally { disposeParticles(); cleanup(a); state.scene = null; userSettings.particleAmount = amount; }
+});
 
 test('wall arrival commits loss before the first punch tick and shares readiness with paused/dead viewers', async t => {
     let now = 1000; t.mock.method(performance, 'now', () => now);

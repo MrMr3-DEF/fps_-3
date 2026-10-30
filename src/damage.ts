@@ -1,5 +1,9 @@
 import type { Vec3Like } from './gameplayMath.js';
-export interface MechaWeaponHit { shotId?: number; pelletIndex?: number; origin: Vec3Like; point: Vec3Like; surface: 'body' | 'shield' }
+export interface MechaWeaponHit {
+    shotId?: number; pelletIndex?: number; origin: Vec3Like; point: Vec3Like; surface: 'body' | 'shield';
+    /** Incoming final flight segment, independent of the muzzle-to-hit vector for homing shots. */
+    direction?: Vec3Like;
+}
 type TargetHitHandler = (targetIndex: number, damage: number, attackerPeerId?: string) => void;
 type PlayerDamageHandler = (damage: number, attackerName: string, attackerPeerId?: string) => void;
 

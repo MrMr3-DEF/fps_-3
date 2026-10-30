@@ -17,6 +17,9 @@ const hoverInput = parent.document.getElementById('hover') as HTMLInputElement;
 const evadeInput = parent.document.getElementById('evade') as HTMLInputElement;
 const shieldInput = parent.document.getElementById('shield') as HTMLInputElement;
 const holdHeadBlack = parent.document.getElementById('hold-head-black') as HTMLInputElement;
+const holdArmorImpact = parent.document.getElementById('hold-armor-impact') as HTMLInputElement;
+const armorParticles = parent.document.getElementById('armor-particles') as HTMLSelectElement;
+armorParticles.addEventListener('change', () => { userSettings.particleAmount = Number(armorParticles.value); });
 const pauseAt = parent.document.getElementById('pause-at') as HTMLSelectElement;
 const history = parent.document.getElementById('history')!;
 const transitions: string[] = [];
@@ -24,6 +27,7 @@ let previous = '', dodged = false;
 let scanned = false;
 let paused = false;
 let walking = false, reversing = false, firing = false;
+let armorReview = false, bulletFiring = false;
 let previouslyMounted = false;
 let turnUntil = 0, frontReview = false;
 let observedRenderer: THREE.WebGLRenderer | null = null;
@@ -38,7 +42,7 @@ window.addEventListener('mecha-review-action', event => {
     const action = (event as CustomEvent<string>).detail;
     if (action === 'front') frontReview = !frontReview;
     if (action === 'player-death') takePlayerDamage(50, 'Review');
-    if (action === 'start' || action === 'leave') frontReview = false;
+    if (action === 'start' || action === 'leave') { frontReview = armorReview = bulletFiring = false; }
     if (action === 'start') document.getElementById('btn-play-sp')!.click();
     if (action === 'leave') document.getElementById('btn-pause-leave')!.click();
     if (action === 'pause') { if (paused) { paused = false; beginInput(); } else pauseReview(); }
@@ -46,6 +50,7 @@ window.addEventListener('mecha-review-action', event => {
     // input-release path. Resume before an action that needs live gameplay.
     if (!['pause', 'leave', 'start'].includes(action) && state.isPlaying && state.playerHp > 0) { paused = false; beginInput(); }
     if (action === 'noon') { state.dayNightElapsedSeconds = 150; state.dayNightSyncPending = state.dayNightSyncImmediate = true; }
+    if (action === 'night') { state.dayNightElapsedSeconds = 390; state.dayNightSyncPending = state.dayNightSyncImmediate = true; }
     if (action === 'head-safe') userSettings.photosensitivityMode = !userSettings.photosensitivityMode;
     const actor = forgottenMecha;
     if (!actor?.ready || !state.camera) return;
@@ -60,6 +65,14 @@ window.addEventListener('mecha-review-action', event => {
     if (action === 'scan') scanned = !scanned;
     if (action === 'shoot') fireProjectile();
     if (action === 'sniper') { state.desiredWeaponName = 'SNIPER'; }
+    if (action === 'armor-review' && actor.hp > 0 && !actor.ownsPilot) {
+        armorReview = true; actor.combat.stop(); actor.combat.shieldPhase = 'down';
+        const distance = Number(distanceInput.value);
+        state.camera.position.copy(actor.group.position).add(new THREE.Vector3(Math.sin(actor.group.rotation.y) * distance,
+            Number(heightInput.value), Math.cos(actor.group.rotation.y) * distance));
+        state.camera.lookAt(actor.hitbox.position); state.velocity.set(0, 0, 0);
+    }
+    if (action === 'armor-fire') bulletFiring = !bulletFiring;
     if (action === 'kill') processMechaHit(50);
     if (action === 'cockpit' && actor.canMount) {
         const seat = actor.seatAnchor.getWorldPosition(new THREE.Vector3());
@@ -174,7 +187,9 @@ function report() {
         const update = actor.update.bind(actor);
         // Ordinary pause hides HUD by design. Hold only the actor's helmet
         // clock at opaque cover so the real active HUD/layering stays reviewable.
-        actor.update = (delta, player) => update(holdHeadBlack.checked && actor.mode === 'piloted'
+        // Freeze only the review actor, leaving real weapon flight and pooled
+        // effects on the ordinary match clock for reproducible armor shots.
+        actor.update = (delta, player) => update(armorReview && actor.hp > 0 || holdHeadBlack.checked && actor.mode === 'piloted'
             && actor.headView.blackout >= 1 - 1e-9 ? 0 : delta, player);
     } else if (!actor) observedMecha = null;
     if (state.renderer && observedRenderer !== state.renderer) {
@@ -194,6 +209,10 @@ function report() {
         };
     }
     if (actor && state.camera && isInputActive()) {
+        if (holdArmorImpact.checked && state.activeParticles.some(p => p.kind === 'armor-spark' && p.maxLife - p.life >= 0.08)) {
+            bulletFiring = false; pauseReview();
+        }
+        if (armorReview && !actor.ownsPilot) state.isMouseDown = bulletFiring && actor.hp > 0;
         if (previouslyMounted && !actor.ownsPilot) {
             // Review automation must not pin the released bean at cabin height
             // or keep replaying scope/fire input after the real handoff clears it.
@@ -236,6 +255,7 @@ function report() {
         status.textContent += `\nHead view: ${actor.headView.phase} | Eye blend: ${actor.headView.eyeBlend.toFixed(2)} | Black: ${actor.headView.blackout.toFixed(2)} | Loading: ${(actor.headView.loadingProgress * 100).toFixed(1)}% | HUD: ${actor.headView.hudOpacity.toFixed(2)} | Reveal: ${actor.headView.revealProgress.toFixed(2)} | Target ready: ${actor.targetingReady} | Gentle reveal: ${userSettings.photosensitivityMode}`;
         status.textContent += `\nTransition camera: ${actor.transitionCamera.phase} | View locked: ${actor.transitionCamera.locked} | External: ${actor.transitionCamera.external} | Exit recovery: ${actor.transitionCamera.recovering}`;
         status.textContent += ` | Helmet clock held: ${holdHeadBlack.checked && actor.mode === 'piloted' && actor.headView.blackout >= 1 - 1e-9}`;
+        status.textContent += `\nArmor review: ${armorReview} | Weapon: ${state.activeWeaponName} | Particles: ${state.activeParticles.length} | Sparks: ${state.activeParticles.filter(p => p.kind === 'armor-spark').length}`;
         const next = `${actor.combat.laserPhase}/${actor.combat.shieldPhase}/${state.playerHp}`;
         if (next !== previous) {
             transitions.push(`${actor.combat.clock.toFixed(2)}s ${next}`); if (transitions.length > 12) transitions.shift();

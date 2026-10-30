@@ -35,6 +35,7 @@ const _segmentStart = new THREE.Vector3();
 const _segmentEnd = new THREE.Vector3();
 const _segmentMidpoint = new THREE.Vector3();
 const _impactPoint = new THREE.Vector3();
+const _impactDirection = new THREE.Vector3();
 const _aabbMin = new THREE.Vector3();
 const _aabbMax = new THREE.Vector3();
 const _currentDirection = new THREE.Vector3();
@@ -257,8 +258,13 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
             processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'shield', shotId: data.shotId, pelletIndex: data.pelletIndex });
             projectileHit = true;
         } else if (hitObstacle) {
-            if (!visualOnly && obstacleData(hitObstacle).damageTarget === 'forgotten-mecha') processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'body', shotId: data.shotId, pelletIndex: data.pelletIndex });
-            spawnParticles(_impactPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
+            if (obstacleData(hitObstacle).damageTarget === 'forgotten-mecha') {
+                // Only accepted damage produces armor effects; replicated
+                // visual bullets must not double the host's confirmed burst.
+                if (!visualOnly) processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint,
+                    direction: _impactDirection.subVectors(_segmentEnd, _segmentStart).normalize(),
+                    surface: 'body', shotId: data.shotId, pelletIndex: data.pelletIndex });
+            } else spawnParticles(_impactPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
             projectileHit = true;
         } else {
             spawnParticles(_impactPoint, 0xccd5e0, 6, 8, 0.1, 8.0);

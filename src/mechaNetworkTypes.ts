@@ -37,7 +37,7 @@ export type MechaEvent =
     | { kind: 'blast'; position: Vec3Packet }
     | { kind: 'blocked'; peerId: string }
     | { kind: 'board_denied'; peerId: string; lifeId: number }
-    | { kind: 'hit'; peerId: string; killed: boolean; score: number }
+    | { kind: 'hit'; peerId: string; killed: boolean; score: number; position: Vec3Packet; direction: Vec3Packet }
     | { kind: 'end' };
 export interface MechaEventPacket extends MechaSender { type: 'mecha_event'; sequence: number; state: MechaState; event: MechaEvent }
 export interface MechaStatePacket extends MechaSender { type: 'mecha_state'; state: MechaState }
@@ -94,7 +94,7 @@ function isEvent(e: unknown): e is MechaEvent {
     if (!isPeerId(e.peerId)) return false;
     if (e.kind === 'blocked') return true;
     if (e.kind === 'board_denied') return integer(e.lifeId);
-    if (e.kind === 'hit') return bool(e.killed) && integer(e.score);
+    if (e.kind === 'hit') return bool(e.killed) && integer(e.score) && isMechaVector(e.position) && direction(e.direction);
     if (!integer(e.lifeId)) return false;
     if (e.kind === 'damage') return number(e.damage, 0.01, 100) && ['laser', 'stomp', 'rocket'].includes(e.attack as string) && (e.attackerPeerId === null || isPeerId(e.attackerPeerId));
     return e.kind === 'release' && record(e.pose) && isMechaVector(e.pose.position) && isMechaVector(e.pose.viewPosition) && quaternion(e.pose.quaternion);

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { LASER_BEAM_FADE_TIME, MAX_PARTICLES } from './config.js';
+import { LASER_BEAM_FADE_TIME, MAX_PARTICLES, MECHA_ARMOR_IMPACT } from './config.js';
 import { getParticleLimit, scaleParticleCount } from './settings.js';
+import type { Vec3Like } from './gameplayMath.js';
 
 const SHARED_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
 const SHARED_CYL_GEO = new THREE.CylinderGeometry(0.025, 0.025, 1, 6);
@@ -15,6 +16,12 @@ const _instanceQuaternion = new THREE.Quaternion();
 const _instanceScale = new THREE.Vector3();
 const _instanceColor = new THREE.Color();
 const _laserMidPoint = new THREE.Vector3();
+const _impactAxis = new THREE.Vector3();
+const _impactTangent = new THREE.Vector3();
+const _impactBitangent = new THREE.Vector3();
+const _particleDirection = new THREE.Vector3();
+const _sparkAxis = new THREE.Vector3(0, 1, 0);
+const _cooledSparkColor = new THREE.Color(MECHA_ARMOR_IMPACT.cooledSparkColor);
 
 const materialPool: THREE.MeshBasicMaterial[] = [];
 const shockwaveMaterialPool: THREE.MeshBasicMaterial[] = [];
@@ -101,7 +108,7 @@ function releaseShockwaveMaterial(mat: THREE.MeshBasicMaterial): void {
     }
 }
 
-export type ParticleKind = 'spark' | 'dust' | 'sniper-trail' | 'shockwave' | 'rocket-flame' | 'maneuvering';
+export type ParticleKind = 'spark' | 'armor-spark' | 'dust' | 'sniper-trail' | 'shockwave' | 'rocket-flame' | 'maneuvering';
 
 export interface Particle {
     kind: ParticleKind;
@@ -116,12 +123,13 @@ export interface Particle {
     vz?: number;
     gravity?: number;
     size?: number;
+    length?: number;
     color?: number;
     targetScale?: number;
 }
 
 function isBoxParticle(kind: ParticleKind): boolean {
-    return kind === 'spark' || kind === 'dust' || kind === 'rocket-flame' || kind === 'maneuvering';
+    return kind === 'spark' || kind === 'armor-spark' || kind === 'dust' || kind === 'rocket-flame' || kind === 'maneuvering';
 }
 
 function pushBoxParticle(
@@ -134,7 +142,7 @@ function pushBoxParticle(
     vz: number,
     gravity: number,
     maxLife: number
-): void {
+): Particle {
     ensureBoxParticleMesh();
     const particle = boxParticlePool.pop() || ({} as Particle);
     particle.kind = kind;
@@ -147,15 +155,52 @@ function pushBoxParticle(
     particle.vz = vz;
     particle.gravity = gravity;
     particle.size = size;
+    particle.length = undefined;
     particle.color = color;
     particle.targetScale = undefined;
     particle.life = maxLife;
     particle.maxLife = maxLife;
     state.activeParticles.push(particle);
+    return particle;
 }
 
 function availableParticleSlots(): number {
     return Math.max(0, getParticleLimit() - state.activeParticles.length);
+}
+
+function sampleParticleRange(range: readonly [number, number]): number {
+    return range[0] + Math.random() * (range[1] - range[0]);
+}
+
+/** One accepted armor hit; all viewers use the canonical incoming segment.
+ * World-space pooled particles survive a lethal hit without following the wreck. */
+export function spawnMechaArmorImpact(position: Vec3Like, incoming: Vec3Like): void {
+    if (!state.scene) return;
+    _impactAxis.set(-incoming.x, -incoming.y, -incoming.z);
+    if (!_impactAxis.lengthSq() || !Number.isFinite(_impactAxis.lengthSq())) return;
+    _impactAxis.normalize();
+    _impactTangent.set(Math.abs(_impactAxis.y) < 0.9 ? 0 : 1, Math.abs(_impactAxis.y) < 0.9 ? 1 : 0, 0)
+        .cross(_impactAxis).normalize();
+    _impactBitangent.crossVectors(_impactAxis, _impactTangent);
+    const tuning = MECHA_ARMOR_IMPACT;
+    const sparks = scaleParticleCount(tuning.sparks), dust = scaleParticleCount(tuning.dust);
+    const count = Math.min(sparks + dust, availableParticleSlots());
+    for (let i = 0; i < count; i++) {
+        // Interleave the two kinds instead of spending the budget on sparks first.
+        const isDust = Math.floor((i + 1) * dust / (sparks + dust)) > Math.floor(i * dust / (sparks + dust));
+        const angle = Math.random() * Math.PI * 2, spread = Math.sqrt(Math.random()) * (isDust ? tuning.dustSpread : tuning.sparkSpread);
+        _particleDirection.copy(_impactAxis)
+            .addScaledVector(_impactTangent, Math.cos(angle) * spread)
+            .addScaledVector(_impactBitangent, Math.sin(angle) * spread).normalize();
+        const speed = sampleParticleRange(isDust ? tuning.dustSpeed : tuning.sparkSpeed);
+        _instancePosition.set(position.x, position.y, position.z).addScaledVector(_impactAxis, tuning.surfaceOffset);
+        const colors = isDust ? tuning.dustColors : tuning.sparkColors;
+        const p = pushBoxParticle(isDust ? 'dust' : 'armor-spark', _instancePosition,
+            colors[Math.floor(Math.random() * colors.length)], sampleParticleRange(isDust ? tuning.dustSize : tuning.sparkWidth),
+            _particleDirection.x * speed, _particleDirection.y * speed, _particleDirection.z * speed,
+            isDust ? tuning.dustGravity : tuning.sparkGravity, sampleParticleRange(isDust ? tuning.dustLife : tuning.sparkLife));
+        if (!isDust) p.length = sampleParticleRange(tuning.sparkLength);
+    }
 }
 
 export function spawnParticles(position: THREE.Vector3, color: number, count: number, speed: number, size: number, gravity: number): void {
@@ -267,9 +312,17 @@ function updateBoxInstances(hasBoxParticles: boolean): void {
         const scale = (p.size || 0.1) * (p.kind === 'dust' ? Math.sin(Math.PI * ratio) : ratio);
         _instancePosition.set(p.x || 0, p.y || 0, p.z || 0);
         _instanceScale.set(scale, scale, scale);
+        _instanceQuaternion.identity();
+        _instanceColor.setHex(p.color || 0xffffff);
+        if (p.kind === 'armor-spark') {
+            _particleDirection.set(p.vx || 0, p.vy || 0, p.vz || 0).normalize();
+            _instanceQuaternion.setFromUnitVectors(_sparkAxis, _particleDirection);
+            _instanceScale.y = (p.length || scale) * Math.sqrt(ratio);
+            _instanceColor.lerp(_cooledSparkColor, 1 - ratio);
+        }
         _instanceMatrix.compose(_instancePosition, _instanceQuaternion, _instanceScale);
         mesh.setMatrixAt(instanceIndex, _instanceMatrix);
-        mesh.setColorAt(instanceIndex, _instanceColor.setHex(p.color || 0xffffff));
+        mesh.setColorAt(instanceIndex, _instanceColor);
         instanceIndex++;
     }
 

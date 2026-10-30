@@ -46,7 +46,7 @@ import {
     GRAPPLE_BLUE,
     MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE,
 } from './config.js';
-import { spawnParticles, spawnGroundImpact, updateParticles, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
+import { spawnParticles, spawnGroundImpact, spawnMechaArmorImpact, updateParticles, spawnRocketFlame, createShockwave, disposeParticles } from './particles.js';
 import { disposeProjectiles, updateProjectiles } from './projectiles.js';
 import { applyHudPresentation, setFpsText, updateAccelerometer, updateHealthBar, resetHealthBarFlash, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
@@ -224,6 +224,7 @@ function mechaImpact(kind: MechaImpact, position: THREE.Vector3): void {
     }
 }
 
+const mechaImpactDirection = new THREE.Vector3();
 function processMechaDamage(damage: number, context?: import('./damage.js').MechaWeaponHit): void {
     if (state.isMultiplayer) {
         if (context?.shotId !== undefined && forgottenMecha) broadcastToAll({ type: 'hit_mecha', revision: forgottenMecha.revision,
@@ -233,6 +234,8 @@ function processMechaDamage(damage: number, context?: import('./damage.js').Mech
     const mounted = forgottenMecha?.ownsLocalPilot;
     const hit = forgottenMecha?.damage(damage, context);
     if (!hit?.accepted) return;
+    if (context?.surface === 'body') spawnMechaArmorImpact(context.point, context.direction ?? mechaImpactDirection.set(
+        context.point.x - context.origin.x, context.point.y - context.origin.y, context.point.z - context.origin.z));
     if (mounted) {
         if (forgottenMecha!.ownsLocalPilot) {
             lastMountedHp = forgottenMecha!.hp;

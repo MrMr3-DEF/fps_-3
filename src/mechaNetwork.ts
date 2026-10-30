@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { state } from './state.js';
+import { spawnMechaArmorImpact } from './particles.js';
 import { resolveThirdPersonCameraPosition, resolveThirdPersonAimTarget } from './thirdPersonCamera.js';
 import { forgottenMecha, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment } from './world.js';
 import { MECHA_ROCKET_SHOT_TIME, MECHA_ROCKET_FIRE_TIME, MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE, NETWORK_TICK_MS, MECHA_NETWORK_INPUT_TIMEOUT_MS, MECHA_NETWORK_REFRESH_MS, PLAYER_HEIGHT, PLAYER_MAX_HP, NETWORK_POSITION_RESPONSE } from './config.js';
@@ -176,6 +177,9 @@ function applyEvent(packet: MechaEventPacket): void {
     }
     if (event.kind === 'hit') {
         state.score = event.score;
+        // The event owns the contact even if its snapshot has already killed
+        // the actor or restored its shield by the time this viewer receives it.
+        spawnMechaArmorImpact(event.position, event.direction);
         presentation?.hit(event.killed, event.score, event.peerId === state.peer?.id);
         return;
     }
@@ -294,7 +298,9 @@ export function mechaPeerLeft(peerId: string): void {
     approaches.delete(peerId); commandSequences.delete(peerId);
     if (state.isHost && activeActor?.pilotPeerId === peerId) { detachRemotePilot(peerId); activeActor.abandonPilot(); input = null; publish(true); }
 }
-export function announceMechaHit(peerId: string, killed: boolean): void { emit({ kind: 'hit', peerId, killed, score: state.score }); publish(true); }
+export function announceMechaHit(peerId: string, killed: boolean, position: THREE.Vector3, direction: THREE.Vector3): void {
+    emit({ kind: 'hit', peerId, killed, score: state.score, position: vector(position), direction: vector(direction) }); publish(true);
+}
 export function updateMechaNetwork(delta: number): void {
     const actor = activeActor; if (!state.isMultiplayer || !actor?.ready) return;
     actor.localPeerId = state.peer?.id ?? null;

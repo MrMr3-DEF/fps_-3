@@ -681,9 +681,8 @@ export function fireProjectile(): void {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestObstacleDist);
             if (obstacleHits[0]?.distance === closestObstacleDist && obstacleData(obstacleHits[0].object).damageTarget === 'forgotten-mecha') {
                 if (state.isMultiplayer) { broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed); sniperFireBroadcast = true; }
-                processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'body', shotId, pelletIndex: 0 });
-            }
-            spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
+                processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, direction: camDirection, surface: 'body', shotId, pelletIndex: 0 });
+            } else spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
         } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist && hitTargetGroup) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestTargetDist);
             

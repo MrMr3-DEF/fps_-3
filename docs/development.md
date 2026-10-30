@@ -94,6 +94,9 @@ It uses temporary touch input without saving settings; use a
 landscape viewport. See [Forgotten Mecha](forgotten-mecha.md) for gameplay and
 resource ownership. Focused checks are in `tests/forgottenMecha.test.ts`,
 `tests/mechaCombat.test.ts` and `tests/mechaWeapons.test.ts`.
+Armor hit setup holds the vulnerable actor still for actual bullet/sniper shots;
+continuous firing, pause-on-impact, night lighting and temporary 20%/100% particle
+controls support dust/spark review without saving graphics settings.
 Mounting controls additionally expose cockpit aim/grapple, turning, forward/reverse
 movement, third-person view, targets ahead, rocket firing and a held shield.
 Fitted pillar approach, leg-supported stomp and sideways defeat controls review

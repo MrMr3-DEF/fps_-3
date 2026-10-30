@@ -618,6 +618,11 @@ test('real host authorizes mecha shield/body claims once, rejects fabricated dam
         const forged = actor.captureNetworkState(999, true);
         connection.emit('data', { type: 'mecha_state', state: forged });
         connection.emit('data', { type: 'mecha_event', sequence: 999, state: forged, event: { kind: 'end' } });
+        const particleCount = state.activeParticles.length;
+        connection.emit('data', { type: 'mecha_event', sequence: 1000, state: forged,
+            event: { kind: 'hit', peerId: 'mecha-shooter', killed: false, score: 999,
+                position: { x: 0, y: 20, z: 0 }, direction: { x: 0, y: -1, z: 0 } } });
+        assert.equal(state.activeParticles.length, particleCount, 'guests cannot forge armor impact events');
         assert.equal(state.matchEnded, false); assert.equal(actor.hp, 50);
         const origin = actor.combat.shieldCenter.clone().add(new THREE.Vector3(0, 60, 0));
         assert.ok(authorizeClientPacket('mecha-shooter', { ...update('Shooter'), pos: { x: origin.x, y: origin.y, z: origin.z } }));
@@ -640,6 +645,14 @@ test('real host authorizes mecha shield/body claims once, rejects fabricated dam
 
         actor.combat.shieldPhase = 'down'; now += 2100; assert.ok(fire(2));
         assert.equal(authorizeMechaHit('mecha-shooter', claim(2)), true); assert.equal(actor.hp, 40);
+        const armorEvent = connection.sent.find(p => p.type === 'mecha_event' && p.event.kind === 'hit');
+        assert.ok(armorEvent && parseNetworkPacket(armorEvent));
+        assert.deepEqual(armorEvent.event.direction, { x: 0, y: -1, z: 0 });
+        assert.ok(armorEvent.event.position.y < origin.y);
+        const confirmedCount = state.activeParticles.length;
+        assert.ok(confirmedCount > particleCount);
+        assert.equal(authorizeMechaHit('mecha-shooter', claim(2)), false);
+        assert.equal(state.activeParticles.length, confirmedCount, 'consumed claims cannot replay armor effects');
         assert.ok(connection.sent.some(p => p.type === 'mecha_event' && p.event.kind === 'shield'));
         assert.ok(connection.sent.some(p => p.type === 'mecha_state' && p.state.hp === 40));
         now += 2100; assert.ok(fire(3)); actor.damage(40);
