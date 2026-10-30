@@ -229,7 +229,7 @@ and layout. Remote pilot suppresses that player's colored marker; Empty track
 and Reset markers review retirement and rebuilding. The unparameterized player
 list fixture retains its scoreboard review.
 
-Check that all dots stay 10px at every distance/zoom, overlap directly on the
+Check that all dots stay 20px at every distance/zoom, overlap directly on the
 line, and retain exact suit colors. Markers use the shared 4px corner radius;
 the mecha's rust patches are square. The locator's outer width must match the
 health/reload bars: 484px desktop and 124px mobile, with the shared 4px radius.
@@ -245,6 +245,11 @@ scoped visibility. The real gameplay fixture also verified a mecha marker in
 first/third-person scoped views, concealment on death and restoration on respawn.
 Active cockpit review retained the empty track without a self-mecha marker;
 leaving the match hid the track and cleared all markers.
+
+Locator sizing follow-up: markers are now 20 × 20px, twice their original side
+length, with larger pixelated rust patches and elevation arrows. Endpoint
+insets keep the enlarged squares within the existing track width; the 4px
+corner radius and distance-independent sizing are retained.
 
 ## Weapon indicator assets and review
 

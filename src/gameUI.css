@@ -601,6 +601,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 #locator-bar {
+    --locator-marker-size: 20px;
     position: fixed;
     top: calc(env(safe-area-inset-top, 0px) + 20px);
     left: 50%;
@@ -615,14 +616,14 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     z-index: 7;
     display: none;
 }
-#locator-markers { position: absolute; inset: 0 6px; }
+#locator-markers { position: absolute; inset: 0 calc(var(--locator-marker-size) / 2 + 1px); }
 .locator-dot {
     position: absolute;
     top: 50%;
     transform: translate(-50%, -50%);
     box-sizing: border-box;
-    width: 10px;
-    height: 10px;
+    width: var(--locator-marker-size);
+    height: var(--locator-marker-size);
     border: 1px solid #101923;
     border-radius: var(--control-radius);
     background: var(--locator-color);
@@ -630,10 +631,13 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     box-shadow: 0 0 0 1px #ffffff80;
 }
 .locator-dot-mecha {
+    --locator-rust: #95613f;
     background:
-        linear-gradient(#91502c 0 0) 0 1px / 3px 2px no-repeat,
-        linear-gradient(#a5703b 0 0) 4px 4px / 3px 3px no-repeat,
-        linear-gradient(#65432e 0 0) 1px 6px / 2px 2px no-repeat,
+        linear-gradient(var(--locator-rust) 0 0) 2px 2px / 6px 3px no-repeat,
+        linear-gradient(var(--locator-rust) 0 0) 2px 5px / 3px 3px no-repeat,
+        linear-gradient(var(--locator-rust) 0 0) 13px 6px / 3px 3px no-repeat,
+        linear-gradient(var(--locator-rust) 0 0) 8px 12px / 5px 3px no-repeat,
+        linear-gradient(var(--locator-rust) 0 0) 10px 15px / 3px 2px no-repeat,
         linear-gradient(135deg, #eff3f5, #a5adb5);
 }
 .locator-dot[data-elevation="above"]::before,
@@ -642,12 +646,12 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    border-left: 3px solid transparent;
-    border-right: 3px solid transparent;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
     filter: drop-shadow(0 0 1px #000);
 }
-.locator-dot[data-elevation="above"]::before { bottom: calc(100% + 3px); border-bottom: 4px solid currentColor; }
-.locator-dot[data-elevation="below"]::after { top: calc(100% + 3px); border-top: 4px solid currentColor; }
+.locator-dot[data-elevation="above"]::before { bottom: calc(100% + 3px); border-bottom: 5px solid currentColor; }
+.locator-dot[data-elevation="below"]::after { top: calc(100% + 3px); border-top: 5px solid currentColor; }
 
 #hover-container {
     position: absolute;

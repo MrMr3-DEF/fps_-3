@@ -69,8 +69,8 @@ singleplayer-only.
 
 ## Behavior
 
-The top-center locator shows the mecha as a fixed-size silver marker with
-square, pixelated brown/bronze rust spots, distinct from solid player-color
+The top-center locator shows the mecha as a fixed-size 20 × 20px silver marker with
+three offset, stepped rust clusters in one warm bronze tone, distinct from solid player-color
 markers. All markers are rounded squares with the shared 4px corner radius.
 The locator tracks the animated body center through cover and beyond render distance in singleplayer
 and multiplayer. The defeated, mountable robot remains tracked; final

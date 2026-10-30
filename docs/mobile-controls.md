@@ -28,7 +28,7 @@ The mobile HUD keeps equal-sized health and reload bars stacked horizontally, wi
 The locator sits at the top center, 20px below the safe top edge. Its width
 shares the health/reload sizing (124px here, 484px on desktop) and its corners
 use the shared 4px control radius. Player dots keep their suit color, including
-duplicate colors, and stay 10px across with the shared 4px corner radius. The
+duplicate colors, and stay 20px across with the shared 4px corner radius. The
 mecha uses a silver marker with square, pixelated rust spots. Markers overlap on
 the line, with small above/below-view arrows; scoped
 aiming keeps the locator visible while the bottom bars hide.
