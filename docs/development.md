@@ -200,6 +200,8 @@ The test suite focuses on deterministic logic and security boundaries that can r
 | `pointerLockControls.test.ts`, `mouseMovement.test.ts` | Mouse/trackpad resampling across input/render rates, zoom gain, cancellation and optional spike protection |
 | `pointerAimIntegration.test.ts` | Published crosshair, actual homing acquisition/firing, sniper exclusion and grappling agree during queued turns |
 | `multiplayerVisuals.test.ts` | Overlapping remote damage pulses and material restoration |
+| `locatorBar.test.ts`, `hudPresentation.test.ts` | Locator bearings/elevation, confirmed colors, entity retirement, mecha occupancy and HUD visibility across scope and lifecycle transitions |
+| `weaponIndicator.test.ts`, `weaponLifecycle.test.ts` | Static silhouettes, icon caching/reset, actual weapon-swap commit timing, mecha selection and safe touch placement |
 | `networkTypes.test.ts` | Accepted packets and rejection of malformed or excessive network data |
 | `town.test.ts` | 1,000 seeded layouts, street/door clearance, real world rebuilds/disposal, hazard exclusion, collision, ceilings, rooftop edges, projectile/grapple geometry, culling and enemy placement |
 | `spatialHash.test.ts` | Radius queries, reusable outputs, clearing, segment traversal, deduplication, negative cells, grid corners |
@@ -216,6 +218,62 @@ On 25 September 2026, `npm run check` passed both TypeScript projects and all 23
 Keep testable logic independent of the DOM, Three.js renderer, PeerJS implementation, and Cloudflare bindings where practical. The `TurnRoomStateMachine` storage interface is an example: tests use an in-memory implementation while production supplies Durable Object storage.
 
 Add or update tests for changes to packet parsing, authorization rules, geometry math, state-machine quotas, input decoding, shared-material lifecycle, and configuration invariants. Browser-only changes still require manual validation.
+
+## Locator bar review
+
+With Vite running, open `/tests/player-list-preview.html?locator-preview` to
+review the production locator renderer with duplicate suit colors, a distant
+player beyond render range, elevation arrows and a rust-spotted silver mecha.
+Camera yaw/pitch, scope, third-person and mobile-HUD controls exercise bearing
+and layout. Remote pilot suppresses that player's colored marker; Empty track
+and Reset markers review retirement and rebuilding. The unparameterized player
+list fixture retains its scoreboard review.
+
+Check that all dots stay 10px at every distance/zoom, overlap directly on the
+line, and retain exact suit colors. Markers use the shared 4px corner radius;
+the mecha's rust patches are square. The locator's outer width must match the
+health/reload bars: 484px desktop and 124px mobile, with the shared 4px radius.
+In real gameplay, verify first/third-person and cockpit turns, scoped visibility,
+pause/death/loading concealment, respawn and leave/restart cleanup. This local
+fixture does not establish deployed multiplayer or physical-device behavior.
+
+October 30, 2026: both TypeScript projects and all 493 tests passed; the
+production build regenerated `dist/`. Browser review measured equal outer
+widths of 484px desktop and 124px mobile, 10px markers with 4px corners, duplicate
+suit colors, pixelated rust, elevation arrows, remote-pilot suppression and
+scoped visibility. The real gameplay fixture also verified a mecha marker in
+first/third-person scoped views, concealment on death and restoration on respawn.
+Active cockpit review retained the empty track without a self-mecha marker;
+leaving the match hid the track and cleared all markers.
+
+## Weapon indicator assets and review
+
+The HUD's six static white SVG silhouettes are generated from the actual weapon
+meshes and rocket hull/nose. After changing those models, run
+`node --experimental-strip-types --import ./tests/register.mjs scripts/generate-weapon-icons.mjs`
+and include the updated `src/weaponIndicatorIcons.ts` with the normal build.
+Dormant muzzle effects and the rocket flame are excluded. This is an authoring
+step; gameplay does not load models or allocate a renderer for the indicator.
+
+Open `/tests/player-list-preview.html?weapon-preview` for the shared HUD review.
+Weapon, Piloting mecha, Power jump and HUD state controls exercise all icons,
+ordinary visibility and the neutral panel styling. Mobile HUD shows the real
+touch-control layout so panel clearance can be inspected. Desktop outer size is
+140 × 70px; touch size is 88 × 44px. Both share the health/ammo stack height and
+4px radius. Short desktop windows shorten the hover bar to leave 12px above
+the bottom-right panel. Also review switching, cockpit entry/exit and cleanup
+in the real match fixture.
+
+October 30, 2026: both TypeScript projects and all 497 tests passed, and the
+production build regenerated `dist/`. Browser review covered all six silhouettes,
+matching 140 × 70px/88 × 44px panel and bar-stack sizing, 4px corners, neutral
+styling while Power Jump is enabled, 10px touch-action clearance and 12px hover
+clearance in a short desktop window. The real match confirmed sniper selection,
+scope/pause concealment, hidden boarding/startup/shutdown and the rocket icon
+during active piloting. Exiting restored the sniper icon; death hid it, respawn
+restored the equipped sniper, and leaving hid and cleared the indicator.
+These are local browser checks, not physical-device or
+deployed multiplayer validation.
 
 ## CI contract
 

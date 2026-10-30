@@ -89,6 +89,15 @@ export function getTouchControlRect(id: TouchControlId, layout: TouchLayout, bou
     };
 }
 
+/** Keep the read-only weapon panel above the action cluster without moving
+ * saved controls. Clamp its top to the safe viewport for extreme custom layouts. */
+export function getWeaponIndicatorTouchBottom(layout: TouchLayout, bounds: TouchBounds, height: number, fireMode: TouchFireMode): number {
+    const actionTop = Math.min(...(['grapple', 'hover', 'aim', 'jump', 'fire'] as const)
+        .map(id => getTouchControlRect(id, layout, bounds, fireMode).top));
+    const top = Math.max(bounds.top, actionTop - height - 10);
+    return bounds.height - top - height;
+}
+
 export function placeTouchControl(id: TouchControlId, layout: TouchLayout, bounds: TouchBounds, x: number, y: number, scale = layout[id]?.scale ?? 1, fireMode: TouchFireMode = 'joystick'): void {
     layout[id] = {
         x: clamp((x - bounds.left) / Math.max(1, bounds.width - bounds.left - bounds.right), 0, 1),

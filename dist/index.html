@@ -12,9 +12,9 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-CdnYYCGv.js"></script>
+  <script type="module" crossorigin src="/assets/index-DWGtkd6i.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-BCaTdE9K.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-BLESZrDI.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-B0iedgkL.css">
 </head>
 
 <body>
@@ -335,7 +335,12 @@
     </div>
     <div id="fps-counter">FPS: 0</div>
 
+    <div id="locator-bar" role="img" aria-label="Player and mecha directions">
+        <div id="locator-markers"></div>
+    </div>
+
     <button id="powerjump-toggle" hidden aria-label="Toggle power jump (Ctrl)" aria-pressed="false" title="Ctrl: toggle power jump">POWER JUMP OFF</button>
+    <div id="weapon-indicator" role="img" aria-label="Selected weapon"></div>
     <div id="reload-container">
         <div id="reload-bar"></div>
     </div>

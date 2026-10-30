@@ -3,11 +3,13 @@ import { applyLookInput } from './lookInput.js';
 import { onInputStarted, onInputEnded, setTouchMode, touchMode, endInput, isInputActive, touchMove } from './inputSession.js';
 import { userSettings } from './settings.js';
 import { createTouchControls, applyTouchLayout } from './mobileControlsView.js';
+import type { TouchBounds } from './mobileControlLayout.js';
 
 interface Actions {
     keyDown(code: string): void;
     keyUp(code: string): void;
     fire(held: boolean): void;
+    layout?(bounds: TouchBounds): void;
 }
 
 /** Independent pointer ownership permits walking, aiming and firing together. */
@@ -31,6 +33,11 @@ export function setupMobileControls(actions: Actions): () => void {
     let stickPointer: number | null = null;
     let lookPointer: number | null = null;
     let lastX = 0, lastY = 0;
+
+    function layout(): void {
+        const bounds = applyTouchLayout(layer, userSettings.touchLayout, userSettings.touchFireMode);
+        actions.layout?.(bounds);
+    }
 
     function capture(e: PointerEvent, element: HTMLElement, release: () => void): boolean {
         if (!touchMode || !isInputActive() || e.pointerType !== 'touch') return false;
@@ -127,11 +134,11 @@ export function setupMobileControls(actions: Actions): () => void {
         document.body.classList.toggle('touch-device', coarsePointer || enabled);
         document.body.classList.toggle('touch-input', enabled);
         layer.hidden = !enabled || !isInputActive();
-        if (!layer.hidden) applyTouchLayout(layer, userSettings.touchLayout, userSettings.touchFireMode);
+        if (!layer.hidden) layout();
     }
     onInputStarted(() => {
         layer.hidden = !touchMode;
-        if (!layer.hidden) applyTouchLayout(layer, userSettings.touchLayout, userSettings.touchFireMode);
+        if (!layer.hidden) layout();
     });
     onInputEnded(() => { reset(); layer.hidden = true; });
     const pause = () => { reset(); if (isInputActive()) endInput(); };
@@ -140,7 +147,7 @@ export function setupMobileControls(actions: Actions): () => void {
     document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
     window.addEventListener('resize', () => {
         if (touchMode && innerWidth <= innerHeight) pause();
-        else if (!layer.hidden) applyTouchLayout(layer, userSettings.touchLayout, userSettings.touchFireMode);
+        else if (!layer.hidden) layout();
     });
     sync();
     return sync;

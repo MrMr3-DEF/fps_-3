@@ -198,6 +198,7 @@ export const MAX_PLAYERS = 5;
 // before the Worker issues short-lived TURN credentials.
 export const ROOM_CODE_LENGTH = 8;
 export const PEER_Y_OFFSET = 0.35;
+export const LOCATOR_HALF_ANGLE = Math.PI / 3;
 export const HIT_FLASH_DURATION_MS = 150;
 
 export const HOOK_SPEED = 500;

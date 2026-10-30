@@ -14,6 +14,8 @@ import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setPlayerListVisible } from './playerList.js';
+import { LocatorBar } from './locatorBar.js';
+import { WeaponIndicator } from './weaponIndicator.js';
 import { setupMobileControls } from './mobileControls.js';
 import { MobileControlsEditor } from './mobileControlsEditor.js';
 import { cloneTouchLayout } from './mobileControlLayout.js';
@@ -94,6 +96,8 @@ let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
 let dayNightCycle: DayNightCycle | null = null;
 let smartGoggles: SmartGogglesHud | null = null;
+let locatorBar: LocatorBar | null = null;
+let weaponIndicator: WeaponIndicator | null = null;
 const conversationCamera = new ConversationCamera();
 const cameraShake = new CameraShake();
 const lastRenderedAimRay = new THREE.Ray();
@@ -954,6 +958,7 @@ function setupInputListeners(): void {
             if (forgottenMecha?.ownsLocalPilot) { mountedFireRequested ||= held; return; }
             if (held && isInputActive() && state.fireCooldown <= 0 && state.switchState === 'IDLE') { cancelInspect(); fireProjectile(); }
         },
+        layout: bounds => weaponIndicator?.placeTouch(userSettings.touchLayout, bounds, userSettings.touchFireMode),
     });
     document.getElementById('npc-interaction')?.addEventListener('click', event => {
         event.preventDefault();
@@ -1059,6 +1064,7 @@ function syncGameHud(): void {
     updateWorldBorderOverlay(presentation.border);
     const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
     const stats = WEAPON_STATS[state.activeWeaponName];
+    if (presentation.ordinary) weaponIndicator?.update(state.activeWeaponName, Boolean(pilot));
     updateHealthBar(pilot ? pilot.hp / pilot.maxHp * 100 : state.playerHp / state.playerMaxHp * 100);
     updateReloadBar(Math.max(0, Math.min(1, 1 - (pilot ? pilot.pilot.cooldown / WEAPON_STATS.SNIPER.fireRate : state.fireCooldown / (stats?.fireRate ?? 0.1)))));
     updateHoverBar(pilot ? pilot.combat.energy : state.hoverFuel, presentation.ordinary && (pilot ? pilot.combat.shieldActive : state.isHovering));
@@ -1093,6 +1099,8 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
         if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
         gothChat?.reset({ preserveLoadedModel: userSettings.downloadWebLLMImmediately });
         smartGoggles?.reset();
+        locatorBar?.reset();
+        weaponIndicator?.reset();
         conversationCamera.cancel();
         chatCharacter = null;
         if (options.disconnect !== false) disconnectMultiplayer({ notifyRuntime: false });
@@ -1673,6 +1681,10 @@ function init(): void {
     setupSettingsControls();
     applyLiveSettings();
     if (UI.gogglesTargetLayer) smartGoggles = new SmartGogglesHud(UI.gogglesTargetLayer);
+    const locatorMarkers = document.getElementById('locator-markers');
+    if (locatorMarkers) locatorBar = new LocatorBar(locatorMarkers);
+    const weaponPanel = document.getElementById('weapon-indicator');
+    if (weaponPanel) weaponIndicator = new WeaponIndicator(weaponPanel);
 
     setupMenuListeners();
     gothChat = new GothChat({
@@ -2156,6 +2168,12 @@ function animate(): void {
             // may begin in the next simulation frame, after the grapple snaps
             // the logical player eye to the seat.
             forgottenMecha?.transitionCamera.recordView(state.camera.position, state.camera.quaternion);
+
+            // Use the final shoulder/cockpit view, before impact shake. This
+            // matches the displayed direction without making the dots jitter.
+            if (currentHudPresentation().locator) {
+                locatorBar?.update(state.camera, state.peers, state.playerList, state.peer?.id, forgottenMecha);
+            }
 
             // Match the exact camera pose used for this draw. In third person,
             // distance still comes from the logical player position rather than

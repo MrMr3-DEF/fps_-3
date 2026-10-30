@@ -79,6 +79,8 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `projectileTrails.ts` | Pooled world-space projectile path history and post-impact tracer fading |
 | `particles.ts` | Instanced debris, beams, exhaust, shockwaves, material pools, cleanup |
 | `hudPresentation.ts`, `hud.ts` | Pure phase/input visibility policy, one DOM applicator, health flash ownership, bars, FPS, speed lines and accelerometer |
+| `locatorBar.ts`, `locatorBarMath.ts` | Top-center player/mecha direction markers, fixed bearing arc and camera-relative elevation arrows; consumes existing replicated state |
+| `weaponIndicator.ts`, `weaponIndicatorIcons.ts` | Cached static white weapon/rocket silhouettes, equipped-weapon selection and touch HUD placement |
 | `smartGoggles.ts` | Scoped enemy recognition, line-of-sight filtering, target-lock DOM lifecycle, and live distance/health callouts |
 | `gogglesFailure.ts` | Match-scoped continuous anomaly-scan timer, terminal failure, shutdown timing, and input-release latch |
 | `smartGogglesMath.ts` | Rotation-independent target-envelope projection, adaptive 45-degree callout layout, and target-surface distance math |

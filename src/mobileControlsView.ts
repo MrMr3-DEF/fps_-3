@@ -59,7 +59,7 @@ export function getTouchBounds(layer: HTMLElement): TouchBounds {
     };
 }
 
-export function applyTouchLayout(layer: HTMLElement, layout: TouchLayout, fireMode: TouchFireMode = 'joystick'): void {
+export function applyTouchLayout(layer: HTMLElement, layout: TouchLayout, fireMode: TouchFireMode = 'joystick'): TouchBounds {
     setFireMode(layer, fireMode);
     const bounds = getTouchBounds(layer);
     for (const { id } of TOUCH_CONTROLS) {
@@ -75,4 +75,5 @@ export function applyTouchLayout(layer: HTMLElement, layout: TouchLayout, fireMo
     helmet.style.cssText = grapple.style.cssText;
     const exit = layer.querySelector<HTMLElement>('[data-control="exit"]')!;
     exit.style.cssText = layer.querySelector<HTMLElement>('[data-control="inspect"]')!.style.cssText;
+    return bounds;
 }

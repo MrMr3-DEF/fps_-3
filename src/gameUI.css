@@ -40,7 +40,7 @@
     unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 
-:root { --ui-font: 'Science Gothic', 'Segoe UI', Tahoma, sans-serif; }
+:root { --ui-font: 'Science Gothic', 'Segoe UI', Tahoma, sans-serif; --hud-bar-width: 484px; --hud-stack-height: 70px; --hud-bar-gap: 6px; --hud-bar-height: calc((var(--hud-stack-height) - var(--hud-bar-gap)) / 2); --hud-bottom: 30px; }
 html,
 body {
     margin: 0;
@@ -517,21 +517,37 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 #powerjump-toggle[hidden] { display: none; }
+#powerjump-toggle, #weapon-indicator {
+    box-sizing: border-box;
+    border: 2px solid #ffffffb0;
+    border-radius: var(--control-radius);
+    background: #17283b88;
+    color: #d0d9e2;
+    box-shadow: none;
+}
 #powerjump-toggle {
     position: fixed;
     right: calc(50% + 260px);
-    bottom: 30px;
+    bottom: var(--hud-bottom);
     width: 90px;
-    height: 70px;
+    height: var(--hud-stack-height);
     padding: 8px;
-    border: 2px solid #ffffffb0;
-    border-radius: 4px;
-    background: #17283b88;
-    color: #d0d9e2;
     font: 700 11px var(--ui-font);
     z-index: 9;
     touch-action: manipulation;
 }
+#weapon-indicator {
+    position: fixed;
+    right: max(30px, env(safe-area-inset-right));
+    bottom: var(--hud-bottom);
+    height: var(--hud-stack-height);
+    width: calc(var(--hud-stack-height) * 2);
+    padding: 8px;
+    pointer-events: none;
+    z-index: 9;
+    display: none;
+}
+#weapon-indicator svg { display: block; width: 100%; height: 100%; }
 #powerjump-toggle[aria-pressed="true"] {
     color: #8be2ff;
     border-color: #40c8ff;
@@ -539,14 +555,15 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 #health-container {
     position: absolute;
-    bottom: 30px;
+    bottom: var(--hud-bottom);
     left: 50%;
     transform: translateX(-50%);
-    width: 480px;
-    height: 28px;
+    box-sizing: border-box;
+    width: var(--hud-bar-width);
+    height: var(--hud-bar-height);
     background: rgba(0, 0, 0, 0.65);
     border: 2px solid rgba(255, 255, 255, 0.95);
-    border-radius: 4px;
+    border-radius: var(--control-radius);
     overflow: hidden;
     z-index: 5;
     display: none;
@@ -562,14 +579,15 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 
 #reload-container {
     position: absolute;
-    bottom: 68px;
+    bottom: calc(var(--hud-bottom) + var(--hud-bar-height) + var(--hud-bar-gap));
     left: 50%;
     transform: translateX(-50%);
-    width: 480px;
-    height: 28px;
+    box-sizing: border-box;
+    width: var(--hud-bar-width);
+    height: var(--hud-bar-height);
     background: rgba(43, 43, 43, 0.95);
     border: 2px solid rgba(255, 255, 255, 0.95);
-    border-radius: 4px;
+    border-radius: var(--control-radius);
     overflow: hidden;
     z-index: 5;
     display: none;
@@ -582,6 +600,55 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     background: #ffffff;
 }
 
+#locator-bar {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 20px);
+    left: 50%;
+    transform: translateX(-50%);
+    box-sizing: border-box;
+    width: var(--hud-bar-width);
+    height: 12px;
+    border: 2px solid #fffffff2;
+    border-radius: var(--control-radius);
+    background: #000a;
+    pointer-events: none;
+    z-index: 7;
+    display: none;
+}
+#locator-markers { position: absolute; inset: 0 6px; }
+.locator-dot {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    box-sizing: border-box;
+    width: 10px;
+    height: 10px;
+    border: 1px solid #101923;
+    border-radius: var(--control-radius);
+    background: var(--locator-color);
+    color: var(--locator-color);
+    box-shadow: 0 0 0 1px #ffffff80;
+}
+.locator-dot-mecha {
+    background:
+        linear-gradient(#91502c 0 0) 0 1px / 3px 2px no-repeat,
+        linear-gradient(#a5703b 0 0) 4px 4px / 3px 3px no-repeat,
+        linear-gradient(#65432e 0 0) 1px 6px / 2px 2px no-repeat,
+        linear-gradient(135deg, #eff3f5, #a5adb5);
+}
+.locator-dot[data-elevation="above"]::before,
+.locator-dot[data-elevation="below"]::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    filter: drop-shadow(0 0 1px #000);
+}
+.locator-dot[data-elevation="above"]::before { bottom: calc(100% + 3px); border-bottom: 4px solid currentColor; }
+.locator-dot[data-elevation="below"]::after { top: calc(100% + 3px); border-top: 4px solid currentColor; }
+
 #hover-container {
     position: absolute;
     right: 30px;
@@ -589,6 +656,8 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     transform: translateY(-50%);
     width: 28px;
     height: 480px;
+    /* Its outer bottom must leave 12px above the weapon panel on short windows. */
+    max-height: max(0px, calc(100dvh - 2 * (var(--hud-bottom) + var(--hud-stack-height) + 12px) - 4px));
     background: rgba(0, 0, 0, 0.65);
     border: 2px solid rgba(255, 255, 255, 0.95);
     border-radius: 4px;

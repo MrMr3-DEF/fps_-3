@@ -5,8 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Player list preview</title>
     <link rel="stylesheet" href="/src/gameUI.css">
+    <link rel="stylesheet" href="/src/mobile.css">
 </head>
 <body style="background: linear-gradient(#55afe0, #b7e4f7)">
+    <div id="locator-controls" hidden style="position: absolute; top: 80px; left: 20px; right: 20px; display: none; gap: 12px; flex-wrap: wrap; align-items: center; color: #182d40; font-size: 12px">
+        <label>Camera yaw <input id="locator-yaw" type="range" min="-180" max="180" value="0"></label>
+        <label>Camera pitch <input id="locator-pitch" type="range" min="-89" max="89" value="0"></label>
+        <label><input id="locator-scoped" type="checkbox"> Scoped</label>
+        <label><input id="locator-third-person" type="checkbox"> Third person</label>
+        <label><input id="locator-mobile" type="checkbox"> Mobile HUD</label>
+        <label><input id="locator-pilot" type="checkbox"> Remote pilot</label>
+        <label><input id="locator-empty" type="checkbox"> Empty track</label>
+        <label>Weapon <select id="weapon-choice"><option>PISTOL</option><option>SHOTGUN</option><option>AR</option><option>SNIPER</option><option>MINIGUN</option></select></label>
+        <label><input id="weapon-mecha" type="checkbox"> Piloting mecha</label>
+        <label><input id="weapon-power-jump" type="checkbox"> Power jump</label>
+        <label>HUD state <select id="weapon-phase"><option value="playing">Playing</option><option value="paused">Paused</option><option value="dead">Dead</option><option value="loading">Loading</option><option value="boarding">Boarding</option><option value="startup">Startup</option><option value="shutting-down">Shutdown</option></select></label>
+        <button id="locator-reset" type="button">Reset markers</button>
+    </div>
+    <div id="locator-bar" role="img" aria-label="Player and mecha directions"><div id="locator-markers"></div></div>
+    <div id="health-container"><div id="health-bar"></div></div>
+    <div id="reload-container"><div id="reload-bar"></div></div>
+    <div id="hover-container"><div id="hover-bar"></div></div>
+    <button id="powerjump-toggle" hidden aria-pressed="false">POWER JUMP OFF</button>
+    <div id="weapon-indicator" role="img" aria-label="Selected weapon"></div>
     <section id="player-list" hidden aria-hidden="true" aria-label="Players">
         <div class="player-list-heading"><span>PLAYERS</span><span>K / D</span></div>
         <div id="player-list-rows" role="list"></div>
@@ -14,6 +35,12 @@
     <script type="module">
         import { state } from '../src/state.ts';
         import { setPlayerListVisible } from '../src/playerList.ts';
+        import * as THREE from 'three';
+        import { LocatorBar } from '../src/locatorBar.ts';
+        import { deriveHudPresentation } from '../src/hudPresentation.ts';
+        import { applyHudPresentation } from '../src/hud.ts';
+        import { WeaponIndicator } from '../src/weaponIndicator.ts';
+        import { createTouchControls, applyTouchLayout } from '../src/mobileControlsView.ts';
         state.isMultiplayer = state.isPlaying = true;
         state.peer = { id: 'host' };
         state.playerList = [
@@ -23,7 +50,60 @@
             { peerId: 'c', username: 'BluePilot', bodyColor: 0x4aa4df, kills: 1, deaths: 3 },
             { peerId: 'd', username: 'GoldBean', bodyColor: 0xe0bb64, kills: 0, deaths: 2 },
         ];
-        setPlayerListVisible(true);
+        const params = new URLSearchParams(location.search);
+        if (!params.has('locator-preview') && !params.has('weapon-preview')) {
+            setPlayerListVisible(true);
+        } else {
+            document.title = 'HUD review';
+            const controls = document.getElementById('locator-controls');
+            controls.hidden = false; controls.style.display = 'flex';
+            const bar = new LocatorBar(document.getElementById('locator-markers'));
+            const indicator = new WeaponIndicator(document.getElementById('weapon-indicator'));
+            const touchControls = createTouchControls(); touchControls.id = 'mobile-controls';
+            touchControls.style.inset = '0'; touchControls.style.pointerEvents = 'none';
+            document.body.append(touchControls);
+            const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
+            const peers = {};
+            state.playerList[2].bodyColor = state.playerList[1].bodyColor;
+            state.playerList[3].bodyColor = 0xc5cbd0;
+            for (const [id, angle, distance, height] of [['a', -38, 50, 0], ['b', -18, 1500, 0], ['c', 20, 100, 150], ['d', 43, 100, -150]]) {
+                const mesh = new THREE.Group();
+                mesh.position.set(Math.sin(angle * Math.PI / 180) * distance, height, -Math.cos(angle * Math.PI / 180) * distance);
+                peers[id] = { mesh, hp: 100 };
+            }
+            const mecha = { ready: true, disposed: false, mode: 'dead', ownsLocalPilot: false, ownsPilot: false,
+                pilotPeerId: 'a', hitbox: new THREE.Mesh() };
+            mecha.hitbox.position.set(0, 2, -200);
+            const checked = id => document.getElementById(id).checked;
+            function draw() {
+                const scoped = checked('locator-scoped'), thirdPerson = checked('locator-third-person');
+                const mobile = checked('locator-mobile'), piloting = checked('weapon-mecha');
+                const phase = document.getElementById('weapon-phase').value;
+                document.body.classList.toggle('touch-device', mobile);
+                document.body.classList.toggle('touch-input', mobile);
+                touchControls.hidden = !mobile;
+                if (mobile) indicator.placeTouch({}, applyTouchLayout(touchControls, {}), 'joystick');
+                camera.position.set(thirdPerson ? 4 : 0, 2, thirdPerson ? 8 : 0);
+                camera.rotation.set(Number(document.getElementById('locator-pitch').value) * Math.PI / 180,
+                    Number(document.getElementById('locator-yaw').value) * Math.PI / 180, 0, 'YXZ');
+                camera.fov = scoped ? 20 : 75; camera.updateProjectionMatrix();
+                mecha.ownsPilot = piloting || checked('locator-pilot'); mecha.ownsLocalPilot = piloting;
+                mecha.pilotPeerId = piloting ? 'host' : 'a';
+                const transition = ['boarding', 'startup', 'shutting-down'].includes(phase);
+                const presentation = deriveHudPresentation({ runtime: true, playing: true, input: phase !== 'paused', alive: phase !== 'dead',
+                    ended: false, conversation: false, loading: phase === 'loading', reveal: false, editor: false,
+                    scoped, thirdPerson, touch: mobile, showFps: false, multiplayer: true,
+                    pilot: piloting || transition ? { mode: transition ? phase : 'piloted', phase: 'ready', blackout: 0, targetingReady: false, hudOpacity: 1 } : null });
+                applyHudPresentation(presentation, checked('weapon-power-jump'));
+                indicator.update(document.getElementById('weapon-choice').value, piloting || transition);
+                const empty = checked('locator-empty');
+                bar.update(camera, empty ? {} : peers, empty ? [] : state.playerList, 'host', empty ? null : mecha);
+            }
+            controls.addEventListener('input', draw);
+            window.addEventListener('resize', draw);
+            document.getElementById('locator-reset').addEventListener('click', () => { bar.reset(); draw(); });
+            draw();
+        }
     </script>
 </body>
 </html>

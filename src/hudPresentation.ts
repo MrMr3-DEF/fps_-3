@@ -38,6 +38,7 @@ export function deriveHudPresentation(context: HudContext) {
         : context.scoped);
     return {
         ordinary,
+        locator: active && !context.loading && (!pilot || pilot.mode === 'piloted'),
         crosshair: active && (pilot ? ready && !scope : !context.scoped),
         scope,
         mechaScope: Boolean(scope && pilot && (pilot.targetingReady || boot || shutdown)),

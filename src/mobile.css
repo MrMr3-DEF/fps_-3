@@ -16,11 +16,13 @@
 .touch-device #ui { top: max(8px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); font-size: 12px; pointer-events: none; }
 /* The whole bar stack, including borders and its gap, matches the default
    44px Power jump toggle in mobileControlLayout.ts. Both share its bottom anchor. */
-.touch-device { --mobile-hud-height: 44px; --mobile-hud-bottom: max(10px, env(safe-area-inset-bottom)); --mobile-hud-gap: 6px; --mobile-hud-bar-height: calc((var(--mobile-hud-height) - var(--mobile-hud-gap)) / 2); }
+.touch-device { --hud-bar-width: 124px; --hud-stack-height: 44px; --hud-bar-height: calc((var(--hud-stack-height) - var(--hud-bar-gap)) / 2); --hud-bottom: max(10px, env(safe-area-inset-bottom)); --mobile-hud-height: var(--hud-stack-height); --mobile-hud-bottom: var(--hud-bottom); --mobile-hud-gap: var(--hud-bar-gap); --mobile-hud-bar-height: var(--hud-bar-height); }
 .touch-device #health-container, .touch-device #hover-container, .touch-device #reload-container { box-sizing: border-box; }
-.touch-device #health-container { bottom: var(--mobile-hud-bottom); width: 124px; height: var(--mobile-hud-bar-height); }
+.touch-device #health-container { bottom: var(--mobile-hud-bottom); height: var(--mobile-hud-bar-height); }
 .touch-device #hover-container { top: auto; right: auto; left: calc(50% + 70px); bottom: var(--mobile-hud-bottom); transform: none; width: 12px; height: var(--mobile-hud-height); }
-.touch-device #reload-container { bottom: calc(var(--mobile-hud-bottom) + var(--mobile-hud-bar-height) + var(--mobile-hud-gap)); width: 124px; height: var(--mobile-hud-bar-height); }
+.touch-device #reload-container { bottom: calc(var(--mobile-hud-bottom) + var(--mobile-hud-bar-height) + var(--mobile-hud-gap)); height: var(--mobile-hud-bar-height); }
+.touch-device #weapon-indicator { padding: 4px; }
+.touch-input #weapon-indicator { right: max(20px, env(safe-area-inset-right)); bottom: var(--weapon-indicator-touch-bottom, calc(max(20px, env(safe-area-inset-bottom)) + 158px)); }
 @media (orientation: portrait) {
     .touch-input #rotate-device { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: #0a1524; color: #e1edf8; font: 18px var(--ui-font); padding: 24px; touch-action: none; }
     #rotate-device span { font-size: 80px; color: #66caff; margin-bottom: 20px; }

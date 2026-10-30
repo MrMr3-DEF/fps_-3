@@ -15,7 +15,8 @@ export function applyHudPresentation(presentation: HudPresentation, powerJumpEna
     };
     display('crosshair', presentation.crosshair);
     display('ui', presentation.ordinary, 'flex');
-    for (const id of ['health-container', 'reload-container', 'hover-container']) display(id, presentation.ordinary);
+    display('locator-bar', presentation.locator);
+    for (const id of ['health-container', 'reload-container', 'hover-container', 'weapon-indicator']) display(id, presentation.ordinary);
     display('pvp-stats', presentation.pvpStats);
     display('hover-badge', false);
     display('goggles-scope', presentation.scope);

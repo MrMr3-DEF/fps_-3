@@ -69,6 +69,23 @@ singleplayer-only.
 
 ## Behavior
 
+The top-center locator shows the mecha as a fixed-size silver marker with
+square, pixelated brown/bronze rust spots, distinct from solid player-color
+markers. All markers are rounded squares with the shared 4px corner radius.
+The locator tracks the animated body center through cover and beyond render distance in singleplayer
+and multiplayer. The defeated, mountable robot remains tracked; final
+destruction removes it. An occupied robot replaces its remote pilot's colored
+marker until exit, and the local pilot never tracks their own vehicle.
+The locator stays available during scoped aiming and active piloting, including
+helmet toggles, and hides during boarding/startup/shutdown and other gameplay
+overlays. Dots map the forward 120-degree arc, with above/below-view arrows and
+no distance scaling.
+
+The selected-weapon panel follows the ordinary health/ammo HUD. During active
+local piloting it shows a flat white side view of the actual rocket hull and
+nose, excluding exhaust. Boarding/startup/shutdown hide the panel; exiting or
+losing the mecha restores the equipped player's weapon icon.
+
 - A fresh singleplayer match shows **Something’s approaching...** once after
   loading, centered in white for three active gameplay seconds with a gentle
   opacity pulse. Photosensitivity/reduced-motion modes keep it steady. Pause

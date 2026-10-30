@@ -6,6 +6,7 @@ import { createAkimboGuns, createPlayerMesh, disposePlayerVisuals, updateWeapons
 import { PLAYER_BODY_CAMERA_OFFSET } from '../src/playerHitbox.ts';
 import { advanceWeaponState, initialWeaponState } from '../src/shotAuthority.ts';
 import { SWITCH_DURATION, NETWORK_TICK_MS } from '../src/config.ts';
+import { selectedWeaponIcon } from '../src/weaponIndicator.ts';
 
 Object.assign(globalThis, { document: { getElementById: () => null } });
 function setup() {
@@ -15,6 +16,20 @@ function setup() {
     state.activeWeaponName = state.desiredWeaponName = 'PISTOL';
     createAkimboGuns(); createPlayerMesh();
 }
+test('HUD selection follows the committed visual swap rather than queued weapon input', () => {
+    setup(); resetPlayerState(); resetWeaponPresentation();
+    try {
+        state.desiredWeaponName = 'SHOTGUN'; updateWeapons(0);
+        assert.equal(state.switchState, 'WITHDRAWING');
+        assert.equal(selectedWeaponIcon(state.activeWeaponName, false), 'PISTOL');
+        updateWeapons(SWITCH_DURATION / 2);
+        assert.equal(selectedWeaponIcon(state.activeWeaponName, false), 'PISTOL');
+        updateWeapons(SWITCH_DURATION / 2 + 0.001);
+        assert.equal(state.switchState, 'BRINGING_IN');
+        assert.equal(selectedWeaponIcon(state.activeWeaponName, false), 'SHOTGUN');
+        assert.equal(selectedWeaponIcon(state.activeWeaponName, true), 'ROCKET');
+    } finally { disposePlayerVisuals(); resetPlayerState(); resetWeaponPresentation(); }
+});
 test('inspection cannot leave yaw or roll behind when changing views at any animation phase', () => {
     setup();
     try {

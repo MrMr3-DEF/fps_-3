@@ -25,6 +25,22 @@ Touch gameplay is landscape-only. Starting or resuming requests fullscreen and a
 
 The mobile HUD keeps equal-sized health and reload bars stacked horizontally, with the vertical hover bar beside them. Each horizontal bar is 124 × 19px including borders, with a 6px gap. The stack is 44px tall, matching the default Power jump toggle; the hover bar shares that height and bottom anchor. Desktop bar dimensions are unchanged.
 
+The locator sits at the top center, 20px below the safe top edge. Its width
+shares the health/reload sizing (124px here, 484px on desktop) and its corners
+use the shared 4px control radius. Player dots keep their suit color, including
+duplicate colors, and stay 10px across with the shared 4px corner radius. The
+mecha uses a silver marker with square, pixelated rust spots. Markers overlap on
+the line, with small above/below-view arrows; scoped
+aiming keeps the locator visible while the bottom bars hide.
+
+The selected-weapon panel uses the same neutral styling as Power Jump when off.
+Its 88 × 44px touch size shares the bar-stack height and 4px control radius.
+It stays at the far right, 10px above the actual action-button cluster, using
+the saved layout and safe-area bounds without moving controls. Extreme custom
+layouts clamp the panel to the safe top edge. With keyboard input the panel
+uses the bottom-right anchor instead. Scoped aiming on foot hides it with the
+health/ammo bars; active mecha piloting shows the rocket silhouette.
+
 ## Editing the layout
 
 In **Controls**, **Edit controls** opens a blank sky preview from either the main menu or offline pause settings. Drag any button or the movement joystick to reposition it. Selecting a control highlights it and opens a **50–250%** size slider above it (below it when the top edge leaves insufficient room). Tap the sky to deselect. Controls retain their size proportions and are clamped inside display safe areas. Saved centers are relative to the safe viewport so the same layout adapts to landscape size and browser chrome changes.
