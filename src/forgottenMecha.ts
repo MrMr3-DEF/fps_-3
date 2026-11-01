@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, PLAYER_MAX_HP, MECHA_STOMP_RADIUS, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE } from './config.js';
-import { obstacleData } from './userDataTypes.js';
+import { MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE } from './config.js';
+import { obstacleData, targetData } from './userDataTypes.js';
+import { MechaStomp, stompContact, type PilotWeapon } from './mechaStomp.js';
 import { MechaNavigation, type NavigationBox, type MechaRoute } from './mechaNavigation.js';
 import { MechaFootPlant } from './mechaFootPlant.js';
 import { MechaCombat, classifyMechaAttack } from './mechaCombat.js';
@@ -32,7 +33,6 @@ const LOOP = 4 / 3;
 const IDENTITY_ROTATION = new THREE.Quaternion();
 // The five legacy clips carry a 1/24-second lead-in in the GLB. Events use
 // Blender frame / 24, not (frame - 1) / 24, to stay aligned with exported time.
-const STOMP_IMPACT = 39 / 24;
 const KNEE_IMPACT = 40 / 24;
 const FIST_IMPACT = 64 / 24;
 const PUNCH_IMPACT = 35 / 24;
@@ -55,6 +55,11 @@ export class ForgottenMecha {
     readonly colliders: THREE.Mesh[] = [];
     readonly combat: MechaCombat;
     readonly pilot = new MechaPilot();
+    readonly stomp = new MechaStomp();
+    pilotWeapon: PilotWeapon = 'rocket';
+    private queuedExit: { thirdPerson: boolean; secondaryHeld: boolean } | null = null;
+    private stompTargets: readonly THREE.Group[] = [];
+    private stompTargetHit: (index: number, damage: number) => void = () => {};
     readonly headView = new MechaHeadView();
     readonly headEffects = new MechaHeadEffects();
     readonly transitionCamera = new MechaTransitionCamera();
@@ -148,7 +153,6 @@ export class ForgottenMecha {
     private readonly reflectiveMaterials = new Set<THREE.MeshStandardMaterial>();
     private waypoint = 1;
     private elapsed = 0;
-    private cooldown = 0;
     private waistYaw = 0;
     private phase = 0;
     private locomotionRate = 0;
@@ -446,6 +450,14 @@ export class ForgottenMecha {
     get helmetProgress(): number { return this.headView.fold; }
     get targetingReady(): boolean { return this.mode === 'piloted' && this.headView.targetingReady; }
     get firingTime(): number { return this.fireTime; }
+    get attackCommitted(): boolean { return this.stomp.active || this.fireTime < MECHA_ROCKET_FIRE_TIME - 1e-9 || this.releasePending; }
+    get reloadProgress(): number {
+        if (this.attackCommitted) return 0;
+        return Math.max(0, Math.min(1, 1 - (this.pilotWeapon === 'stomp' ? this.stomp.cooldown / MECHA_STOMP_COOLDOWN : this.pilot.cooldown / WEAPON_STATS.SNIPER.fireRate)));
+    }
+    selectPilotWeapon(weapon: PilotWeapon): void { if (this.mode === 'piloted') this.pilotWeapon = weapon; }
+    requestAttack(): boolean { return this.pilotWeapon === 'stomp' ? this.requestStomp() : this.requestRocket(); }
+    setStompTargets(targets: readonly THREE.Group[], hit: (index: number, damage: number) => void): void { this.stompTargets = targets; this.stompTargetHit = hit; }
     get controlsFrozen(): boolean { return this.mode !== 'piloted' || !this.released && this.fireTime < MECHA_ROCKET_FIRE_TIME; }
     look(yaw: number, pitch: number, time?: number): void { if (!this.controlsFrozen) this.pilot.look(yaw, pitch, time); }
     toggleHelmet(): void {
@@ -455,6 +467,7 @@ export class ForgottenMecha {
         this.pilot.rockets.selected = null;
     }
     private cancelPilotLayers(): void {
+        this.stomp.reset(); this.pilotWeapon = 'rocket'; this.queuedExit = null;
         this.fireTime = Infinity; this.releasePending = this.released = this.queuedHelmetToggle = false;
         this.rocketMixer?.stopAllAction(); this.helmetMixer?.stopAllAction(); this.headAction = null;
         this.pilot.clearLookMotion();
@@ -517,7 +530,8 @@ export class ForgottenMecha {
         if (hit.kind === 'stomp') this.events.stompPlayer(); else this.events.laserPlayer?.(hit.damage);
     }
     requestExit(thirdPerson = false, secondaryHeld = false): boolean {
-        if (this.mode !== 'piloted') return false;
+        if (this.mode !== 'piloted' || this.queuedExit) return false;
+        if (this.attackCommitted) { this.queuedExit = { thirdPerson, secondaryHeld }; this.pilotDirection = 0; return true; }
         this.group.localToWorld(this.exitStart.copy(this.exitLocalStart));
         if (!this.findPilotExit(this.exitStart, this.target)) { this.events.exitBlocked?.(); return false; }
         this.transitionCamera.begin('exit', thirdPerson, this.pilot.cameraPosition, this.pilot.cameraQuaternion, secondaryHeld);
@@ -593,9 +607,13 @@ export class ForgottenMecha {
         return false;
     }
     requestRocket(): boolean {
-        if (this.mode !== 'piloted' || this.pilot.cooldown > 1e-9 || this.fireTime < MECHA_ROCKET_FIRE_TIME || this.releasePending) return false;
+        if (!this.ready || this.disposed || this.hp <= 0 || this.mode !== 'piloted' || this.queuedExit || this.stomp.active || this.pilot.cooldown > 1e-9 || this.fireTime < MECHA_ROCKET_FIRE_TIME || this.releasePending) return false;
         this.fireTime = 0; this.releasePending = this.released = false; this.pilot.clearLookMotion();
         this.rocketAction!.reset().setEffectiveTimeScale(1).play(); return true;
+    }
+    requestStomp(): boolean {
+        if (!this.ready || this.disposed || this.hp <= 0 || this.mode !== 'piloted' || this.queuedExit || this.attackCommitted || !this.stomp.start()) return false;
+        this.rocketAction!.stop(); this.play('Stomp', false, 0.15); this.footPlant?.reset(); return true;
     }
     /** Release at the render boundary: acquisition must use the actual shoulder
      * camera, and the socket must reflect this frame's authored shot pose. */
@@ -633,6 +651,8 @@ export class ForgottenMecha {
         while (this.lavaTime + 1e-9 >= MECHA_LAVA_INTERVAL && this.mode === 'piloted') { this.lavaTime -= MECHA_LAVA_INTERVAL; this.damage(MECHA_LAVA_DAMAGE); }
     }
     private updatePilot(delta: number): void {
+        if (this.stomp.active) { this.updateStomp(delta, { position: this.group.position, alive: false, grounded: false }, true); return; }
+        this.stomp.tick(delta);
         this.elapsed += delta;
         if (this.mode === 'boarding') {
             if (this.elapsed + 1e-9 >= MECHA_BOARD_TIME) { this.mode = 'startup'; this.elapsed = 0; this.play('Mount', false); this.mixer!.update(0); }
@@ -684,6 +704,77 @@ export class ForgottenMecha {
         }
         this.updateEye();
         this.updatePilotCamera();
+        this.finishQueuedExit();
+    }
+    private finishQueuedExit(): void {
+        if (!this.queuedExit || this.attackCommitted || this.mode !== 'piloted') return;
+        const request = this.queuedExit; this.queuedExit = null;
+        this.requestExit(request.thirdPerson, request.secondaryHeld);
+    }
+
+    /** Shared enemy/pilot execution owns the complete clip, exact contact pose,
+     * effects and victim tests. Piloting stays an ownership mode, not an attack. */
+    private updateStomp(delta: number, player: MechaPlayer, piloted: boolean, clockAdvanced = false): void {
+        const duration = this.actions.get('Stomp')!.getClip().duration;
+        // Lava can revoke ownership before contact during a hitch. Sample its
+        // next damage boundary too, rather than applying a later stomp first.
+        const step = Math.min(this.stomp.step(delta, duration), piloted ? Math.max(1e-9, MECHA_LAVA_INTERVAL - this.lavaTime) : Infinity);
+        if (piloted) {
+            this.pilot.update(step, this.group.position, this.group.rotation.y, this.speed, 0, this.resolvePilotMovement);
+            this.waistYaw = this.pilot.yaw - this.group.rotation.y;
+        } else {
+            if (!clockAdvanced) this.combat.advanceClock(step);
+            if (this.combat.frozen) { this.updateEye(); this.combat.updateEffects(); return; }
+            if (!clockAdvanced) this.enemyReload = Math.max(0, this.enemyReload - step);
+            const desired = Math.atan2(player.position.x - this.group.position.x, player.position.z - this.group.position.z) - this.group.rotation.y;
+            this.turnWaist(desired, step);
+        }
+        const waist = this.bones.get('CTRL_WaistYaw')!; waist.quaternion.identity();
+        this.action!.setEffectiveTimeScale(1); this.mixer!.update(step);
+        if (piloted) this.updateHelmet(step);
+        waist.quaternion.multiply(this.yawRotation.setFromAxisAngle(this.localYawAxis, this.waistYaw));
+        this.updateColliders(); this.updateCombatAnchors();
+        const result = this.stomp.advance(step, duration);
+        if (!piloted) this.elapsed = this.stomp.elapsed;
+        if (piloted) {
+            this.combat.updateManualShield(step, this.shieldHeld); this.updateLava(step);
+            if (!this.ownsPilot) return;
+        } else this.combat.updateEffects();
+        if (result.impact) this.executeStomp(player, piloted);
+        this.updateEye(); this.updatePilotCamera();
+        if (result.finished) {
+            if (!piloted) this.mode = 'tracking';
+            this.locomotion = 'Idle'; this.play('Idle', true, 0.2); this.footPlant?.reset();
+            if (piloted) this.finishQueuedExit();
+        }
+        const remaining = delta - step;
+        if (remaining > 1e-9) {
+            if (this.stomp.active) this.updateStomp(remaining, player, piloted, clockAdvanced);
+            else this.updateActor(remaining, player);
+        }
+    }
+    private executeStomp(player: MechaPlayer, piloted: boolean): void {
+        this.emitImpact('stomp', 'CTRL_Ankle_L');
+        const contacted = (candidate: MechaPlayer) => candidate.alive &&
+            stompContact(this.group.position, candidate.position, candidate.grounded, this.playerTouchesLegs(candidate));
+        if (this.networked) for (const candidate of this.multiplayerPlayers) {
+            if (candidate.peerId !== this.pilotPeerId && contacted(candidate)) this.events.playerHit?.(candidate, MECHA_STOMP_DAMAGE, 'stomp', piloted ? this.pilotPeerId : null);
+        }
+        if (!piloted && contacted(player)) this.captureHit('stomp', MECHA_STOMP_DAMAGE);
+        // Only the pilot owns NPC damage. Floating cubes do not receive a floor
+        // shockwave; they must physically intersect an animated leg instead.
+        if (piloted) for (const target of this.stompTargets) {
+            const data = targetData(target); if (data.hp <= 0 || !data.bodyMesh) continue;
+            target.updateWorldMatrix(true, true); this.meshBounds.setFromObject(data.bodyMesh, true);
+            const grounded = this.meshBounds.min.y <= 0.15 && this.meshBounds.max.y >= -0.15;
+            this.meshBounds.getCenter(this.aim);
+            const legs = this.legColliders.some(collider => {
+                this.beamMin.copy(collider.position).addScaledVector(collider.scale, -0.5).addScalar(-MECHA_MOVEMENT_MARGIN);
+                this.beamMax.copy(collider.position).addScaledVector(collider.scale, 0.5).addScalar(MECHA_MOVEMENT_MARGIN);
+                return this.meshBounds.intersectsBox(this.bounds.set(this.beamMin, this.beamMax));
+            });
+            if (stompContact(this.group.position, this.aim, grounded, legs)) this.stompTargetHit(data.index, MECHA_STOMP_DAMAGE);
+        }
     }
     private updatePilotCamera(): void {
         if (this.ownsPilot) {
@@ -806,6 +897,7 @@ export class ForgottenMecha {
         const h = this.headView;
         return { sequence, revision: this.revision, mode: this.mode, elapsed: this.elapsed, position: vector(this.group.position), heading: this.group.rotation.y, hp: this.hp, recoveringExit: this.recoveringExit,
             pilotPeerId: this.ownsPilot ? this.pilotPeerId : null, pilotLifeId: this.pilotLifeId, pilotYaw: this.pilot.yaw, pilotPitch: this.pilot.pitch, cooldown: this.pilot.cooldown,
+            pilotWeapon: this.pilotWeapon, stompActive: this.stomp.active, stompElapsed: this.stomp.elapsed, stompCooldown: this.stomp.cooldown, rocketTime: Number.isFinite(this.fireTime) ? this.fireTime : MECHA_ROCKET_FIRE_TIME,
             boneCount: this.bones.size,
             // Sparse local transforms keep ordinary walking snapshots small;
             // FinalDeath can still reproduce every detached armor fragment.
@@ -827,6 +919,7 @@ export class ForgottenMecha {
         this.group.position.lerp(this.replicaPosition.set(s.position.x, s.position.y, s.position.z), alpha);
         this.group.rotation.y += Math.atan2(Math.sin(s.heading - this.group.rotation.y), Math.cos(s.heading - this.group.rotation.y)) * alpha;
         this.pilot.yaw = s.pilotYaw; this.pilot.pitch = s.pilotPitch; this.pilot.cooldown = s.cooldown;
+        this.pilotWeapon = s.pilotWeapon; this.stomp.active = s.stompActive; this.stomp.elapsed = s.stompElapsed; this.stomp.cooldown = s.stompCooldown; this.fireTime = s.rocketTime; this.releasePending = false;
         let index = 0;
         for (const bone of this.bones.values()) {
             const i = index++, pose = s.bones.find(p => p[0] === i), rest = this.networkRest[i];
@@ -951,23 +1044,20 @@ export class ForgottenMecha {
             return;
         }
         if (this.mode === 'aligning') { this.updateAlignment(delta, player); return; }
-        // Evaluate the leg pose at the exported contact, not a later animation
-        // frame after a hitch. The remaining animation advances afterward.
-        if (this.mode === 'stomping' && !this.impactFired && this.elapsed < STOMP_IMPACT && this.elapsed + delta > STOMP_IMPACT + 1e-9) {
-            const toImpact = STOMP_IMPACT - this.elapsed;
-            this.update(toImpact, player); this.update(delta - toImpact, player); return;
-        }
+        if (this.mode === 'stomping') { this.updateStomp(delta, player, false); return; }
         if (this.mode === 'dying') this.deathTime += delta;
         this.combat.advanceClock(delta);
         this.enemyReload = Math.max(0, this.enemyReload - delta);
         if (this.combat.frozen) { this.updateEye(); this.combat.updateEffects(); return; }
-        this.cooldown = Math.max(0, this.cooldown - delta);
-        const attack = this.mode === 'stomping' || this.mode === 'punching' || this.mode === 'dying' || this.mode === 'rocketing';
+        this.stomp.tick(delta);
+        const attack = this.mode === 'punching' || this.mode === 'dying' || this.mode === 'rocketing';
         const region = classifyMechaAttack(this.group.position, player.position);
         const detected = !attack && region !== null && this.hasLineOfSight(player);
         if (!attack) {
             this.mode = detected || this.combat.rangedCommitted ? 'tracking' : 'walking';
-            if (detected && this.combat.canStartRanged && this.cooldown <= 0 && region === 'stomp') this.begin('stomping', 'Stomp');
+            if (detected && this.combat.canStartRanged && this.stomp.cooldown <= 1e-9 && region === 'stomp') {
+                this.begin('stomping', 'Stomp'); this.stomp.start(); this.updateStomp(delta, player, false, true); return;
+            }
             else if (detected && this.combat.canStartRanged && this.enemyReload <= 0 && region === 'rocket') {
                 this.mode = 'rocketing'; this.fireTime = 0; this.released = false; this.move(0, true);
                 this.rocketAction!.reset().setEffectiveTimeScale(0).play();
@@ -975,7 +1065,7 @@ export class ForgottenMecha {
             else this.move(delta, detected || this.combat.rangedCommitted || this.combat.aimFrozen);
         }
         if (this.wallPunchHeld) return;
-        if (!this.combat.aimFrozen && (this.mode === 'tracking' || this.mode === 'stomping' || this.mode === 'rocketing' && !this.released && this.hasLineOfSight(player))) {
+        if (!this.combat.aimFrozen && (this.mode === 'tracking' || this.mode === 'rocketing' && !this.released && this.hasLineOfSight(player))) {
             const desired = Math.atan2(player.position.x - this.group.position.x, player.position.z - this.group.position.z) - this.group.rotation.y;
             this.turnWaist(desired, delta);
         } else if (!this.combat.aimFrozen && this.mode === 'walking') this.turnWaist(0, delta);
@@ -987,7 +1077,7 @@ export class ForgottenMecha {
         this.mixer.update(delta);
         // Apply an offset after animation evaluation: attacks retain their
         // authored wind-up while the upper body follows its independent aim.
-        if (this.mode === 'tracking' || this.mode === 'stomping' || this.mode === 'walking' || this.mode === 'rocketing') waist.quaternion.multiply(this.yawRotation.setFromAxisAngle(this.localYawAxis, this.waistYaw));
+        if (this.mode === 'tracking' || this.mode === 'walking' || this.mode === 'rocketing') waist.quaternion.multiply(this.yawRotation.setFromAxisAngle(this.localYawAxis, this.waistYaw));
         if (this.mode === 'rocketing') this.updateEnemyRocket(delta, player);
         this.group.updateMatrixWorld(true);
         if (this.mode === 'walking' || this.mode === 'tracking') this.footPlant?.update(this.phase, this.locomotion === 'Idle', delta);
@@ -1014,15 +1104,6 @@ export class ForgottenMecha {
         }
         this.combat.updateEffects();
         this.updateEye();
-        if (this.mode === 'stomping' && !this.impactFired && this.elapsed >= STOMP_IMPACT) {
-            this.impactFired = true;
-            this.emitImpact('stomp', 'CTRL_Ankle_L');
-            // Re-evaluate grounding and range at impact, not when wind-up starts.
-            if (this.networked) for (const candidate of this.multiplayerPlayers) {
-                if (candidate.alive && (candidate.grounded && Math.hypot(candidate.position.x - this.group.position.x, candidate.position.z - this.group.position.z) <= MECHA_STOMP_RADIUS || this.playerTouchesLegs(candidate))) this.events.playerHit?.(candidate, PLAYER_MAX_HP, 'stomp');
-            }
-            if (player.alive && (player.grounded && Math.hypot(player.position.x - this.group.position.x, player.position.z - this.group.position.z) <= MECHA_STOMP_RADIUS || this.playerTouchesLegs(player))) this.captureHit('stomp', 0);
-        }
         if (this.mode === 'dying') {
             if (!this.impactFired && this.elapsed >= KNEE_IMPACT) { this.impactFired = true; this.emitImpact('knees', 'CTRL_Knee_L'); }
             if (!this.secondImpactFired && this.elapsed >= FIST_IMPACT) { this.secondImpactFired = true; this.emitImpact('fists', 'CTRL_Elbow_R'); }
@@ -1031,9 +1112,8 @@ export class ForgottenMecha {
             this.impactFired = true;
             this.emitImpact('punch', 'CTRL_Elbow_R');
         }
-        if (['stomping', 'punching', 'dying'].includes(this.mode) && this.elapsed >= this.action!.getClip().duration) {
-            if (this.mode === 'stomping') { this.cooldown = MECHA_STOMP_COOLDOWN; this.mode = 'tracking'; this.play('Idle', true, 0.2); this.locomotion = 'Idle'; }
-            else if (this.mode === 'punching') { this.mode = 'game-over'; this.events.gameOver(); }
+        if (['punching', 'dying'].includes(this.mode) && this.elapsed >= this.action!.getClip().duration) {
+            if (this.mode === 'punching') { this.mode = 'game-over'; this.events.gameOver(); }
             else this.mode = 'dead';
         }
     }
@@ -1172,6 +1252,7 @@ export class ForgottenMecha {
         (this.hitbox.material as THREE.Material).dispose();
         this.environment?.dispose();
         this.combat.dispose();
+        this.stompTargets = []; this.stompTargetHit = () => {};
         this.pilot.dispose();
         this.headEffects.dispose();
         this.colliders.length = 0;

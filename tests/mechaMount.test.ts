@@ -140,7 +140,7 @@ test('exit closes a folding helmet, reverses Mount behind shutdown bar and relea
     actor.beginBoarding(actor.seatAnchor.getWorldPosition(new THREE.Vector3()), new THREE.Quaternion());
     assert.equal(actor.requestExit(), false); advance(actor, 8.3);
     actor.toggleHelmet(); advance(actor, 0.7); assert.ok(actor.helmetProgress > 0);
-    actor.requestRocket(); assert.equal(actor.requestExit(), true); assert.equal(actor.requestExit(), false);
+    assert.equal(actor.requestExit(), true); assert.equal(actor.requestExit(), false);
     assert.equal(actor.damage(50).accepted, false); assert.equal(actor.requestRocket(), false); assert.equal(actor.targetingReady, false);
     advance(actor, 2); assert.equal(actor.mode, 'shutting-down'); assert.equal(actor.headView.phase, 'shutdown');
     assert.ok(actor.headView.loadingProgress > 0 && actor.headView.loadingProgress < 1);

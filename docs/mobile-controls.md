@@ -39,7 +39,8 @@ It stays at the far right, 10px above the actual action-button cluster, using
 the saved layout and safe-area bounds without moving controls. Extreme custom
 layouts clamp the panel to the safe top edge. With keyboard input the panel
 uses the bottom-right anchor instead. Scoped aiming on foot hides it with the
-health/ammo bars; active mecha piloting shows the rocket silhouette.
+health/ammo bars; active mecha piloting shows the selected rocket or stomp-foot
+silhouette. The stomp uses the same 4px corners and white static icon styling.
 
 ## Editing the layout
 
@@ -68,5 +69,10 @@ Implementation: `src/inputSession.ts` owns input activation and mode switching; 
 While piloting the Mecha, Helmet occupies the Grapple layout slot, Shield replaces
 Hover, and Exit occupies the otherwise inactive Inspect slot. Exit closes the
 helmet and runs voluntary shutdown; it is unavailable during boarding/startup.
+Weapon cycles Rockets and Stomp, starting on Rockets after fresh boarding.
+Hold Fire repeats the selected ready attack. Stomp freezes travel and leg
+turning through the full animation while torso look and shield remain usable.
+Its reload bar stays empty during the clip, then fills over five seconds.
+Switching keeps both cooldowns; Exit waits for any committed attack to finish.
 These mounted controls inherit existing saved slot placement/scale and remain
 inactive in the layout editor. No stored-layout migration is required.

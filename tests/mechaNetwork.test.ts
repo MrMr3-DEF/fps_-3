@@ -36,7 +36,7 @@ function host(a: ForgottenMecha, players: MechaPlayer[]) {
 }
 function command(a: ForgottenMecha, sequence: number, rest: Partial<MechaInputPacket> = {}): MechaInputPacket {
     return { type: 'mecha_input', sequence, revision: a.revision, lifeId: 0, direction: 0, yaw: 0, pitch: 0,
-        shield: false, fire: false, helmet: false, exit: false, thirdPerson: false, secondaryHeld: false, viewThirdPerson: false, fov: 75, aspect: 1, ...rest };
+        shield: false, fire: false, weapon: 'rocket', helmet: false, exit: false, thirdPerson: false, secondaryHeld: false, viewThirdPerson: false, fov: 75, aspect: 1, ...rest };
 }
 function cleanup(a: ForgottenMecha) { resetMechaNetwork(); a.dispose(); state.isMultiplayer = state.isHost = state.isPlaying = false; state.matchEnded = false; state.peer = null; }
 
@@ -374,4 +374,68 @@ test('blocked-exit recovery reaches the owning replica camera while observers re
         a.localPeerId = 'observer'; a.localPilotPresentation = false;
         assert.equal(a.localTransition, undefined);
     } finally { cleanup(a); state.isThirdPerson = false; }
+});
+
+test('host owns stomp selection, repetition, damage credit and cooldown while input expires and late joiners receive the impact pose', async t => {
+    let now = 1000; t.mock.method(performance, 'now', () => now);
+    const a = await actor(multiplayerMechaEvents()); a.damage(50); advance(a, 6.2);
+    const seat = a.seatAnchor.getWorldPosition(new THREE.Vector3());
+    const players = [player('pilot', seat.x, seat.y, seat.z), player('host', 20, 2, 0), player('jump', 20, 4, 0, false)];
+    const packets = host(a, players), credited: string[] = [], hits: number[] = [];
+    let accepted = 0;
+    setMechaNetworkPort({ send: p => packets.push(structuredClone(p)), players: () => players,
+        hitTarget() {}, acceptedDamage(peerId, lifeId, owner) { assert.equal(lifeId, 0); credited.push(`${owner}:${peerId}`); accepted++; } });
+    setMechaPresentation({ impact() {}, release() {}, blocked() {}, damage(damage, owner) { hits.push(damage); assert.equal(owner, 'pilot'); }, gameOver() {}, hit() {} });
+    const copy = await actor();
+    try {
+        a.pilotPeerId = 'pilot'; a.pilotLifeId = 0;
+        a.beginBoarding(seat, new THREE.Quaternion()); advance(a, 8.3);
+        let seq = 0;
+        const send = (rest: Partial<MechaInputPacket> = {}) => acceptMechaCommand('pilot', command(a, ++seq, { weapon: 'stomp', fire: true, ...rest }));
+        assert.equal(send({ senderPeerId: 'forged' }), false);
+        assert.equal(send({ weapon: 'laser' as any }), false);
+        assert.equal(send({ revision: a.revision - 1 }), false);
+        assert.equal(send({ lifeId: 1 }), false);
+        assert.equal(acceptMechaCommand('host', command(a, ++seq, { weapon: 'stomp', fire: true })), false);
+        assert.equal(send(), true); updateMechaNetwork(.01); assert.equal(a.stomp.active, true); assert.equal(a.mode, 'piloted');
+        assert.equal(a.pilotWeapon, 'stomp');
+        const initial = a.captureNetworkState(100);
+        for (const mutate of [
+            (s: any) => { delete s.pilotWeapon; }, (s: any) => { s.pilotWeapon = 'laser'; },
+            (s: any) => { s.stompElapsed = NaN; }, (s: any) => { s.stompCooldown = 5.01; },
+            (s: any) => { s.stompActive = 'yes'; }, (s: any) => { s.stompActive = true; s.mode = 'startup'; },
+            (s: any) => { s.stompActive = true; s.rocketTime = 1; },
+        ]) { const snapshot = structuredClone(initial); mutate(snapshot); assert.equal(parseNetworkPacket({ type: 'mecha_state', state: snapshot }), null); }
+        const malformed = command(a, 100); delete (malformed as any).weapon; assert.equal(parseNetworkPacket(malformed), null);
+        assert.equal(parseNetworkPacket({ ...command(a, 100), weapon: 2 }), null);
+        // New selection never cancels the already accepted stomp or its timer.
+        assert.equal(send({ weapon: 'rocket', fire: false }), true); assert.equal(a.stomp.active, true);
+        const tick = (seconds: number, held: boolean) => {
+            for (let t = 0; t < seconds - 1e-9; t += 1 / 60) {
+                now += 1000 / 60; if (held) send(); updateMechaNetwork(Math.min(1 / 60, seconds - t));
+            }
+        };
+        tick(1.625, false); assert.equal(accepted, 1); assert.deepEqual(credited, ['pilot:host']);
+        const contact = packets.find(p => p.type === 'mecha_event' && p.event.kind === 'damage' && p.event.attack === 'stomp') as MechaEventPacket;
+        assert.equal(contact.state.mode, 'piloted'); assert.equal(contact.state.stompActive, true); assert.ok(Math.abs(contact.state.stompElapsed - 1.625) < 1e-8);
+        assert.ok(parseNetworkPacket(unpack(await pack(contact))));
+        copy.networked = true; copy.localPeerId = 'late'; copy.applyNetworkState(contact.state);
+        assert.equal(copy.ownsPilot, true); assert.equal(copy.ownsLocalPilot, false); assert.equal(copy.stomp.active, true);
+        for (const name of ['M_Foot_L', 'M_LowerLeg_R']) {
+            const expected = new THREE.Matrix4();
+            const poseActor = await actor(); poseActor.networked = true; poseActor.applyNetworkState(contact.state);
+            expected.copy(poseActor.group.getObjectByName(name)!.matrixWorld);
+            assert.ok(copy.group.getObjectByName(name)!.matrixWorld.elements.every((n, i) => Math.abs(n - expected.elements[i]) < 1e-8)); poseActor.dispose();
+        }
+        assert.equal(hits.length, 0, 'host victim still waits for its draw'); acknowledgeMechaRender(); flushMechaDamage(); assert.deepEqual(hits, [10]);
+        receiveMechaEvent(contact); acknowledgeMechaRender(); flushMechaDamage();
+        // Event originated locally, so its receive sequence has not yet been
+        // consumed. A second network duplicate must nevertheless do no damage.
+        const delivered = hits.length; receiveMechaEvent(contact); acknowledgeMechaRender(); flushMechaDamage(); assert.equal(hits.length, delivered);
+        tick(7, false); assert.equal(accepted, 1, 'expired/released fire cannot repeat'); assert.equal(a.stomp.active, false); assert.equal(a.stomp.cooldown, 0);
+        tick(10, true); assert.equal(accepted, 3, 'held fire repeats after clip plus cooldown, without requiring a target');
+        assert.ok(packets.every(p => parseNetworkPacket(p) !== null));
+        mechaPeerLeft('pilot'); assert.equal(a.stomp.active, false); assert.equal(a.canMount, true);
+        resetMechaNetwork(); initializeNetworkMecha(a); assert.equal(a.pilotWeapon, 'rocket');
+    } finally { copy.dispose(); cleanup(a); }
 });

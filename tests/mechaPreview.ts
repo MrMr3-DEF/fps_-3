@@ -124,6 +124,20 @@ window.addEventListener('mecha-review-action', event => {
     if (action === 'reverse') { reversing = !reversing; walking = false; }
     if (action === 'third') setThirdPerson(!state.isThirdPerson);
     if (action === 'rockets') firing = !firing;
+    for (const [name, code] of [['slot-rocket', 'Digit1'], ['slot-stomp', 'Digit2'], ['cycle', 'KeyE']]) if (action === name) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code })); window.dispatchEvent(new KeyboardEvent('keyup', { code }));
+    }
+    if (action === 'wheel-up' || action === 'wheel-down') document.dispatchEvent(new WheelEvent('wheel', { deltaY: action === 'wheel-up' ? -1 : 1, bubbles: true, cancelable: true }));
+    if (action === 'stomp-targets' && actor.mode === 'piloted') {
+        for (let i = 0; i < 3; i++) {
+            const target = state.targets[i]; target.position.copy(actor.group.position).add(new THREE.Vector3(18 + i * 2, 0, 0));
+            target.userData.hp = target.userData.maxHp = 50;
+            const half = new THREE.Box3().setFromObject(target.userData.bodyMesh, true).getSize(new THREE.Vector3()).y / 2;
+            target.position.y = i === 2 ? half + 4 : half;
+            target.visible = target.userData.bodyMesh.visible = true; target.updateMatrixWorld(true);
+        }
+        rebuildTargetHash();
+    }
     if (action === 'targets' && actor.mode === 'piloted') {
         const direction = state.camera.getWorldDirection(new THREE.Vector3());
         const ray = new THREE.Raycaster(), candidates: THREE.Object3D[] = [];
@@ -222,6 +236,7 @@ function report() {
         if (performance.now() < turnUntil) applyLookInput(state.camera, -0.01, 0);
         if (pauseAt.value === 'aligning' && actor.mode === 'aligning' || pauseAt.value === 'breakup' && actor.mode === 'destroying') { pauseReview(); pauseAt.value = 'none'; }
         if (pauseAt.value === 'rocket' && actor.firingTime >= 1.25 && actor.firingTime < 1.5 || pauseAt.value === 'helmet' && actor.helmetProgress > 0.4 && actor.helmetProgress < 0.6) { pauseReview(); pauseAt.value = 'none'; }
+        if (pauseAt.value === 'stomp-contact' && actor.stomp.active && actor.stomp.elapsed >= 1.625) { pauseReview(); pauseAt.value = 'none'; }
         const head = actor.headView;
         const transition = actor.transitionCamera;
         if (pauseAt.value === 'camera-swivel' && transition.external && transition.phase === 'swivel'
@@ -256,6 +271,7 @@ function report() {
         status.textContent += `\nTransition camera: ${actor.transitionCamera.phase} | View locked: ${actor.transitionCamera.locked} | External: ${actor.transitionCamera.external} | Exit recovery: ${actor.transitionCamera.recovering}`;
         status.textContent += ` | Helmet clock held: ${holdHeadBlack.checked && actor.mode === 'piloted' && actor.headView.blackout >= 1 - 1e-9}`;
         status.textContent += `\nArmor review: ${armorReview} | Weapon: ${state.activeWeaponName} | Particles: ${state.activeParticles.length} | Sparks: ${state.activeParticles.filter(p => p.kind === 'armor-spark').length}`;
+        status.textContent += `\nPilot attack: ${actor.pilotWeapon} | Stomp: ${actor.stomp.active ? actor.stomp.elapsed.toFixed(3) + 's' : 'idle'} | Stomp cooldown: ${actor.stomp.cooldown.toFixed(2)}s | Reload: ${(actor.reloadProgress * 100).toFixed(0)}% | Target HP: ${state.targets.slice(0, 3).map(t => t.userData.hp).join(', ')}`;
         const next = `${actor.combat.laserPhase}/${actor.combat.shieldPhase}/${state.playerHp}`;
         if (next !== previous) {
             transitions.push(`${actor.combat.clock.toFixed(2)}s ${next}`); if (transitions.length > 12) transitions.shift();

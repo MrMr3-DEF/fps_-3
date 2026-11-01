@@ -89,6 +89,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `forgottenMecha.ts`, `mechaNavigation.ts`, `mechaFootPlant.ts`, `mechaCombat.ts`, `mechaCombatEffects.ts` | Shared siege robot, seeded border routes, animation/AI, torso laser, spherical shield cycle, planted feet, moving body proxies and reusable effects |
 | `cameraShake.ts` | Temporary impact rotation applied only to the render camera pose |
 | `mechaPilot.ts`, `mechaRockets.ts`, `lookInput.ts` | Cockpit boarding support, sampled pilot view/leg steering, immediate vehicle targeting, continuous pooled rocket guidance and shared timed touch/pointer look routing |
+| `mechaStomp.ts`, `mechaStompIcon.svg` | Shared enemy/pilot stomp event boundaries, cooldown and contact eligibility; typed pilot slots and approved static foot pictogram |
 | `mechaHeadView.ts`, `mechaHeadEffects.ts`, `mechaTransitionCamera.ts` | Actor-owned simulation-clock helmet/boot and exterior entry/exit camera phases; main owns DOM composition and temporary render-pose application |
 | `gothChat.ts`, `gothChatEngine.ts`, `gothChat.worker.ts` | Conversation UI, local WebLLM lifecycle, and inference worker |
 | `gothKnowledge.ts`, `gothChatConsent.ts` | Character-file retrieval/prompt context and first-use model consent |
@@ -405,6 +406,15 @@ admission order. Acquisition retains one eligible target; physical attacks test
 all affected lives. Rocket targeting reconstructs the actual pilot perspective
 and queries physical targets independently of the host's render chunks. The
 existing local damage and weapon-network ports remain the integration seams.
+
+Pilot `rocket | stomp` selection is separate from the bean weapon. Stomps retain
+`piloted` ownership while a substate owns exact frame-39 contact and full-clip
+recovery. The actor shares enemy/pilot timing and contact execution, keeps
+locomotion/foot planting out of stomps, and defers exit until committed attacks
+finish. Host input validates selection; snapshots include stomp activity, elapsed
+time/cooldown and rocket recovery alongside bones, so late joiners and the HUD
+never invent an attack clock. NPC damage and player attribution use existing
+pilot-owned ports, independently of rendering/culling.
 
 Initial world snapshots include the complete current mecha presentation and
 terminal state. State, commands and events have independent bounded sequence

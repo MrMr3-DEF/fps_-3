@@ -1,6 +1,7 @@
 import { MechaEndingAuthority, type MechaEndingState } from './mechaEndingTimeline.js';
 import { MechaEndingPlayback } from './mechaEndingPlayback.js';
-import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork } from './mechaNetwork.js';
+import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork, selectMechaWeapon, localMechaWeapon } from './mechaNetwork.js';
+import { cyclePilotWeapon, type PilotWeapon } from './mechaStomp.js';
 import { deriveHudPresentation } from './hudPresentation.js';
 import { cancelWorldLoading, isWorldLoading, isWorldReveal, withWorldLoading, type WorldLoadingMode } from './worldLoading.js';
 import { prepareRenderer } from './renderPreparation.js';
@@ -196,7 +197,7 @@ function syncMountedControls(mounted: boolean): void {
     resetHealthBarFlash();
     lastMountedHp = null;
     mountedControlsPresented = mounted;
-    for (const id of ['weapon', 'inspect', 'grapple', 'jump', 'powerJump']) {
+    for (const id of ['inspect', 'grapple', 'jump', 'powerJump']) {
         const button = document.querySelector<HTMLButtonElement>(`#mobile-controls [data-control="${id}"]`);
         if (button) button.hidden = mounted;
     }
@@ -783,7 +784,10 @@ function setupInputListeners(): void {
         if (e.repeat || gothChat?.isOpen) return;
         if (code !== 'Escape' && !isInputActive()) return;
         if (code && code !== 'Escape') e.preventDefault?.();
-        if (forgottenMecha?.ownsLocalPilot && !['Escape', 'KeyW', 'KeyS', 'KeyC', 'KeyP', 'KeyO', 'KeyR', 'ShiftLeft', 'ShiftRight'].includes(code)) return;
+        if (forgottenMecha?.ownsLocalPilot) {
+            if (code === 'Digit1' || code === 'Digit2') { selectMountedWeapon(code === 'Digit1' ? 'rocket' : 'stomp'); return; }
+            if (!['Escape', 'KeyW', 'KeyS', 'KeyC', 'KeyP', 'KeyO', 'KeyR', 'KeyE', 'ShiftLeft', 'ShiftRight'].includes(code)) return;
+        }
 
         switch (code) {
             case 'Escape':
@@ -1067,9 +1071,9 @@ function syncGameHud(): void {
     updateWorldBorderOverlay(presentation.border);
     const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
     const stats = WEAPON_STATS[state.activeWeaponName];
-    if (presentation.ordinary) weaponIndicator?.update(state.activeWeaponName, Boolean(pilot));
+    if (presentation.ordinary) weaponIndicator?.update(state.activeWeaponName, pilot ? pilot.pilotWeapon : false);
     updateHealthBar(pilot ? pilot.hp / pilot.maxHp * 100 : state.playerHp / state.playerMaxHp * 100);
-    updateReloadBar(Math.max(0, Math.min(1, 1 - (pilot ? pilot.pilot.cooldown / WEAPON_STATS.SNIPER.fireRate : state.fireCooldown / (stats?.fireRate ?? 0.1)))));
+    updateReloadBar(pilot ? pilot.reloadProgress : Math.max(0, Math.min(1, 1 - state.fireCooldown / (stats?.fireRate ?? 0.1))));
     updateHoverBar(pilot ? pilot.combat.energy : state.hoverFuel, presentation.ordinary && (pilot ? pilot.combat.shieldActive : state.isHovering));
     if (presentation.hardware) syncMechaHeadPresentation(); else clearMechaHeadPresentation();
 }
@@ -1317,12 +1321,19 @@ function handleWeaponWheel(e: WheelEvent): void {
 }
 
 function cycleWeapon(direction: number): void {
-    if (forgottenMecha?.ownsLocalPilot) return;
+    if (forgottenMecha?.ownsLocalPilot) {
+        if (direction) selectMountedWeapon(cyclePilotWeapon(state.isMultiplayer ? localMechaWeapon() : forgottenMecha.pilotWeapon));
+        return;
+    }
     const currentIndex = WEAPON_CYCLE.indexOf(state.desiredWeaponName);
     const safeIndex = currentIndex >= 0 ? currentIndex : WEAPON_CYCLE.indexOf(state.activeWeaponName);
     const nextIndex = (safeIndex + Math.sign(direction) + WEAPON_CYCLE.length) % WEAPON_CYCLE.length;
     state.desiredWeaponName = WEAPON_CYCLE[nextIndex];
     cancelInspect();
+}
+
+function selectMountedWeapon(weapon: PilotWeapon): void {
+    if (state.isMultiplayer) selectMechaWeapon(weapon); else forgottenMecha?.selectPilotWeapon(weapon);
 }
 
 function updateLocalAccelerometer(delta: number): void {
@@ -2016,6 +2027,7 @@ function animate(): void {
     forgottenMecha?.updateLighting(lanternStrength);
     if (!state.isMultiplayer) forgottenMecha?.setPilotInput((state.moveForward ? 1 : 0) - (state.moveBackward ? 1 : 0) - touchMove.y, state.isShiftDown);
     gothGirlfriend?.update(npcInputActive || gothChat?.isOpen ? delta : 0);
+    if (!state.isMultiplayer && npcInputActive) forgottenMecha?.setStompTargets(state.targets, processTargetHit);
     if (!state.isMultiplayer && npcInputActive && state.controls) forgottenMecha?.update(delta, {
         position: state.controls.getObject().position,
         yaw: state.controls.getObject().rotation.y,
@@ -2053,7 +2065,7 @@ function animate(): void {
         updateHealthBar(mountedActor.hp / mountedActor.maxHp * 100,
             lastMountedHp !== null && mountedActor.hp < lastMountedHp ? '#ff4757' : null);
         lastMountedHp = mountedActor.hp;
-        updateReloadBar(Math.max(0, 1 - mountedActor.pilot.cooldown / WEAPON_STATS.SNIPER.fireRate));
+        updateReloadBar(mountedActor.reloadProgress);
     }
     if (!state.isMultiplayer && forgottenMecha && npcInputActive) forgottenMecha.updateRockets(delta, state.targets, queryObstaclesAlongSegment, processTargetHit);
     cameraShake.update(delta);
@@ -2194,11 +2206,11 @@ function animate(): void {
                 pilot.preparePilotView(!state.isThirdPersonView);
                 pilot.muzzleAnchor.getWorldPosition(_gogglesWeaponOrigin);
                 if (pilot.mode === 'piloted') {
-                    if (pilot.targetingReady) pilot.pilot.rockets.select(state.camera, _gogglesWeaponOrigin, state.targets, queryObstaclesAlongSegment);
+                    if (pilot.targetingReady && pilot.pilotWeapon === 'rocket') pilot.pilot.rockets.select(state.camera, _gogglesWeaponOrigin, state.targets, queryObstaclesAlongSegment);
                     else pilot.pilot.rockets.selected = null;
                     if (!state.isMultiplayer && isInputActive()) {
                         pilot.fireRocket(state.camera, state.targets, queryObstaclesAlongSegment);
-                        if (state.isMouseDown || mountedFireRequested) pilot.requestRocket();
+                        if (state.isMouseDown || mountedFireRequested) pilot.requestAttack();
                     }
                 }
                 mountedFireRequested = false;

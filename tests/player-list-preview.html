@@ -18,6 +18,7 @@
         <label><input id="locator-empty" type="checkbox"> Empty track</label>
         <label>Weapon <select id="weapon-choice"><option>PISTOL</option><option>SHOTGUN</option><option>AR</option><option>SNIPER</option><option>MINIGUN</option></select></label>
         <label><input id="weapon-mecha" type="checkbox"> Piloting mecha</label>
+        <label>Pilot attack <select id="weapon-pilot-attack"><option value="rocket">Rockets</option><option value="stomp">Stomp</option></select></label>
         <label><input id="weapon-power-jump" type="checkbox"> Power jump</label>
         <label>HUD state <select id="weapon-phase"><option value="playing">Playing</option><option value="paused">Paused</option><option value="dead">Dead</option><option value="loading">Loading</option><option value="boarding">Boarding</option><option value="startup">Startup</option><option value="shutting-down">Shutdown</option></select></label>
         <button id="locator-reset" type="button">Reset markers</button>
@@ -51,7 +52,10 @@
             { peerId: 'd', username: 'GoldBean', bodyColor: 0xe0bb64, kills: 0, deaths: 2 },
         ];
         const params = new URLSearchParams(location.search);
-        if (!params.has('locator-preview') && !params.has('weapon-preview')) {
+        if (params.has('stomp-icons')) {
+            const { showStompIconPreview } = await import('./stompIconPreview.ts');
+            showStompIconPreview();
+        } else if (!params.has('locator-preview') && !params.has('weapon-preview')) {
             setPlayerListVisible(true);
         } else {
             document.title = 'HUD review';
@@ -95,7 +99,7 @@
                     scoped, thirdPerson, touch: mobile, showFps: false, multiplayer: true,
                     pilot: piloting || transition ? { mode: transition ? phase : 'piloted', phase: 'ready', blackout: 0, targetingReady: false, hudOpacity: 1 } : null });
                 applyHudPresentation(presentation, checked('weapon-power-jump'));
-                indicator.update(document.getElementById('weapon-choice').value, piloting || transition);
+                indicator.update(document.getElementById('weapon-choice').value, piloting || transition ? document.getElementById('weapon-pilot-attack').value : false);
                 const empty = checked('locator-empty');
                 bar.update(camera, empty ? {} : peers, empty ? [] : state.playerList, 'host', empty ? null : mecha);
             }

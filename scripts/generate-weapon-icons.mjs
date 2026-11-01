@@ -1,7 +1,7 @@
 // Run: node --experimental-strip-types --import ./tests/register.mjs scripts/generate-weapon-icons.mjs
 // Flatten the convex component meshes of the production models into static
 // side-view SVGs. Runtime HUD rendering needs neither models nor a WebGL pass.
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import * as THREE from 'three';
 import { buildGun, buildShotgun, buildAR, buildSniper, buildMinigun } from '../src/weapons.ts';
 import { MechaRockets } from '../src/mechaRockets.ts';
@@ -51,8 +51,9 @@ try {
     // solid hull/nose belong to the icon; there are no fins on this projectile.
     icons.ROCKET = { label: 'Mecha rocket', svg: silhouette(rockets.group.children[0].children.slice(0, 2), 1) };
 } finally { rockets.dispose(); }
+icons.STOMP = { label: 'Mecha stomp', svg: (await readFile(new URL('../src/mechaStompIcon.svg', import.meta.url), 'utf8')).trim() };
 const source = '// Generated from production geometry by scripts/generate-weapon-icons.mjs.\n' +
     'export const WEAPON_INDICATOR_ICONS = ' + JSON.stringify(icons, null, 4) + ' as const;\n' +
     'export type WeaponIndicatorKind = keyof typeof WEAPON_INDICATOR_ICONS;\n';
 await writeFile(new URL('../src/weaponIndicatorIcons.ts', import.meta.url), source);
-console.log('Generated six static weapon silhouettes.');
+console.log('Generated seven static weapon silhouettes.');

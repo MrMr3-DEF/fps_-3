@@ -3,7 +3,8 @@ import { state } from './state.js';
 import { spawnMechaArmorImpact } from './particles.js';
 import { resolveThirdPersonCameraPosition, resolveThirdPersonAimTarget } from './thirdPersonCamera.js';
 import { forgottenMecha, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment } from './world.js';
-import { MECHA_ROCKET_SHOT_TIME, MECHA_ROCKET_FIRE_TIME, MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE, NETWORK_TICK_MS, MECHA_NETWORK_INPUT_TIMEOUT_MS, MECHA_NETWORK_REFRESH_MS, PLAYER_HEIGHT, PLAYER_MAX_HP, NETWORK_POSITION_RESPONSE } from './config.js';
+import { MECHA_ROCKET_SHOT_TIME, MECHA_ROCKET_FIRE_TIME, MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE, NETWORK_TICK_MS, MECHA_NETWORK_INPUT_TIMEOUT_MS, MECHA_NETWORK_REFRESH_MS, PLAYER_HEIGHT, NETWORK_POSITION_RESPONSE } from './config.js';
+import { isPilotWeapon, type PilotWeapon } from './mechaStomp.js';
 import { PLAYER_BODY_CAMERA_OFFSET } from './playerHitbox.js';
 import type { ForgottenMecha, MechaEvents, MechaPlayer } from './forgottenMecha.js';
 import type { MechaPilotRelease } from './mechaPilotRelease.js';
@@ -36,6 +37,7 @@ let previousFingerprint = '', previousPhase = '';
 let replica: MechaState | null = null;
 let input: MechaInputPacket | null = null;
 let yaw = 0, pitch = 0, helmet = false, exit = false;
+let requestedWeapon: PilotWeapon | null = null;
 let boardStart: { lifeId: number; position: THREE.Vector3; quaternion: THREE.Quaternion } | null = null;
 const commandSequences = new Map<string, number>();
 const approaches = new Map<string, THREE.Vector3>();
@@ -54,6 +56,7 @@ export function resetMechaNetwork(): void {
     sequence = eventSequence = inputSequence = 0; receivedSequence = receivedEvent = -1;
     lastPublish = lastInputSent = lastInputReceived = -Infinity; previousFingerprint = previousPhase = '';
     replica = input = null; boardStart = null; yaw = pitch = 0; helmet = exit = false;
+    requestedWeapon = null;
     commandSequences.clear(); approaches.clear(); pendingDamage.length = 0;
 }
 export function captureMechaSnapshot(): MechaState | undefined {
@@ -95,7 +98,7 @@ function publish(force = false): void {
     const actor = activeActor, now = performance.now();
     if (!actor?.ready || !state.isHost) return;
     const firing = actor.firingTime < MECHA_ROCKET_SHOT_TIME ? 'windup' : actor.firingTime < MECHA_ROCKET_FIRE_TIME ? 'recovery' : 'idle';
-    const phase = `${firing}:${actor.pilot.rockets.activeCount}:${actor.revision}:${actor.mode}:${actor.combat.laserPhase}:${actor.combat.shieldPhase}:${actor.pilotPeerId}:${actor.headView.phase}`;
+    const phase = `${actor.pilotWeapon}:${actor.stomp.active}:${firing}:${actor.pilot.rockets.activeCount}:${actor.revision}:${actor.mode}:${actor.combat.laserPhase}:${actor.combat.shieldPhase}:${actor.pilotPeerId}:${actor.headView.phase}`;
     force ||= phase !== previousPhase;
     if (!force && now - lastPublish < NETWORK_TICK_MS) return;
     const snapshot = endingSnapshot(actor.captureNetworkState(sequence + 1, state.matchEnded));
@@ -119,7 +122,7 @@ export function multiplayerMechaEvents(): MechaEvents {
         stompPlayer() {},
         wallPunchStarted: commitEnding,
         playerHit: (player, damage, attack, attackerPeerId = null) => {
-            if (player.peerId) emit({ kind: 'damage', peerId: player.peerId, lifeId: player.lifeId ?? 0, damage: attack === 'stomp' ? PLAYER_MAX_HP : damage, attack, attackerPeerId });
+            if (player.peerId) emit({ kind: 'damage', peerId: player.peerId, lifeId: player.lifeId ?? 0, damage, attack, attackerPeerId });
         },
         gameOver: () => { emit({ kind: 'end' }); state.matchEnded = true; publish(true); },
         pilotReleased: pose => {
@@ -222,12 +225,17 @@ export function flushMechaDamage(): void {
 }
 export function queueMechaLook(yawDelta: number, pitchDelta: number): void { yaw += yawDelta; pitch += pitchDelta; }
 export function requestMechaAction(action: 'helmet' | 'exit'): void { if (action === 'helmet') helmet = !helmet; else exit = true; lastInputSent = -Infinity; }
+export function selectMechaWeapon(weapon: PilotWeapon): void {
+    if (!activeActor?.ownsLocalPilot || activeActor.mode !== 'piloted') return;
+    requestedWeapon = weapon; lastInputSent = -Infinity;
+}
+export function localMechaWeapon(): PilotWeapon { return requestedWeapon ?? activeActor?.pilotWeapon ?? 'rocket'; }
 export function submitMechaInput(direction: number, shield: boolean, fire: boolean, active: boolean): void {
     const actor = activeActor, now = performance.now();
     if (!actor?.ownsLocalPilot || now - lastInputSent < NETWORK_TICK_MS) return;
     const packet: MechaInputPacket = { type: 'mecha_input', sequence: ++inputSequence, revision: actor.revision, lifeId: state.lifeId,
         direction: active ? Math.max(-1, Math.min(1, direction)) : 0, yaw: active ? Math.max(-10, Math.min(10, yaw)) : 0,
-        pitch: active ? Math.max(-Math.PI, Math.min(Math.PI, pitch)) : 0, shield: active && shield, fire: active && fire,
+        pitch: active ? Math.max(-Math.PI, Math.min(Math.PI, pitch)) : 0, shield: active && shield, fire: active && fire, weapon: localMechaWeapon(),
         helmet: active && helmet, exit: active && exit, thirdPerson: state.isThirdPerson, secondaryHeld: state.rightClickActive, viewThirdPerson: state.isThirdPersonView,
         fov: state.camera?.fov ?? 75, aspect: Math.max(0.1, Math.min(10, state.camera?.aspect ?? 1)) };
     yaw = pitch = 0; helmet = exit = false; lastInputSent = now;
@@ -239,12 +247,15 @@ export function rememberMechaApproach(): void {
 }
 export function requestMechaBoard(): void {
     const actor = activeActor; if (!actor?.canMount) return;
+    requestedWeapon = null;
     const packet: MechaBoardPacket = { type: 'mecha_board', sequence: ++inputSequence, revision: actor.revision, lifeId: state.lifeId, thirdPerson: state.isThirdPerson, secondaryHeld: state.rightClickActive };
     if (state.isHost && state.peer) acceptMechaCommand(state.peer.id, packet); else port?.send(packet);
 }
 export function acceptMechaCommand(peerId: string, packet: MechaInputPacket | MechaBoardPacket): boolean {
     const actor = activeActor, player = port?.players().find(p => p.peerId === peerId);
-    if (!state.isHost || !state.isPlaying || state.matchEnded || !actor?.ready || !player?.alive || player.lifeId !== packet.lifeId || packet.sequence <= (commandSequences.get(peerId) ?? -1)) return false;
+    if (!state.isHost || !state.isPlaying || state.matchEnded || !actor?.ready || !player?.alive || player.lifeId !== packet.lifeId ||
+        packet.senderPeerId !== undefined && packet.senderPeerId !== peerId || packet.type === 'mecha_input' && !isPilotWeapon(packet.weapon) ||
+        packet.sequence <= (commandSequences.get(peerId) ?? -1)) return false;
     commandSequences.set(peerId, packet.sequence);
     if (packet.type === 'mecha_board') {
         const denied = () => { emit({ kind: 'board_denied', peerId, lifeId: packet.lifeId }); return false; };
@@ -263,6 +274,7 @@ export function acceptMechaCommand(peerId: string, packet: MechaInputPacket | Me
     }
     if (actor.revision !== packet.revision || actor.pilotPeerId !== peerId || actor.pilotLifeId !== packet.lifeId || !actor.ownsPilot) return false;
     input = packet; lastInputReceived = performance.now();
+    actor.selectPilotWeapon(packet.weapon);
     actor.look(packet.yaw, packet.pitch, lastInputReceived);
     if (packet.helmet) actor.toggleHelmet();
     if (packet.exit) {
@@ -311,11 +323,12 @@ export function updateMechaNetwork(delta: number): void {
         if (actor.pilotPeerId && !players.some(p => p.peerId === actor.pilotPeerId && p.lifeId === actor.pilotLifeId && p.alive)) { actor.abandonPilot(); input = null; }
         const activeInput = input && performance.now() - lastInputReceived <= MECHA_NETWORK_INPUT_TIMEOUT_MS ? input : null;
         actor.setPilotInput(activeInput?.direction ?? 0, activeInput?.shield ?? false);
+        actor.setStompTargets(state.targets, (index, damage) => port?.hitTarget(index, damage, actor.pilotPeerId));
         actor.updatePlayers(delta, players);
         // Shutdown, lava destruction and the wall callback can synchronously
         // revoke ownership/input or end the room during this update.
         if (state.matchEnded) return;
-        if (activeInput && input === activeInput && activeInput.fire) actor.requestRocket();
+        if (activeInput && input === activeInput && activeInput.fire) actor.requestAttack();
         if (actor.mode === 'piloted') {
             aimCamera.fov = input?.fov ?? 75; aimCamera.aspect = input?.aspect ?? 1; aimCamera.updateProjectionMatrix();
             logicalAim.copy(actor.pilot.cameraPosition); aimCamera.quaternion.copy(actor.pilot.cameraQuaternion);

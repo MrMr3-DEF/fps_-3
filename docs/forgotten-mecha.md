@@ -82,8 +82,8 @@ overlays. Dots map the forward 120-degree arc, with above/below-view arrows and
 no distance scaling.
 
 The selected-weapon panel follows the ordinary health/ammo HUD. During active
-local piloting it shows a flat white side view of the actual rocket hull and
-nose, excluding exhaust. Boarding/startup/shutdown hide the panel; exiting or
+local piloting it shows a flat white side view of the selected rocket hull/nose
+or the stomp foot and impact rays. Boarding/startup/shutdown hide the panel; exiting or
 losing the mecha restores the equipped player's weapon icon.
 
 - A fresh singleplayer match shows **Something’s approaching...** once after
@@ -472,12 +472,48 @@ at 6.095 m/s with planted feet. Reverse plays Walk backward. Moving turns have a
 Piloted collision uses separate height-aware animated body bounds with a 0.1 m contact margin, rather than the enemy route grid and its 14.78 m clearance circle. Swept movement slides along architecture, permits escaping existing overlaps, and uses the real border without a grid setback. Accepted distance drives walk playback; blocked travel retains acceleration/alignment intent. Enemy navigation still uses its original conservative route clearance.
 
 Release movement for tighter turns. Turning stops within 100 ms of horizontal input ending; pitch keeps normal controls. Pause, boarding, windup and destruction clear recent input. Solid architecture/pillar and border clearance remain. Piloted travel permits lava, while enemy routes still avoid it. Ground-contacting feet cost one HP every 0.5 seconds of contact, once regardless of the number of feet, bypassing shields.
-A/D, jump, hover, ordinary grapple, weapon switching, inspection and conversation
+A/D, jump, hover, ordinary grapple, on-foot weapon switching, inspection and conversation
 are disabled. The configured Grapple action (R by default) requests voluntary
 shutdown instead; touch adds Exit in the inactive Inspect slot and retains Helmet
 in the grapple slot. Touch uses Shield in place of Hover.
 
 An accepted fire request plays the full three-second RocketFire animation. Translation and look freeze until the 1.5-second shot cue; look input during this period is discarded. The cassette's exported socket on `CTRL_RocketSlide_R` supplies the animated muzzle position/direction. This is the anatomical right arm despite its legacy `PART_Forearm_L_02` parent. Upper-body recoil then layers over locomotion and independent world yaw. Reload starts at release and lasts two seconds; another windup needs both reload and recovery completed, giving at least 3.5 seconds between releases. Held fire repeats.
+
+### Pilot attack slots and stomp
+
+Fresh boarding selects **1: Rockets**. **2: Stomp** selects the second attack;
+E, scrolling either direction and touch Weapon alternate the two. The bean's
+equipped/desired gun stays separate and returns on exit. Selecting another slot
+does not cancel a committed animation or reset either cooldown. The indicator
+shows the selected attack: the rocket or the approved white right-facing actual
+foot with impact rays beneath the sole (no line above it).
+
+Fire starts a ready stomp even without a nearby target. Held Fire repeats after
+the complete authored `Stomp` clip (about 3.042 seconds) and its five-second
+cooldown. Enemy and pilot share `mechaStomp.ts` timing and the actor's contact
+execution: frame 39 at 1.625 seconds is sampled exactly even across hitches,
+with the same dust, chips, shockwave and camera shake. Each affected living
+player or NPC takes **10 damage once**, with a 25 m ground-centered radius.
+Jumping and elevated supports avoid the floor wave; contact with animated feet,
+shins or thighs still counts. Floating NPCs are safe unless touching a leg.
+Tougher NPCs survive according to their health. The pilot/vehicle are immune;
+player kills and NPC hits use the existing pilot-owned attribution paths.
+
+The actor remains `piloted` with a separate stomp substate. Travel and leg
+turning stop for the full clip; normal capped torso looking, cockpit ownership,
+helmet, camera following and manual shields remain available. Walking and foot
+planting cannot overwrite the clip. Rockets and stomps cannot overlap. Any
+committed attack keeps the reload bar empty, including when another slot is
+selected; after stomp completion it fills over five seconds. Exit requested
+during an attack waits for its full animation, then begins normal shutdown.
+Destruction, ownership loss and disposal cancel an unfinished stomp.
+
+Offline pause freezes animation and cooldowns. Multiplayer host simulation
+finishes committed attacks while a viewer is paused; released or 250 ms expired
+Fire input cannot start repetitions. Required validated input selection and
+replicated selection, stomp activity/time/cooldown and rocket recovery preserve
+authority, late-join poses and victim render-before-damage delivery. All room
+participants must use the same build.
 
 Rockets fit 90% of the 0.52 m native barrel bore: 1.9015 m diameter after scaling, with 3.2 m hull/nose length. They travel the first three meters along the actual barrel axis with collision active. Thereafter guided flight steers current velocity toward a smoothly updated moving-target intercept at 120 m/s, with bounded angular changes and reduced loft near the shared 700 m travel limit. Acquisition at release uses the visible unobstructed NPC nearest the rendered crosshair, independent of HUD animation. The captured life/revision remains tracked off-screen; invalidation drops guidance without retargeting. Closed-helmet shots without a lock coast straight. Open/folding shots instead follow a launch-owned wandering route toward a landing point 75–100 m away; unobstructed ground contact cannot precede 50 m horizontal travel. Cover can intercept earlier.
 
@@ -525,7 +561,8 @@ skinned-armor triangle checks cover Mount, HeadOpen/Close, RocketFire and revers
 Mount. First-person draws hide the bean temporarily; third person shows the
 complete occupant. Release restores the normal 1.5 scale and body bounds.
 
-Only fully piloted ownership accepts Exit, once. `shutting-down` ends firing,
+Only fully piloted ownership accepts Exit, once, deferring it until a committed
+attack's animation finishes. `shutting-down` ends firing,
 motion, manual shield and targeting, closes any open/folding helmet smoothly and
 aligns the torso with its legs. The startup video reveal then runs backward for
 0.3 seconds, followed by a 0.4-second HUD fade under black, before the original

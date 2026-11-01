@@ -1,10 +1,11 @@
 import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, type MechaEndingState } from './mechaEndingTimeline.js';
 import { isPeerId } from './roomIdentity.js';
-import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES } from './config.js';
+import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME } from './config.js';
 import type { Vec3Packet } from './networkTypes.js';
 import type { MechaMode, MechaImpact } from './forgottenMecha.js';
 import type { MechaHeadPhase } from './mechaHeadView.js';
 import type { LaserPhase, ShieldPhase } from './mechaCombat.js';
+import { isPilotWeapon, type PilotWeapon } from './mechaStomp.js';
 
 export interface MechaPose { position: Vec3Packet; quaternion: number[]; viewPosition: Vec3Packet }
 export interface MechaRocketState { slot: number; position: Vec3Packet; direction: Vec3Packet }
@@ -12,6 +13,7 @@ export interface MechaState {
     sequence: number; revision: number; mode: MechaMode; elapsed: number;
     position: Vec3Packet; heading: number; hp: number; recoveringExit: boolean;
     pilotPeerId: string | null; pilotLifeId: number; pilotYaw: number; pilotPitch: number; cooldown: number;
+    pilotWeapon: PilotWeapon; stompActive: boolean; stompElapsed: number; stompCooldown: number; rocketTime: number;
     /** Asset-order bone transforms include planted feet and the corrected launcher. */
     boneCount: number; bones: number[][]; eye: number[];
     head: { phase: MechaHeadPhase; fold: number; wantedOpen: boolean; eyeBlend: number; blackout: number;
@@ -25,6 +27,7 @@ interface MechaSender { senderPeerId?: string }
 export interface MechaInputPacket extends MechaSender {
     type: 'mecha_input'; sequence: number; revision: number; lifeId: number;
     direction: number; yaw: number; pitch: number; shield: boolean; fire: boolean;
+    weapon: PilotWeapon;
     helmet: boolean; exit: boolean; thirdPerson: boolean; secondaryHeld: boolean; viewThirdPerson: boolean; fov: number; aspect: number;
 }
 export interface MechaBoardPacket extends MechaSender { type: 'mecha_board'; sequence: number; revision: number; lifeId: number; thirdPerson: boolean; secondaryHeld: boolean }
@@ -65,7 +68,10 @@ export function isMechaState(x: unknown): x is MechaState {
     if (!record(x) || !integer(x.sequence) || !integer(x.revision) || !modes.includes(x.mode as string) || !number(x.elapsed, 0, 86400) ||
         !isMechaVector(x.position) || !number(x.heading, -Math.PI * 4, Math.PI * 4) || !number(x.hp, 0, MECHA_HP) ||
         !(x.pilotPeerId === null || isPeerId(x.pilotPeerId)) || !integer(x.pilotLifeId) || !number(x.pilotYaw, -Math.PI * 4, Math.PI * 4) ||
-        !number(x.pilotPitch, -Math.PI, Math.PI) || !number(x.cooldown, 0, 60) || !bool(x.matchEnded) || !bool(x.recoveringExit) ||
+        !number(x.pilotPitch, -Math.PI, Math.PI) || !number(x.cooldown, 0, 60) || !isPilotWeapon(x.pilotWeapon) ||
+        !bool(x.stompActive) || !number(x.stompElapsed, 0, 4) || !number(x.stompCooldown, 0, MECHA_STOMP_COOLDOWN) || !number(x.rocketTime, 0, MECHA_ROCKET_FIRE_TIME) ||
+        x.stompActive && (x.mode !== 'piloted' && x.mode !== 'stomping' || x.stompCooldown !== 0 || x.rocketTime < MECHA_ROCKET_FIRE_TIME) ||
+        !bool(x.matchEnded) || !bool(x.recoveringExit) ||
         !integer(x.boneCount, MECHA_NETWORK_MAX_BONES) || x.boneCount === 0 || !Array.isArray(x.bones) || x.bones.length > x.boneCount ||
         !x.bones.every(b => Array.isArray(b) && b.length === 11 && integer(b[0], (x.boneCount as number) - 1) &&
             b.slice(1, 4).every(v => number(v, -5000, 5000)) && quaternion(b.slice(4, 8)) && b.slice(8).every(v => number(v, 0, 100))) ||
@@ -106,6 +112,6 @@ export function parseMechaPacket(x: Record<string, unknown>): MechaPacket | null
     if (x.type === 'hit_mecha') return integer(x.revision) && integer(x.shotId) && integer(x.pelletIndex, 4) && number(x.damage, 0.01, 100) ? x as unknown as MechaHitPacket : null;
     if (!integer(x.sequence) || !integer(x.revision) || !integer(x.lifeId) || !bool(x.thirdPerson) || !bool(x.secondaryHeld)) return null;
     if (x.type === 'mecha_board') return x as unknown as MechaBoardPacket;
-    return x.type === 'mecha_input' && number(x.direction, -1, 1) && number(x.yaw, -10, 10) && number(x.pitch, -Math.PI, Math.PI) &&
+    return x.type === 'mecha_input' && isPilotWeapon(x.weapon) && number(x.direction, -1, 1) && number(x.yaw, -10, 10) && number(x.pitch, -Math.PI, Math.PI) &&
         ['shield', 'fire', 'helmet', 'exit', 'viewThirdPerson'].every(k => bool(x[k])) && number(x.fov, 10, 150) && number(x.aspect, 0.1, 10) ? x as unknown as MechaInputPacket : null;
 }

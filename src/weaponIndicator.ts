@@ -1,9 +1,10 @@
 import { WEAPON_INDICATOR_ICONS, type WeaponIndicatorKind } from './weaponIndicatorIcons.js';
 import { getWeaponIndicatorTouchBottom, type TouchBounds, type TouchLayout, type TouchFireMode } from './mobileControlLayout.js';
+import type { PilotWeapon } from './mechaStomp.js';
 
-export function selectedWeaponIcon(activeWeaponName: string, piloting: boolean): WeaponIndicatorKind {
-    if (piloting) return 'ROCKET';
-    return Object.hasOwn(WEAPON_INDICATOR_ICONS, activeWeaponName) && activeWeaponName !== 'ROCKET'
+export function selectedWeaponIcon(activeWeaponName: string, piloting: boolean | PilotWeapon): WeaponIndicatorKind {
+    if (piloting) return piloting === 'stomp' ? 'STOMP' : 'ROCKET';
+    return Object.hasOwn(WEAPON_INDICATOR_ICONS, activeWeaponName) && activeWeaponName !== 'ROCKET' && activeWeaponName !== 'STOMP'
         ? activeWeaponName as WeaponIndicatorKind : 'PISTOL';
 }
 
@@ -13,7 +14,7 @@ export class WeaponIndicator {
 
     constructor(element: HTMLElement) { this.element = element; }
 
-    update(activeWeaponName: string, piloting: boolean): void {
+    update(activeWeaponName: string, piloting: boolean | PilotWeapon): void {
         const kind = selectedWeaponIcon(activeWeaponName, piloting);
         if (kind === this.current) return;
         this.current = kind;

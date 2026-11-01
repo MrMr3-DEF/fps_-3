@@ -5,6 +5,7 @@ import { state } from '../src/state.js';
 import { setupMobileControls } from '../src/mobileControls.js';
 import { beginInput, endInput, isInputActive, setTouchMode, touchMove } from '../src/inputSession.js';
 import { cloneSettings, DEFAULT_USER_SETTINGS, userSettings } from '../src/settings.js';
+import { cyclePilotWeapon, type PilotWeapon } from '../src/mechaStomp.js';
 
 /** Pointer capture and bubbling are the DOM seams exercised by the real input handlers. */
 class TouchElement extends EventTarget {
@@ -83,10 +84,16 @@ for (const coarsePointer of [true, false]) test(`two touch owners can move and f
         state.camera = new PerspectiveCamera();
         state.baseSensitivity = 1;
         state.isScoped = false;
-        const sync = setupMobileControls({ keyDown() {}, keyUp() {}, fire: held => fires.push(held) });
+        let pilotWeapon: PilotWeapon = 'rocket';
+        const sync = setupMobileControls({ keyDown(code) { if (code === 'KeyE') pilotWeapon = cyclePilotWeapon(pilotWeapon); }, keyUp() {}, fire: held => fires.push(held) });
         beginInput();
         await Promise.resolve();
         const layer = body.children.find(child => child.id === 'mobile-controls')!;
+        const weapon = layer.querySelector('[data-control="weapon"]')!;
+        weapon.pointer('pointerdown', 40, 0, 0); assert.equal(pilotWeapon, 'stomp');
+        weapon.pointer('pointerdown', 41, 0, 0); assert.equal(pilotWeapon, 'stomp', 'another finger cannot cycle a held Weapon button');
+        weapon.pointer('pointerup', 40, 0, 0); weapon.pointer('pointerdown', 41, 0, 0);
+        assert.equal(pilotWeapon, 'rocket'); weapon.pointer('pointerup', 41, 0, 0);
         const stick = layer.querySelector('[data-control="stick"]')!;
         const fire = layer.querySelector('[data-control="fire"]')!;
         const stickRect = stick.getBoundingClientRect();

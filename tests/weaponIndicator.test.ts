@@ -4,10 +4,10 @@ import { WeaponIndicator, selectedWeaponIcon } from '../src/weaponIndicator.ts';
 import { WEAPON_INDICATOR_ICONS } from '../src/weaponIndicatorIcons.ts';
 import { getTouchControlRect, getWeaponIndicatorTouchBottom, type TouchLayout } from '../src/mobileControlLayout.ts';
 
-test('all five weapons and the rocket have distinct, flat vector silhouettes', () => {
+test('all five weapons and both mecha attacks have distinct, flat vector silhouettes', () => {
     const icons = Object.values(WEAPON_INDICATOR_ICONS);
-    assert.equal(icons.length, 6);
-    assert.equal(new Set(icons.map(icon => icon.svg)).size, 6);
+    assert.equal(icons.length, 7);
+    assert.equal(new Set(icons.map(icon => icon.svg)).size, 7);
     for (const { svg } of icons) {
         assert.match(svg, /fill="#fff"/);
         const dimensions = svg.match(/viewBox="([^"]+)"/)![1].split(' ').map(Number);
@@ -35,6 +35,8 @@ test('indicator caches its current SVG and restores the equipped gun after mecha
     assert.equal(writes, before);
     indicator.update('MINIGUN', true); assert.equal(node.dataset.weapon, 'ROCKET');
     assert.equal(node.attributes['aria-label'], 'Selected weapon: Mecha rocket');
+    indicator.update('MINIGUN', 'stomp'); assert.equal(node.dataset.weapon, 'STOMP');
+    assert.equal(node.attributes['aria-label'], 'Selected weapon: Mecha stomp');
     indicator.update('MINIGUN', false); assert.equal(node.dataset.weapon, 'MINIGUN');
     indicator.reset(); assert.equal(html, ''); assert.equal(node.dataset.weapon, undefined);
     indicator.update('PISTOL', false); assert.equal(node.dataset.weapon, 'PISTOL');

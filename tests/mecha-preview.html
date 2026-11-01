@@ -17,7 +17,7 @@
     <label>Body height (m) <input id="height" type="number" value="2" min="0" max="80" style="width:60px"></label>
     <label><input id="hover" type="checkbox"> Hold height</label>
     <label><input id="evade" type="checkbox"> Evade charged shots</label>
-    <label>Pause at <select id="pause-at"><option value="none">No event</option><option value="aligning">Defeat torso alignment</option><option value="breakup">Immediate breakup / release</option><option value="charging">Charged sphere</option><option value="firing">Beam firing</option><option value="down">Shield drop</option><option value="rebuilding">Shield rebuilding</option><option value="rocket">Rocket windup</option><option value="helmet">Helmet folding</option><option value="head-mount">Mount helmet closure</option><option value="head-loading">Orange loading</option><option value="head-hud">Black goggles boot</option><option value="head-reveal">Video tearing</option><option value="head-black">Helmet blackout</option><option value="camera-swivel">Camera swivel</option><option value="camera-return">Camera return</option><option value="exit-mount">Reversed Mount</option><option value="camera-release">Release camera handoff</option></select></label>
+    <label>Pause at <select id="pause-at"><option value="none">No event</option><option value="aligning">Defeat torso alignment</option><option value="breakup">Immediate breakup / release</option><option value="charging">Charged sphere</option><option value="firing">Beam firing</option><option value="down">Shield drop</option><option value="rebuilding">Shield rebuilding</option><option value="rocket">Rocket windup</option><option value="stomp-contact">Pilot stomp impact</option><option value="helmet">Helmet folding</option><option value="head-mount">Mount helmet closure</option><option value="head-loading">Orange loading</option><option value="head-hud">Black goggles boot</option><option value="head-reveal">Video tearing</option><option value="head-black">Helmet blackout</option><option value="camera-swivel">Camera swivel</option><option value="camera-return">Camera return</option><option value="exit-mount">Reversed Mount</option><option value="camera-release">Release camera handoff</option></select></label>
     <button data-action="dodge">Dodge sideways</button>
     <button data-action="scan">Toggle goggles</button>
     <button data-action="noon">Noon lighting</button>
@@ -48,7 +48,13 @@
     <button data-action="front">Front asset review</button>
     <button data-action="player-death">Damage player / pilot</button>
     <button data-action="targets">Targets ahead</button>
-    <button data-action="rockets">Fire / stop rockets</button>
+    <button data-action="slot-rocket">Rockets (1)</button>
+    <button data-action="slot-stomp">Stomp (2)</button>
+    <button data-action="cycle">Cycle attack (E)</button>
+    <button data-action="wheel-up">Scroll up</button>
+    <button data-action="wheel-down">Scroll down</button>
+    <button data-action="stomp-targets">Stomp targets</button>
+    <button data-action="rockets">Hold / release Fire</button>
     <label><input id="shield" type="checkbox"> Hold shield</label>
     <button data-action="jump">Jump</button>
     <button data-action="punch">Place at wall</button>

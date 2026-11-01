@@ -38,6 +38,8 @@ export const MECHA_SHIELD_SHOT_COUNT = 4;
 export const MECHA_STOMP_RADIUS = 25;
 export const MECHA_SHAKE_RADIUS = 50;
 export const MECHA_STOMP_COOLDOWN = 5;
+export const MECHA_STOMP_IMPACT_TIME = 39 / 24;
+export const MECHA_STOMP_DAMAGE = 10;
 // Actual steady walking is ~18.26 m/s after acceleration/friction; / 50 m.
 export const MECHA_TORSO_YAW_SPEED = 0.366;
 export const MECHA_LASER_LOCK_ANGLE = Math.PI / 180;

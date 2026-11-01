@@ -256,21 +256,59 @@ corner radius and distance-independent sizing are retained.
 
 ## Weapon indicator assets and review
 
-The HUD's six static white SVG silhouettes are generated from the actual weapon
-meshes and rocket hull/nose. After changing those models, run
+The playable-stomp pictogram drafts are preview-only. Open
+`/tests/player-list-preview.html?stomp-icons` to compare three treatments at
+140 × 70px desktop and 88 × 44px mobile sizes, using the production panel's
+resolved styling. They use the actual left-foot mesh and a cropped ankle edge.
+Approved direction C has impact rays beneath the sole and no line above the
+foot. Its production asset is `src/mechaStompIcon.svg`; A and B remain available
+for comparison.
+Regenerate these drafts with
+`node --experimental-strip-types --import ./tests/register.mjs scripts/generate-stomp-icon-previews.mjs`.
+The review fixture does not drive gameplay; C was explicitly approved before
+the playable attack was implemented.
+
+The HUD's seven static white SVG silhouettes use the actual weapon meshes,
+rocket hull/nose and approved stomp SVG. After changing those models/assets, run
 `node --experimental-strip-types --import ./tests/register.mjs scripts/generate-weapon-icons.mjs`
 and include the updated `src/weaponIndicatorIcons.ts` with the normal build.
 Dormant muzzle effects and the rocket flame are excluded. This is an authoring
 step; gameplay does not load models or allocate a renderer for the indicator.
 
 Open `/tests/player-list-preview.html?weapon-preview` for the shared HUD review.
-Weapon, Piloting mecha, Power jump and HUD state controls exercise all icons,
+Weapon, Piloting mecha, Pilot attack, Power jump and HUD state controls exercise all icons,
 ordinary visibility and the neutral panel styling. Mobile HUD shows the real
 touch-control layout so panel clearance can be inspected. Desktop outer size is
 140 × 70px; touch size is 88 × 44px. Both share the health/ammo stack height and
 4px radius. Short desktop windows shorten the hover bar to leave 12px above
 the bottom-right panel. Also review switching, cockpit entry/exit and cleanup
 in the real match fixture.
+
+`tests/mechaStomp.test.ts` compares actual enemy/pilot leg poses at frame 39 at
+30/60/144 Hz and across hitches; it covers player/NPC contact, health, immunity,
+independent cooldowns, movement/look/shields, deferred exit and cancellation.
+`tests/mechaNetwork.test.ts` checks validated slots, host repetition/input expiry,
+attribution, render acknowledgment and late-join stomp poses. In
+`/tests/mecha-preview.html`, Rockets (1), Stomp (2), E, both scroll buttons and
+touch Weapon use actual selection controls. Stomp targets places two grounded
+NPCs and one floating target; Hold/release Fire reviews repetition and reload.
+
+November 1, 2026: `npm run check` passed both TypeScript projects and all 507
+tests; `npm run build` regenerated tracked `dist/`, and whitespace checks passed.
+The live singleplayer fixture verified slot 2, E and both scroll directions,
+the visible touch Weapon button, first/third-person stomp presentation, 10 HP
+grounded NPC hits with the floating target unchanged, pause freezing, deferred
+exit, ordinary-gun restoration and leave cleanup. Touch pointer ownership and
+cycling were also exercised by the automated input tests. The HUD fixture
+measured 140 × 70px desktop and 88 × 44px at 844 × 390 landscape, 4px corners,
+matching stack heights, 10px action clearance and unchanged neutral panel styling
+with Power Jump enabled. Scope and overlay visibility were checked in that fixture.
+
+Live multiplayer limitation: two browser clients reached Host/Join, but local
+room creation returned HTTP 502 with no Worker listening on port 8787, so no
+room code or live peer connection could be established. Host/client authority,
+expiry, attribution and late-join pose results above are automated coverage;
+a real two-client WebRTC stomp and physical-device touch check remain pending.
 
 October 30, 2026: both TypeScript projects and all 497 tests passed, and the
 production build regenerated `dist/`. Browser review covered all six silhouettes,
