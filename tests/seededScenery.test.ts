@@ -13,19 +13,24 @@ const context = new Proxy({}, { get: () => () => {} });
 Object.assign(globalThis, { window: {}, document: { getElementById: () => null, createElement: () => ({ getContext: () => context }) } });
 GothGirlfriend.prototype.load = async () => {};
 // Captured from the original complete generator before extracting its scenery.
+// Positions are normalized to nine decimal places for ARM64/x64 portability.
 // Include post-scenery enemies: their poses prove the RNG continuation stayed intact.
 const baseline = new Map([
-    [0, 'fa3963afbdba3d575bb10c6abb78db2065de42b11804e53f0fc86adc4aafc635'],
-    [1, '9dfe13eaa951440f1c974987d5d1166629803ca5dfd2019572e8ba94b531d8fe'],
-    [42, '3e8518ee9b41369696e5fc51bba21c3967391093754a64c9b11ee421874dd7f6'],
-    [91234, 'c371e34db6f6448d82f7026cdc2bce1312b7e2adee61c55a437a5e7511dc688c'],
-    [0xffffffff, 'ecdd31ed94b4d6435801053fc4888682743255a1c440ecd7e5a162be5ae22910'],
+    [0, '5f4a5ec9eb3cd0920ce2297c44638d8e5d487ef63b84d0e642f14da8bcb07645'],
+    [1, 'f34dc77b17c01e56d4312e3dd04d51a93ceb8f951277be96805cfcb764b02af1'],
+    [42, 'b8f48fa5741e7e02a6668cdb18d334026c64e6836d4303445bb01c43a5251faf'],
+    [91234, '1e70e734d5b61d12da384cb8c3edd3dea415da15f66d0a2b8a913a51db5e62eb'],
+    [0xffffffff, '63c34042f0e2a0689b428aac50a08c55d49a3ac402617d03d185f4c1d96fd4b2'],
 ]);
-function fingerprint(scene: THREE.Scene) {
+function fingerprint(scene: THREE.Scene, portablePositions = false) {
     const shapes = scene.children.map((object: any) => ({ type: object.type, name: object.name, pos: object.position.toArray(), scale: object.scale.toArray(),
         matrices: object.isInstancedMesh ? Array.from(object.instanceMatrix.array).slice(0, object.count * 16) : undefined,
         mats: object.material ? (Array.isArray(object.material) ? object.material : [object.material]).map((material: any) => ({ type: material.type, color: material.color?.getHex(),
             map: material.map ? { repeat: material.map.repeat.toArray(), width: material.map.image?.width, height: material.map.image?.height } : null })) : undefined }));
+    // Trigonometric positions differ by ~2e-13 across ARM64/x64 V8 builds.
+    // Normalize only the golden baseline; mutation checks below stay bit-exact,
+    // as do instance matrices, scales, materials and texture metadata.
+    if (portablePositions) for (const shape of shapes) shape.pos = shape.pos.map((value: number) => Number(value.toFixed(9)));
     return createHash('sha256').update(JSON.stringify(shapes)).digest('hex');
 }
 function disposePresentation(scene: THREE.Scene) {
@@ -53,7 +58,7 @@ test('shared extraction preserves all complete-world baseline hashes, including 
     try {
         for (const [seed, expected] of baseline) {
             state.scene = new THREE.Scene(); rebuildEnvironmentWithSeed(seed); updateEnvironmentVisibility(new THREE.Vector3(), 16);
-            assert.equal(fingerprint(state.scene), expected, `world changed for seed ${seed}`); disposeWorld();
+            assert.equal(fingerprint(state.scene, true), expected, `world changed for seed ${seed}`); disposeWorld();
         }
     } finally { disposeWorld(); state.scene = null; state.isMultiplayer = false; }
 });

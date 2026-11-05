@@ -337,6 +337,11 @@ before the existing verification steps:
 3. `npm run build`
 4. `test -z "$(git status --porcelain --untracked-files=all -- dist)"` (checks changed and newly generated assets)
 
+The complete-world baseline test normalizes object positions to nine decimal
+places before hashing: ARM64 and x64 V8 builds produce tiny trigonometric rounding
+differences. Instance matrices and other scene metadata remain exact, as do the
+separate checks for unintended live-scene mutations.
+
 The last step fails when committed generated assets do not match the source. A local change is ready for CI when `npm run check` and `npm run build` both pass and `git status` shows only intended source, documentation, and regenerated bundle changes.
 
 ## Validation by change type
