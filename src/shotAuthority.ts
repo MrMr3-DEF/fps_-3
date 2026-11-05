@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM, SWITCH_DURATION, NETWORK_TICK_MS } from './config.js';
 import { segmentSphereHitT } from './gameplayMath.js';
 import { segmentPlayerHitboxHitT, closestPlayerBodyPoint } from './playerHitbox.js';
-import type { FirePacket, HomingTargetPacket, UpdatePacket, WeaponName } from './networkTypes.js';
+import type { FirePacket, HomingTargetPacket, UpdatePacket, WeaponName, FirearmName } from './networkTypes.js';
 import { PROJECTILE_GUIDANCE_STEP, HOMING_HISTORY_SAMPLES, HOMING_VERIFICATION_STEPS_PER_SECOND, HOMING_HIT_TOLERANCE, FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS } from './config.js';
 import { canContinueHoming, isWithinHomingAimEnvelope } from './projectileHoming.js';
 import { stepProjectileFlight, homingReplayCandidates, type HomingFireContext, type HomingFlightTarget } from './projectileFlight.js';
@@ -59,7 +59,7 @@ export function spreadDirection(base: THREE.Vector3, seed: number, pelletIndex: 
 interface Shot {
     at: number;
     mechaRevision?: number;
-    weapon: WeaponName;
+    weapon: FirearmName;
     origin: THREE.Vector3;
     directions: THREE.Vector3[];
     used: Set<number>;
@@ -94,9 +94,12 @@ export class ShotLedger {
         this.triggerUpdatedAt = now;
         this.triggerHeld = held;
     }
+    ready(now: number): boolean { return now >= this.nextFireAt; }
+    reserveMelee(now: number, duration: number): void { this.nextFireAt = Math.max(this.nextFireAt, now + duration * 1000); }
     reset(): void { this.shots.clear(); this.nextFireAt = -Infinity; this.fireGraceMs = 0; this.triggerHeld = false; this.triggerRampMs = 0; this.triggerUpdatedAt = null; this.minigunSample = null; }
     record(packet: FirePacket, now: number, dead: boolean, context?: HomingFireContext | (() => HomingFireContext | null), mechaRevision?: number): boolean {
         const stats = WEAPON_STATS[packet.weapon];
+        if (!stats) return false;
         let interval = stats.fireRate * 1000;
         if (packet.weapon === 'MINIGUN') {
             this.updateTrigger(this.triggerHeld, now);

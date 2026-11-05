@@ -36,7 +36,8 @@ export const MECHA_ENEMY_ROCKET_TURN_SPEED = 3;
 export const MECHA_ENEMY_ROCKET_GUIDANCE_RESPONSE = 4;
 export const MECHA_SHIELD_SHOT_COUNT = 4;
 export const MECHA_STOMP_RADIUS = 25;
-export const MECHA_SHAKE_RADIUS = 50;
+export const MECHA_STOMP_SHAKE = { radius: 50, strength: 0.065, duration: 0.85 } as const;
+export const MECHA_DEFEAT_SHAKE = { radius: 200, strength: 0.045, duration: 0.65 } as const;
 export const MECHA_STOMP_COOLDOWN = 5;
 export const MECHA_STOMP_IMPACT_TIME = 39 / 24;
 export const MECHA_STOMP_DAMAGE = 10;
@@ -272,3 +273,11 @@ export const MECHA_NETWORK_REFRESH_MS = 250;
 export const MECHA_NETWORK_MAX_BONES = 192;
 // A connected but unresponsive viewer must not hold the ending indefinitely.
 export const MECHA_ENDING_READY_TIMEOUT_MS = 10000;
+
+/** Shared melee timing and geometry; all times are simulation seconds. */
+export const KATANA = Object.freeze({ charge: 3, damage: 5, chargedDamage: 10, radius: 4, chargedRadius: 10,
+    duration: 0.6, windup: 0.1, slash: 0.2, chargedSlash: 0.08, chargedHold: 0.17, impact: 0.2, chargedImpact: 0.14, damageWindow: 0.4, waveDuration: 0.3, shake: 0.0012 });
+
+export const KATANA_FEEDBACK = Object.freeze({ impactDuration: .12, maxTrails: 32, maxSnapshots: 8 });
+
+export const MECHA_NAPE = Object.freeze({ width: .6, height: .3, depth: .3 });

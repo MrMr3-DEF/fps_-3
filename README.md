@@ -8,7 +8,7 @@ or join a small peer-to-peer multiplayer room.
 ## Features
 
 - A seeded procedural arena with a walled town, wilderness, and lava hazards.
-- Five weapons, smart goggles, grappling, air hover, and third-person view.
+- Six weapons including a charged katana, smart goggles, grappling, air hover, and third-person view.
 - A shared siege robot with enemy combat and a pilotable cockpit in singleplayer and multiplayer.
 - Keyboard/mouse and customizable touch controls.
 - WebRTC multiplayer with Cloudflare-backed room admission and TURN credentials.

@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Katana gameplay review</title>
+<style>body{margin:0;background:#10161b;color:white;font:14px system-ui}header{padding:8px;display:flex;gap:8px;flex-wrap:wrap}button{padding:8px}iframe{width:100%;height:80vh;border:0}#status{padding:8px}</style>
+<header><button data-action="start">Start</button><button data-action="setup">Equip / targets</button><button data-action="clear">Clear view</button><button data-action="tap">Tap attack</button><button data-action="charged">Charged attack</button><button data-action="hold">Hold full charge</button><button data-action="third">Third person</button><button data-action="gentle">Toggle gentle effects</button><button data-action="leave">Leave</button><button data-action="charge:0">Uncharged</button><button data-action="charge:1.5">Half charge</button><button data-action="charge:3">Full charge</button><button data-action="pose:0.1">Windup pose</button><button data-action="pose:0.2">Impact pose</button><button data-action="pose:0.3">Follow-through pose</button><button data-action="pose:0.45">Recovery pose</button><button data-action="live">Live animation</button></header>
+<div id="status" role="status">Loading…</div><iframe id="game" title="Katana gameplay" src="/"></iframe>
+<script type="module">
+const frame=document.getElementById('game');frame.addEventListener('load',()=>{const script=frame.contentDocument.createElement('script');script.type='module';script.src='/tests/katanaPreview.ts';frame.contentDocument.body.append(script);});
+for(const button of document.querySelectorAll('[data-action]')) button.onclick=()=>frame.contentWindow.dispatchEvent(new CustomEvent('katana-review',{detail:button.dataset.action}));
+</script></html>

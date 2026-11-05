@@ -1,5 +1,8 @@
 # Blender assets
 
+- `katana/`: editable classic black katana with a bright silver grip, GLB and
+  matching synchronous game mesh export. See [the asset guide](katana/README.md).
+
 - `goth_girlfriend/`: goth girlfriend source meshes, rigged Blender project,
   textures, and the GLB loaded by `src/gothGirlfriend.ts`. The rig tests use the
   same GLB. Keep the Blender projects beside their textures when reorganizing.

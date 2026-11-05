@@ -45,6 +45,7 @@ for (const [kind, label, build] of [
     model.traverseVisible(node => { if (node.isMesh) meshes.push(node); });
     icons[kind] = { label, svg: silhouette(meshes, -1) };
 }
+icons.KATANA = { label: 'Katana', svg: (await readFile(new URL('../src/katanaIcon.svg', import.meta.url), 'utf8')).trim() };
 const rockets = new MechaRockets();
 try {
     // Production rockets contain hull, nose and flame in that order. Only the
@@ -56,4 +57,4 @@ const source = '// Generated from production geometry by scripts/generate-weapon
     'export const WEAPON_INDICATOR_ICONS = ' + JSON.stringify(icons, null, 4) + ' as const;\n' +
     'export type WeaponIndicatorKind = keyof typeof WEAPON_INDICATOR_ICONS;\n';
 await writeFile(new URL('../src/weaponIndicatorIcons.ts', import.meta.url), source);
-console.log('Generated seven static weapon silhouettes.');
+console.log('Generated eight static weapon silhouettes.');

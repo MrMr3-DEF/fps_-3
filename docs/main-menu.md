@@ -43,3 +43,8 @@ leaving with immediate downloads disabled releases them. In-flight replies are
 interrupted on close, and conversation text is cleared. Cached model files may
 remain in browser storage. No GLB/model-weight cache was added by the October
 audit repairs.
+
+The sixth arsenal entry is [Katana](katana.md), with a shared black-blade/silver-grip
+model and melee-specific damage, radius, charge and swing facts. It does not show
+firearm projectile speed, spread, caliber or ammunition facts. V is its default
+rebindable equip key; cycling includes it after the minigun.

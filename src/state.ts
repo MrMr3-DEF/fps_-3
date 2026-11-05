@@ -37,6 +37,7 @@ export interface PeerData {
     arMesh: THREE.Group;
     sniperMesh: THREE.Group;
     minigunMesh: THREE.Group;
+    katanaMesh?: THREE.Group;
     minigunRamp?: number;
     lastUpdateTime?: number;
     lastRemoteExhaustTime?: number;
@@ -132,6 +133,7 @@ export interface GameState {
     arMesh: THREE.Object3D | null;
     sniperMesh: THREE.Object3D | null;
     minigunMesh: THREE.Object3D | null;
+    katanaMesh: THREE.Group | null;
     playerMesh: THREE.Group | null;
     /** Saved camera-mode preference toggled with P. */
     isThirdPerson: boolean;
@@ -237,6 +239,7 @@ export const state: GameState = {
     arMesh: null,
     sniperMesh: null,
     minigunMesh: null,
+    katanaMesh: null,
     playerMesh: null,
     isThirdPerson: false,
     isThirdPersonView: false,
@@ -252,7 +255,11 @@ export const state: GameState = {
 };
 
 /** Release held actions synchronously; pointer-lock events may arrive later. */
+let heldInputReset: (() => void) | undefined;
+export function onHeldInputReset(callback: () => void): void { heldInputReset = callback; }
+
 export function resetHeldInput(): void {
+    heldInputReset?.();
     state.moveForward = state.moveBackward = state.moveLeft = state.moveRight = false;
     state.isShiftDown = state.isHovering = state.isMouseDown = false;
     state.isScoped = state.rightClickActive = state.keyCActive = false;

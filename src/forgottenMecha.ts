@@ -1,3 +1,4 @@
+import { MechaNape } from './mechaNape.js';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -299,6 +300,9 @@ export class ForgottenMecha {
         this.group.rotation.y = 0;
         this.updateSkin(); this.meshBounds.setFromObject(lens, true).getSize(this.size);
         this.combat.eyeRadius = this.size.y / 2; this.eyeDepth = this.size.z / 2;
+        const head = this.bones.get('CTRL_Head'), helmet = this.meshes.find(mesh => mesh.name === 'M_HelmetShell');
+        if (!head || !helmet) throw new Error('Ironmaw is missing its nape anchors');
+        this.nape = new MechaNape(head, helmet, this.bones.get('PART_EyeLens_01')!);
         const chest = this.bones.get('CTRL_Chest')!;
         const frame = chest.getWorldQuaternion(new THREE.Quaternion()).invert();
         this.seatAnchor.name = 'Mecha pilot seat'; this.viewAnchor.name = 'Mecha eye viewport'; this.interiorAnchor.name = 'Mecha helmet interior'; this.muzzleAnchor.name = 'Mecha right forearm muzzle';
@@ -365,6 +369,7 @@ export class ForgottenMecha {
     updateLighting(nightStrength: number): void {
         for (const material of this.reflectiveMaterials) material.envMapIntensity = 0.6 * (1 - nightStrength * 0.85);
     }
+    nape: MechaNape | null = null;
     private updateSkin(): void {
         this.group.updateMatrixWorld(true);
         for (const skeleton of this.skeletons) skeleton.update();
@@ -1233,6 +1238,7 @@ export class ForgottenMecha {
         geometries.forEach(value => value.dispose()); materials.forEach(value => value.dispose()); textures.forEach(value => value.dispose()); skeletons.forEach(value => value.dispose());
     }
     dispose(): void {
+        this.nape?.dispose(); this.nape = null;
         this.transitionCamera.reset();
         if (this.disposed) return;
         this.clearPendingDamage();

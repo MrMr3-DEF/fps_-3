@@ -1,3 +1,5 @@
+import { buildKatana } from './katanaModel.js';
+import { KATANA } from './config.js';
 import * as THREE from 'three';
 import { buildBeanModel, setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, isSharedGeometry, SHARED_BODY_MAT } from './weapons.js';
 import { characterColor, saveCharacterColor } from './appearance.js';
@@ -26,11 +28,18 @@ export function setupMainMenu(): void {
     const arsenal = document.getElementById('panel-weapons')!;
     weaponsButton.onclick = () => { main.style.display = 'none'; arsenal.style.display = 'flex'; };
     arsenal.querySelector<HTMLButtonElement>('[data-menu-back]')!.onclick = () => { arsenal.style.display = 'none'; main.style.display = 'flex'; };
-    const labels: Record<string, string> = { PISTOL: 'Pistol', SHOTGUN: 'Shotgun', AR: 'Assault rifle', SNIPER: 'Sniper', MINIGUN: 'Minigun' };
+    const labels: Record<string, string> = { PISTOL: 'Pistol', SHOTGUN: 'Shotgun', AR: 'Assault rifle', SNIPER: 'Sniper', MINIGUN: 'Minigun', KATANA: 'Katana' };
     const tabs = arsenal.querySelector('.weapon-tabs')!;
-    const weaponOrder = Object.keys(WEAPON_STATS);
+    const weaponOrder = [...Object.keys(WEAPON_STATS), 'KATANA'];
     let selectedWeapon = 'PISTOL';
     const setWeaponSpecs = (name: string) => {
+        if (name === 'KATANA') {
+            const panel = document.getElementById('weapon-specs')!;
+            panel.setAttribute('aria-label', 'Katana specifications');
+            panel.replaceChildren(...[['Damage', `${KATANA.damage} / ${KATANA.chargedDamage} charged`], ['Radius', `${KATANA.radius} / ${KATANA.chargedRadius} m`], ['Arc', '180°'], ['Charge', `${KATANA.charge}s`], ['Swing', `${KATANA.duration}s`], ['Attack', 'Hold, then release'], ['Equip', 'V (rebindable)']].map(([key,value]) => {
+                const fact=document.createElement('span'); fact.className='goggles-target-fact'; fact.textContent=`${key}: ${value}`; return fact;
+            })); return;
+        }
         const stats = WEAPON_STATS[name as keyof typeof WEAPON_STATS];
         const rpm = name === 'MINIGUN' ? `${MINIGUN_MIN_RPM}–${MINIGUN_MAX_RPM}` : (60 / stats.fireRate).toFixed(0);
         const specs = [['Damage / pellet', stats.damage], ['Pellets / shot', stats.pellets ?? 1], ['Max damage / shot', stats.damage * (stats.pellets ?? 1)], ['RPM', rpm], ['Speed', name === 'SNIPER' ? 'Hitscan' : `${PROJECTILE_SPEED} m/s`], ['Base spread', `${(Math.atan(stats.spread) * 180 / Math.PI).toFixed(2)}°`], ['Recoil', stats.recoil.toFixed(2)]];
@@ -96,7 +105,7 @@ export function setupMainMenu(): void {
         const geometries = new Set<THREE.BufferGeometry>();
         const materials = new Set<THREE.Material>();
         item.model.traverse(object => {
-            if (!(object instanceof THREE.Mesh)) return;
+            if (!(object instanceof THREE.Mesh || object instanceof THREE.Line)) return;
             if (!isSharedGeometry(object.geometry)) geometries.add(object.geometry);
             for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
                 if (material !== SHARED_BODY_MAT) materials.add(material);
@@ -112,7 +121,7 @@ export function setupMainMenu(): void {
     const weaponGeometries = new Map<string, WeaponScanGeometry>();
     const factories: Record<string, () => THREE.Group> = {
         PISTOL: () => buildGun(WEAPON_STATS.PISTOL.bulletColor),
-        SHOTGUN: buildShotgun, AR: buildAR, SNIPER: buildSniper, MINIGUN: buildMinigun,
+        SHOTGUN: buildShotgun, AR: buildAR, SNIPER: buildSniper, MINIGUN: buildMinigun, KATANA: buildKatana,
     };
     const baseWeaponRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, -Math.PI / 3, 0));
     const returnFromRotation = new THREE.Quaternion();
@@ -407,7 +416,7 @@ export function setupMainMenu(): void {
         for (const id of lobbyModels.keys()) disposeLobbyModel(id);
         const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>();
         for (const model of [...weaponModels.values(), bean]) model.traverse(object => {
-            if (!(object instanceof THREE.Mesh)) return;
+            if (!(object instanceof THREE.Mesh || object instanceof THREE.Line)) return;
             if (!isSharedGeometry(object.geometry)) geometries.add(object.geometry);
             for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
                 if (material !== SHARED_BODY_MAT) materials.add(material);

@@ -1,3 +1,8 @@
+import type { PlayerHitPacket } from './networkTypes.js';
+import { acceptMeleeCommand, invalidateMeleePeer, forgetMeleePeer, receiveMeleeEvent, receiveMeleeHit, localMeleePlayer, resetKatana } from './katana.js';
+import { buildKatana } from './katanaModel.js';
+import { setMeleeNetworkPort } from './weaponNetworkPort.js';
+import { KATANA } from './config.js';
 import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, resetMechaNetwork, acceptMechaCommand, acceptMechaEndingReady, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
 import type { MechaHitPacket } from './mechaNetworkTypes.js';
 import { TargetMotionHistory, type HomingFireContext } from './projectileFlight.js';
@@ -25,7 +30,7 @@ import {
     rebuildTargetHash,
 } from './world.js';
 import { resetHook, GUN_TIP_OFFSET } from './grapple.js';
-import { processTargetHit, takePlayerDamage } from './damage.js';
+import { processMechaHit, processTargetHit, takePlayerDamage } from './damage.js';
 import {
     NETWORK_TICK_MS,
     NETWORK_POSITION_RESPONSE,
@@ -75,7 +80,7 @@ import {
     resolveProjectileHomingTarget,
     type ProjectileHomingTarget,
 } from './projectileHoming.js';
-import { PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX, PLAYER_HITBOX_BOUNDING_RADIUS, segmentPlayerHitboxHitT } from './playerHitbox.js';
+import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX, PLAYER_HITBOX_BOUNDING_RADIUS, segmentPlayerHitboxHitT } from './playerHitbox.js';
 import { beginProjectileTrail } from './projectileTrails.js';
 import {
     admitRoomPeer,
@@ -316,6 +321,7 @@ interface PeerRuntimeState {
     username: string;
     position: THREE.Vector3;
     yaw: number;
+    pitch: number;
     lastUpdateAt: number;
     travelAllowance: number;
     shots: ShotLedger;
@@ -580,7 +586,7 @@ function isKnownClient(fromPeerId: string): boolean {
 }
 
 function getActiveWeaponName(): WeaponName {
-    return Object.prototype.hasOwnProperty.call(WEAPON_STATS, state.activeWeaponName)
+    return state.activeWeaponName === 'KATANA' || Object.prototype.hasOwnProperty.call(WEAPON_STATS, state.activeWeaponName)
         ? state.activeWeaponName as WeaponName
         : 'PISTOL';
 }
@@ -836,6 +842,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     state.dayNightSyncImmediate = false;
     targetStateFingerprints.clear();
     peerRuntime.clear();
+    resetKatana();
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     pendingConnectionPeers.clear();
     lastDamageByVictim.clear();
@@ -1250,6 +1257,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
                 username: packet.username,
                 position: new THREE.Vector3(packet.pos.x, packet.pos.y, packet.pos.z),
                 yaw: packet.yaw,
+                pitch: packet.pitch,
                 lastUpdateAt: now,
                 travelAllowance: NETWORK_MOVEMENT_BURST,
                 shots: new ShotLedger(),
@@ -1279,11 +1287,13 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             runtime.travelAllowance = newLife ? NETWORK_MOVEMENT_BURST : Math.max(0, allowance - travel);
             runtime.position.copy(nextPosition);
             runtime.yaw = packet.yaw;
+            runtime.pitch = packet.pitch;
             runtime.lastUpdateAt = now;
             runtime.username = packet.username;
             runtime.weaponState = weaponState;
             runtime.wasDead = packet.isDead;
         }
+        if (packet.isDead || packet.switchState !== 'IDLE' || packet.activeWeapon !== 'KATANA') invalidateMeleePeer(fromPeerId);
         runtime.motion.add(now, _peerTargetPosition.copy(runtime.position).addScaledVector(THREE.Object3D.DEFAULT_UP, -PEER_Y_OFFSET), runtime.yaw);
         runtime.shots.updateTrigger(packet.isMouseDown && packet.activeWeapon === 'MINIGUN' && packet.switchState === 'IDLE', now);
         return { ...packet, senderPeerId: fromPeerId };
@@ -1459,6 +1469,8 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
 
     let msg: NetworkPacket = parsed;
     if (state.isHost) {
+        if (msg.type === 'melee_command') { if (isKnownClient(fromPeerId)) acceptMeleeCommand(fromPeerId, msg); return; }
+        if (msg.type === 'melee_event' || msg.type === 'melee_hit') return;
         if (msg.type === 'mecha_ending_ready') {
             if (isKnownClient(fromPeerId)) acceptMechaEndingReady(fromPeerId, msg);
             return;
@@ -1558,6 +1570,9 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         if (!clientWorldSynchronized || (!state.isPlaying && msg.type !== 'kill_target')) return;
     }
 
+    if (msg.type === 'melee_event') { receiveMeleeEvent(msg); return; }
+    if (msg.type === 'melee_hit') { receiveMeleeHit(msg); return; }
+    if (msg.type === 'melee_command') return;
     const senderId = msg.senderPeerId || fromPeerId;
 
     if (msg.type === 'update') {
@@ -1646,6 +1661,11 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         peerData.arMesh.visible = (msg.activeWeapon === 'AR');
         peerData.sniperMesh.visible = (msg.activeWeapon === 'SNIPER');
         peerData.minigunMesh.visible = (msg.activeWeapon === 'MINIGUN');
+        if (peerData.katanaMesh) peerData.katanaMesh.visible = msg.activeWeapon === 'KATANA';
+        peerData.mesh.userData.meleePitch = msg.pitch;
+        peerData.mesh.userData.meleeWeapon = msg.activeWeapon;
+        peerData.mesh.userData.meleeReady = msg.switchState === 'IDLE';
+        if(msg.isDead || msg.activeWeapon !== 'KATANA' || msg.switchState !== 'IDLE') invalidateMeleePeer(senderId);
 
         if (msg.hookState === 'FIRING' && peerData.lastHookState !== 'FIRING') {
             triggerMuzzleFlash(peerData.leftGun);
@@ -1809,6 +1829,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
 // Peer avatars own cloned weapon/name-tag resources, so leaving a room must
 // dispose those objects instead of only removing them from the scene.
 function removePeer(peerId: string): void {
+    forgetMeleePeer(peerId);
     mechaPeerLeft(peerId);
     const peerData = state.peers[peerId];
     if (peerData) {
@@ -1817,8 +1838,8 @@ function removePeer(peerId: string): void {
             peerData.mesh.removeFromParent();
             const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
             peerData.mesh.traverse(child => {
-                if (child instanceof THREE.Mesh && !isSharedGeometry(child.geometry)) geometries.add(child.geometry);
-                if (!(child instanceof THREE.Mesh || child instanceof THREE.Sprite)) return;
+                if ((child instanceof THREE.Mesh || child instanceof THREE.Line) && !isSharedGeometry(child.geometry)) geometries.add(child.geometry);
+                if (!(child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.Sprite)) return;
                 for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
                     if (material === SHARED_BODY_MAT) continue;
                     materials.add(material);
@@ -1980,6 +2001,7 @@ function broadcastLocalFire(
     if (!state.isMultiplayer || (!state.isHost && state.connections.length === 0)) return;
     sendLocalState(true);
     const weapon = getActiveWeaponName();
+    if (weapon === 'KATANA') return;
 
     const packet: FirePacket = {
         type: 'fire',
@@ -2080,6 +2102,8 @@ function createPeerBean(username: string): PeerData {
     minigunMesh.visible = false;
     rightGunContainer.add(minigunMesh);
 
+    const katanaMesh = buildKatana(); katanaMesh.visible = false; rightGunContainer.add(katanaMesh);
+
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 64;
@@ -2130,6 +2154,7 @@ function createPeerBean(username: string): PeerData {
         arMesh: arMesh,
         sniperMesh: sniperMesh,
         minigunMesh: minigunMesh,
+        katanaMesh,
         hookLine: null,
         lastHookState: 'IDLE',
         hp: PLAYER_MAX_HP,
@@ -2187,5 +2212,49 @@ setMechaNetworkPort({
         mechaDamageByVictim.set(peerId, { lifeId, attacker, at: performance.now() });
         if (attacker) lastDamageByVictim.set(peerId, { attackerPeerId: attacker, at: performance.now() });
         else lastDamageByVictim.delete(peerId);
+    },
+});
+
+
+setMeleeNetworkPort({
+    ready: peerId => !state.isMultiplayer || (peerId===state.peer?.id ? hostMechaShots : peerRuntime.get(peerId)?.shots)?.ready(performance.now()) === true,
+    reserve: peerId => { if(state.isMultiplayer) (peerId===state.peer?.id ? hostMechaShots : peerRuntime.get(peerId)?.shots)?.reserveMelee(performance.now(),KATANA.duration); },
+    hitTarget: (index,damage,attacker,sequence) => {
+        processTargetHit(index,damage,attacker.id==='local'?undefined:attacker.id);
+        if(state.isMultiplayer) { broadcastToAll({type:'hit_target',shotId:sequence,pelletIndex:0,targetIndex:index,damage,senderPeerId:attacker.id}); syncHostTargetStates(); }
+    },
+    players: () => {
+        const local = localMeleePlayer();
+        if (!state.isMultiplayer) return [local];
+        if (state.isHost) return [local, ...Array.from(peerRuntime, ([id, p]) => ({id, lifeId:p.lifeId, alive:!p.wasDead && !(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId===id),
+            ready:p.weaponState.activeWeapon==='KATANA' && p.weaponState.switchState==='IDLE' && !(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId===id),
+            position:p.position.clone(), yaw:p.yaw, pitch:p.pitch, name:p.username}))];
+        return [local, ...Object.entries(state.peers).map(([id,p]) => ({id,lifeId:p.lifeId??0,alive:p.hp>0 && !(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId===id),
+            ready:p.mesh.userData.meleeWeapon==='KATANA' && p.mesh.userData.meleeReady===true,
+            position:p.targetPosition.clone().add(new THREE.Vector3(0,PLAYER_BODY_CAMERA_OFFSET,0)),yaw:p.targetYaw,pitch:p.mesh.userData.meleePitch??0,name:p.username}))];
+    },
+    sendCommand: packet => { sendLocalState(true); broadcastToAll(packet); },
+    emit: broadcastToAll,
+    confirmHit: broadcastToAll,
+    blocked: (start,end,mecha) => { const t=shotObstructionT(start,end,0,mecha); return t!==null && t<1-1e-6; },
+    hitPlayer: (victim,attacker,damage,sequence) => {
+        if (state.isMultiplayer && !state.isHost) return;
+        lastDamageByVictim.set(victim.id,{attackerPeerId:attacker.id,at:performance.now()});
+        const packet: PlayerHitPacket={type:'player_hit',shotId:sequence,pelletIndex:0,senderPeerId:attacker.id,
+            targetPeerId:victim.id,targetLifeId:victim.lifeId,damage,attackerName:attacker.name};
+        if(victim.id===state.peer?.id && state.lifeId===victim.lifeId) takePlayerDamage(damage,attacker.name,attacker.id);
+        else if(state.peers[victim.id]) flashPeerMesh(state.peers[victim.id]);
+        broadcastToAll(packet);
+    },
+    hitMecha: (attacker,damage,origin,point) => {
+        const actor=forgottenMecha; if(!actor || state.isMultiplayer && !state.isHost) return false;
+        if(!state.isMultiplayer) { const hp = actor.hp; processMechaHit(damage,{origin,point,surface:'body'}); return actor.hp < hp; }
+        const mounted=actor.ownsPilot;
+        const result=actor.damage(damage,{origin,point,surface:'body'});
+        if(!result.accepted) return false;
+        if(result.killed && !mounted) state.score++;
+        if(state.isMultiplayer) announceMechaHit(attacker.id,result.killed,point,point.clone().sub(origin).normalize());
+        else if(attacker.id===localMeleePlayer().id) flashHitmarker(result.killed);
+        return true;
     },
 });

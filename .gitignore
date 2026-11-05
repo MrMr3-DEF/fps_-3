@@ -28,3 +28,6 @@ analysis/
 *.tsbuildinfo
 .dev.vars
 .dev.vars.*
+
+# Other
+AGENTS.md

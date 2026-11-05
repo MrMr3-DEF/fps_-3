@@ -23,6 +23,7 @@ Feature guides below cover current behavior and manual checks.
 | Guide | Contents |
 | --- | --- |
 | [Full-screen menu](main-menu.md) | Character customization, controls, and weapon specifications |
+| [Katana](katana.md) | Melee controls, charge effects, damage geometry and authority |
 | [Mobile controls](mobile-controls.md) | Touch input, layout editing, landscape behavior, and device validation |
 | [Forgotten Mecha](forgotten-mecha.md) | Siege robot behavior, combat, mounting, piloting, and manual acceptance checks |
 | [Blender assets](../blender_assets/README.md) | Asset layout and exports |

@@ -1,3 +1,4 @@
+import { buildKatana } from './katanaModel.js';
 import { characterColor } from './appearance.js';
 import { isInputActive } from './inputSession.js';
 import { spreadDirection } from './shotAuthority.js';
@@ -125,6 +126,7 @@ const WEAPON_MESH_KEYS: Record<string, keyof GameState> = {
     SHOTGUN: 'shotgunMesh',
     AR: 'arMesh',
     SNIPER: 'sniperMesh',
+    KATANA: 'katanaMesh',
     MINIGUN: 'minigunMesh'
 };
 
@@ -440,6 +442,10 @@ export function createAkimboGuns(): void {
     state.minigunMesh = buildMinigun();
     state.minigunMesh.visible = false;
     state.rightGunContainer.add(state.minigunMesh);
+
+    state.katanaMesh = buildKatana();
+    state.katanaMesh.visible = false;
+    state.rightGunContainer.add(state.katanaMesh);
 
     state.rightGun = state.pistolMesh;
 
@@ -996,7 +1002,7 @@ export function resetWeaponPresentation(): void {
     state.inspectState = 'IDLE'; state.inspectTimer = 0;
     const active = getWeaponMesh(state.activeWeaponName);
     state.rightGun = active;
-    for (const mesh of [state.pistolMesh, state.shotgunMesh, state.arMesh, state.sniperMesh, state.minigunMesh]) {
+    for (const mesh of [state.pistolMesh, state.shotgunMesh, state.arMesh, state.sniperMesh, state.minigunMesh, state.katanaMesh]) {
         if (!mesh) continue;
         mesh.visible = mesh === active; mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0);
     }
@@ -1096,7 +1102,7 @@ export function disposePlayerVisuals(): void {
         if (!obj) return;
         obj.parent?.remove(obj);
         obj.traverse((child: any) => {
-            if (!child.isMesh) return;
+            if (!child.isMesh && !child.isLine) return;
             if (child.geometry && !isSharedGeometry(child.geometry)) {
                 child.geometry.dispose();
             }
@@ -1122,6 +1128,7 @@ export function disposePlayerVisuals(): void {
     state.arMesh = null;
     state.sniperMesh = null;
     state.minigunMesh = null;
+    state.katanaMesh = null;
     state.playerMesh = null;
 }
 

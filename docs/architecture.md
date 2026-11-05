@@ -87,7 +87,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `smartGogglesPeerMath.ts` | Stable avatar-envelope, visibility, and distance helpers for remote players |
 | `gothGirlfriend.ts` | Rigged character loading, placement, animation, and fixed gameplay hitbox |
 | `forgottenMecha.ts`, `mechaNavigation.ts`, `mechaFootPlant.ts`, `mechaCombat.ts`, `mechaCombatEffects.ts` | Shared siege robot, seeded border routes, animation/AI, torso laser, spherical shield cycle, planted feet, moving body proxies and reusable effects |
-| `cameraShake.ts` | Temporary impact rotation applied only to the render camera pose |
+| `cameraShake.ts`, `mechaImpactShake.ts` | Temporary render-camera rotation and horizontal, airborne-inclusive mecha impact reach |
 | `mechaPilot.ts`, `mechaRockets.ts`, `lookInput.ts` | Cockpit boarding support, sampled pilot view/leg steering, immediate vehicle targeting, continuous pooled rocket guidance and shared timed touch/pointer look routing |
 | `mechaStomp.ts`, `mechaStompIcon.svg` | Shared enemy/pilot stomp event boundaries, cooldown and contact eligibility; typed pilot slots and approved static foot pictogram |
 | `mechaHeadView.ts`, `mechaHeadEffects.ts`, `mechaTransitionCamera.ts` | Actor-owned simulation-clock helmet/boot and exterior entry/exit camera phases; main owns DOM composition and temporary render-pose application |
@@ -233,6 +233,7 @@ Player damage records the last damage time for regeneration and kill attribution
 | `R` | Toggle grappling hook |
 | `E` or mouse wheel | Cycle weapons |
 | `1`–`5` | Select pistol, shotgun, AR, sniper, or minigun |
+| `V` | Equip katana; hold primary attack to charge, release to swing |
 | `X` | Inspect the active weapon |
 | `P` | Toggle third-person presentation |
 | Hold `Tab` in multiplayer | Show the host-ordered player list with suit-colored pixel faces and kills/deaths |
@@ -423,3 +424,17 @@ neutral after 250 ms without refresh. Host simulation never waits for a render
 acknowledgment; each victim queues its authoritative laser/stomp contact until
 local drawing, with actual beam drawing required for laser damage. Disconnect,
 reset and disposal invalidate coordinator state together with the world.
+
+## Katana combat
+
+The sixth weapon uses dedicated charge/area-hit authority instead of firearm shot
+claims. See [Katana](katana.md) for module ownership, packet validation, tilted
+body-height hit volumes, cancellation and verification.
+
+Charged katana presentation is isolated in `katanaEffects.ts`: sampled world-space
+ribbons and bounded baked enemy snapshots render without mutating gameplay meshes.
+The main temporary render boundary invokes its attacker-only impact overlay and
+restores camera and renderer state afterward. Strictly parsed `melee_hit` packets
+are host-origin feedback, never damage requests. `mechaNape.ts` attaches the fitted
+rear weak spot to the animated head; `katana.ts` resolves it before body damage
+while retaining the same per-revision consumed-hit set and Mecha damage port.

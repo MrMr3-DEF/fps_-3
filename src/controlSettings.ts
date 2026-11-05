@@ -7,7 +7,7 @@ export const BIND_ACTIONS = [
     ['grapple', 'Grappling hook', 'KeyR'], ['nextWeapon', 'Next weapon', 'KeyE'],
     ['pistol', 'Equip pistol', 'Digit1'], ['shotgun', 'Equip shotgun', 'Digit2'],
     ['rifle', 'Equip assault rifle', 'Digit3'], ['sniper', 'Equip sniper', 'Digit4'],
-    ['minigun', 'Equip minigun', 'Digit5'], ['inspect', 'Inspect weapon', 'KeyX'],
+    ['minigun', 'Equip minigun', 'Digit5'], ['katana', 'Equip katana', 'KeyV'], ['inspect', 'Inspect weapon', 'KeyX'],
     ['aim', 'Hold to aim', 'KeyC'], ['view', 'Toggle third person', 'KeyP'],
 ] as const;
 export type BindAction = typeof BIND_ACTIONS[number][0];

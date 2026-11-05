@@ -1,3 +1,5 @@
+import { KATANA } from './config.js';
+import { katanaInput, cancelKatana, updateKatana, validateKatanaInput, applyKatanaShake, renderKatanaImpact, resetKatana } from './katana.js';
 import { MechaEndingAuthority, type MechaEndingState } from './mechaEndingTimeline.js';
 import { MechaEndingPlayback } from './mechaEndingPlayback.js';
 import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork, selectMechaWeapon, localMechaWeapon } from './mechaNetwork.js';
@@ -55,8 +57,9 @@ import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, syncThirdPersonPresentation, cancelInspect, resetWeaponPresentation, updatePlayerAvatarPose, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
 import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns } from './world.js';
 import { CameraShake } from './cameraShake.js';
+import { triggerMechaImpactShake } from './mechaImpactShake.js';
 import type { MechaImpact } from './forgottenMecha.js';
-import { MECHA_APPROACH_WARNING_TIME, MECHA_SHAKE_RADIUS, MECHA_STOMP_RADIUS } from './config.js';
+import { MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS } from './config.js';
 import { setDamageHandlers } from './damage.js';
 import {
     sendLocalState,
@@ -215,14 +218,7 @@ function mechaImpact(kind: MechaImpact, position: THREE.Vector3): void {
     if (!actor || !state.controls) return;
     if (kind === 'punch') { spawnParticles(position, 0x8b887d, 55, 20, 0.65, 35); return; }
     spawnGroundImpact(position, kind === 'step' ? 3 : kind === 'stomp' ? MECHA_STOMP_RADIUS : 7, kind !== 'step');
-    if (kind === 'step') return;
-    const player = state.controls.getObject().position;
-    const distance = Math.hypot(player.x - actor.group.position.x, player.z - actor.group.position.z);
-    if (distance <= MECHA_SHAKE_RADIUS) {
-        // Keep a substantial impact at the edge, with stronger feedback nearby.
-        const strength = (kind === 'stomp' ? 0.065 : 0.018) * (1 - distance / MECHA_SHAKE_RADIUS * 0.65);
-        cameraShake.trigger(strength, kind === 'stomp' ? 0.85 : 0.45);
-    }
+    triggerMechaImpactShake(cameraShake, kind, state.controls.getObject().position, actor.group.position);
 }
 
 const mechaImpactDirection = new THREE.Vector3();
@@ -375,7 +371,7 @@ const UI = {
     get turnstileJoinChallenge() { return getUI<HTMLElement>('turnstile-join-challenge'); },
 };
 // Sequential cycling order for E. Number keys below use a different, FPS-style layout.
-const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
+const WEAPON_CYCLE = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN', 'KATANA'];
 
 let lastFov = -1;
 let pendingSettings: UserSettings = cloneSettings(userSettings);
@@ -895,6 +891,9 @@ function setupInputListeners(): void {
                     cancelInspect();
                 }
                 break;
+            case 'KeyV':
+                if (state.controls && isInputActive() && !forgottenMecha?.ownsLocalPilot) { state.desiredWeaponName = 'KATANA'; cancelInspect(); }
+                break;
             case 'Digit5':
                 if (state.controls && isInputActive()) {
                     state.desiredWeaponName = 'MINIGUN';
@@ -960,9 +959,11 @@ function setupInputListeners(): void {
     syncMobileControls = setupMobileControls({
         keyDown: code => onKeyDown({ code, repeat: false }),
         keyUp: code => onKeyUp({ code }),
+        cancelFire: cancelKatana,
         fire: held => {
             state.isMouseDown = held;
             if (forgottenMecha?.ownsLocalPilot) { mountedFireRequested ||= held; return; }
+            if (state.activeWeaponName === 'KATANA') { katanaInput(held); return; }
             if (held && isInputActive() && state.fireCooldown <= 0 && state.switchState === 'IDLE') { cancelInspect(); fireProjectile(); }
         },
         layout: bounds => weaponIndicator?.placeTouch(userSettings.touchLayout, bounds, userSettings.touchFireMode),
@@ -1073,7 +1074,7 @@ function syncGameHud(): void {
     const stats = WEAPON_STATS[state.activeWeaponName];
     if (presentation.ordinary) weaponIndicator?.update(state.activeWeaponName, pilot ? pilot.pilotWeapon : false);
     updateHealthBar(pilot ? pilot.hp / pilot.maxHp * 100 : state.playerHp / state.playerMaxHp * 100);
-    updateReloadBar(pilot ? pilot.reloadProgress : Math.max(0, Math.min(1, 1 - state.fireCooldown / (stats?.fireRate ?? 0.1))));
+    updateReloadBar(pilot ? pilot.reloadProgress : Math.max(0, Math.min(1, 1 - state.fireCooldown / (stats?.fireRate ?? (state.activeWeaponName === 'KATANA' ? KATANA.duration : 0.1)))));
     updateHoverBar(pilot ? pilot.combat.energy : state.hoverFuel, presentation.ordinary && (pilot ? pilot.combat.shieldActive : state.isHovering));
     if (presentation.hardware) syncMechaHeadPresentation(); else clearMechaHeadPresentation();
 }
@@ -1100,7 +1101,7 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
         middleMouseChordActive = false;
         hideGameHud();
         resetHealthBarFlash();
-        cameraShake.reset();
+        cameraShake.reset(); resetKatana();
         const gameOverOverlay = document.getElementById('game-over-overlay');
         if (gameOverOverlay) gameOverOverlay.style.display = 'none';
         if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
@@ -1294,6 +1295,8 @@ function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
 
     const wasMouseDown = state.isMouseDown;
     updateMouseButtonStateFromChange(e);
+    if (e.type === 'pointercancel') { cancelKatana(); return; }
+    if (state.activeWeaponName === 'KATANA' && wasMouseDown !== state.isMouseDown) katanaInput(state.isMouseDown);
 
     if (!wasMouseDown && state.isMouseDown) {
         if (forgottenMecha?.ownsLocalPilot) { mountedFireRequested = true; return; }
@@ -1855,7 +1858,7 @@ function startMechaEnding(scene: MechaEndingState): void {
     mobileControlsEditor.cancel();
     endInput(); setPlayerListVisible(false); clearApproachWarning(); clearMechaHeadPresentation();
     mountedFireRequested = false; hasRenderedAim = false;
-    cameraShake.reset(); mechaCameraHandoff.reset(); conversationCamera.cancel();
+    cameraShake.reset(); resetKatana(); mechaCameraHandoff.reset(); conversationCamera.cancel();
     gothChat?.close(false); smartGoggles?.reset(); resetHook(); cancelInspect();
     state.velocity.set(0, 0, 0); state.isHovering = false;
     for (const panel of [UI.blocker, UI.panelMain, UI.panelSettings, UI.panelMp, UI.panelPause, UI.panelHostWaiting, UI.panelJoinRoom, UI.deathOverlay]) {
@@ -1933,6 +1936,7 @@ function animate(): void {
         state.prevTime = time;
         return;
     }
+    validateKatanaInput();
     if (shouldPauseOfflineSimulation({
         isPlaying: state.isPlaying,
         isMultiplayer: state.isMultiplayer,
@@ -1975,13 +1979,14 @@ function animate(): void {
 
     const previousWeaponPhase = state.switchState;
     updateWeapons(delta);
+    updateKatana(delta);
     // The host times switching from the first received withdrawal intent. Do
     // not let the ordinary movement throttle delay that intent by another tick
     // and reject the first legal shot when the local animation completes.
     if (state.switchState !== previousWeaponPhase) sendLocalState(true);
 
     const stats = WEAPON_STATS[state.activeWeaponName];
-    const maxCooldown = stats ? stats.fireRate : 0.1;
+    const maxCooldown = stats ? stats.fireRate : state.activeWeaponName === 'KATANA' ? KATANA.duration : 0.1;
     updateReloadBar(Math.max(0, Math.min(1.0, 1.0 - (state.fireCooldown / maxCooldown))));
 
     if (state.controls && isInputActive() && state.isMouseDown && (touchMode || state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN') && state.fireCooldown <= 0 && state.switchState === 'IDLE') {
@@ -2200,6 +2205,8 @@ function animate(): void {
             lastRenderedAimRay.origin.copy(state.camera.position);
             state.camera.getWorldDirection(lastRenderedAimRay.direction);
             hasRenderedAim = true;
+            applyKatanaShake(state.camera);
+            state.camera.updateMatrixWorld(true);
             const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
             if (pilot) {
                 if (state.playerMesh && !state.isThirdPersonView) state.playerMesh.visible = false;
@@ -2254,6 +2261,7 @@ function animate(): void {
             if (!state.isThirdPersonView && (pilot?.headView.phase === 'reveal' || pilot?.headView.phase === 'shutdown-reveal') && !userSettings.photosensitivityMode && !reducedHeadMotion.matches) {
                 pilot.headEffects.render(state.renderer, state.scene, state.camera, pilot.headView.revealProgress);
             } else state.renderer.render(state.scene, state.camera);
+            renderKatanaImpact(state.renderer, state.camera);
             if (state.isMultiplayer) acknowledgeMechaRender(); else forgottenMecha?.acknowledgeRendered();
         } finally {
             forgottenMecha?.restorePilotView();

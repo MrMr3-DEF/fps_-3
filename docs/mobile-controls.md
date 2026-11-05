@@ -76,3 +76,7 @@ Its reload bar stays empty during the clip, then fills over five seconds.
 Switching keeps both cooldowns; Exit waits for any committed attack to finish.
 These mounted controls inherit existing saved slot placement/scale and remain
 inactive in the layout editor. No stored-layout migration is required.
+
+The Weapon cycle includes [Katana](katana.md). Hold Fire to charge and release
+to swing; touch cancellation or leaving input cancels charge without attacking.
+There is no automatic repeated melee attack while Fire is held.

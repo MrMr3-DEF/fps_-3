@@ -2,10 +2,24 @@ import { parseMechaPacket, isMechaState, type MechaPacket, type MechaState } fro
 import { isUsername, isPeerId } from './roomIdentity.js';
 import { MAX_PLAYERS, PLAYER_MAX_HP } from './config.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
-export type WeaponName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
+export type FirearmName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
+export type WeaponName = FirearmName | 'KATANA';
 export type WeaponSwitchPhase = 'IDLE' | 'WITHDRAWING' | 'BRINGING_IN';
 
-export const WEAPON_NAMES: readonly WeaponName[] = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN'];
+export const WEAPON_NAMES: readonly WeaponName[] = ['PISTOL', 'SHOTGUN', 'AR', 'SNIPER', 'MINIGUN', 'KATANA'];
+
+export interface MeleeCommand {
+    type: 'melee_command'; action: 'start' | 'release' | 'cancel'; sequence: number; lifeId: number; senderPeerId?: string;
+}
+export interface MeleeEvent {
+    type: 'melee_event'; action: 'start' | 'release' | 'cancel'; sequence: number; lifeId: number;
+    senderPeerId: string; charged: boolean; origin: Vec3Packet; yaw: number; pitch: number;
+}
+
+export interface MeleeHitEvent {
+    type: 'melee_hit'; senderPeerId: string; sequence: number; lifeId: number;
+    target: string; contact: Vec3Packet; execution: boolean;
+}
 
 export interface Vec3Packet {
     x: number;
@@ -48,7 +62,7 @@ export interface FirePacket {
     type: 'fire';
     shotId: number;
     senderPeerId?: string;
-    weapon: WeaponName;
+    weapon: FirearmName;
     barrelPos: Vec3Packet;
     dir: Vec3Packet;
     hitPoint?: Vec3Packet;
@@ -155,6 +169,7 @@ export interface PlayerListEntry extends LobbyPlayer { kills: number; deaths: nu
 export interface PlayerListPacket { type: 'player_list'; players: PlayerListEntry[]; senderPeerId?: string; }
 
 export type NetworkPacket =
+    | MeleeCommand | MeleeEvent | MeleeHitEvent
     | MechaPacket
     | { type: 'start_game'; senderPeerId?: string }
     | PeerLeftPacket
@@ -247,6 +262,27 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
     if (!isRecord(value) || typeof value.type !== 'string' || !isSender(value.senderPeerId)) return null;
 
     switch (value.type) {
+        case 'melee_hit': {
+            if (Object.keys(value).some(key => !['type', 'senderPeerId', 'sequence', 'lifeId', 'target', 'contact', 'execution'].includes(key)) ||
+                !isPeerId(value.senderPeerId) || !isInteger(value.sequence, 0, Number.MAX_SAFE_INTEGER) ||
+                !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isVec3(value.contact) || typeof value.execution !== 'boolean' ||
+                typeof value.target !== 'string' || value.target.length > 180) return null;
+            const parts = value.target.split(':');
+            const validId = (part: string | undefined) => part !== undefined && /^(0|[1-9][0-9]*)$/.test(part) && Number.isSafeInteger(Number(part));
+            if (!(parts[0] === 'npc' && parts.length === 3 && validId(parts[1]) && Number(parts[1]) < 4096 && validId(parts[2]) ||
+                parts[0] === 'peer' && parts.length === 3 && isPeerId(parts[1]) && validId(parts[2]) ||
+                parts[0] === 'mecha' && parts.length === 2 && validId(parts[1]))) return null;
+            if (value.execution && parts[0] !== 'mecha') return null;
+            return value as unknown as MeleeHitEvent;
+        }
+        case 'melee_command':
+        case 'melee_event': {
+            if (!['start', 'release', 'cancel'].includes(String(value.action)) || !isInteger(value.sequence, 0, Number.MAX_SAFE_INTEGER) || !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER)) return null;
+            if (value.type === 'melee_event' && (!isPeerId(value.senderPeerId) || typeof value.charged !== 'boolean' || !isVec3(value.origin) || !isFiniteNumber(value.yaw, -Math.PI*4, Math.PI*4) || !isFiniteNumber(value.pitch, -Math.PI/2, Math.PI/2))) return null;
+            // Commands contain intent only; never accept claimed power or damage.
+            if (value.type === 'melee_command' && Object.keys(value).some(key => !['type','action','sequence','lifeId','senderPeerId'].includes(key))) return null;
+            return value as unknown as MeleeCommand | MeleeEvent;
+        }
         case 'update':
             if (!(value.bodyColor === undefined || isInteger(value.bodyColor, 0, 0xffffff)) || !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isUsername(value.username) || !isVec3(value.pos) ||
                 !isFiniteNumber(value.yaw, -Math.PI * 4, Math.PI * 4) ||
@@ -271,7 +307,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
             return value as unknown as UpdatePacket;
 
         case 'fire': {
-            if (!isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) || !isWeaponName(value.weapon) || !isVec3(value.barrelPos) || !isVec3(value.dir) ||
+            if (!isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) || (!isWeaponName(value.weapon) || value.weapon === 'KATANA') || !isVec3(value.barrelPos) || !isVec3(value.dir) ||
                 !(value.hitPoint === undefined || isVec3(value.hitPoint)) ||
                 !isInteger(value.spreadSeed, 0, 0xffffffff) ||
                 !(value.pelletCount === undefined || isInteger(value.pelletCount, 1, 16)) ||

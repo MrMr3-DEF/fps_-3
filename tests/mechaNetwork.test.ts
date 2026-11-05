@@ -12,6 +12,8 @@ import { initializeNetworkMecha, resetMechaNetwork, setMechaNetworkPort, setMech
     multiplayerMechaEvents, captureMechaSnapshot, markMechaEndingReady, acceptMechaEndingReady, updateMechaEndingNetwork, announceMechaHit } from '../src/mechaNetwork.ts';
 import { disposeParticles } from '../src/particles.ts';
 import { MECHA_ARMOR_IMPACT } from '../src/config.ts';
+import { CameraShake } from '../src/cameraShake.ts';
+import { triggerMechaImpactShake } from '../src/mechaImpactShake.ts';
 import { userSettings } from '../src/settings.ts';
 import { MECHA_ENDING_DURATION, type MechaEndingState } from '../src/mechaEndingTimeline.ts';
 import type { MechaInputPacket, MechaEventPacket, MechaState } from '../src/mechaNetworkTypes.ts';
@@ -39,6 +41,32 @@ function command(a: ForgottenMecha, sequence: number, rest: Partial<MechaInputPa
         shield: false, fire: false, weapon: 'rocket', helmet: false, exit: false, thirdPerson: false, secondaryHeld: false, viewThirdPerson: false, fov: 75, aspect: 1, ...rest };
 }
 function cleanup(a: ForgottenMecha) { resetMechaNetwork(); a.dispose(); state.isMultiplayer = state.isHost = state.isPlaying = false; state.matchEnded = false; state.peer = null; }
+
+test('host defeat impacts shake a distant airborne observer once on host and replica', async () => {
+    const a = await actor(multiplayerMechaEvents()), packets = host(a, []);
+    const viewer = player('observer', 150, 80, 0, false), contacts: string[] = [];
+    const shake = new CameraShake(), camera = new THREE.PerspectiveCamera();
+    setMechaPresentation({ impact(kind) {
+        shake.reset(); camera.quaternion.identity();
+        triggerMechaImpactShake(shake, kind, viewer.position, a.group.position);
+        shake.apply(camera);
+        assert.ok(new THREE.Quaternion().angleTo(camera.quaternion) > 0.005);
+        contacts.push(kind);
+    }, release() {}, blocked() {}, damage() { assert.fail('presentation must not damage observers'); }, gameOver() {}, hit() {} });
+    try {
+        a.damage(50); advance(a, 7);
+        assert.deepEqual(contacts, ['knees', 'fists']);
+        const impacts = packets.filter(p => p.type === 'mecha_event' && p.event.kind === 'impact') as MechaEventPacket[];
+        assert.equal(impacts.length, 2);
+        resetMechaNetwork(); initializeNetworkMecha(a); state.isHost = false; contacts.length = 0;
+        for (const packet of impacts) {
+            assert.ok(parseNetworkPacket(unpack(await pack(packet))));
+            receiveMechaEvent(packet); receiveMechaEvent(packet);
+            receiveMechaEvent({ ...packet, sequence: packet.sequence - 1 });
+        }
+        assert.deepEqual(contacts, ['knees', 'fists']);
+    } finally { cleanup(a); }
+});
 
 test('confirmed armor hit events validate contacts and show one world-space burst on host and guest, including death', async () => {
     const a = await actor(), packets = host(a, []), amount = userSettings.particleAmount;

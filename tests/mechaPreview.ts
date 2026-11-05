@@ -9,6 +9,7 @@ import { processMechaHit, takePlayerDamage } from '/src/damage.ts';
 import { fireProjectile, setThirdPerson } from '/src/weapons.ts';
 import { toggleGrapplingHook } from '/src/grapple.ts';
 import { applyLookInput } from '/src/lookInput.ts';
+import { CameraShake } from '/src/cameraShake.ts';
 
 const status = parent.document.getElementById('status')!;
 const distanceInput = parent.document.getElementById('distance') as HTMLInputElement;
@@ -32,6 +33,19 @@ let previouslyMounted = false;
 let turnUntil = 0, frontReview = false;
 let observedRenderer: THREE.WebGLRenderer | null = null;
 let observedMecha: typeof forgottenMecha = null;
+let kneeShakePeak = 0, fistShakePeak = 0;
+const unshakenRotation = new THREE.Quaternion();
+const applyShake = CameraShake.prototype.apply;
+// Observe the production pulse after shoulder/cockpit framing, without
+// counting those camera offsets as shake or injecting any extra rotation.
+CameraShake.prototype.apply = function (camera) {
+    unshakenRotation.copy(camera.quaternion); applyShake.call(this, camera);
+    if (forgottenMecha?.mode !== 'dying') return;
+    const time = forgottenMecha.animationTime;
+    const angle = unshakenRotation.angleTo(camera.quaternion) * 180 / Math.PI;
+    if (time >= 40 / 24 && time < 64 / 24) kneeShakePeak = Math.max(kneeShakePeak, angle);
+    else if (time >= 64 / 24) fistShakePeak = Math.max(fistShakePeak, angle);
+};
 const frontCamera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 2000);
 // This is an in-memory fixture preference; no saved user setting is changed.
 userSettings.mobileInput = 'touch';
@@ -40,6 +54,7 @@ setTouchMode(true);
 document.documentElement.requestFullscreen = async () => {};
 window.addEventListener('mecha-review-action', event => {
     const action = (event as CustomEvent<string>).detail;
+    if (action === 'start' || action === 'kill' || action === 'leave') kneeShakePeak = fistShakePeak = 0;
     if (action === 'front') frontReview = !frontReview;
     if (action === 'player-death') takePlayerDamage(50, 'Review');
     if (action === 'start' || action === 'leave') { frontReview = armorReview = bulletFiring = false; }
@@ -263,6 +278,7 @@ function report() {
     status.textContent = actor ? `Mode: ${actor.mode} | HP: ${actor.hp}/50 | Height: 28 m | Walk: ${actor.speed.toFixed(3)} m/s\nPosition: ${actor.group.position.x.toFixed(1)}, ${actor.group.position.z.toFixed(1)} | Player HP: ${state.playerHp} | Active: ${isInputActive()} | Ended: ${state.matchEnded}`
         : `No mecha | Playing: ${state.isPlaying} | Scene: ${Boolean(state.scene)} | Ended: ${state.matchEnded}`;
     if (actor && state.camera) {
+        status.textContent += `\nDefeat shake peaks: knees ${kneeShakePeak.toFixed(3)}° | fists ${fistShakePeak.toFixed(3)}° | Grounded: ${state.canJump}`;
         status.textContent += `\nCockpit available: ${actor.canMount} | Hook: ${state.hookState}${state.hookTargetCockpit ? ' cockpit' : ''} | Mounted: ${actor.ownsPilot} | Clip time: ${actor.animationTime.toFixed(2)}s | Eye: #${(actor.group.getObjectByName('M_EyeLens') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | undefined)?.material.color.getHexString() ?? 'loading'} | Energy: ${(actor.combat.energy * 100).toFixed(1)}% | Shield build: ${actor.combat.manualBuild.toFixed(2)} | Rockets: ${actor.pilot.rockets.activeCount} | Fire phase: ${Number.isFinite(actor.firingTime) ? actor.firingTime.toFixed(2) : 'idle'}s | Helmet: ${actor.helmetClosed ? 'closed' : actor.helmetProgress.toFixed(2)} | Rocket reload: ${actor.pilot.cooldown.toFixed(2)}s | Lock: ${actor.pilot.rockets.selected?.index ?? 'none'} | FOV: ${state.camera.fov.toFixed(1)} | Third person: ${state.isThirdPersonView} | Score: ${state.score}`;
         status.textContent += `\nLaser: ${actor.combat.laserPhase} | Reload: ${actor.combat.reloadRemaining.toFixed(2)} s | Shots: ${actor.combat.shotCount} | Shield: ${actor.combat.shieldPhase} | Protected: ${actor.combat.shieldActive} | Combat clock: ${actor.combat.clock.toFixed(2)} s\nPlayer body height: ${state.camera.position.y.toFixed(2)} m | Range: ${Math.hypot(state.camera.position.x - actor.group.position.x, state.camera.position.z - actor.group.position.z).toFixed(2)} m | Beam: ${actor.combat.beamLength.toFixed(1)} m | Direction: ${actor.combat.beamDirection.toArray().map(n => n.toFixed(3)).join(', ')}`;
         const waist = actor.group.getObjectByName('CTRL_WaistYaw')?.quaternion;

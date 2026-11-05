@@ -9,6 +9,7 @@ interface Actions {
     keyDown(code: string): void;
     keyUp(code: string): void;
     fire(held: boolean): void;
+    cancelFire?(): void;
     layout?(bounds: TouchBounds): void;
 }
 
@@ -54,11 +55,16 @@ export function setupMobileControls(actions: Actions): () => void {
         if (entry.element.hasPointerCapture(id)) entry.element.releasePointerCapture(id);
     }
     function reset(): void {
+        actions.cancelFire?.();
         for (const id of [...held.keys()]) release(id);
         touchMove.x = touchMove.y = 0;
     }
     for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-        layer.addEventListener(event, e => release((e as PointerEvent).pointerId));
+        layer.addEventListener(event, e => {
+            const id=(e as PointerEvent).pointerId;
+            if(event !== 'pointerup' && held.get(id)?.element.hasAttribute('data-fire')) actions.cancelFire?.();
+            release(id);
+        });
     }
     function moveStick(e: PointerEvent): void {
         const rect = stick.getBoundingClientRect();

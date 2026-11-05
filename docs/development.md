@@ -97,6 +97,11 @@ resource ownership. Focused checks are in `tests/forgottenMecha.test.ts`,
 Armor hit setup holds the vulnerable actor still for actual bullet/sniper shots;
 continuous firing, pause-on-impact, night lighting and temporary 20%/100% particle
 controls support dust/spark review without saving graphics settings.
+For defeat shake, set Distance to 150–200 m and Body height to 80 m, enable
+Hold height, then Find Mecha and Kill Mecha. The status reports separate knee/fist
+render-rotation peaks and grounding; both impacts should visibly shake while
+airborne. Repeat beyond 200 m for no shake. These controls also work at ground
+height and in third person; ordinary stomp shake still stops at 50 m.
 Mounting controls additionally expose cockpit aim/grapple, turning, forward/reverse
 movement, third-person view, targets ahead, rocket firing and a held shield.
 Fitted pillar approach, leg-supported stomp and sideways defeat controls review
@@ -446,3 +451,9 @@ Run the focused suites during iteration, then `npm run check` and
 joiner; use the checklist in [Forgotten Mecha](forgotten-mecha.md#multiplayer-acceptance).
 Update [Multiplayer live test](multiplayer-live-test.md) with dated results and
 separate local fixtures from deployed service/device verification.
+
+### Katana review
+
+`/tests/katana-preview.html` exercises production melee input, charge, area damage,
+HUD and temporary gentle-effects/third-person settings. See [Katana](katana.md)
+for expected target HP and authority regression coverage.

@@ -139,8 +139,14 @@ losing the mecha restores the equipped player's weapon icon.
   and normalized incoming direction. Every viewer draws it once; replicated
   visual bullets do not add another burst. Clients cannot supply effect contacts.
 - At zero HP, Death cancels navigation and any pending attack. Its knee and fist
-  impacts each create debris and lighter shake within 50 m. Eye emission fades
-  out, and the final open, kneeling pose remains solid. Normal gameplay continues;
+  impacts each create debris and a distinct 0.65-second camera-shake pulse at
+  exported frames 40 and 64 (1.67 and 2.67 seconds into Death). Defeat shake
+  reaches 200 m horizontally from the mecha, fading with distance while remaining
+  noticeable at the edge. Jumping, hovering and standing on roofs receive the
+  same shake as grounded players at that horizontal distance, including through
+  cover and beyond render distance. Ordinary stomp shake retains its 50 m reach.
+  Eye emission fades out, and the final open, kneeling pose remains solid.
+  Normal gameplay continues;
   there is no robot respawn or victory overlay. The cockpit becomes mountable
   after the whole Death clip completes.
 - Reaching the wall commits the loss before the first HeavyPunch animation tick
@@ -926,3 +932,21 @@ The local three-client relay acceptance is recorded in
 [Multiplayer live test](multiplayer-live-test.md). A final focused regression
 also verifies that a blocked-exit recovery flag reaches the owning client
 camera without taking over an observer camera.
+
+## Charged katana rear-nape weak spot
+
+`MechaNape` fits an invisible box to `M_HelmetShell` in the neutral head's
+anatomical frame. The eye-facing direction defines front; world up in the neutral
+pose defines height. Its dimensions are 60% helmet width, 30% height and 30% depth,
+centered on the lower rear edge. The fitted frame is attached to `CTRL_Head`, so
+head animation, turning and piloted motion carry the volume with them.
+
+During a fully charged katana's existing active damage window, the host checks
+this box first using accepted attacker poses. The attacker must be behind its
+anatomical rear edge and have an unobstructed volume contact within 10 m.
+Close contact inside the rear half of the enlarged box remains valid. An accepted
+contact deals remaining HP through `damage`, preserving shields, protected
+phases, kill credit and pilot release. A body hit already accepted for that
+Mecha revision in the swing prevents a subsequent nape execution. Normal swings
+remain ordinary body damage. The volume is never included in movement colliders
+or firearm hitboxes. Disposal detaches its anchor with the model lifecycle.

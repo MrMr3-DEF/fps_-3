@@ -4,10 +4,10 @@ import { WeaponIndicator, selectedWeaponIcon } from '../src/weaponIndicator.ts';
 import { WEAPON_INDICATOR_ICONS } from '../src/weaponIndicatorIcons.ts';
 import { getTouchControlRect, getWeaponIndicatorTouchBottom, type TouchLayout } from '../src/mobileControlLayout.ts';
 
-test('all five weapons and both mecha attacks have distinct, flat vector silhouettes', () => {
+test('all six weapons and both mecha attacks have distinct, flat vector silhouettes', () => {
     const icons = Object.values(WEAPON_INDICATOR_ICONS);
-    assert.equal(icons.length, 7);
-    assert.equal(new Set(icons.map(icon => icon.svg)).size, 7);
+    assert.equal(icons.length, 8);
+    assert.equal(new Set(icons.map(icon => icon.svg)).size, 8);
     for (const { svg } of icons) {
         assert.match(svg, /fill="#fff"/);
         const dimensions = svg.match(/viewBox="([^"]+)"/)![1].split(' ').map(Number);

@@ -20,6 +20,10 @@ export const WEAPON_INDICATOR_ICONS = {
         "label": "Minigun",
         "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-0.1 -0.1 90.2 26.2\" fill=\"#fff\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M0 8L18 8L18 26L0 26Z\"/><path d=\"M0 2L4 2L4 14L0 14Z\"/><path d=\"M2 0L17 0L17 4L2 4Z\"/><path d=\"M18 15L90 15L90 19L18 19Z\"/><path d=\"M18 8.938L90 8.938L90 12.938L18 12.938Z\"/><path d=\"M18 21.062L90 21.062L90 25.062L18 25.062Z\"/><path d=\"M53.25 8L54.75 8L54.75 26L53.25 26Z\"/><path d=\"M54.2 12.5L56.2 12.5L56.2 21.5L54.2 21.5Z\"/></svg>"
     },
+    "KATANA": {
+        "label": "Katana",
+        "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 128 64\" fill=\"#fff\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M29.586 37.135 L35.910 34.263 L42.292 31.519 L48.734 28.900 L55.235 26.409 L61.795 24.044 L68.414 21.806 L75.092 19.694 L81.829 17.710 L88.625 15.851 L95.480 14.120 L102.394 12.515 L109.368 11.037 L120.000 14.786 L112.294 17.313 L105.321 18.791 L98.407 20.396 L91.551 22.127 L84.755 23.985 L78.018 25.970 L71.340 28.082 L64.721 30.320 L58.161 32.685 L51.660 35.176 L45.219 37.794 L38.836 40.539 L32.512 43.411 Z\"/><path d=\"M25.895 35.125 L31.679 47.531 L33.723 46.578 L27.938 34.172 Z\"/><path d=\"M8.000 48.000 L10.314 52.963 L30.017 43.775 L27.703 38.813 Z\"/></svg>"
+    },
     "ROCKET": {
         "label": "Mecha rocket",
         "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-0.1 -0.1 320.2 190.2\" fill=\"#fff\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M0 0L240 19L240 171L0 190Z\"/><path d=\"M240 19L320 95L240 171Z\"/></svg>"
