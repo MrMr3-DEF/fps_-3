@@ -187,7 +187,7 @@ test('analog movement preserves partial speed, caps diagonals and is ignored whi
     touchMove.x = touchMove.y = 0;
 });
 
-test('normal jumps reach 90% of player height across frame rates and reset on landing', async () => {
+test('normal jumps reach 135% of player height across frame rates and reset on landing', async () => {
     const { NORMAL_JUMP_FORCE, PLAYER_HEIGHT } = await import('../src/config.ts');
     for (const fps of [30, 60, 120, 240]) {
         state.camera = new THREE.PerspectiveCamera();
@@ -208,7 +208,7 @@ test('normal jumps reach 90% of player height across frame rates and reset on la
             peak = Math.max(peak, state.camera.position.y - PLAYER_HEIGHT);
             if (state.canJump) break;
         }
-        assert.ok(Math.abs(peak - PLAYER_HEIGHT * 0.9) < 0.06, `${fps} FPS: peak ${peak}`);
+        assert.ok(Math.abs(peak - PLAYER_HEIGHT * 1.35) < 0.06, `${fps} FPS: peak ${peak}`);
         assert.equal(state.canJump, true);
         assert.equal(state.normalJumpActive, false);
         assert.equal(state.camera.position.y, PLAYER_HEIGHT);

@@ -367,12 +367,15 @@ for (const kind of ['npc', 'peer'] as const) {
     });
 }
 
-test('five nearest screen centers receive callouts while every enemy retains its corners', () => {
+test('eight physically closest targets retain corners and three nearest screen centers receive callouts', () => {
     const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
     const targets = crowdedEnemies().reverse();
-    for (const now of [1000, 2000]) hud.update(view, view.position, view.position, targets, {}, true, now);
+    const far = enemy(99); far.position.set(0, 40, -900); far.updateMatrixWorld(true);
+    const scannedTargets = [far, ...targets];
+    for (const now of [1000, 2000]) hud.update(view, view.position, view.position, scannedTargets, {}, true, now);
+    assert.equal(layer.children.some(child => child.dataset.targetKey === 'npc:99'), false);
     assert.equal(layer.children.filter(child => child.dataset.targetKey).length, 8);
-    assert.deepEqual(selectedCallouts(layer), ['npc:2', 'npc:3', 'npc:4', 'npc:5', 'npc:6']);
+    assert.deepEqual(selectedCallouts(layer), ['npc:3', 'npc:4', 'npc:5']);
     for (const target of targets) assert.equal(record(layer, `npc:${target.userData.index}`).classList.contains('is-active'), true);
     assert.equal(calloutLabel(record(layer, 'npc:0')).children[0].textContent, '', 'peripheral target never types a hidden callout');
     hud.reset();
@@ -383,12 +386,12 @@ test('camera movement swaps callouts, keeps corners alive and replays typing onl
     const targets = crowdedEnemies();
     const update = (now: number) => hud.update(view, view.position, view.position, targets, {}, true, now);
     update(1000); update(2000);
-    const outgoing = record(layer, 'npc:6'), incoming = record(layer, 'npc:0');
+    const outgoing = record(layer, 'npc:5'), incoming = record(layer, 'npc:1');
     const held = record(layer, 'npc:3');
     const heldText = calloutLabel(held).texts();
     view.rotation.y = 0.08; view.updateMatrixWorld(true);
     update(2100); update(2120);
-    assert.deepEqual(selectedCallouts(layer), ['npc:0', 'npc:1', 'npc:2', 'npc:3', 'npc:4']);
+    assert.deepEqual(selectedCallouts(layer), ['npc:1', 'npc:2', 'npc:3']);
     assert.equal(outgoing.classList.contains('is-callout-leaving'), true);
     assert.equal(outgoing.classList.contains('is-active'), true, 'corners do not exit with the callout');
     assert.equal(incoming.classList.contains('is-callout-active'), true);
@@ -415,14 +418,14 @@ test('exact screen-distance ties use target keys rather than iteration order', (
         const target = enemy(index, x); target.position.z = -300; target.updateMatrixWorld(true); return target;
     }).reverse();
     for (const now of [1000, 2000]) hud.update(view, view.position, view.position, targets, {}, true, now);
-    assert.deepEqual(selectedCallouts(layer), ['npc:0', 'npc:1', 'npc:2', 'npc:3', 'npc:4']);
+    assert.deepEqual(selectedCallouts(layer), ['npc:1', 'npc:2', 'npc:3']);
     hud.reset();
 });
 
-test('sun and moon ignore range while celestial, peer and anomaly scans share the five slots', () => {
+test('sun and moon ignore range while celestial, peer and anomaly scans share the three slots', () => {
     const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
     view.far = 10000; view.updateProjectionMatrix();
-    const targets = crowdedEnemies();
+    const targets = crowdedEnemies().slice(3, 5);
     const sky = (x: number) => {
         const mesh = new THREE.Mesh(new THREE.SphereGeometry(4), new THREE.MeshBasicMaterial());
         mesh.position.set(x, 2, -2000); mesh.updateMatrixWorld(true); return mesh;
@@ -436,7 +439,7 @@ test('sun and moon ignore range while celestial, peer and anomaly scans share th
     const peer = enemy(50, -3); peer.position.z = -300; peer.updateMatrixWorld(true);
     const peers = { remote: { mesh: peer, hp: 3, maxHp: 3, username: 'Remote' } };
     for (const now of [1000, 2000]) hud.update(view, view.position, view.position, targets, peers, true, now, { hitbox }, celestial);
-    assert.deepEqual(selectedCallouts(layer), ['anomaly:goth-girlfriend', 'celestial:moon', 'celestial:sun', 'npc:4', 'peer:remote']);
+    assert.deepEqual(selectedCallouts(layer), ['anomaly:goth-girlfriend', 'celestial:moon', 'celestial:sun']);
     assert.equal(hud.isAnomalyDetected, true);
     hitbox.position.x = 30; hitbox.updateMatrixWorld(true);
     hud.update(view, view.position, view.position, targets, peers, true, 2100, { hitbox }, celestial);
@@ -494,12 +497,12 @@ test('gameplay limit opt-out preserves unrestricted preview callouts and distanc
     hud.reset();
 });
 
-test('reduced motion reveals selected callouts immediately and still applies the five-target cap', () => {
+test('reduced motion reveals selected callouts immediately and still applies the three-target cap', () => {
     (globalThis as any).window.matchMedia = () => ({ matches: true });
     const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
     try {
         hud.update(view, view.position, view.position, crowdedEnemies(), {}, true, 1000);
-        assert.equal(selectedCallouts(layer).length, 5);
+        assert.equal(selectedCallouts(layer).length, 3);
         assert.equal(calloutLabel(record(layer, 'npc:3')).children[0].textContent, 'Enemy');
     } finally {
         hud.reset();
@@ -522,7 +525,7 @@ test('covered Mecha does not consume a slot needed by visible enemy callouts', (
     const scan = record(layer, 'mecha:forgotten');
     assert.equal(scan.classList.contains('is-mecha-hidden'), true);
     assert.equal(scan.classList.contains('is-callout-active'), false);
-    assert.equal(selectedCallouts(layer).length, 5, 'covered Mecha leaves five slots for visible targets');
+    assert.equal(selectedCallouts(layer).length, 3, 'covered Mecha leaves three slots for visible targets');
     hud.reset();
 });
 

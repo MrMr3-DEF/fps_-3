@@ -2,7 +2,7 @@ import { worldGeneration } from './world.js';
 import { hasLineOfSightToOrientedBox as boxLineOfSight, type TargetObstacleQuery } from './targetVisibility.js';
 import * as THREE from 'three';
 import { userSettings } from './settings.js';
-import { BULLET_TRAVEL_DISTANCE, GOGGLES_SCAN_DISTANCE, GOGGLES_MAX_CALLOUTS, MECHA_HEIGHT } from './config.js';
+import { BULLET_TRAVEL_DISTANCE, GOGGLES_SCAN_DISTANCE, GOGGLES_MAX_CALLOUTS, GOGGLES_MAX_TARGETS, MECHA_HEIGHT } from './config.js';
 import type { ForgottenMecha } from './forgottenMecha.js';
 import type { RocketLock } from './mechaRockets.js';
 import {
@@ -723,7 +723,10 @@ export class SmartGogglesHud {
             );
         }
 
-        if (this.gameplayLimits) this.updateCalloutSelection(viewportWidth, viewportHeight, now);
+        if (this.gameplayLimits) {
+            this.limitVisualTargets(playerPosition);
+            this.updateCalloutSelection(viewportWidth, viewportHeight, now);
+        }
 
         // Clear the candidate through the normal lock lifecycle so switching to
         // a hitscan weapon also cancels a pending or completed red lock.
@@ -878,6 +881,22 @@ export class SmartGogglesHud {
         return true;
     }
 
+    private limitVisualTargets(playerPosition: THREE.Vector3): void {
+        // Include exit animations in the budget so retiring scans cannot exceed
+        // the visual cap. Physical distance is independent of screen position.
+        const candidates = [...this.records.values(), ...this.retiringRecords];
+        candidates.sort((a, b) =>
+            playerPosition.distanceToSquared(a.lastDistancePosition) - playerPosition.distanceToSquared(b.lastDistancePosition) ||
+            a.targetKey.localeCompare(b.targetKey));
+        for (const record of candidates.slice(GOGGLES_MAX_TARGETS)) {
+            record.root.remove();
+            if (this.records.get(record.targetKey) === record) this.records.delete(record.targetKey);
+            this.retiringRecords.delete(record);
+            if (this.bestHomingCandidate?.record === record) this.bestHomingCandidate = null;
+        }
+        if (!this.records.has('anomaly:goth-girlfriend')) this.anomalyDetectedThisFrame = false;
+    }
+
     private updateCalloutSelection(viewportWidth: number, viewportHeight: number, now: number): void {
         const candidates = this.calloutCandidates;
         candidates.length = 0;
@@ -891,7 +910,7 @@ export class SmartGogglesHud {
                 candidates[index].calloutAimScore < record.calloutAimScore ||
                 (candidates[index].calloutAimScore === record.calloutAimScore && candidates[index].targetKey < record.targetKey)
             )) index++;
-            // Keep a bounded top five rather than sorting every detected enemy.
+            // Keep a bounded top three rather than sorting every detected enemy.
             if (index >= GOGGLES_MAX_CALLOUTS) continue;
             candidates.splice(index, 0, record);
             if (candidates.length > GOGGLES_MAX_CALLOUTS) candidates.pop();
@@ -900,7 +919,7 @@ export class SmartGogglesHud {
             const selected = candidates.includes(record);
             if (selected && !record.calloutSelected) {
                 // Restart only this callout. Corner acquisition and homing keep
-                // their own clocks even when a target crosses the fifth slot.
+                // their own clocks even when a target crosses the third slot.
                 const reversingExit = now < record.calloutLeavingUntil;
                 record.calloutActivateAt = now + (this.reducedMotion || reversingExit ? 0 : ENTER_DELAY_MS);
                 record.typeStartedAt = now + (this.reducedMotion ? 0 : SCAN_TYPE_START_DELAY_MS);

@@ -113,7 +113,8 @@ export const SWITCH_DURATION = 0.15;
 export const BULLET_TRAVEL_DISTANCE = 700;
 // Presentation range and callout density are independent of weapon reach.
 export const GOGGLES_SCAN_DISTANCE = 1200;
-export const GOGGLES_MAX_CALLOUTS = 5;
+export const GOGGLES_MAX_TARGETS = 8;
+export const GOGGLES_MAX_CALLOUTS = 3;
 export const PROJECTILE_SPEED = 900;
 // Projectile lifetime is a defensive timeout with a small buffer beyond the
 // roughly 0.78-second flight to 700 m at the current 900 m/s speed. Travel
@@ -150,8 +151,8 @@ export const PLAYER_HEIGHT = 2.0;
 // Keep the camera's 0.1-unit near plane fully below ceilings, including at the
 // widest supported FOV, so a head impact cannot briefly reveal the roof top.
 export const CAMERA_CEILING_CLEARANCE = 0.15;
-export const NORMAL_JUMP_HEIGHT = PLAYER_HEIGHT * 0.9;
-// A 25% longer normal hop, with the same peak height.
+export const NORMAL_JUMP_HEIGHT = PLAYER_HEIGHT * 1.35;
+// Softer gravity preserves the normal hop’s slower pacing.
 export const NORMAL_JUMP_GRAVITY = BASE_GRAVITY / (1.25 * 1.25);
 export const NORMAL_JUMP_FORCE = Math.sqrt(2 * NORMAL_JUMP_GRAVITY * NORMAL_JUMP_HEIGHT);
 export const PLAYER_MAX_HP = 10;
