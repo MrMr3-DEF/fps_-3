@@ -1,3 +1,4 @@
+import { createCornerScan, createInfoOverview, setScanStyle, setScanAttribute } from './gogglesScanTemplates.js';
 import { worldGeneration } from './world.js';
 import { hasLineOfSightToOrientedBox as boxLineOfSight, type TargetObstacleQuery } from './targetVisibility.js';
 import * as THREE from 'three';
@@ -101,6 +102,7 @@ interface TargetLockRecord {
     killMark: SVGSVGElement;
     path: SVGPathElement;
     label: HTMLDivElement;
+    panel: HTMLDivElement;
     measure: HTMLSpanElement;
     labelWidth: number;
     naturalLabelWidth: number;
@@ -133,6 +135,20 @@ interface TargetLockRecord {
     calloutAimScore: number;
     lobbyOrder: number;
     lobbyPlan?: LobbyCalloutPlan;
+}
+
+type ScanArguments = [
+    targetKey: string, targetRevision: number, variant: TargetVariant, identifierText: string,
+    bounds: ScreenBounds, worldPosition: THREE.Vector3, worldHalfWidth: number, worldHalfHeight: number,
+    centerDistance: number, reachableDistance: number, hp: number, maxHp: number,
+    viewportWidth: number, viewportHeight: number, now: number, lobbyOrder?: number,
+];
+
+interface ScanObservation {
+    args: ScanArguments;
+    distancePosition: THREE.Vector3;
+    homingTarget?: ProjectileHomingTarget;
+    mechaHidden?: boolean;
 }
 
 interface HomingCandidate {
@@ -200,10 +216,10 @@ function setCornerGeometry(
     centerX: number,
     centerY: number,
 ): void {
-    corner.style.left = `${x.toFixed(1)}px`;
-    corner.style.top = `${y.toFixed(1)}px`;
-    corner.style.setProperty('--goggles-collapse-x', `${(centerX - x - CORNER_SIZE / 2).toFixed(1)}px`);
-    corner.style.setProperty('--goggles-collapse-y', `${(centerY - y - CORNER_SIZE / 2).toFixed(1)}px`);
+    setScanStyle(corner, 'left', `${x.toFixed(1)}px`);
+    setScanStyle(corner, 'top', `${y.toFixed(1)}px`);
+    setScanStyle(corner, '--goggles-collapse-x', `${(centerX - x - CORNER_SIZE / 2).toFixed(1)}px`);
+    setScanStyle(corner, '--goggles-collapse-y', `${(centerY - y - CORNER_SIZE / 2).toFixed(1)}px`);
 }
 
 function setHomingCornerGeometry(
@@ -220,8 +236,8 @@ function setHomingCornerGeometry(
     const markerCenterRadius = Math.max(0, radius - vertexOffset);
     const x = centerX + directionX * markerCenterRadius - CORNER_SIZE / 2;
     const y = centerY + directionY * markerCenterRadius - CORNER_SIZE / 2;
-    corner.style.left = `${x.toFixed(1)}px`;
-    corner.style.top = `${y.toFixed(1)}px`;
+    setScanStyle(corner, 'left', `${x.toFixed(1)}px`);
+    setScanStyle(corner, 'top', `${y.toFixed(1)}px`);
 }
 
 function padBounds(bounds: ScreenBounds): void {
@@ -325,6 +341,8 @@ function ensureAnomalyTearFilters(layer: HTMLElement): void {
 export class SmartGogglesHud {
     private readonly records = new Map<string, TargetLockRecord>();
     private readonly retiringRecords = new Set<TargetLockRecord>();
+    private readonly availableRecords: TargetLockRecord[] = [];
+    private readonly observations: ScanObservation[] = [];
     private worldGeneration = -1;
     private readonly hiddenHealthBars = new Map<THREE.Object3D, boolean>();
     private readonly layer: HTMLElement;
@@ -357,6 +375,7 @@ export class SmartGogglesHud {
         this.lobbyAvoidElements = options?.lobbyAvoidElements ?? [];
         this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
         ensureAnomalyTearFilters(layer);
+        for (let i = 0; i < GOGGLES_MAX_TARGETS; i++) this.availableRecords.push(this.buildRecord());
     }
 
     get isAnomalyDetected(): boolean {
@@ -395,6 +414,7 @@ export class SmartGogglesHud {
         }
 
         this.active = true;
+        this.observations.length = 0;
         this.frame++;
         this.occupiedLobbyLabels.length = 0;
         if (this.lobbyPreview) {
@@ -486,7 +506,7 @@ export class SmartGogglesHud {
                 localBox,
                 data.bodyMesh.matrixWorld,
             );
-            const trackedRecord = this.trackTarget(
+            const trackedRecord = this.observeTarget(
                 targetKey,
                 targetRevision,
                 'enemy',
@@ -503,19 +523,12 @@ export class SmartGogglesHud {
                 viewportHeight,
                 now,
             );
-            this.considerHomingTarget(
-                trackedRecord,
-                projectionBounds,
-                viewportWidth,
-                viewportHeight,
-                playerPosition.distanceTo(_bodyCenter),
-                {
+            trackedRecord.homingTarget = {
                     kind: 'npc',
                     object: target,
                     targetIndex: data.index,
                     targetRevision,
-                },
-            );
+            };
         }
 
         for (const [peerId, peer] of Object.entries(peers)) {
@@ -558,7 +571,7 @@ export class SmartGogglesHud {
             _bodyCenter.copy(stablePeerEnvelope.center).applyMatrix4(peer.mesh.matrixWorld);
             peer.mesh.getWorldPosition(_peerRootPosition);
             const peerWorldScale = peer.mesh.matrixWorld.getMaxScaleOnAxis();
-            const trackedRecord = this.trackTarget(
+            const trackedRecord = this.observeTarget(
                 targetKey,
                 0,
                 'peer',
@@ -576,20 +589,13 @@ export class SmartGogglesHud {
                 now,
                 peer.lobbyOrder ?? 0,
             );
-            trackedRecord.lastDistancePosition.copy(_peerRootPosition);
-            if (!this.lobbyPreview) this.considerHomingTarget(
-                trackedRecord,
-                projectionBounds,
-                viewportWidth,
-                viewportHeight,
-                playerPosition.distanceTo(_peerRootPosition),
-                {
+            trackedRecord.distancePosition.copy(_peerRootPosition);
+            if (!this.lobbyPreview) trackedRecord.homingTarget = {
                     kind: 'peer',
                     object: peer.mesh,
                     targetPeerId: peerId,
                     targetLifeId: peer.lifeId ?? 0,
-                },
-            );
+            };
         }
 
         if (mecha?.ready) {
@@ -606,13 +612,11 @@ export class SmartGogglesHud {
             _anomalyEnvelope.halfHeight = MECHA_HEIGHT / 2;
             if (!this.rejectBeyondScanRange(key, playerPosition.distanceTo(hitbox.position)) && mecha.hp > 0 && _cameraFrustum.intersectsObject(hitbox) && projectStableTargetEnvelopeToScreen(_anomalyEnvelope, _worldIdentity, camera, viewportWidth, viewportHeight, bounds)) {
                 const visible = hasLineOfSightToOrientedBox(camera.position, box, hitbox.matrixWorld, queryMechaOccluders, _enemyOccluders);
-                const record = this.trackTarget(key, mecha.revision, 'enemy', 'Forgotten Mecha', bounds, hitbox.position,
+                const record = this.observeTarget(key, mecha.revision, 'enemy', 'Forgotten Mecha', bounds, hitbox.position,
                     mecha.radius, MECHA_HEIGHT / 2, playerPosition.distanceTo(hitbox.position), distanceToOrientedBox(weaponOrigin, box, hitbox.matrixWorld),
                     mecha.hp, mecha.maxHp, viewportWidth, viewportHeight, now);
-                record.root.classList.toggle('is-mecha-hidden', !visible);
-                record.root.classList.toggle('is-mecha-steady', this.reducedMotion || userSettings.photosensitivityMode);
-                if (visible) this.considerHomingTarget(record, bounds, viewportWidth, viewportHeight, playerPosition.distanceTo(hitbox.position),
-                    { kind: 'mecha', object: mecha.group, actor: mecha, targetRevision: mecha.revision });
+                record.mechaHidden = !visible;
+                if (visible) record.homingTarget = { kind: 'mecha', object: mecha.group, actor: mecha, targetRevision: mecha.revision };
             }
         }
 
@@ -647,7 +651,7 @@ export class SmartGogglesHud {
                     projectionBounds,
                 )) {
                     const anomalyWorldScale = hitbox.matrixWorld.getMaxScaleOnAxis();
-                    this.trackTarget(
+                    this.observeTarget(
                         targetKey,
                         0,
                         'anomaly',
@@ -704,7 +708,7 @@ export class SmartGogglesHud {
             )) continue;
 
             _bodyCenter.copy(localSphere.center).applyMatrix4(mesh.matrixWorld);
-            this.trackTarget(
+            this.observeTarget(
                 targetKey,
                 0,
                 'celestial',
@@ -723,10 +727,8 @@ export class SmartGogglesHud {
             );
         }
 
-        if (this.gameplayLimits) {
-            this.limitVisualTargets(playerPosition);
-            this.updateCalloutSelection(viewportWidth, viewportHeight, now);
-        }
+        this.assignVisualTargets(playerPosition);
+        if (this.gameplayLimits) this.updateCalloutSelection(viewportWidth, viewportHeight, now);
 
         // Clear the candidate through the normal lock lifecycle so switching to
         // a hitscan weapon also cancels a pending or completed red lock.
@@ -746,7 +748,7 @@ export class SmartGogglesHud {
             if (record.seenFrame === this.frame) continue;
             if (record.phase !== 'leaving') this.beginLeaving(record, now);
             if (now >= record.removeAt) {
-                record.root.remove();
+                this.releaseRecord(record);
                 this.records.delete(targetKey);
             }
         }
@@ -756,10 +758,25 @@ export class SmartGogglesHud {
                 record.phase === 'eliminated' &&
                 !this.updateEliminatedGeometry(record, camera, viewportWidth, viewportHeight)
             )) {
-                record.root.remove();
+                this.releaseRecord(record);
                 this.retiringRecords.delete(record);
             }
         }
+    }
+
+    private observeTarget(...args: ScanArguments): ScanObservation {
+        const [targetKey, , , , bounds, worldPosition] = args;
+        const previous = this.records.get(targetKey);
+        if (previous && previous.lastWorldPosition.distanceToSquared(worldPosition) > TELEPORT_DISTANCE_SQ) {
+            this.retire(previous, args[14]);
+            this.records.delete(targetKey);
+        }
+        // Projection and center scratch objects are shared across the detection pass.
+        args[4] = { ...bounds };
+        args[5] = worldPosition.clone();
+        const observation = { args, distancePosition: worldPosition.clone() };
+        this.observations.push(observation);
+        return observation;
     }
 
     private trackTarget(
@@ -781,16 +798,12 @@ export class SmartGogglesHud {
         lobbyOrder = 0,
     ): TargetLockRecord {
         let record = this.records.get(targetKey);
-        if (record && record.lastWorldPosition.distanceToSquared(worldPosition) > TELEPORT_DISTANCE_SQ) {
-            this.retire(record, now);
-            this.records.delete(targetKey);
-            record = undefined;
-        }
         if (!record) {
             record = this.createRecord(targetKey, targetRevision, variant, bounds, now);
             this.records.set(targetKey, record);
         }
 
+        Object.assign(record.bounds, bounds);
         record.seenFrame = this.frame;
         record.lobbyOrder = lobbyOrder;
         record.lastIdentifierText = identifierText;
@@ -862,6 +875,7 @@ export class SmartGogglesHud {
             record.root.classList.add('is-active');
             record.phase = 'tracking';
         } else if (record.phase === 'entering' && now >= record.activateAt) {
+            record.root.classList.remove('is-resetting');
             record.root.classList.add('is-active');
             record.phase = 'tracking';
         }
@@ -871,30 +885,59 @@ export class SmartGogglesHud {
     /** Range and callout visibility never change weapon reachability. */
     private rejectBeyondScanRange(targetKey: string, distance: number): boolean {
         if (!this.gameplayLimits || targetKey.startsWith('celestial:') || distance <= GOGGLES_SCAN_DISTANCE) return false;
-        this.records.get(targetKey)?.root.remove();
+        const record = this.records.get(targetKey);
+        if (record) this.releaseRecord(record);
         this.records.delete(targetKey);
         for (const record of this.retiringRecords) {
             if (record.targetKey !== targetKey) continue;
-            record.root.remove();
+            this.releaseRecord(record);
             this.retiringRecords.delete(record);
         }
         return true;
     }
 
-    private limitVisualTargets(playerPosition: THREE.Vector3): void {
-        // Include exit animations in the budget so retiring scans cannot exceed
-        // the visual cap. Physical distance is independent of screen position.
-        const candidates = [...this.records.values(), ...this.retiringRecords];
-        candidates.sort((a, b) =>
-            playerPosition.distanceToSquared(a.lastDistancePosition) - playerPosition.distanceToSquared(b.lastDistancePosition) ||
-            a.targetKey.localeCompare(b.targetKey));
-        for (const record of candidates.slice(GOGGLES_MAX_TARGETS)) {
-            record.root.remove();
-            if (this.records.get(record.targetKey) === record) this.records.delete(record.targetKey);
-            this.retiringRecords.delete(record);
-            if (this.bestHomingCandidate?.record === record) this.bestHomingCandidate = null;
+    private assignVisualTargets(playerPosition: THREE.Vector3): void {
+        const observedKeys = new Set(this.observations.map(observation => observation.args[0]));
+        const candidates: Array<ScanObservation | TargetLockRecord> = [
+            ...this.observations,
+            ...[...this.records.values()].filter(record => !observedKeys.has(record.targetKey)),
+            ...this.retiringRecords,
+        ];
+        const position = (candidate: ScanObservation | TargetLockRecord) =>
+            'args' in candidate ? candidate.distancePosition : candidate.lastDistancePosition;
+        const key = (candidate: ScanObservation | TargetLockRecord) =>
+            'args' in candidate ? candidate.args[0] : candidate.targetKey;
+        if (this.gameplayLimits) candidates.sort((a, b) =>
+            playerPosition.distanceToSquared(position(a)) - playerPosition.distanceToSquared(position(b)) ||
+            key(a).localeCompare(key(b)));
+        const selected = this.gameplayLimits ? candidates.slice(0, GOGGLES_MAX_TARGETS) : candidates;
+        const selectedObservations = new Set(selected.filter((entry): entry is ScanObservation => 'args' in entry));
+        const selectedKeys = new Set([...selectedObservations].map(entry => entry.args[0]));
+        // Release losers before binding incoming targets: even crowded scenes never
+        // allocate beyond the gameplay pool, including outgoing confirmations.
+        for (const [targetKey, record] of this.records) {
+            if (selected.includes(record) || selectedKeys.has(targetKey)) continue;
+            this.releaseRecord(record);
+            this.records.delete(targetKey);
         }
-        if (!this.records.has('anomaly:goth-girlfriend')) this.anomalyDetectedThisFrame = false;
+        for (const record of this.retiringRecords) {
+            if (selected.includes(record)) continue;
+            this.releaseRecord(record);
+            this.retiringRecords.delete(record);
+        }
+        for (const observation of this.observations) {
+            if (!selectedObservations.has(observation)) continue;
+            const record = this.trackTarget(...observation.args);
+            record.lastDistancePosition.copy(observation.distancePosition);
+            if (observation.mechaHidden !== undefined) {
+                record.root.classList.toggle('is-mecha-hidden', observation.mechaHidden);
+                record.root.classList.toggle('is-mecha-steady', this.reducedMotion || userSettings.photosensitivityMode);
+            }
+            if (observation.homingTarget) this.considerHomingTarget(record, record.bounds,
+                observation.args[12], observation.args[13], observation.args[8], observation.homingTarget);
+        }
+        this.observations.length = 0;
+        if (this.gameplayLimits && !this.records.has('anomaly:goth-girlfriend')) this.anomalyDetectedThisFrame = false;
     }
 
     private updateCalloutSelection(viewportWidth: number, viewportHeight: number, now: number): void {
@@ -974,10 +1017,11 @@ export class SmartGogglesHud {
     }
 
     reset(): void {
-        for (const record of this.records.values()) record.root.remove();
-        for (const record of this.retiringRecords) record.root.remove();
+        for (const record of this.records.values()) this.releaseRecord(record);
+        for (const record of this.retiringRecords) this.releaseRecord(record);
         this.records.clear();
         this.calloutCandidates.length = 0;
+        this.observations.length = 0;
         this.retiringRecords.clear();
         for (const [healthBar, wasVisible] of this.hiddenHealthBars) healthBar.visible = wasVisible;
         this.hiddenHealthBars.clear();
@@ -1051,29 +1095,74 @@ export class SmartGogglesHud {
         this.records.get(this.homingLockKey)?.root.classList.remove('is-homing-locking', 'is-homing-locked');
     }
 
-    private createRecord(
-        targetKey: string,
-        targetRevision: number,
-        variant: TargetVariant,
-        bounds: ScreenBounds,
-        now: number,
-    ): TargetLockRecord {
-        const root = document.createElement('div');
-        root.className = 'goggles-target-lock';
-        root.classList.toggle('is-callout-managed', this.gameplayLimits);
+    private createRecord(targetKey: string, targetRevision: number, variant: TargetVariant,
+        bounds: ScreenBounds, now: number): TargetLockRecord {
+        // Preview callers may explicitly opt out of the six-target budget.
+        const record = this.availableRecords.pop() ?? this.buildRecord();
+        // A respawn or teleport can retain the key while its old view retracts.
+        // Its new incarnation must still complete both acquisition animations.
+        if (this.homingLockKey === targetKey) {
+            this.homingLockKey = null;
+            this.homingLockStartedAt = Infinity;
+            setProjectileHomingTarget(null);
+        }
+        Object.assign(record, {
+            targetKey, targetRevision, bounds, phase: 'entering', seenFrame: this.frame,
+            labelWidth: LABEL_WIDTH, naturalLabelWidth: LABEL_WIDTH, sizedFor: '',
+            activateAt: now + ENTER_DELAY_MS,
+            scanCompleteAt: now + ENTER_DELAY_MS + (this.reducedMotion ? 1 : SCAN_BRACKET_DURATION_MS),
+            removeAt: Infinity, lastDistanceText: '', lastHealthText: '', lastIdentifierText: '', readoutMode: null,
+            typeStartedAt: now + SCAN_TYPE_START_DELAY_MS, calloutSelected: false,
+            calloutActivateAt: Infinity, calloutLeavingUntil: -Infinity, calloutAimScore: Infinity,
+            lobbyOrder: 0, lobbyPlan: undefined, lastWorldHalfWidth: 0, lastWorldHalfHeight: 0,
+        });
+        const { root, identifier, healthFact, distanceFact, warning, label, measure, panel } = record;
+        root.className = 'goggles-target-lock is-resetting';
         root.dataset.targetKey = targetKey;
+        root.classList.toggle('is-callout-managed', this.gameplayLimits);
         root.classList.toggle('is-peer', variant === 'peer');
         root.classList.toggle('is-lobby-peer', variant === 'peer' && this.lobbyPreview);
         root.classList.toggle('is-anomalous', variant === 'anomaly');
         root.classList.toggle('is-celestial', variant === 'celestial');
+        identifier.classList.toggle('is-corrupted', variant === 'anomaly');
+        healthFact.classList.toggle('is-corrupted', variant === 'anomaly');
+        for (const text of [identifier, measure, distanceFact, healthFact, warning]) text.textContent = '';
+        distanceFact.hidden = false;
+        healthFact.hidden = variant === 'celestial';
+        warning.hidden = true;
+        if (variant === 'peer' && this.customPeerReadout) {
+            this.customPeerReadout.hidden = false;
+            panel.append(this.customPeerReadout);
+        }
+        if (variant === 'peer' && this.lobbyPreview) {
+            panel.remove();
+            label.append(measure, identifier);
+        } else {
+            // Keep measurement first, followed by the unchanged live typing nodes.
+            panel.insertBefore(measure, distanceFact);
+            label.append(identifier, panel);
+        }
+        this.layer.appendChild(root);
+        return record;
+    }
 
-        const cornerClasses = ['tl', 'tr', 'bl', 'br'] as const;
-        const corners = cornerClasses.map((cornerName) => {
-            const corner = document.createElement('div');
-            corner.className = `goggles-target-corner goggles-target-corner--${cornerName}`;
-            root.appendChild(corner);
-            return corner;
-        }) as TargetLockRecord['corners'];
+    private releaseRecord(record: TargetLockRecord): void {
+        record.root.remove();
+        // The interactive color picker belongs to the menu, never to a pooled target.
+        if (this.customPeerReadout?.parentElement === record.panel) this.customPeerReadout.remove();
+        if (this.homingLockKey === record.targetKey &&
+            (!this.records.has(record.targetKey) || this.records.get(record.targetKey) === record)) {
+            this.homingLockKey = null;
+            this.homingLockStartedAt = Infinity;
+            setProjectileHomingTarget(null);
+        }
+        this.availableRecords.push(record);
+    }
+
+    private buildRecord(): TargetLockRecord {
+        const root = document.createElement('div');
+        root.className = 'goggles-target-lock';
+        const corners = createCornerScan(root);
         const homingCornerClasses = ['top', 'right', 'bottom', 'left'] as const;
         const homingCorners = homingCornerClasses.map((cornerName) => {
             const corner = document.createElement('div');
@@ -1094,49 +1183,26 @@ export class SmartGogglesHud {
         }
         root.appendChild(killMark);
 
-        const leader = document.createElementNS(SVG_NS, 'svg');
-        leader.classList.add('goggles-target-leader');
-        leader.setAttribute('aria-hidden', 'true');
-        const path = document.createElementNS(SVG_NS, 'path');
-        path.setAttribute('pathLength', '1');
-        leader.appendChild(path);
-        root.appendChild(leader);
-
-        const label = document.createElement('div');
-        label.className = 'goggles-target-label';
-        const identifier = document.createElement('span');
-        identifier.className = 'goggles-target-identifier';
-        identifier.classList.toggle('is-corrupted', variant === 'anomaly');
-        const panel = document.createElement('div');
-        panel.className = 'goggles-target-label-panel';
+        const { path, label, identifier, panel } = createInfoOverview(root);
         const measure = document.createElement('span');
         measure.className = 'goggles-target-label-measure';
         measure.setAttribute('aria-hidden', 'true');
         const distanceFact = this.createFact();
         const healthFact = this.createFact();
-        healthFact.classList.toggle('is-corrupted', variant === 'anomaly');
-        healthFact.hidden = variant === 'celestial';
         const warning = document.createElement('span');
         warning.className = 'goggles-target-warning';
         warning.hidden = true;
         panel.append(measure, distanceFact, healthFact, warning);
-        if (variant === 'peer' && this.customPeerReadout) {
-            this.customPeerReadout.hidden = false;
-            panel.append(this.customPeerReadout);
-        }
-        if (variant === 'peer' && this.lobbyPreview) label.append(measure, identifier);
-        else label.append(identifier, panel);
-        root.appendChild(label);
-        this.layer.appendChild(root);
 
         return {
-            targetKey,
+            targetKey: '',
             root,
             corners,
             homingCorners,
             killMark,
             path,
             label,
+            panel,
             measure,
             labelWidth: LABEL_WIDTH,
             naturalLabelWidth: LABEL_WIDTH,
@@ -1145,23 +1211,23 @@ export class SmartGogglesHud {
             distanceFact,
             healthFact,
             warning,
-            bounds,
+            bounds: createScreenBounds(),
             layout: createSmartGogglesCalloutLayout(),
             lastWorldPosition: new THREE.Vector3(),
             lastDistancePosition: new THREE.Vector3(),
             lastWorldHalfWidth: 0,
             lastWorldHalfHeight: 0,
-            targetRevision,
+            targetRevision: 0,
             phase: 'entering',
             seenFrame: this.frame,
-            activateAt: now + ENTER_DELAY_MS,
-            scanCompleteAt: now + ENTER_DELAY_MS + (this.reducedMotion ? 1 : SCAN_BRACKET_DURATION_MS),
+            activateAt: Infinity,
+            scanCompleteAt: Infinity,
             removeAt: Infinity,
             lastDistanceText: '',
             lastHealthText: '',
             lastIdentifierText: '',
             readoutMode: null,
-            typeStartedAt: now + SCAN_TYPE_START_DELAY_MS,
+            typeStartedAt: Infinity,
             calloutSelected: false,
             calloutActivateAt: Infinity,
             calloutLeavingUntil: -Infinity,
@@ -1242,12 +1308,12 @@ export class SmartGogglesHud {
         setHomingCornerGeometry(record.homingCorners[1], centerX, centerY, cornerRadius, 1, 0);
         setHomingCornerGeometry(record.homingCorners[2], centerX, centerY, cornerRadius, 0, 1);
         setHomingCornerGeometry(record.homingCorners[3], centerX, centerY, cornerRadius, -1, 0);
-        record.killMark.style.left = `${bounds.left.toFixed(1)}px`;
-        record.killMark.style.top = `${bounds.top.toFixed(1)}px`;
-        record.killMark.style.width = `${bounds.width.toFixed(1)}px`;
-        record.killMark.style.height = `${bounds.height.toFixed(1)}px`;
+        setScanStyle(record.killMark, 'left', `${bounds.left.toFixed(1)}px`);
+        setScanStyle(record.killMark, 'top', `${bounds.top.toFixed(1)}px`);
+        setScanStyle(record.killMark, 'width', `${bounds.width.toFixed(1)}px`);
+        setScanStyle(record.killMark, 'height', `${bounds.height.toFixed(1)}px`);
 
-        record.path.setAttribute(
+        setScanAttribute(record.path,
             'd',
             `M ${layout.anchor.x.toFixed(1)} ${layout.anchor.y.toFixed(1)} ` +
             `L ${layout.elbow.x.toFixed(1)} ${layout.elbow.y.toFixed(1)} ` +
@@ -1255,14 +1321,14 @@ export class SmartGogglesHud {
         );
         record.root.classList.toggle('is-left', layout.horizontal === 'left');
         record.root.classList.toggle('is-up', layout.vertical === 'up');
-        record.label.style.left = `${layout.labelX.toFixed(1)}px`;
-        record.label.style.top = `${layout.labelY.toFixed(1)}px`;
-        record.label.style.width = `${record.labelWidth}px`;
+        setScanStyle(record.label, 'left', `${layout.labelX.toFixed(1)}px`);
+        setScanStyle(record.label, 'top', `${layout.labelY.toFixed(1)}px`);
+        setScanStyle(record.label, 'width', `${record.labelWidth}px`);
         // The readout always hangs beneath the single horizontal leader rule.
-        record.label.style.transform = 'translateY(5px)';
-        record.label.style.setProperty('--goggles-label-shift', '-3px');
-        record.label.style.setProperty('--goggles-label-origin', 'top');
-        record.label.style.setProperty(
+        setScanStyle(record.label, 'transform', 'translateY(5px)');
+        setScanStyle(record.label, '--goggles-label-shift', '-3px');
+        setScanStyle(record.label, '--goggles-label-origin', 'top');
+        setScanStyle(record.label,
             '--goggles-label-align',
             layout.horizontal === 'left' ? 'flex-end' : 'flex-start',
         );
@@ -1303,7 +1369,7 @@ export class SmartGogglesHud {
     private beginLeaving(record: TargetLockRecord, now: number): void {
         record.phase = 'leaving';
         record.removeAt = now + EXIT_DURATION_MS;
-        record.root.classList.remove('is-active');
+        record.root.classList.remove('is-active', 'is-resetting');
         record.root.classList.remove('is-homing-locking', 'is-homing-locked');
         record.root.classList.add('is-leaving');
     }
@@ -1312,7 +1378,7 @@ export class SmartGogglesHud {
         if (record.phase === 'eliminated') return;
         record.phase = 'eliminated';
         record.removeAt = now + (this.reducedMotion ? 40 : ELIMINATION_DURATION_MS);
-        record.root.classList.remove('is-leaving', 'is-out-of-range');
+        record.root.classList.remove('is-leaving', 'is-out-of-range', 'is-resetting');
         record.root.classList.remove('is-homing-locking', 'is-homing-locked');
         record.root.classList.add('is-active', 'is-eliminated');
         this.retiringRecords.add(record);

@@ -772,8 +772,8 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 #weapon-scan-layer[hidden] { display: none; }
 #weapon-scan-layer .goggles-target-label-panel { margin: 0; }
 #weapon-scan-layer .goggles-target-identifier { font-size: 15px; }
-.weapon-scan-lock.is-resetting, .weapon-scan-lock.is-resetting .goggles-target-corner, .weapon-scan-lock.is-resetting .goggles-target-label-panel, .weapon-scan-lock.is-resetting .goggles-target-identifier { opacity: 0; transition: none; }
-.weapon-scan-lock.is-resetting .goggles-target-leader path { stroke-dashoffset: 1; transition: none; }
+.goggles-target-lock.is-resetting, .goggles-target-lock.is-resetting .goggles-target-corner, .goggles-target-lock.is-resetting .goggles-homing-corner, .goggles-target-lock.is-resetting .goggles-target-killmark, .goggles-target-lock.is-resetting .goggles-target-label-panel, .goggles-target-lock.is-resetting .goggles-target-identifier { opacity: 0; transition: none; }
+.goggles-target-lock.is-resetting .goggles-target-leader path { stroke-dashoffset: 1; transition: none; }
 #blocker .legal-link { color: #d8f6ff; text-shadow: 0 1px 5px #062332; }
 
 #menu-goggles-scope {

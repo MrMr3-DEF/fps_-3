@@ -1,8 +1,8 @@
+import { createCornerScan, createInfoOverview, setScanStyle, setScanAttribute } from './gogglesScanTemplates.js';
 import * as THREE from 'three';
 import { createScreenBounds, createSmartGogglesCalloutLayout, layoutSmartGogglesCallout } from './smartGogglesMath.js';
 import { SCAN_TYPE_CHARACTER_MS, SCAN_TYPE_LINE_PAUSE_CHARACTERS, SCAN_TYPE_START_DELAY_MS } from './smartGoggles.js';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 const CORNER_SIZE = 15;
 const SCAN_PADDING = 8;
 
@@ -124,28 +124,13 @@ export class WeaponMenuScan {
         this.layer = layer;
         this.root = document.createElement('div');
         this.root.className = 'goggles-target-lock is-peer is-left is-up weapon-scan-lock';
-        this.corners = (['tl', 'tr', 'bl', 'br'] as const).map(name => {
-            const corner = document.createElement('div');
-            corner.className = `goggles-target-corner goggles-target-corner--${name}`;
-            this.root.append(corner);
-            return corner;
-        });
-        const leader = document.createElementNS(SVG_NS, 'svg');
-        leader.classList.add('goggles-target-leader');
-        leader.setAttribute('aria-hidden', 'true');
-        this.path = document.createElementNS(SVG_NS, 'path');
-        this.path.setAttribute('pathLength', '1');
-        leader.append(this.path);
-        this.root.append(leader);
-        this.label = document.createElement('div');
-        this.label.className = 'goggles-target-label';
-        this.identifier = document.createElement('span');
-        this.identifier.className = 'goggles-target-identifier';
-        this.panel = document.createElement('div');
-        this.panel.className = 'goggles-target-label-panel';
+        this.corners = createCornerScan(this.root);
+        const overview = createInfoOverview(this.root);
+        this.path = overview.path;
+        this.label = overview.label;
+        this.identifier = overview.identifier;
+        this.panel = overview.panel;
         this.panel.append(specs);
-        this.label.append(this.identifier, this.panel);
-        this.root.append(this.label);
         layer.append(this.root);
     }
 
@@ -203,10 +188,10 @@ export class WeaponMenuScan {
             [left, bottom - CORNER_SIZE], [right - CORNER_SIZE, bottom - CORNER_SIZE],
         ];
         for (let i = 0; i < this.corners.length; i++) {
-            this.corners[i].style.left = `${positions[i][0].toFixed(1)}px`;
-            this.corners[i].style.top = `${positions[i][1].toFixed(1)}px`;
-            this.corners[i].style.setProperty('--goggles-collapse-x', `${((left + right) / 2 - positions[i][0] - CORNER_SIZE / 2).toFixed(1)}px`);
-            this.corners[i].style.setProperty('--goggles-collapse-y', `${((top + bottom) / 2 - positions[i][1] - CORNER_SIZE / 2).toFixed(1)}px`);
+            setScanStyle(this.corners[i], 'left', `${positions[i][0].toFixed(1)}px`);
+            setScanStyle(this.corners[i], 'top', `${positions[i][1].toFixed(1)}px`);
+            setScanStyle(this.corners[i], '--goggles-collapse-x', `${((left + right) / 2 - positions[i][0] - CORNER_SIZE / 2).toFixed(1)}px`);
+            setScanStyle(this.corners[i], '--goggles-collapse-y', `${((top + bottom) / 2 - positions[i][1] - CORNER_SIZE / 2).toFixed(1)}px`);
         }
 
         const compact = height < 560;
@@ -217,7 +202,7 @@ export class WeaponMenuScan {
         const labelWidth = compact
             ? Math.max(100, Math.min(210, compactRoom - baseDiagonal))
             : Math.max(110, Math.min(300, left - 20 - baseDiagonal));
-        this.label.style.width = `${labelWidth.toFixed(1)}px`;
+        setScanStyle(this.label, 'width', `${labelWidth.toFixed(1)}px`);
         // Keep the in-game 45-degree callout. Only lengthen that diagonal when
         // the taller menu readout would otherwise cover the weapon buttons.
         const panelHeight = this.panel.getBoundingClientRect().height;
@@ -234,18 +219,18 @@ export class WeaponMenuScan {
             horizontalLength: labelWidth,
             diagonalLength,
         });
-        this.path.setAttribute(
+        setScanAttribute(this.path,
             'd',
             `M ${layout.anchor.x.toFixed(1)} ${layout.anchor.y.toFixed(1)} ` +
             `L ${layout.elbow.x.toFixed(1)} ${layout.elbow.y.toFixed(1)} ` +
             `L ${layout.end.x.toFixed(1)} ${layout.end.y.toFixed(1)}`,
         );
-        this.label.style.left = `${layout.labelX.toFixed(1)}px`;
-        this.label.style.top = `${layout.labelY.toFixed(1)}px`;
-        this.label.style.transform = 'translateY(5px)';
-        this.label.style.setProperty('--goggles-label-shift', '-3px');
-        this.label.style.setProperty('--goggles-label-origin', 'top');
-        this.label.style.setProperty('--goggles-label-align', 'flex-end');
+        setScanStyle(this.label, 'left', `${layout.labelX.toFixed(1)}px`);
+        setScanStyle(this.label, 'top', `${layout.labelY.toFixed(1)}px`);
+        setScanStyle(this.label, 'transform', 'translateY(5px)');
+        setScanStyle(this.label, '--goggles-label-shift', '-3px');
+        setScanStyle(this.label, '--goggles-label-origin', 'top');
+        setScanStyle(this.label, '--goggles-label-align', 'flex-end');
         if (now >= this.activateAt) {
             this.root.classList.remove('is-resetting');
             this.root.classList.add('is-active');

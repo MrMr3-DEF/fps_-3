@@ -113,7 +113,7 @@ export const SWITCH_DURATION = 0.15;
 export const BULLET_TRAVEL_DISTANCE = 700;
 // Presentation range and callout density are independent of weapon reach.
 export const GOGGLES_SCAN_DISTANCE = 1200;
-export const GOGGLES_MAX_TARGETS = 8;
+export const GOGGLES_MAX_TARGETS = 6;
 export const GOGGLES_MAX_CALLOUTS = 3;
 export const PROJECTILE_SPEED = 900;
 // Projectile lifetime is a defensive timeout with a small buffer beyond the
@@ -241,6 +241,22 @@ export const HOOK_SLINGSHOT_ACCEL = 400.0;
 
 export const REGEN_DELAY_MS = 4000;
 export const MAP_HALF_SIZE = 1000;
+
+/** Presentation only: one periodic weather field crosses the map every lighting cycle. */
+export const ATMOSPHERE = {
+    fieldSize: 2400,
+    noiseSize: 16,
+    altitude: 120,
+    nearFade: 10,
+    farFade: 40,
+    groundDensity: 0.00018,
+    upperDensity: 0.002,
+    groundBankDensity: 0.003,
+    exposureSeconds: 1 / 120,
+    maxBlurPixels: 12,
+    cutDistance: 25,
+    cutAngle: Math.PI / 4,
+} as const;
 export const BORDER_WARN_THRESHOLD = 50;
 export const BORDER_PULSE_DISTANCE = 1.5;
 export const MINIGUN_RAMP_TIME = 3.0;

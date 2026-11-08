@@ -22,6 +22,8 @@ export interface UserSettings {
     particleAmount: number;
     renderDistanceChunks: number;
     shadows: boolean;
+    fog: boolean;
+    motionBlur: boolean;
     lavaGlow: boolean;
     muzzleFlashes: boolean;
     muzzleFlashOpacity: number;
@@ -47,6 +49,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     particleAmount: 1.0,
     renderDistanceChunks: 4,
     shadows: true,
+    fog: true,
+    motionBlur: true,
     lavaGlow: true,
     muzzleFlashes: true,
     muzzleFlashOpacity: 1.0,
@@ -96,6 +100,8 @@ export function loadUserSettings(): UserSettings {
             userSettings.particleAmount = clamp(parsed.particleAmount ?? DEFAULT_USER_SETTINGS.particleAmount, 0.2, 1.0);
             userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
+            userSettings.fog = readBoolean(parsed.fog, DEFAULT_USER_SETTINGS.fog);
+            userSettings.motionBlur = readBoolean(parsed.motionBlur, DEFAULT_USER_SETTINGS.motionBlur);
             userSettings.lavaGlow = readBoolean(parsed.lavaGlow, DEFAULT_USER_SETTINGS.lavaGlow);
             userSettings.muzzleFlashes = readBoolean(parsed.muzzleFlashes, DEFAULT_USER_SETTINGS.muzzleFlashes);
             userSettings.muzzleFlashOpacity = clamp(parsed.muzzleFlashOpacity ?? DEFAULT_USER_SETTINGS.muzzleFlashOpacity, 0, 1);

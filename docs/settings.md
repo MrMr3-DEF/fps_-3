@@ -29,7 +29,7 @@ content area's width, including stacked labels and sliders on narrow screens.
   discard genuine flicks. Scoped gain follows perspective projection throughout
   zoom. See [Desktop pointer input](pointer-input.md).
 - **Graphics:** render scale, render distance, particles, shadows and quality,
-  lava glow, muzzle flashes, bullet trails, FPS counter.
+  fog, motion blur, lava glow, muzzle flashes, bullet trails, FPS counter.
 - **Accessibility:** photosensitivity mode.
 - **Reset:** global reset for every settings category.
 - **Keybinds:** all existing keyboard gameplay actions. Select an action and press
@@ -64,6 +64,19 @@ existing afterimages when applied. New fields are validated on load. Nested draf
 values are cloned to keep edits separate from the applied settings and defaults.
 
 Lava Pool Glow defaults to on for new settings. A saved explicit `false` stays off after reload; a missing or malformed stored value uses the default. Shadows default to on with low quality, and their quality can be changed without rebuilding the arena.
+
+Fog and Motion Blur default to on, including when loading older saved settings.
+Either can be disabled independently through Apply; Discard and Reset use the
+same shared draft as the other controls. Fog drifts across the map in irregular
+banks, becoming denser with altitude on average, with ground patches and clear
+openings overhead. Disabling Fog removes gameplay fog completely. Offline pause
+also pauses its movement. Motion Blur subtly softens camera turns and travel,
+leaving the HUD sharp; it does not accumulate old frames or independently blur
+moving objects. Photosensitivity Mode and the system's reduced-motion preference
+suppress blur while preserving its saved toggle. Both effects honor Render Scale
+and share one render target/pass; disabling both removes that overhead. Devices
+without depth-texture support use ordinary distance fog and skip motion blur.
+Menu previews and the terminal cinematic retain their own presentation.
 
 Layout validation on September 30, 2026: native Chrome desktop and mobile emulation
 at 821 × 400, 821 × 300, and 500 × 300. Checked independent sidebar/content scrolling,

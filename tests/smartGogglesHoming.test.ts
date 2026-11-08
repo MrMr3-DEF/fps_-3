@@ -361,22 +361,27 @@ for (const kind of ['npc', 'peer'] as const) {
         update(1200.001, 2200);
         assert.equal(layer.children.some(child => child.dataset.targetKey === key), false, 'hard cutoff has no exit tail');
         assert.equal(getProjectileHomingTarget(), null);
-        update(1200, 2300); update(1200, 2400);
-        assert.notEqual(record(layer, key), initial, 'range reentry reacquires a fresh scan');
+        update(1200, 2300);
+        assert.equal(record(layer, key), initial, 'range reentry reuses its released overlay');
+        assert.equal(initial.classList.contains('is-active'), false, 'corner acquisition restarts');
+        assert.equal(calloutLabel(initial).children[0].textContent, '', 'typing restarts');
+        update(1200, 2400);
+        assert.equal(initial.classList.contains('is-active'), true);
         hud.reset();
     });
 }
 
-test('eight physically closest targets retain corners and three nearest screen centers receive callouts', () => {
+test('six physically closest targets retain corners and three nearest screen centers receive callouts', () => {
     const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
     const targets = crowdedEnemies().reverse();
     const far = enemy(99); far.position.set(0, 40, -900); far.updateMatrixWorld(true);
     const scannedTargets = [far, ...targets];
     for (const now of [1000, 2000]) hud.update(view, view.position, view.position, scannedTargets, {}, true, now);
     assert.equal(layer.children.some(child => child.dataset.targetKey === 'npc:99'), false);
-    assert.equal(layer.children.filter(child => child.dataset.targetKey).length, 8);
+    assert.equal(layer.children.filter(child => child.dataset.targetKey).length, 6);
     assert.deepEqual(selectedCallouts(layer), ['npc:3', 'npc:4', 'npc:5']);
-    for (const target of targets) assert.equal(record(layer, `npc:${target.userData.index}`).classList.contains('is-active'), true);
+    assert.deepEqual(layer.children.filter(child => child.dataset.targetKey).map(child => child.dataset.targetKey).sort(),
+        ['npc:0', 'npc:1', 'npc:3', 'npc:4', 'npc:5', 'npc:7']);
     assert.equal(calloutLabel(record(layer, 'npc:0')).children[0].textContent, '', 'peripheral target never types a hidden callout');
     hud.reset();
 });
@@ -391,7 +396,7 @@ test('camera movement swaps callouts, keeps corners alive and replays typing onl
     const heldText = calloutLabel(held).texts();
     view.rotation.y = 0.08; view.updateMatrixWorld(true);
     update(2100); update(2120);
-    assert.deepEqual(selectedCallouts(layer), ['npc:1', 'npc:2', 'npc:3']);
+    assert.deepEqual(selectedCallouts(layer), ['npc:0', 'npc:1', 'npc:3']);
     assert.equal(outgoing.classList.contains('is-callout-leaving'), true);
     assert.equal(outgoing.classList.contains('is-active'), true, 'corners do not exit with the callout');
     assert.equal(incoming.classList.contains('is-callout-active'), true);
@@ -512,7 +517,7 @@ test('reduced motion reveals selected callouts immediately and still applies the
 
 test('covered Mecha does not consume a slot needed by visible enemy callouts', () => {
     const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
-    const targets = [-0.10, -0.05, 0, 0.05, 0.10].map((slope, index) => {
+    const targets = [-0.10, -0.05, 0, 0.05].map((slope, index) => {
         const target = enemy(index, slope * 100); target.position.z = -100; target.updateMatrixWorld(true); return target;
     });
     const cover = enemy(8); cover.position.set(0, 14, -250); cover.children[0].scale.setScalar(50); cover.updateMatrixWorld(true);
@@ -543,4 +548,68 @@ test('observer movement clears unseen and eliminated scans at the hard cutoff', 
         assert.equal(getProjectileHomingTarget(), null);
         hud.reset();
     }
+});
+
+test('crowded scans reuse six prebuilt overlays across selection changes and reset', () => {
+    const doc = (globalThis as any).document;
+    const createElement = doc.createElement, createElementNS = doc.createElementNS;
+    let allocations = 0;
+    doc.createElement = () => { allocations++; return new HudElement(); };
+    doc.createElementNS = () => { allocations++; return new HudElement(); };
+    const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
+    const prebuilt = allocations;
+    const targets = crowdedEnemies();
+    try {
+        hud.update(view, view.position, view.position, targets, {}, true, 1000);
+        const roots = new Set(layer.children);
+        for (const now of [1100, 1500, 2000]) hud.update(view, view.position, view.position, targets, {}, true, now);
+        assert.equal(allocations, prebuilt, 'rejected scans never construct DOM');
+        for (const target of targets) target.userData.index += 100;
+        hud.update(view, view.position, view.position, targets, {}, true, 2100);
+        hud.update(view, view.position, view.position, targets, {}, true, 2400);
+        hud.reset();
+        hud.update(view, view.position, view.position, targets, {}, true, 2500);
+        assert.equal(allocations, prebuilt, 'outgoing views and reset return to the same pool');
+        assert.equal(layer.children.length, 6);
+        assert.ok(layer.children.every(root => roots.has(root)));
+    } finally {
+        hud.reset();
+        doc.createElement = createElement; doc.createElementNS = createElementNS;
+    }
+});
+
+test('a recycled scan clears variant effects and typing and requires a fresh homing lock', () => {
+    const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
+    const target = enemy();
+    for (const now of [1000, 1500]) hud.update(view, view.position, view.position, [target], {}, true, now);
+    const root = record(layer, 'npc:0');
+    assert.equal(getProjectileHomingTarget()?.object, target);
+    // Simulate all presentation classes that can survive on a retired view.
+    root.classList.add('is-anomalous', 'is-celestial', 'is-out-of-range', 'is-eliminated', 'is-mecha-hidden');
+    const label = calloutLabel(root);
+    label.children[0].classList.add('is-corrupted');
+    label.children[1].children[2].classList.add('is-corrupted');
+    hud.reset();
+    const replacement = enemy(1);
+    hud.update(view, view.position, view.position, [replacement], {}, true, 2000);
+    assert.equal(record(layer, 'npc:1'), root);
+    for (const name of ['is-anomalous', 'is-celestial', 'is-out-of-range', 'is-eliminated', 'is-mecha-hidden', 'is-homing-locked']) {
+        assert.equal(root.classList.contains(name), false, name);
+    }
+    assert.equal(label.children[0].classList.contains('is-corrupted'), false);
+    assert.equal(label.children[1].children[2].classList.contains('is-corrupted'), false);
+    assert.equal(label.children[0].textContent, '');
+    assert.equal(label.children[1].children[1].textContent, '');
+    assert.equal(getProjectileHomingTarget(), null);
+    hud.update(view, view.position, view.position, [replacement], {}, true, 2318);
+    assert.equal(label.children[0].textContent, 'E', 'original character timing restarts');
+    assert.equal(getProjectileHomingTarget(), null, 'homing still waits for red brackets');
+    hud.update(view, view.position, view.position, [replacement], {}, true, 2417);
+    assert.equal(getProjectileHomingTarget()?.object, replacement);
+    replacement.userData.eliminationRevision++;
+    hud.update(view, view.position, view.position, [replacement], {}, true, 2418);
+    assert.equal(getProjectileHomingTarget(), null, 'same-key respawn cannot inherit a completed lock');
+    hud.update(view, view.position, view.position, [replacement], {}, true, 2835);
+    assert.equal(getProjectileHomingTarget()?.object, replacement);
+    hud.reset();
 });

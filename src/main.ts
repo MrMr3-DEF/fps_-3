@@ -83,6 +83,7 @@ import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
 import { DayNightCycle } from './dayNightCycle.js';
+import { AtmosphereEffects, type AtmosphereFrame } from './atmosphereEffects.js';
 import { isGogglesScanZoomReady, SmartGogglesHud } from './smartGoggles.js';
 import {
     finishGogglesShutdown,
@@ -99,6 +100,13 @@ let endingCover: HTMLDivElement | null = null;
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
 let dayNightCycle: DayNightCycle | null = null;
+let atmosphere: AtmosphereEffects | null = null;
+const atmosphereFrame: AtmosphereFrame = { elapsed: 0, delta: 0, blurAllowed: false, cameraKey: '' };
+function drawAtmosphere(): void {
+    if (!state.renderer || !state.scene || !state.camera) return;
+    if (atmosphere) atmosphere.render(state.renderer, state.scene, state.camera, atmosphereFrame);
+    else state.renderer.render(state.scene, state.camera);
+}
 let smartGoggles: SmartGogglesHud | null = null;
 let locatorBar: LocatorBar | null = null;
 let weaponIndicator: WeaponIndicator | null = null;
@@ -113,6 +121,9 @@ let lastMountedHp: number | null = null;
 const mechCameraDimensions = { distance: MECHA_CAMERA_DISTANCE, height: MECHA_CAMERA_HEIGHT, shoulder: MECHA_CAMERA_SHOULDER };
 const mechaCameraHandoff = new MechaCameraHandoff();
 const reducedHeadMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+reducedHeadMotion.addEventListener('change', () => {
+    atmosphere?.applySettings({ fog: userSettings.fog, motionBlur: userSettings.motionBlur && !userSettings.photosensitivityMode && !reducedHeadMotion.matches });
+});
 let approachWarningRemaining = 0;
 let exitWarningRemaining = 0;
 
@@ -319,6 +330,10 @@ const UI = {
     get settingWebLLMDownload() { return getUI<HTMLInputElement>('setting-webllm-download'); },
     get settingWebLLMDownloadValue() { return getUI<HTMLElement>('setting-webllm-download-value'); },
     get settingShadows() { return getUI<HTMLInputElement>('setting-shadows'); },
+    get settingFog() { return getUI<HTMLInputElement>('setting-fog'); },
+    get settingFogValue() { return getUI<HTMLElement>('setting-fog-value'); },
+    get settingMotionBlur() { return getUI<HTMLInputElement>('setting-motion-blur'); },
+    get settingMotionBlurValue() { return getUI<HTMLElement>('setting-motion-blur-value'); },
     get settingShadowsValue() { return getUI<HTMLElement>('setting-shadows-value'); },
     get settingLavaGlow() { return getUI<HTMLInputElement>('setting-lava-glow'); },
     get settingLavaGlowValue() { return getUI<HTMLElement>('setting-lava-glow-value'); },
@@ -496,6 +511,7 @@ async function beginJoining(username: string, roomCode: string): Promise<void> {
 }
 
 function onWindowResize(): void {
+    atmosphere?.resetHistory();
     if (state.camera && state.renderer) {
         state.camera.aspect = window.innerWidth / window.innerHeight;
         state.camera.updateProjectionMatrix();
@@ -511,7 +527,6 @@ function setupRenderer(): void {
 
     state.scene = new THREE.Scene();
     state.scene.background = new THREE.Color(0xd0dbf0);
-    state.scene.fog = new THREE.FogExp2(0xd0dbf0, 0.002);
 
     const shadowMapSize = userSettings.shadowQuality === 'high' ? 2048 : 1024;
     dayNightCycle = new DayNightCycle(state.scene, {
@@ -1118,6 +1133,7 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
         disposePlayerVisuals();
         disposeHookMesh();
         disposeWorld();
+        atmosphere?.dispose(); atmosphere = null;
         dayNightCycle?.dispose();
         dayNightCycle = null;
 
@@ -1168,6 +1184,9 @@ async function loadPreparedWorld(
             if (state.scene !== scene || !current()) throw new DOMException('Loading cancelled', 'AbortError');
         };
         await createEnvironmentAsync(seed, checkpoint);
+        atmosphere?.dispose();
+        atmosphere = new AtmosphereEffects(seed);
+        atmosphere.applySettings({ fog: userSettings.fog, motionBlur: userSettings.motionBlur && !userSettings.photosensitivityMode && !reducedHeadMotion.matches });
         await prepareForgottenMecha(state.isMultiplayer ? multiplayerMechaEvents() : {
             impact: mechaImpact,
             stompPlayer: () => takePlayerDamage(state.playerMaxHp, 'Forgotten Mecha'),
@@ -1180,6 +1199,7 @@ async function loadPreparedWorld(
         }, checkpoint);
         if (state.isMultiplayer) initializeNetworkMecha();
         if (dayNightCycle) await prepareRenderer(dayNightCycle, checkpoint);
+        if (state.renderer && atmosphere) { await atmosphere.prepare(state.renderer); await checkpoint(); }
         if (onPrepared) {
             if (state.scene !== scene || !current()) throw new DOMException('Loading cancelled', 'AbortError');
             onPrepared();
@@ -1239,6 +1259,7 @@ function leaveCurrentGame(): void {
 }
 
 function performPlayerReset(resetMatch = false): void {
+    atmosphere?.resetHistory();
     state.controls?.resetLook();
     resetHealthBarFlash();
     clearApproachWarning();
@@ -1443,6 +1464,8 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.particleAmount === b.particleAmount &&
         a.renderDistanceChunks === b.renderDistanceChunks &&
         a.shadows === b.shadows &&
+        a.fog === b.fog &&
+        a.motionBlur === b.motionBlur &&
         a.lavaGlow === b.lavaGlow &&
         a.muzzleFlashes === b.muzzleFlashes &&
         a.muzzleFlashOpacity === b.muzzleFlashOpacity &&
@@ -1486,6 +1509,10 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     if (UI.settingWebLLMDownload) UI.settingWebLLMDownload.checked = settings.downloadWebLLMImmediately;
     setCheckboxLabel(UI.settingWebLLMDownloadValue, settings.downloadWebLLMImmediately);
     if (UI.settingShadows) UI.settingShadows.checked = settings.shadows;
+    if (UI.settingFog) UI.settingFog.checked = settings.fog;
+    setCheckboxLabel(UI.settingFogValue, settings.fog);
+    if (UI.settingMotionBlur) UI.settingMotionBlur.checked = settings.motionBlur;
+    setCheckboxLabel(UI.settingMotionBlurValue, settings.motionBlur);
     setCheckboxLabel(UI.settingShadowsValue, settings.shadows);
     if (UI.settingLavaGlow) UI.settingLavaGlow.checked = settings.lavaGlow;
     setCheckboxLabel(UI.settingLavaGlowValue, settings.lavaGlow);
@@ -1530,6 +1557,7 @@ function updatePendingSettings(mutator: (settings: UserSettings) => void): void 
 }
 
 function applyLiveSettings(): void {
+    atmosphere?.applySettings({ fog: userSettings.fog, motionBlur: userSettings.motionBlur && !userSettings.photosensitivityMode && !reducedHeadMotion.matches });
     syncMobileControls?.();
     if (UI.crosshair) UI.crosshair.innerHTML = crosshairSvg(userSettings.crosshair);
     applyHitmarkerSettings();
@@ -1642,6 +1670,13 @@ function setupSettingsControls(): void {
         });
     });
 
+    UI.settingFog?.addEventListener('change', e => {
+        updatePendingSettings(settings => { settings.fog = (e.target as HTMLInputElement).checked; });
+    });
+    UI.settingMotionBlur?.addEventListener('change', e => {
+        updatePendingSettings(settings => { settings.motionBlur = (e.target as HTMLInputElement).checked; });
+    });
+
     UI.settingLavaGlow?.addEventListener('change', (e) => {
         updatePendingSettings((settings) => {
             settings.lavaGlow = (e.target as HTMLInputElement).checked;
@@ -1746,6 +1781,7 @@ function init(): void {
         if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Lobby';
     });
     onInputStarted(() => {
+        atmosphere?.resetHistory();
         if (state.matchEnded) { endInput(); return; }
         if (UI.btnPauseResume) UI.btnPauseResume.innerText = 'Resume';
         if (state.pendingPlay) {
@@ -1764,6 +1800,7 @@ function init(): void {
     });
 
     onInputEnded(() => {
+        atmosphere?.resetHistory();
         if (state.isMultiplayer) releaseMechaInput();
         if (disposingGameRuntime) return;
         updateApproachWarning(0, false);
@@ -1925,12 +1962,14 @@ function animate(): void {
         state.controls?.resetLook();
         updateApproachWarning(0, false);
         if (isWorldReveal && state.scene && state.camera && state.renderer) {
-            state.renderer.render(state.scene, state.camera);
+            atmosphereFrame.elapsed = state.dayNightElapsedSeconds; atmosphereFrame.delta = 0; atmosphereFrame.blurAllowed = false;
+            drawAtmosphere();
         }
         state.prevTime = time;
         return;
     }
-    const delta = clampFrameDelta((time - state.prevTime) / 1000, MAX_FRAME_DELTA);
+    const frameDelta = (time - state.prevTime) / 1000;
+    const delta = clampFrameDelta(frameDelta, MAX_FRAME_DELTA);
     if (!state.scene || !state.camera || !state.renderer || !state.controls) {
         updateApproachWarning(0, false);
         state.prevTime = time;
@@ -1943,6 +1982,7 @@ function animate(): void {
         isInputActive: isInputActive(),
         isConversationOpen: gothChat?.isOpen ?? false,
     })) {
+        atmosphere?.resetHistory();
         updateApproachWarning(0, false);
         state.prevTime = time;
         return;
@@ -2258,9 +2298,16 @@ function animate(): void {
             );
             if (gogglesBrickedThisFrame) syncGogglesFailureVisuals();
 
-            if (!state.isThirdPersonView && (pilot?.headView.phase === 'reveal' || pilot?.headView.phase === 'shutdown-reveal') && !userSettings.photosensitivityMode && !reducedHeadMotion.matches) {
-                pilot.headEffects.render(state.renderer, state.scene, state.camera, pilot.headView.revealProgress);
-            } else state.renderer.render(state.scene, state.camera);
+            const videoReveal = !state.isThirdPersonView && (pilot?.headView.phase === 'reveal' || pilot?.headView.phase === 'shutdown-reveal') && !userSettings.photosensitivityMode && !reducedHeadMotion.matches;
+            // Blur rejects long gaps using wall time; simulation still uses its
+            // bounded delta so returning to a backgrounded tab cannot smear.
+            atmosphereFrame.elapsed = state.dayNightElapsedSeconds; atmosphereFrame.delta = frameDelta;
+            atmosphereFrame.blurAllowed = !videoReveal && isInputActive() && !gothChat?.isOpen && !userSettings.photosensitivityMode && !reducedHeadMotion.matches;
+            atmosphereFrame.cameraKey = `${state.lifeId}/${state.isThirdPersonView}/${gothChat?.isOpen}/${pilot?.headView.phase ?? 'on-foot'}`;
+            if (videoReveal && pilot) {
+                atmosphere?.resetHistory();
+                pilot.headEffects.render(state.renderer, state.scene, state.camera, pilot.headView.revealProgress, drawAtmosphere);
+            } else drawAtmosphere();
             renderKatanaImpact(state.renderer, state.camera);
             if (state.isMultiplayer) acknowledgeMechaRender(); else forgottenMecha?.acknowledgeRendered();
         } finally {

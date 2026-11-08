@@ -370,7 +370,16 @@ Use the ownership table and data-flow notes in [Architecture](architecture.md) b
 
 ## Browser visual checks
 
-With `npm run dev` running, open `/tests/lighting-preview.html` to inspect the current sun-shadow and lava-glow behavior. It has noon, low-sun, night, shadow-quality, glow, render-distance, and camera-motion controls. Compare nearby surfaces and chunk edges at different phases; shader compilation and actual WebGL output need browser inspection in addition to Node tests. Actual match startup also exercises the loading overlay and render preparation, which this fixture does not.
+With `npm run dev` running, open `/tests/lighting-preview.html` to inspect sun shadows, lava glow and atmosphere. It has noon, low-sun, night, shadow-quality, glow, render-distance, camera-motion, fog, blur, wind, altitude-offset and weather-time controls. Weather time can be scrubbed with wind paused to compare ground patches and high-altitude clearings; 0 and 480 seconds produce the same field. Compare nearby surfaces and chunk edges at different phases. The status includes total draw calls and an averaged frame duration (including display/vsync); compare effects on/off at the same view rather than interpreting this as GPU timing. Shader compilation and actual WebGL output need browser inspection in addition to Node tests. Actual match startup also exercises the loading overlay and render preparation, which this fixture does not. Fixture controls do not save settings.
+
+Atmosphere verification on November 8, 2026: `npm run check` passed 554 tests and
+the production build passed. In-app browser inspection covered ground/elevated
+fog, weather scrubbing and drift, night lighting, camera movement and Graphics
+toggle defaults/draft actions without shader errors. At the same stationary lava
+view, effects off/on used 90/91 draw calls and both averaged about 8.3 ms/frame
+including vsync; this is not a GPU timing or other-device performance guarantee.
+The browser rejected pointer lock, so full mouse-controlled gameplay and physical
+mobile-device performance were not validated in that inspection.
 
 Open `/tests/player-list-preview.html` to inspect the five-row multiplayer Tab list and its suit-colored pixel bean faces without a TURN-backed room. It uses the real list renderer and stylesheet with sample scores; input handling and host score replication still need an actual room check.
 

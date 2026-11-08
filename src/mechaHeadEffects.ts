@@ -44,7 +44,8 @@ export class MechaHeadEffects {
         finally { renderer.setRenderTarget(previous); }
         await renderer.compileAsync(this.scene, this.camera);
     }
-    render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, progress: number): void {
+    render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, progress: number,
+        drawScene?: () => void): void {
         if (this.disposed) { renderer.render(scene, camera); return; }
         const previous = renderer.getRenderTarget();
         renderer.getDrawingBufferSize(this.size);
@@ -54,7 +55,9 @@ export class MechaHeadEffects {
         const step = Math.floor(progress * 3);
         try {
             if (step !== this.captureStep) {
-                renderer.setRenderTarget(this.target); renderer.render(scene, camera); this.captureStep = step;
+                renderer.setRenderTarget(this.target);
+                if (drawScene) drawScene(); else renderer.render(scene, camera);
+                this.captureStep = step;
             }
             renderer.setRenderTarget(previous); this.material.uniforms.progress.value = progress;
             renderer.render(this.scene, this.camera);
