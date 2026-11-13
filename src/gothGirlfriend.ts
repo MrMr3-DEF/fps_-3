@@ -10,6 +10,8 @@ export function canUseGothChat(session: { isMultiplayer: boolean; isHost: boolea
     return !session.isMultiplayer || session.isHost;
 }
 
+type InteractionObstacleQuery = (sx: number, sz: number, ex: number, ez: number, out: THREE.Object3D[]) => THREE.Object3D[];
+
 export const GOTH_GESTURES = ['Wave', 'Explain', 'Shrug', 'Agree'] as const;
 export type GothGesture = typeof GOTH_GESTURES[number];
 export const GOTH_INTERACTION_RANGE = 4;
@@ -201,7 +203,11 @@ export class GothGirlfriend {
     private direction = new THREE.Vector3();
     private ray = new THREE.Raycaster();
 
-    constructor(building: TownBuilding) {
+    private readonly obstacleQuery?: InteractionObstacleQuery;
+    private readonly interactionObstacles: THREE.Object3D[] = [];
+
+    constructor(building: TownBuilding, obstacleQuery?: InteractionObstacleQuery) {
+        this.obstacleQuery = obstacleQuery;
         const placement = getGothPlacement(building);
         this.group.name = 'Goth girlfriend';
         this.group.position.copy(placement.position);
@@ -263,7 +269,9 @@ export class GothGirlfriend {
         this.ray.set(camera.position, this.direction);
         this.ray.far = distance;
         // Collision proxies are deliberately invisible but still raycastable.
-        return this.ray.intersectObjects(obstacles, false).every(hit => hit.object === this.hitbox);
+        this.target.copy(camera.position).addScaledVector(this.direction, distance);
+        const candidates = this.obstacleQuery?.(camera.position.x, camera.position.z, this.target.x, this.target.z, this.interactionObstacles) ?? obstacles;
+        return this.ray.intersectObjects(candidates, false).every(hit => hit.object === this.hitbox);
     }
 
     interact(camera: THREE.Camera, obstacles: THREE.Object3D[]): boolean {

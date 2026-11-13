@@ -76,7 +76,7 @@ The script type-checks the project, rebuilds `dist/`, and executes `wrangler dep
 
 ## Public API
 
-All JSON responses use `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. JSON request bodies are limited to 4 KiB while streaming, with a five-second body-read deadline. Oversized streams are cancelled before full buffering.
+Unmatched `/api` routes return JSON 404 without static asset fallback. All JSON responses use `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. JSON request bodies are limited to 4 KiB while streaming, with a five-second body-read deadline. Oversized streams are cancelled before full buffering.
 
 | Route | Method | Authorization | Result |
 | --- | --- | --- | --- |
@@ -122,7 +122,8 @@ The browser releases a join session on exit and the host closes the entire room.
 | --- | --- |
 | Room lifetime | 30 minutes from creation or latest heartbeat |
 | Host heartbeat cadence | 2 minutes; renews admitted sessions and removes departed peers |
-| Room session lifetime | 5 minutes, renewed for admitted peers by the host heartbeat |
+| Pending join reservation | 90 seconds, clamped to room expiry |
+| Admitted session lifetime | 5 minutes, renewed by the host heartbeat |
 | TURN credential TTL | 5 minutes |
 | TURN credential claims per session | 2 per five-minute issuance window |
 | Client/host ICE refresh cadence | 4 minutes; updates future and current peer connections |
@@ -136,7 +137,7 @@ The browser releases a join session on exit and the host closes the entire room.
 | TURN upstream request timeout | 10 seconds |
 | Client world-snapshot timeout | 10 seconds |
 
-Expired pending sessions are pruned whenever their room Durable Object is read. Admitted name reservations survive a temporary relay-lease expiry; credential claims still require a live lease, and departure/room expiry removes the reservation. The room alarm deletes all storage at room expiry. Rate-limit Durable Objects delete their buckets when each window ends. Infrastructure failure in verification, rate limiting, room storage, or credential generation returns an error rather than bypassing protection.
+Pending reservations expire after 90 seconds; admission replaces that expiry with the renewable five-minute lease. Join responses return the stored expiry, including room-expiry clamping. Expired pending sessions are pruned whenever their room Durable Object is read or its alarm runs. Admitted name reservations survive a temporary relay-lease expiry; credential claims still require a live lease, and departure/room expiry removes the reservation. The room alarm follows the earliest pending reservation or room expiry and deletes all storage at room expiry. Rate-limit Durable Objects delete their buckets when each window ends. Infrastructure failure in verification, rate limiting, room storage, or credential generation returns an error rather than bypassing protection.
 
 Only roster-listed admitted peers receive session renewal. A heartbeat can prune
 an omitted admission only when its generation is acknowledged, or when that

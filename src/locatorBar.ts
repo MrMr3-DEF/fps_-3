@@ -60,9 +60,10 @@ export class LocatorBar {
             marker.setAttribute('aria-hidden', 'true');
             this.layer.append(marker); this.markers.set(id, marker);
         }
-        marker.style.left = `${projection.position * 100}%`;
-        marker.style.setProperty('--locator-color', color);
-        marker.dataset.elevation = projection.elevation;
+        const left = `${projection.position * 100}%`;
+        if (marker.style.left !== left) marker.style.left = left;
+        if (marker.style.getPropertyValue('--locator-color') !== color) marker.style.setProperty('--locator-color', color);
+        if (marker.dataset.elevation !== projection.elevation) marker.dataset.elevation = projection.elevation;
     }
 
     reset(): void {

@@ -60,7 +60,7 @@ import { CameraShake } from './cameraShake.js';
 import { triggerMechaImpactShake } from './mechaImpactShake.js';
 import type { MechaImpact } from './forgottenMecha.js';
 import { MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS } from './config.js';
-import { setDamageHandlers } from './damage.js';
+import { setDamageHandlers, type TargetHitResult } from './damage.js';
 import {
     sendLocalState,
     startHostMatch,
@@ -1794,7 +1794,7 @@ function init(): void {
 
         document.body.focus();
         if (state.renderer && state.renderer.domElement) {
-            state.renderer.domElement.tabIndex = 1;
+            state.renderer.domElement.tabIndex = -1;
             state.renderer.domElement.focus();
         }
     });
@@ -2392,9 +2392,9 @@ export function triggerDeath(gameOver = false): void {
 }
 
 // Host/singleplayer authority for target health. Clients ask the host to call this.
-export function processTargetHit(targetIndex: number, damage: number, attackerPeerId?: string): void {
+export function processTargetHit(targetIndex: number, damage: number, attackerPeerId?: string): TargetHitResult {
     const target = state.targets[targetIndex];
-    if (!target) return;
+    if (!target || targetData(target).hp <= 0) return { accepted: false, killed: false };
     const data = targetData(target);
     const killed = data.hp - damage <= 0;
     if (!state.isMultiplayer || !attackerPeerId || attackerPeerId === state.peer?.id) {
@@ -2422,6 +2422,7 @@ export function processTargetHit(targetIndex: number, damage: number, attackerPe
             broadcastTargetKill(targetIndex, state.score, target.position, data, attackerPeerId ?? state.peer?.id ?? null);
         }
     }
+    return { accepted: true, killed };
 }
 
 

@@ -179,3 +179,21 @@ test('player hits require the victim life to prevent damage leaking across respa
     }
     assert.equal(parseNetworkPacket({ ...hit, targetLifeId: 7 })?.type, 'player_hit');
 });
+
+
+test('packet projection strips unknown payload recursively without retaining mutable aliases', () => {
+    const raw = { ...validUpdate, unused: 'x'.repeat(4096), pos: { ...validUpdate.pos, payload: 'extra' },
+        hookPos: { x: 1, y: 2, z: 3, unused: true }, hoverKeys: { w: false, s: false, a: false, d: false, extra: 'no' } };
+    const parsed = parseNetworkPacket(raw) as any;
+    assert.equal(parsed.unused, undefined); assert.deepEqual(parsed.pos, validUpdate.pos);
+    assert.deepEqual(parsed.hookPos, { x: 1, y: 2, z: 3 }); assert.equal(parsed.hoverKeys.extra, undefined);
+    raw.pos.x = 99; assert.equal(parsed.pos.x, 0);
+    const fire = parseNetworkPacket({ type: 'fire', shotId: 1, weapon: 'PISTOL', spreadSeed: 1,
+        barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 }, homingStartDistance: 5,
+        homingTarget: { kind: 'npc', targetIndex: 0, targetRevision: 1, targetPeerId: 'irrelevant', extra: 'no' } }) as any;
+    assert.deepEqual(fire.homingTarget, { kind: 'npc', targetIndex: 0, targetRevision: 1 });
+    const roster = parseNetworkPacket({ type: 'lobby_roster', players: [{ peerId: 'peer-a', username: 'Pilot', bodyColor: 1, extra: true }] }) as any;
+    assert.deepEqual(roster.players, [{ peerId: 'peer-a', username: 'Pilot', bodyColor: 1 }]);
+    assert.deepEqual(parseNetworkPacket({ type: 'jump', extra: 'no' }), { type: 'jump' });
+    assert.deepEqual(parseNetworkPacket(Object.create(validUpdate)), validUpdate, 'validated inherited fields become owned canonical fields');
+});

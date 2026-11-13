@@ -1,6 +1,7 @@
-import { parseMechaPacket, isMechaState, type MechaPacket, type MechaState } from './mechaNetworkTypes.js';
+import { fields, projectKnown, variant, vectorFields as vec, type Projection } from './networkProjection.js';
+import { parseMechaPacket, isMechaState, mechaStateFields, type MechaPacket, type MechaState } from './mechaNetworkTypes.js';
 import { isUsername, isPeerId } from './roomIdentity.js';
-import { MAX_PLAYERS, PLAYER_MAX_HP } from './config.js';
+import { MAX_PLAYERS, PLAYER_MAX_HP, MAX_SHOT_PELLET_INDEX } from './config.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
 export type FirearmName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
 export type WeaponName = FirearmName | 'KATANA';
@@ -191,7 +192,7 @@ const MAX_TARGETS_IN_SNAPSHOT = 512;
 const MAX_DAY_NIGHT_ELAPSED_SECONDS = 24 * 60 * 60;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isFiniteNumber(value: unknown, min = -Infinity, max = Infinity): value is number {
@@ -258,7 +259,7 @@ function isPlayerHealth(value: Record<string, unknown>): boolean {
  * PeerJS delivers untrusted `unknown` data. Keep structural validation at this
  * boundary so malformed packets cannot crash the render/update loop.
  */
-export function parseNetworkPacket(value: unknown): NetworkPacket | null {
+function validateNetworkPacket(value: unknown): NetworkPacket | null {
     if (!isRecord(value) || typeof value.type !== 'string' || !isSender(value.senderPeerId)) return null;
 
     switch (value.type) {
@@ -321,7 +322,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
         }
 
         case 'hit_target':
-            return isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, 4) && isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
+            return isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, MAX_SHOT_PELLET_INDEX) && isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
                 isFiniteNumber(value.damage, 0.01, 100) ? value as unknown as HitTargetPacket : null;
 
         case 'kill_target':
@@ -333,7 +334,7 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
                 ? value as unknown as KillTargetPacket : null;
 
         case 'player_hit':
-            return isInteger(value.targetLifeId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, 4) && isPeerId(value.targetPeerId) && isFiniteNumber(value.damage, 0.01, 100) &&
+            return isInteger(value.targetLifeId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, MAX_SHOT_PELLET_INDEX) && isPeerId(value.targetPeerId) && isFiniteNumber(value.damage, 0.01, 100) &&
                 isUsername(value.attackerName) ? value as unknown as PlayerHitPacket : null;
 
         case 'player_died':
@@ -384,4 +385,37 @@ export function parseNetworkPacket(value: unknown): NetworkPacket | null {
         default:
             return parseMechaPacket(value);
     }
+}
+
+const targetFields = { ...fields('targetIndex', 'maxHp', 'hp', 'scale', 'color'), position: vec };
+const playerFields = fields('peerId', 'username', 'bodyColor');
+const packetFields = {
+    melee_command: fields('action', 'sequence', 'lifeId'),
+    melee_event: { ...fields('action', 'sequence', 'lifeId', 'charged', 'yaw', 'pitch'), origin: vec },
+    melee_hit: { ...fields('sequence', 'lifeId', 'target', 'execution'), contact: vec },
+    update: { ...fields('bodyColor', 'lifeId', 'username', 'yaw', 'pitch', 'activeWeapon', 'switchState', 'nextWeapon',
+        'isMouseDown', 'isDead', 'hookState', 'isHovering', 'hp', 'maxHp', 'dayNightElapsedSeconds'),
+        pos: vec, hookPos: vec, hoverKeys: fields('w', 's', 'a', 'd') },
+    fire: { ...fields('shotId', 'weapon', 'spreadSeed', 'pelletCount', 'homingStartDistance'), barrelPos: vec, dir: vec, hitPoint: vec,
+        homingTarget: variant('kind', {
+            mecha: fields('kind', 'targetRevision'), npc: fields('kind', 'targetIndex', 'targetRevision'),
+            peer: fields('kind', 'targetPeerId', 'targetLifeId'),
+        }) },
+    hit_target: fields('shotId', 'pelletIndex', 'targetIndex', 'damage'),
+    kill_target: { ...fields('targetIndex', 'score', 'scale', 'hp', 'color', 'killerPeerId'), newPosition: vec },
+    player_hit: fields('shotId', 'pelletIndex', 'targetPeerId', 'targetLifeId', 'damage', 'attackerName'),
+    player_died: fields('lifeId', 'cause', 'killerPeerId', 'victimName', 'killerName', 'victimPeerId'),
+    start_game: {}, jump: {}, peer_left: fields('peerId'), lobby_color: fields('bodyColor'),
+    lobby_roster: { players: [playerFields] }, player_list: { players: [{ ...playerFields, ...fields('kills', 'deaths') }] },
+    target_state: targetFields,
+    world_snapshot: { ...fields('gameStarted', 'username', 'seed', 'spawnHouseSlot', 'score', 'dayNightElapsedSeconds'),
+        targets: [targetFields], mecha: mechaStateFields },
+} satisfies Record<Exclude<NetworkPacket['type'], MechaPacket['type']>, Projection>;
+
+export function parseNetworkPacket(value: unknown): NetworkPacket | null {
+    const packet = validateNetworkPacket(value);
+    if (!packet) return null;
+    // Mecha's parser already projects its own complete nested state/event shapes.
+    if (!(packet.type in packetFields)) return packet;
+    return projectKnown(packet, { ...fields('type', 'senderPeerId'), ...packetFields[packet.type as keyof typeof packetFields] });
 }

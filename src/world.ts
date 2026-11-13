@@ -257,10 +257,13 @@ export function getGasLanternFlicker(timeSeconds: number, phase: number): number
 }
 
 let lastLanternTime = 0, lastLanternStrength = 0;
+let lanternsDark = false;
 export function updateTownLanterns(timeSeconds: number, strength: number, preparing = false): void {
     lastLanternTime = timeSeconds; lastLanternStrength = strength;
     if (!townLanternFlames || !townLanternGlassMaterial) return;
     const clampedStrength = Math.max(0, Math.min(1, strength));
+    if (lanternsDark && clampedStrength === 0 && !preparing) return;
+    lanternsDark = clampedStrength === 0;
     townLanternGlassMaterial.emissiveIntensity = 0.05 + clampedStrength * 1.25;
 
     townLanternLights.forEach(({ light, x, z, phase, chunk }, index) => {
@@ -737,7 +740,7 @@ function createTown(): void {
     for (const building of buildings.filter(b => b.name === 'goth house')) {
         // Browser asset loading stays outside the synchronous procedural/test path.
         if (typeof window !== 'undefined') {
-            gothGirlfriend = new GothGirlfriend(building);
+            gothGirlfriend = new GothGirlfriend(building, queryObstaclesAlongSegment);
             state.scene!.add(gothGirlfriend.group);
             // The actor owns its animated model and fill light. Only its
             // presentation follows chunks; its world-owned hitbox stays solid.
@@ -908,7 +911,7 @@ export function disposeWorld(): void {
     townLanternFlames = null;
     townLanternGlassMaterial = null;
     townLanternLights.length = 0;
-    lastLanternTime = lastLanternStrength = 0;
+    lastLanternTime = lastLanternStrength = 0; lanternsDark = false;
     lavaLightGroup = null;
     lavaGlowMesh = null;
     lavaGlowMaterial = null;

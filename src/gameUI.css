@@ -457,13 +457,6 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 
 #hitmarker.is-kill { color: #ff304f; }
-#hitmarker.is-flashing { animation: hitmarker-flash var(--hitmarker-duration) ease-out both; }
-
-@keyframes hitmarker-flash {
-    0%, 45% { opacity: 1; }
-    100% { opacity: 0; }
-}
-
 #ui {
     display: flex;
     flex-direction: column;

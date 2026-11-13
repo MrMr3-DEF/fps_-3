@@ -53,7 +53,7 @@ class Element {
     className = '';
     dataset: Record<string, string> = {};
     attributes: Record<string, string> = {};
-    style = { left: '', setProperty: (key: string, value: string) => { this.properties[key] = value; } };
+    style = { left: '', getPropertyValue: (key: string) => this.properties[key] ?? '', setProperty: (key: string, value: string) => { this.properties[key] = value; } };
     properties: Record<string, string> = {};
     append(child: Element) { child.parent = this; this.children.push(child); }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); this.parent = null; }

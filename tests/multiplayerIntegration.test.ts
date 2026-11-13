@@ -1,10 +1,12 @@
+import { setDamageHandlers } from '../src/damage.ts';
+import { getMeleeNetworkPort } from '../src/weaponNetworkPort.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed, rebuildTargetHash } from '../src/world.ts';
 import { state } from '../src/state.ts';
-import { setMultiplayerWorldLoader, onMultiplayerDisconnected, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
+import { setMultiplayerWorldLoader, onMultiplayerDisconnected, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, broadcastTargetKill, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
 import { BULLET_TRAVEL_DISTANCE, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED } from '../src/config.ts';
 import { Peer, Connection } from './fakePeer.ts';
 import worker, { TurnRateLimiter } from '../src/worker.ts';
@@ -730,4 +732,75 @@ test('actual router rejects guest ending authority, accepts admitted readiness a
         assert.ok(parseNetworkPacket(snapshot)); assert.equal(snapshot.mecha.ending.id, ending.id);
         assert.equal(snapshot.mecha.ending.elapsed, 4.65); assert.equal(snapshot.mecha.ending.phase, 'playing');
     } finally { ForgottenMecha.prototype.load = originalLoad; world.disposeWorld(); disconnectMultiplayer(); globalThis.document = originalDocument; }
+});
+
+
+test('live client colors are frozen and extra fields never reach viewers', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room'); const host = Peer.latest;
+        const connections: Connection[] = [];
+        for (const name of ['Alpha', 'Bravo']) {
+            const registration = await registerTurnSession('ABCDEFGH', 'join-room', name, name);
+            const connection = new Connection(name, { admissionToken: registration.admissionToken });
+            connections.push(connection); host.emit('connection', connection);
+        }
+        await tick(); await tick(); startHostMatch(); state.scene = new THREE.Scene();
+        const [a, b] = connections, color = state.playerList.find(p => p.peerId === 'Alpha')!.bodyColor;
+        const lists = b.sent.filter(p => p.type === 'player_list').length;
+        a.emit('data', { ...update('Alpha'), bodyColor: 0x112233, extra: 'payload', pos: { x: 0, y: 2, z: 0, extra: true } });
+        const relayed = b.sent.filter(p => p.type === 'update').at(-1);
+        assert.equal(relayed.bodyColor, color); assert.equal(relayed.extra, undefined); assert.equal(relayed.pos.extra, undefined);
+        assert.equal(state.playerList.find(p => p.peerId === 'Alpha')!.bodyColor, color);
+        assert.equal(b.sent.filter(p => p.type === 'player_list').length, lists);
+    } finally { disconnectMultiplayer(); state.scene = null; }
+});
+
+test('failed admission delivery releases the server reservation even without a close event', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const reservation = await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'broken-peer');
+        const connection = new Connection('broken-peer', { admissionToken: reservation.admissionToken });
+        connection.send = () => { throw new Error('Delivery failed'); }; connection.close = () => {};
+        Peer.latest.emit('connection', connection); await tick(); await tick(); await tick();
+        assert.equal(state.connections.length, 0);
+        assert.ok(await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'replacement-peer'));
+    } finally { disconnectMultiplayer(); }
+});
+
+test('unknown API routes return controlled JSON without touching static assets', async () => {
+    const env: any = { ASSETS: { fetch: () => { throw new Error('Unexpected asset fallback'); } } };
+    for (const method of ['GET', 'POST']) {
+        const response = await worker.fetch(new Request('https://local/api/unknown', { method }), env);
+        assert.equal(response.status, 404); assert.deepEqual(await response.json(), { error: 'Not found.' });
+        assert.match(response.headers.get('Content-Type')!, /application\/json/);
+    }
+});
+
+
+test('fatal melee sends only kill feedback; nonfatal melee confirms and synchronizes damage', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const admission = await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'peer-a');
+        const connection = new Connection('peer-a', { admissionToken: admission.admissionToken });
+        Peer.latest.emit('connection', connection); await tick(); await tick(); startHostMatch();
+        const target = new THREE.Group(); target.userData = { index: 0, hp: 3, maxHp: 3, scale: 1, color: 1 };
+        state.targets = [target];
+        setDamageHandlers((index, amount, attacker) => {
+            const data = target.userData; const killed = data.hp <= amount;
+            data.hp = killed ? data.maxHp : data.hp - amount;
+            if (killed) broadcastTargetKill(index, ++state.score, target.position, data as any, attacker);
+            return { accepted: true, killed };
+        }, () => {});
+        const attacker = { id: 'peer-a', lifeId: 0, alive: true, ready: true, name: 'Pilot', position: new THREE.Vector3(), yaw: 0, pitch: 0 };
+        connection.sent.length = 0;
+        assert.equal(getMeleeNetworkPort().hitTarget(0, 1, attacker, 1).killed, false);
+        assert.deepEqual(connection.sent.map(p => p.type), ['hit_target', 'target_state']);
+        connection.sent.length = 0;
+        assert.equal(getMeleeNetworkPort().hitTarget(0, 10, attacker, 2).killed, true);
+        assert.deepEqual(connection.sent.map(p => p.type), ['kill_target']);
+        assert.equal(connection.sent[0].killerPeerId, 'peer-a');
+    } finally { disconnectMultiplayer(); state.targets = []; }
 });

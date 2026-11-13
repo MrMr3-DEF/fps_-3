@@ -1,3 +1,7 @@
+import { updateKatanaLightning } from './katanaLightning.js';
+import { KATANA } from './config.js';
+import { KatanaEffects } from './katanaEffects.js';
+import { createKatanaSlash } from './katanaSlash.js';
 import * as THREE from 'three';
 import { state } from './state.js';
 import { prepareParticleResources } from './particles.js';
@@ -15,6 +19,15 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     const effects = prepareParticleResources();
     const projectile = state.projectilePool[0];
     const representatives: THREE.Object3D[] = [...effects];
+    const sword = state.katanaMesh;
+    const katanaEffects = state.katanaMesh ? new KatanaEffects() : null;
+    const slash = state.katanaMesh ? createKatanaSlash() : null;
+    if (katanaEffects && state.katanaMesh && slash) {
+        updateKatanaLightning(state.katanaMesh.userData.lightning, KATANA.charge, 0, false);
+        katanaEffects.sample('warm', 'warm', state.katanaMesh, KATANA.windup + KATANA.chargedSlash, 0, scene);
+        katanaEffects.confirm('warm', 'warm', undefined, new THREE.Vector3(), 0, false);
+        representatives.push(slash, katanaEffects.impactScene, ...katanaEffects.trails.map(trail => trail.mesh));
+    }
     if (projectile && !projectile.parent) representatives.push(projectile);
     if (state.hookMesh && !state.hookMesh.parent) representatives.push(state.hookMesh);
     for (const object of representatives) scene.add(object);
@@ -27,7 +40,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     // Hidden weapon/effect geometry otherwise waits until the first switch/shot
     // to reach WebGL. Draw it only into the tiny offscreen preparation target.
     for (const object of [...representatives, state.leftGun, state.pistolMesh, state.shotgunMesh,
-        state.arMesh, state.sniperMesh, state.minigunMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group,
+        state.arMesh, state.sniperMesh, state.minigunMesh, state.katanaMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group,
         gothGirlfriend?.group]) object?.traverse(warmObject);
     const textures = new Set<THREE.Texture>();
     scene.traverse(object => {
@@ -74,11 +87,13 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     } finally {
         renderer.setRenderTarget(previousTarget);
         target.dispose();
+        katanaEffects?.dispose(); slash?.geometry.dispose(); slash?.material.dispose();
         for (const [object, original] of visibility) {
             object.visible = original.visible;
             object.frustumCulled = original.frustumCulled;
         }
         for (const object of representatives) scene.remove(object);
+        if (sword) updateKatanaLightning(sword.userData.lightning, 0, 0, false);
         // Cancellation may already have disposed/replaced the arena.
         if (state.scene === scene) {
             cycle.synchronizeElapsedSeconds(elapsed, true);

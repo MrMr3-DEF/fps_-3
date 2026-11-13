@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { KATANA, KATANA_FEEDBACK, LASER_BEAM_FADE_TIME } from './config.js';
 import { sampleKatanaPose } from './katanaModel.js';
 
-interface Trail { owner: string; swing: string; mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>; points: number[]; sample: number; end: number; previous?: THREE.Vector3[] }
+interface Trail { owner: string; swing: string; mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>; positions: Float32Array; vertexCount: number; sample: number; end: number; previous?: THREE.Vector3[] }
 const cutEnd = KATANA.windup + KATANA.chargedSlash;
 /** World-space ribbons and baked hit silhouettes own all of their GPU resources. */
 export class KatanaEffects {
@@ -19,25 +19,32 @@ export class KatanaEffects {
         if (!trail) {
             if (this.trails.length >= KATANA_FEEDBACK.maxTrails) this.removeTrail(this.trails[0]);
             const geometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(144 * 3);
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+            geometry.setDrawRange(0, 0);
             const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .8, side: THREE.DoubleSide, depthWrite: false }));
             mesh.frustumCulled = false;
             scene.add(mesh);
-            trail = { owner, swing, mesh, points: [], sample: 0, end: now - elapsed + cutEnd };
+            trail = { owner, swing, mesh, positions, vertexCount: 0, sample: 0, end: now - elapsed + cutEnd };
             this.trails.push(trail);
         }
         root.updateWorldMatrix(true, false);
         // Fixed animation samples retain the curved sweep even when a frame crosses the whole cut.
         const count = 24;
+        const previousSample = trail.sample;
         while (trail.sample <= count && KATANA.windup + trail.sample / count * KATANA.chargedSlash <= Math.min(elapsed, cutEnd) + 1e-9) {
             sampleKatanaPose(this.samplePose, KATANA.windup + trail.sample / count * KATANA.chargedSlash, true);
             this.samplePose.updateMatrix();
             const matrix = new THREE.Matrix4().multiplyMatrices(root.matrixWorld, this.samplePose.matrix);
             const points = [new THREE.Vector3(0, .165, 0), new THREE.Vector3(.18, 1.30, 0)].map(p => p.applyMatrix4(matrix));
-            if (trail.previous) for (const point of [trail.previous[0], trail.previous[1], points[1], trail.previous[0], points[1], points[0]]) trail.points.push(point.x, point.y, point.z);
+            if (trail.previous) for (const point of [trail.previous[0], trail.previous[1], points[1], trail.previous[0], points[1], points[0]]) { const offset = trail.vertexCount++ * 3; trail.positions[offset] = point.x; trail.positions[offset + 1] = point.y; trail.positions[offset + 2] = point.z; }
             trail.previous = points;
             trail.sample++;
         }
-        trail.mesh.geometry.setAttribute('position', new THREE.Float32BufferAttribute(trail.points, 3));
+        if (trail.sample !== previousSample) {
+            trail.mesh.geometry.getAttribute('position').needsUpdate = true;
+            trail.mesh.geometry.setDrawRange(0, trail.vertexCount);
+        }
     }
     /** Called only for host-confirmed hits, before a locally killed target can respawn. */
     confirm(swing: string, target: string, object: THREE.Object3D | undefined, contact: THREE.Vector3, now: number, gentle: boolean, rotation = new THREE.Quaternion()): boolean {

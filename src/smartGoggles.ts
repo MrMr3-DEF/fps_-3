@@ -278,6 +278,7 @@ function setFactVisibility(record: TargetLockRecord, outOfRange: boolean): void 
 }
 
 function ensureAnomalyTearFilters(layer: HTMLElement): void {
+    const document = layer.ownerDocument ?? globalThis.document;
     if (document.getElementById('goggles-anomaly-tear-a')) return;
 
     const svg = document.createElementNS(SVG_NS, 'svg');
@@ -343,6 +344,22 @@ export class SmartGogglesHud {
     private readonly retiringRecords = new Set<TargetLockRecord>();
     private readonly availableRecords: TargetLockRecord[] = [];
     private readonly observations: ScanObservation[] = [];
+    private readonly selectionCandidates: Array<ScanObservation | TargetLockRecord> = [];
+    private readonly observedKeys = new Set<string>();
+    private readonly selectedCandidates = new Set<ScanObservation | TargetLockRecord>();
+    private readonly selectedObservations = new Set<ScanObservation>();
+    private readonly selectedKeys = new Set<string>();
+    private readonly selectionOrigin = new THREE.Vector3();
+    private readonly compareCandidates = (a: ScanObservation | TargetLockRecord, b: ScanObservation | TargetLockRecord) => {
+        const distance = this.selectionOrigin.distanceToSquared('args' in a ? a.distancePosition : a.lastDistancePosition)
+            - this.selectionOrigin.distanceToSquared('args' in b ? b.distancePosition : b.lastDistancePosition);
+        const ak = 'args' in a ? a.args[0] : a.targetKey, bk = 'args' in b ? b.args[0] : b.targetKey;
+        return distance || ak.localeCompare(bk);
+    };
+    private readonly textContext: CanvasRenderingContext2D | null;
+    private textFontKey = '';
+    private letterSpacing = 0;
+    private customReadoutVersion = 0;
     private worldGeneration = -1;
     private readonly hiddenHealthBars = new Map<THREE.Object3D, boolean>();
     private readonly layer: HTMLElement;
@@ -367,9 +384,13 @@ export class SmartGogglesHud {
 
     constructor(layer: HTMLElement, options?: Readonly<{ horizontal?: CalloutHorizontalDirection; vertical?: CalloutVerticalDirection; customPeerReadout?: HTMLElement; lobbyPreview?: boolean; gameplayLimits?: boolean; lobbyAvoidElements?: readonly HTMLElement[] }>) {
         this.layer = layer;
+        this.textContext = (layer.ownerDocument ?? document).createElement('canvas').getContext?.('2d') ?? null;
         this.calloutDirection = options?.horizontal && options.vertical
             ? { horizontal: options.horizontal, vertical: options.vertical } : undefined;
         this.customPeerReadout = options?.customPeerReadout;
+        if (this.customPeerReadout && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => {
+            this.customReadoutVersion++;
+        }).observe(this.customPeerReadout);
         this.lobbyPreview = options?.lobbyPreview ?? false;
         this.gameplayLimits = options?.gameplayLimits ?? !this.lobbyPreview;
         this.lobbyAvoidElements = options?.lobbyAvoidElements ?? [];
@@ -569,7 +590,6 @@ export class SmartGogglesHud {
             )) continue;
 
             _bodyCenter.copy(stablePeerEnvelope.center).applyMatrix4(peer.mesh.matrixWorld);
-            peer.mesh.getWorldPosition(_peerRootPosition);
             const peerWorldScale = peer.mesh.matrixWorld.getMaxScaleOnAxis();
             const trackedRecord = this.observeTarget(
                 targetKey,
@@ -848,18 +868,25 @@ export class SmartGogglesHud {
         const fullReadout = outOfRange
             ? 'OUT OF RANGE'
             : `${record.lastDistanceText}\n${record.lastHealthText}`;
-        const sizingKey = emptyPeerFacts ? `lobby:${identifierText}` :
-            `${customReadout ? 'custom-peer' : fullReadout}:${document.fonts?.status ?? ''}`;
-        // Measure the final text before revealing any characters. The panel
-        // and leader then share one width throughout the typing animation.
+        const fontKey = `${viewportWidth}:${viewportHeight}:${document.fonts?.status ?? ''}`;
+        if (this.textFontKey !== fontKey && this.textContext && typeof getComputedStyle === 'function') {
+            const style = getComputedStyle(record.measure);
+            this.textContext.font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+            this.letterSpacing = Number.parseFloat(style.letterSpacing) || 0;
+            this.textFontKey = fontKey;
+        }
+        const measurementText = variant === 'anomaly' && !outOfRange
+            ? `${record.lastDistanceText}\n${CORRUPTED_HEALTH_FRAMES.join('\n')}` : fullReadout;
+        const sizingKey = `${emptyPeerFacts ? identifierText : customReadout ? this.customReadoutVersion : measurementText}:${fontKey}`;
         if (record.sizedFor !== sizingKey) {
-            record.measure.textContent = customReadout ? '' : emptyPeerFacts ? identifierText : fullReadout;
-            const contentWidth = (customReadout ?? record.measure).getBoundingClientRect?.().width;
+            let contentWidth = 0;
+            if (customReadout) contentWidth = customReadout.getBoundingClientRect?.().width ?? 0;
+            else if (this.textContext) for (const line of (emptyPeerFacts ? identifierText : measurementText).split('\n')) {
+                contentWidth = Math.max(contentWidth, this.textContext.measureText(line).width + line.length * this.letterSpacing);
+            }
             record.naturalLabelWidth = emptyPeerFacts
                 ? Math.max(82, identifierText.length * 11 + LABEL_HORIZONTAL_PADDING)
-                : contentWidth && contentWidth > 0
-                    ? Math.ceil(contentWidth + LABEL_HORIZONTAL_PADDING)
-                    : getFallbackLabelWidth(distanceText, variant);
+                : contentWidth > 0 ? Math.ceil(contentWidth + LABEL_HORIZONTAL_PADDING) : getFallbackLabelWidth(distanceText, variant);
             record.sizedFor = sizingKey;
         }
         record.labelWidth = Math.min(
@@ -897,31 +924,28 @@ export class SmartGogglesHud {
     }
 
     private assignVisualTargets(playerPosition: THREE.Vector3): void {
-        const observedKeys = new Set(this.observations.map(observation => observation.args[0]));
-        const candidates: Array<ScanObservation | TargetLockRecord> = [
-            ...this.observations,
-            ...[...this.records.values()].filter(record => !observedKeys.has(record.targetKey)),
-            ...this.retiringRecords,
-        ];
-        const position = (candidate: ScanObservation | TargetLockRecord) =>
-            'args' in candidate ? candidate.distancePosition : candidate.lastDistancePosition;
-        const key = (candidate: ScanObservation | TargetLockRecord) =>
-            'args' in candidate ? candidate.args[0] : candidate.targetKey;
-        if (this.gameplayLimits) candidates.sort((a, b) =>
-            playerPosition.distanceToSquared(position(a)) - playerPosition.distanceToSquared(position(b)) ||
-            key(a).localeCompare(key(b)));
-        const selected = this.gameplayLimits ? candidates.slice(0, GOGGLES_MAX_TARGETS) : candidates;
-        const selectedObservations = new Set(selected.filter((entry): entry is ScanObservation => 'args' in entry));
-        const selectedKeys = new Set([...selectedObservations].map(entry => entry.args[0]));
+        const candidates = this.selectionCandidates, observedKeys = this.observedKeys;
+        const selected = this.selectedCandidates, selectedObservations = this.selectedObservations, selectedKeys = this.selectedKeys;
+        candidates.length = 0; observedKeys.clear(); selected.clear(); selectedObservations.clear(); selectedKeys.clear();
+        for (const observation of this.observations) { observedKeys.add(observation.args[0]); candidates.push(observation); }
+        for (const record of this.records.values()) if (!observedKeys.has(record.targetKey)) candidates.push(record);
+        for (const record of this.retiringRecords) candidates.push(record);
+        this.selectionOrigin.copy(playerPosition);
+        if (this.gameplayLimits) candidates.sort(this.compareCandidates);
+        const limit = this.gameplayLimits ? Math.min(candidates.length, GOGGLES_MAX_TARGETS) : candidates.length;
+        for (let i = 0; i < limit; i++) {
+            const entry = candidates[i]; selected.add(entry);
+            if ('args' in entry) { selectedObservations.add(entry); selectedKeys.add(entry.args[0]); }
+        }
         // Release losers before binding incoming targets: even crowded scenes never
         // allocate beyond the gameplay pool, including outgoing confirmations.
         for (const [targetKey, record] of this.records) {
-            if (selected.includes(record) || selectedKeys.has(targetKey)) continue;
+            if (selected.has(record) || selectedKeys.has(targetKey)) continue;
             this.releaseRecord(record);
             this.records.delete(targetKey);
         }
         for (const record of this.retiringRecords) {
-            if (selected.includes(record)) continue;
+            if (selected.has(record)) continue;
             this.releaseRecord(record);
             this.retiringRecords.delete(record);
         }
@@ -936,7 +960,8 @@ export class SmartGogglesHud {
             if (observation.homingTarget) this.considerHomingTarget(record, record.bounds,
                 observation.args[12], observation.args[13], observation.args[8], observation.homingTarget);
         }
-        this.observations.length = 0;
+        this.observations.length = candidates.length = 0;
+        observedKeys.clear(); selected.clear(); selectedObservations.clear(); selectedKeys.clear();
         if (this.gameplayLimits && !this.records.has('anomaly:goth-girlfriend')) this.anomalyDetectedThisFrame = false;
     }
 

@@ -198,6 +198,8 @@ export const LAVA_POOL_HALF_SIZE = 12.8;
 
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
+export const ROOM_PENDING_SESSION_MS = 90_000;
+export const MAX_SHOT_PELLET_INDEX = Math.max(...Object.values(WEAPON_STATS).map(stats => stats.pellets ?? 1)) - 1;
 // Eight unambiguous characters make active room discovery infeasible by brute force
 // before the Worker issues short-lived TURN credentials.
 export const ROOM_CODE_LENGTH = 8;

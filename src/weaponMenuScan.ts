@@ -116,6 +116,7 @@ export class WeaponMenuScan {
     private readonly bounds = createScreenBounds();
     private readonly callout = createSmartGogglesCalloutLayout();
     private facts: Array<{ text: string; typed: HTMLSpanElement }> = [];
+    private panelHeight = 0;
     private activeName = '';
     private activateAt = Infinity;
     private typeStartedAt = Infinity;
@@ -131,6 +132,11 @@ export class WeaponMenuScan {
         this.identifier = overview.identifier;
         this.panel = overview.panel;
         this.panel.append(specs);
+        // The observer measures after layout; projection never reads immediately
+        // after writing a new label width or typed fact.
+        if (typeof ResizeObserver !== 'undefined') new ResizeObserver(entries => {
+            this.panelHeight = entries[0]?.borderBoxSize?.[0]?.blockSize ?? entries[0]?.contentRect.height ?? 0;
+        }).observe(this.panel);
         layer.append(this.root);
     }
 
@@ -205,7 +211,7 @@ export class WeaponMenuScan {
         setScanStyle(this.label, 'width', `${labelWidth.toFixed(1)}px`);
         // Keep the in-game 45-degree callout. Only lengthen that diagonal when
         // the taller menu readout would otherwise cover the weapon buttons.
-        const panelHeight = this.panel.getBoundingClientRect().height;
+        const panelHeight = this.panelHeight || this.facts.length * 22;
         const overlapsNavColumn = left - baseDiagonal - labelWidth < navRight + 8;
         const diagonalLength = overlapsNavColumn
             ? Math.max(baseDiagonal, top + 5 + panelHeight - navTop + 12)

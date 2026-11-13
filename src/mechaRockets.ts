@@ -79,7 +79,7 @@ export class MechaRockets {
         // must not introduce a new instancing shader variant during gameplay.
         this.particles.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.sparks.length * 3).fill(1), 3).setUsage(THREE.DynamicDrawUsage);
     }
-    get activeCount(): number { return this.rockets.filter(r => r.active).length; }
+    get activeCount(): number { let count = 0; for (const rocket of this.rockets) if (rocket.active) count++; return count; }
     private valid(lock: RocketLock | null, targets: readonly THREE.Group[]): lock is RocketLock {
         if (!lock || targets[lock.index] !== lock.object) return false;
         const data = targetData(lock.object);
@@ -275,6 +275,8 @@ export class MechaRockets {
         player?: RocketPlayer, playerHit: (damage: number) => void = () => {},
         players?: readonly RocketPlayer[], hitPlayer?: (player: RocketPlayer, damage: number, owner: string | null) => void): void {
         if (!Number.isFinite(delta) || delta <= 0) return; this.clock += delta;
+        const offsets = [-1.2 + this.radius, 0, 2 - this.radius];
+        const victims = players ?? (player ? [player] : []);
         for (const rocket of this.rockets) {
             if (!rocket.active) continue;
             if (this.replica) {
@@ -308,12 +310,12 @@ export class MechaRockets {
                 // The visible hull is 3.2m long. Sweep its center and both ends,
                 // with the fitted bore radius, rather than a thin bullet ray.
                 let contact: number | null = null;
-                for (const offset of [-1.2 + this.radius, 0, 2 - this.radius]) {
+                for (const offset of offsets) {
                     this.localStart.copy(rocket.position).addScaledVector(rocket.direction, offset);
                     this.localEnd.copy(this.next).addScaledVector(rocket.direction, offset);
                     const obstacle = this.obstacleT(this.localStart, this.localEnd, query, this.radius);
                     if (obstacle !== null && (contact === null || obstacle < contact)) contact = obstacle;
-                    for (const victim of players ?? (rocket.enemy && player ? [player] : [])) {
+                    for (const victim of rocket.enemy || players ? victims : []) {
                         if (!victim.alive || victim.peerId && victim.peerId === rocket.ownerPeerId) continue;
                         const value = segmentPlayerHitboxHitT(this.localStart, this.localEnd, victim.position, victim.yaw, this.radius);
                         if (value !== null && (contact === null || value < contact)) contact = value;

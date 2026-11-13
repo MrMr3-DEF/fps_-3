@@ -55,7 +55,7 @@ test('diagonal movement slides along a pillar corner without entering it', () =>
 test('invisible live targets retain projectile collision',()=>{
     state.scene=new THREE.Scene();state.isMultiplayer=false;state.peerIds=[];
     const target=new THREE.Group();target.position.set(0,2,-5);target.userData={index:0,scale:1};target.visible=false;state.targets=[target];rebuildTargetHash();
-    let hits=0;setDamageHandlers(()=>hits++,()=>{});
+    let hits=0;setDamageHandlers(()=>{hits++;return {accepted:true,killed:false};},()=>{});
     const bullet=new THREE.Object3D();bullet.position.set(0,2,0);bullet.userData={dx:0,dy:0,dz:-1,age:0,damage:1,visualOnly:false};state.projectiles=[bullet];
     updateProjectiles(.02,'Pilot');assert.equal(hits,1);resetProjectiles();state.targets=[];rebuildTargetHash();
 });

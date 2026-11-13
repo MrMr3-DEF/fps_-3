@@ -210,7 +210,6 @@ function resolve(attack: Attack): void {
             attack.damaged.add(key);
             confirmed(attack, key, point);
             getMeleeNetworkPort().hitTarget(index, amount, attack.player, attack.sequence);
-            hit = true;
         }
     });
     for (const player of getMeleeNetworkPort().players()) {
@@ -296,7 +295,7 @@ export function updateKatana(delta: number): void {
     }
     effects.update(time, userSettings.photosensitivityMode);
     // Local prediction is independent of an eventual host acknowledgment.
-    if (state.katanaMesh)
+    if (state.katanaMesh && !visuals.has(id()))
         updateKatanaModel(state.katanaMesh, local.started === null ? 0 : time - local.started, local.cancelled || local.released === null ? null : time - local.released, local.charged, time, userSettings.photosensitivityMode, Math.max(0, (local.started === null ? local.chargeAtRelease + (time - (local.released ?? time)) : time - local.started) - KATANA.charge));
     for (let i = waves.length - 1; i >= 0; i--) {
         const w = waves[i], t = (time - w.start) / KATANA.waveDuration;

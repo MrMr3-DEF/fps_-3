@@ -8,6 +8,8 @@ import { CHAT_CONSENT_KEY } from '../src/gothChatConsent.ts';
 const fakeEngine = `await globalThis.engineImportGate;
 export class GothChatEngine {
   disposed = false;
+  interrupts = 0;
+  async interrupt() { this.interrupts++; }
   ready = false;
   async load() { globalThis.modelLoads++; await globalThis.modelGate; if (globalThis.modelFailure) throw new Error("Simulated GPU loss"); this.ready = true; }
   dispose() { if (!this.disposed) globalThis.modelDisposals++; this.disposed = true; this.ready = false; }
@@ -75,6 +77,10 @@ test('load ownership cancels fetch/import/worker work and stale completion canno
         releaseImport(); await replacement; await oldImport;
         assert.equal((globalThis as any).modelLoads, 1, 'only the current import may construct a worker');
         assert.equal(internal.engine.ready, true);
+        const retained = internal.engine; internal.pending = true;
+        chat.close();
+        assert.equal(internal.engine, retained); assert.equal(retained.disposed, false); assert.equal(retained.interrupts, 1);
+        chat.open(); await tick();
 
         chat.reset({ preserveLoadedModel: false }); holdKnowledge = true;
         chat.open(); await tick(); const cancelledFetch = internal.preloadTask;

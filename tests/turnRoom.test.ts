@@ -99,7 +99,7 @@ test('renewed sessions retain names and can refresh TURN beyond initial five min
 test('expired pending reservations free usernames',async(t)=>{
     let now=Date.now();t.mock.method(Date,'now',()=>now);
     const {room}=await setup();await call(room,'/create-session',fields('a','Pilot'));
-    now+=300_001;
+    now+=90_000;
     assert.equal((await call(room,'/create-session',fields('b','pilot'))).status,201);
 });
 test('expired relay lease does not free an admitted player name while room is alive',async(t)=>{
@@ -178,4 +178,35 @@ test('automatic guests fill every slot with a custom or non-first guest host', a
         assert.equal(names.length, 5); assert.equal(new Set(names).size, 5);
         assert.equal((await call(room, '/create-session', fields('e', 'Guest'))).status, 409);
     }
+});
+
+
+test('pending reservations expire at 90 seconds, drive alarms, and are not renewed by heartbeat', async t => {
+    let now = Date.now(); t.mock.method(Date, 'now', () => now);
+    const { room, storage } = await setup();
+    const response = await call(room, '/create-session', fields('a'));
+    const expiry = (await response.json()).expiresAt;
+    assert.equal(expiry, now + 90_000); assert.equal(storage.alarmAt, expiry);
+    now += 10_000;
+    await call(room, '/create-session', fields('b'));
+    await call(room, '/heartbeat', { closeToken: cap('X'), expiresAt: now + 1800_000, peerIds: [] });
+    assert.equal(storage.alarmAt, expiry);
+    await call(room, '/admit', { closeToken: cap('X'), peerId: 'peer-a', admissionToken: cap('A') });
+    assert.equal((await storage.get<any>('room')).sessions[cap('a')].expiresAt, now + 300_000);
+    assert.equal(storage.alarmAt, now + 90_000, 'only the remaining pending reservation owns the early alarm');
+    now += 90_000; await room.alarm();
+    const record = await storage.get<any>('room');
+    assert.equal(record.sessions[cap('b')], undefined); assert.equal(record.sessions[cap('a')].admitted, true);
+    assert.equal(storage.alarmAt, record.expiresAt);
+});
+
+test('pending response returns the stored room-clamped expiry and release reschedules its alarm', async t => {
+    const now = Date.now(); t.mock.method(Date, 'now', () => now);
+    const storage = new MemoryStorage(), room = new TurnRoomStateMachine({ storage }, 5);
+    await call(room, '/register', { ...fields('h'), closeToken: cap('X'), expiresAt: now + 30_000, sessionExpiresAt: now + 300_000 });
+    const response = await call(room, '/create-session', fields('a'));
+    assert.equal((await response.json()).expiresAt, now + 30_000);
+    assert.equal((await storage.get<any>('room')).sessions[cap('a')].expiresAt, now + 30_000);
+    await call(room, '/release-session', { turnSessionToken: cap('a') });
+    assert.equal(storage.alarmAt, now + 30_000);
 });

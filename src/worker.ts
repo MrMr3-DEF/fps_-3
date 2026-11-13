@@ -554,6 +554,7 @@ export default {
             return room ? issueTurnCredentials(request, env, room) : json({ error: 'Invalid room code.' }, 400);
         }
 
+        if (url.pathname === '/api' || url.pathname.startsWith('/api/')) return json({ error: 'Not found.' }, 404);
         return env.ASSETS.fetch(request);
     },
 };

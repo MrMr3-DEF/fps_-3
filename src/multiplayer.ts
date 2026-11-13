@@ -965,7 +965,6 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
         if (!state.isHost) showJoinError('Connection authorization timed out. Please retry.');
         handleClose(); // PeerJS does not emit close for a channel that never opened.
         conn.close();
-        if (current() && !state.isHost) disconnectMultiplayer({ preserveJoinError: true });
     }, 20_000);
     connectionCleanup.set(conn, cleanup);
     const handleOpen = async () => {
@@ -976,8 +975,10 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
         const closeToken = roomCloseToken;
         const metadata = conn.metadata as { admissionToken?: unknown } | null;
         if (!room || !closeToken || !isCapability(metadata?.admissionToken)) { conn.close(); return; }
+        let serverAdmitted = false;
         try {
             const result = await admitRoomPeer(room, closeToken, conn.peer, metadata.admissionToken);
+            serverAdmitted = true;
             if (isCurrentSession(generation) && roomCloseToken === closeToken) {
                 acknowledgedAdmissionGeneration = Math.max(acknowledgedAdmissionGeneration, result.admissionGeneration);
             }
@@ -1000,7 +1001,12 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
             sendLocalState(true);
             const status = DOM.hostLobbyStatus();
             if (status) status.innerText = `Waiting for players (${state.connections.length + 1}/${MAX_PLAYERS})...`;
-        } catch { if (current()) conn.close(); }
+        } catch {
+            // Admission can commit before local snapshot/setup fails. A pending
+            // channel has no admitted close handler to release that reservation.
+            if (serverAdmitted && !admitted) void departRoomPeer(room, closeToken, conn.peer).catch(() => {});
+            if (current()) { handleClose(); conn.close(); }
+        }
     };
     conn.on('data', (data: unknown) => {
         if (!current()) return;
@@ -1244,7 +1250,9 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         if (mounted) packet = { ...packet, pos: { x: mounted.x, y: mounted.y, z: mounted.z }, isMouseDown: false, hookState: 'IDLE', hookPos: null, isHovering: false };
         const reservedName = admittedNames.get(fromPeerId);
         if (!reservedName) return null;
-        packet = { ...packet, username: reservedName };
+        const color = state.lobbyPlayers.find(player => player.peerId === fromPeerId)?.bodyColor;
+        if (color === undefined) return null;
+        packet = { ...packet, username: reservedName, bodyColor: color };
         if (![packet.pos.x, packet.pos.y, packet.pos.z].every(Number.isFinite) ||
             Math.abs(packet.pos.x) > MAX_PLAYER_HORIZONTAL_POSITION ||
             Math.abs(packet.pos.z) > MAX_PLAYER_HORIZONTAL_POSITION ||
@@ -1495,13 +1503,6 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         if (!authorized) return;
         msg = authorized;
         if (!state.isPlaying) return;
-        if (msg.type === 'update' && msg.bodyColor !== undefined) {
-            const player = state.lobbyPlayers.find(item => item.peerId === fromPeerId);
-            if (player && player.bodyColor !== msg.bodyColor) {
-                player.bodyColor = msg.bodyColor;
-                publishPlayerList();
-            }
-        }
         if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'hit_target' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
             // The shooter also receives validated player hits so its copy of the
             // victim's health changes immediately. Ordinary self-originated
@@ -2220,8 +2221,12 @@ setMeleeNetworkPort({
     ready: peerId => !state.isMultiplayer || (peerId===state.peer?.id ? hostMechaShots : peerRuntime.get(peerId)?.shots)?.ready(performance.now()) === true,
     reserve: peerId => { if(state.isMultiplayer) (peerId===state.peer?.id ? hostMechaShots : peerRuntime.get(peerId)?.shots)?.reserveMelee(performance.now(),KATANA.duration); },
     hitTarget: (index,damage,attacker,sequence) => {
-        processTargetHit(index,damage,attacker.id==='local'?undefined:attacker.id);
-        if(state.isMultiplayer) { broadcastToAll({type:'hit_target',shotId:sequence,pelletIndex:0,targetIndex:index,damage,senderPeerId:attacker.id}); syncHostTargetStates(); }
+        const result = processTargetHit(index,damage,attacker.id==='local'?undefined:attacker.id);
+        if (state.isMultiplayer && result.accepted && !result.killed) {
+            broadcastToAll({type:'hit_target',shotId:sequence,pelletIndex:0,targetIndex:index,damage,senderPeerId:attacker.id});
+            syncHostTargetStates();
+        }
+        return result;
     },
     players: () => {
         const local = localMeleePlayer();
@@ -2254,7 +2259,6 @@ setMeleeNetworkPort({
         if(!result.accepted) return false;
         if(result.killed && !mounted) state.score++;
         if(state.isMultiplayer) announceMechaHit(attacker.id,result.killed,point,point.clone().sub(origin).normalize());
-        else if(attacker.id===localMeleePlayer().id) flashHitmarker(result.killed);
         return true;
     },
 });

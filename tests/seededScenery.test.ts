@@ -22,10 +22,23 @@ const baseline = new Map([
     [91234, '1e70e734d5b61d12da384cb8c3edd3dea415da15f66d0a2b8a913a51db5e62eb'],
     [0xffffffff, '63c34042f0e2a0689b428aac50a08c55d49a3ac402617d03d185f4c1d96fd4b2'],
 ]);
+// Material identity follows physical box faces, independently of draw grouping.
+function faceMaterials(object: any): THREE.Material[] {
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    if (!Array.isArray(object.material) || object.geometry?.type !== 'BoxGeometry') return materials;
+    const result: THREE.Material[] = [], index = object.geometry.index, normal = object.geometry.attributes.normal;
+    for (const group of object.geometry.groups) for (let i = group.start; i < group.start + group.count; i += 3) {
+        const vertex = index.getX(i), x = normal.getX(vertex), y = normal.getY(vertex), z = normal.getZ(vertex);
+        const face = x ? (x > 0 ? 0 : 1) : y ? (y > 0 ? 2 : 3) : z > 0 ? 4 : 5;
+        result[face] = materials[group.materialIndex];
+    }
+    assert.equal(result.length, 6); assert.ok(result.every(Boolean));
+    return result;
+}
 function fingerprint(scene: THREE.Scene, portablePositions = false) {
     const shapes = scene.children.map((object: any) => ({ type: object.type, name: object.name, pos: object.position.toArray(), scale: object.scale.toArray(),
         matrices: object.isInstancedMesh ? Array.from(object.instanceMatrix.array).slice(0, object.count * 16) : undefined,
-        mats: object.material ? (Array.isArray(object.material) ? object.material : [object.material]).map((material: any) => ({ type: material.type, color: material.color?.getHex(),
+        mats: object.material ? faceMaterials(object).map((material: any) => ({ type: material.type, color: material.color?.getHex(),
             map: material.map ? { repeat: material.map.repeat.toArray(), width: material.map.image?.width, height: material.map.image?.height } : null })) : undefined }));
     // Trigonometric positions differ by ~2e-13 across ARM64/x64 V8 builds.
     // Normalize only the golden baseline; mutation checks below stay bit-exact,

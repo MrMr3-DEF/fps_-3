@@ -37,7 +37,11 @@ function width(t: number): number { return .045 * Math.min(1, (1 - t) / .088); }
 export function updateKatanaLightning(group: THREE.Group, charge: number, time: number, gentle: boolean): void {
     // Leave the first 0.3 s visually quiet, then reach the tip at full charge.
     const progress = THREE.MathUtils.clamp((charge - .3) / (KATANA.charge - .3), 0, 1);
-    group.visible = progress > 0;
+    if (progress <= 0) {
+        if (group.visible) for (const child of group.children) (child as THREE.Mesh).geometry.setDrawRange(0, 0);
+        group.visible = false; return;
+    }
+    group.visible = true;
     const clock = gentle ? 0 : time;
     for (let layer = 0; layer < 2; layer++) {
         const mesh = group.children[layer] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;

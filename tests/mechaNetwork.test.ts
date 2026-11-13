@@ -467,3 +467,21 @@ test('host owns stomp selection, repetition, damage credit and cooldown while in
         resetMechaNetwork(); initializeNetworkMecha(a); assert.equal(a.pilotWeapon, 'rocket');
     } finally { copy.dispose(); cleanup(a); }
 });
+
+
+test('Mecha and nested world snapshots cannot retain unknown fields or bone aliases', async () => {
+    const a = await actor();
+    try {
+        const raw: any = a.captureNetworkState(1, false);
+        raw.extra = 'no'; raw.position.extra = 'no'; raw.head.extra = 'no'; raw.combat.beamOrigin.extra = 'no';
+        const packet = parseNetworkPacket({ type: 'world_snapshot', gameStarted: false, username: 'Pilot', seed: 42,
+            spawnHouseSlot: 1, score: 0, dayNightElapsedSeconds: 0, targets: [], mecha: raw }) as any;
+        assert.ok(packet); const clean = packet.mecha;
+        assert.equal(clean.extra, undefined); assert.equal(clean.position.extra, undefined);
+        assert.equal(clean.head.extra, undefined); assert.equal(clean.combat.beamOrigin.extra, undefined);
+        assert.notEqual(clean.bones, raw.bones); assert.notEqual(clean.bones[0], raw.bones[0]);
+        const event = parseNetworkPacket({ type: 'mecha_event', sequence: 1, state: raw,
+            event: { kind: 'end', peerId: 'unused', extra: 'no' }, extra: 'no' }) as any;
+        assert.deepEqual(event.event, { kind: 'end' }); assert.equal(event.extra, undefined);
+    } finally { a.dispose(); }
+});

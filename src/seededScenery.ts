@@ -495,7 +495,13 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
             metalness: 0.1
         });
 
-        const materials = [barkMat, barkMat, ringsMat, ringsMat, barkMat, barkMat];
+        // Keep each face's existing vertices/UVs; only group opaque triangles by
+        // material so every visible chunk needs two draws instead of six.
+        const indices = boxGeo.index!, reordered: number[] = [];
+        for (const face of [0, 1, 4, 5, 2, 3]) for (let i = face * 6; i < face * 6 + 6; i++) reordered.push(indices.getX(i));
+        boxGeo.setIndex(reordered); boxGeo.clearGroups();
+        boxGeo.addGroup(0, 24, 0); boxGeo.addGroup(24, 12, 1);
+        const materials = [barkMat, ringsMat];
 
         const pillarInstances = createChunkedInstanceSet(boxGeo, materials, PILLAR_COUNT, true, true, 'pillars');
 

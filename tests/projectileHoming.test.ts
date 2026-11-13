@@ -56,7 +56,7 @@ test('projectile flies straight for one third of the firing distance before homi
     target.userData = { index: 0, scale: 1, hp: 10, eliminationRevision: 0 };
     state.targets = [target];
     rebuildTargetHash();
-    setDamageHandlers(() => {}, () => {});
+    setDamageHandlers(() => ({ accepted: false, killed: false }), () => {});
 
     const bullet = new THREE.Object3D();
     bullet.position.set(0, 2, 0);

@@ -287,7 +287,7 @@ test('world preparation registers moving body proxies, routes bullets to health,
         assert.ok(actor.ready);
         const nearby = queryObstaclesNear(actor.group.position.x, actor.group.position.z, 25);
         assert.ok(actor.colliders.every(collider => nearby.includes(collider)));
-        setDamageHandlers(() => {}, () => {}, (damage, hit) => actor.damage(damage, hit));
+        setDamageHandlers(() => ({ accepted: false, killed: false }), () => {}, (damage, hit) => actor.damage(damage, hit));
         const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial());
         bullet.position.copy(actor.hitbox.position).add(new THREE.Vector3(0, 60, 0));
         bullet.userData = { dx: 0, dy: -1, dz: 0, age: 0, distanceTraveled: 0, visualOnly: false, damage: 3 };

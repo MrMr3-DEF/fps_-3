@@ -1,6 +1,7 @@
+import { fields, projectKnown, variant, vectorFields as vec, type Projection } from './networkProjection.js';
 import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, type MechaEndingState } from './mechaEndingTimeline.js';
 import { isPeerId } from './roomIdentity.js';
-import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME } from './config.js';
+import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME, MAX_SHOT_PELLET_INDEX } from './config.js';
 import type { Vec3Packet } from './networkTypes.js';
 import type { MechaMode, MechaImpact } from './forgottenMecha.js';
 import type { MechaHeadPhase } from './mechaHeadView.js';
@@ -105,13 +106,46 @@ function isEvent(e: unknown): e is MechaEvent {
     if (e.kind === 'damage') return number(e.damage, 0.01, 100) && ['laser', 'stomp', 'rocket'].includes(e.attack as string) && (e.attackerPeerId === null || isPeerId(e.attackerPeerId));
     return e.kind === 'release' && record(e.pose) && isMechaVector(e.pose.position) && isMechaVector(e.pose.viewPosition) && quaternion(e.pose.quaternion);
 }
-export function parseMechaPacket(x: Record<string, unknown>): MechaPacket | null {
+function validateMechaPacket(x: Record<string, unknown>): MechaPacket | null {
     if (x.type === 'mecha_ending_ready') return integer(x.id) && x.id > 0 && integer(x.revision) ? x as unknown as MechaEndingReadyPacket : null;
     if (x.type === 'mecha_state') return isMechaState(x.state) ? x as unknown as MechaStatePacket : null;
     if (x.type === 'mecha_event') return integer(x.sequence) && isMechaState(x.state) && isEvent(x.event) ? x as unknown as MechaEventPacket : null;
-    if (x.type === 'hit_mecha') return integer(x.revision) && integer(x.shotId) && integer(x.pelletIndex, 4) && number(x.damage, 0.01, 100) ? x as unknown as MechaHitPacket : null;
+    if (x.type === 'hit_mecha') return integer(x.revision) && integer(x.shotId) && integer(x.pelletIndex, MAX_SHOT_PELLET_INDEX) && number(x.damage, 0.01, 100) ? x as unknown as MechaHitPacket : null;
     if (!integer(x.sequence) || !integer(x.revision) || !integer(x.lifeId) || !bool(x.thirdPerson) || !bool(x.secondaryHeld)) return null;
     if (x.type === 'mecha_board') return x as unknown as MechaBoardPacket;
     return x.type === 'mecha_input' && isPilotWeapon(x.weapon) && number(x.direction, -1, 1) && number(x.yaw, -10, 10) && number(x.pitch, -Math.PI, Math.PI) &&
         ['shield', 'fire', 'helmet', 'exit', 'viewThirdPerson'].every(k => bool(x[k])) && number(x.fov, 10, 150) && number(x.aspect, 0.1, 10) ? x as unknown as MechaInputPacket : null;
+}
+
+export const mechaStateFields: Projection = {
+    ...fields('sequence', 'revision', 'mode', 'elapsed', 'heading', 'hp', 'recoveringExit', 'pilotPeerId', 'pilotLifeId',
+        'pilotYaw', 'pilotPitch', 'cooldown', 'pilotWeapon', 'stompActive', 'stompElapsed', 'stompCooldown', 'rocketTime', 'boneCount', 'matchEnded'),
+    position: vec, bones: [[true]], eye: [true],
+    head: fields('phase', 'fold', 'wantedOpen', 'eyeBlend', 'blackout', 'loadingProgress', 'hudOpacity', 'revealProgress'),
+    combat: { ...fields('clock', 'laserPhase', 'shieldPhase', 'manual', 'energy', 'manualBuild', 'collapse', 'build', 'eyePower',
+        'orbRadius', 'beamRadius', 'beamLength'), beamOrigin: vec, beamDirection: vec, orbPosition: vec, shieldCenter: vec },
+    rockets: [{ ...fields('slot'), position: vec, direction: vec }],
+    ending: { ...fields('id', 'seed', 'effectsSeed', 'heading', 'lightingElapsed', 'elapsed', 'phase'), position: vec },
+};
+const eventFields = variant('kind', {
+    damage: fields('kind', 'peerId', 'lifeId', 'damage', 'attack', 'attackerPeerId'),
+    release: { ...fields('kind', 'peerId', 'lifeId'), pose: { position: vec, viewPosition: vec, quaternion: [true] } },
+    impact: { ...fields('kind', 'impact'), position: vec },
+    shield: { ...fields('kind'), position: vec }, blast: { ...fields('kind'), position: vec },
+    blocked: fields('kind', 'peerId'), board_denied: fields('kind', 'peerId', 'lifeId'),
+    hit: { ...fields('kind', 'peerId', 'killed', 'score'), position: vec, direction: vec }, end: fields('kind'),
+});
+const mechaPacketFields = {
+    mecha_ending_ready: fields('id', 'revision'),
+    mecha_input: fields('sequence', 'revision', 'lifeId', 'direction', 'yaw', 'pitch', 'shield', 'fire', 'weapon', 'helmet', 'exit',
+        'thirdPerson', 'secondaryHeld', 'viewThirdPerson', 'fov', 'aspect'),
+    mecha_board: fields('sequence', 'revision', 'lifeId', 'thirdPerson', 'secondaryHeld'),
+    hit_mecha: fields('revision', 'shotId', 'pelletIndex', 'damage'),
+    mecha_state: { state: mechaStateFields },
+    mecha_event: { ...fields('sequence'), state: mechaStateFields, event: eventFields },
+} satisfies Record<MechaPacket['type'], Projection>;
+export function parseMechaPacket(value: Record<string, unknown>): MechaPacket | null {
+    if (value.senderPeerId !== undefined && !isPeerId(value.senderPeerId)) return null;
+    const packet = validateMechaPacket(value);
+    return packet && projectKnown(packet, { ...fields('type', 'senderPeerId'), ...mechaPacketFields[packet.type] });
 }

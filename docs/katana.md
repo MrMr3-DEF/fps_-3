@@ -73,6 +73,13 @@ Host-only `melee_hit` feedback carries accepted life/swing/contact identities.
 Parsing rejects forged damage and invalid identities; the receiver checks active
 charge and replay state without applying gameplay damage.
 
+NPC damage returns accepted/killed outcomes through the existing damage and melee
+ports. Fatal hits use the authoritative kill packet; nonfatal hits use a hit
+confirmation and changed target state. White confirmations preserve a live red
+kill marker until its original deadline. Ribbon geometry uses one fixed dynamic
+buffer per trail, and loading prepares the sword and representative slash/impact
+resources.
+
 ## Verification
 
 Existing combat/authority suites cover hit eligibility, recovery, cancellation,

@@ -42,7 +42,7 @@ const wire = (c: Connection) => {
         parentPort!.postMessage({ packet: unpack(encoded) });
     };
 };
-setDamageHandlers(() => {}, (damage, attackerName, attackerId) => {
+setDamageHandlers(() => ({ accepted: false, killed: false }), (damage, attackerName, attackerId) => {
     if (!state.isPlaying || state.playerHp <= 0) return;
     state.playerHp = Math.max(0, state.playerHp - damage);
     state.lastDamageTime = performance.now(); state.regenTimer = 0;

@@ -48,3 +48,30 @@ test('nested atmosphere rendering restores target, viewport, fog and flags on fa
         assert.equal(draws, 2); assert.equal(world.fog, originalFog);
     } finally { effects.dispose(); effects.dispose(); output.dispose(); }
 });
+
+test('helmet captures retain independent targets and stationary blur creates none', () => {
+    const effects = new AtmosphereEffects(1), world = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
+    const output = new THREE.WebGLRenderTarget(1920, 1080), seen: THREE.WebGLRenderTarget[] = [];
+    let current: THREE.WebGLRenderTarget | null = null;
+    const viewport = new THREE.Vector4(), scissor = new THREE.Vector4();
+    const renderer = { capabilities: { isWebGL2: true, maxSamples: 2 }, autoClear: true,
+        getRenderTarget: () => current, setRenderTarget: (value: typeof current) => { current = value; },
+        getDrawingBufferSize: (v: THREE.Vector2) => v.set(3840, 2160),
+        getViewport: (v: THREE.Vector4) => v.copy(viewport), setViewport() {},
+        getScissor: (v: THREE.Vector4) => v.copy(scissor), setScissor() {}, getScissorTest: () => false, setScissorTest() {},
+        render: (scene: THREE.Scene) => { if (scene === world && current && current !== output) seen.push(current); },
+    } as unknown as THREE.WebGLRenderer;
+    const frame = { elapsed: 1, delta: 1 / 60, blurAllowed: true, cameraKey: 'life1' };
+    try {
+        effects.applySettings({ fog: false, motionBlur: true }); effects.render(renderer, world, camera, frame);
+        assert.equal(seen.length, 0); assert.equal((effects as any).target, null); assert.equal((effects as any).captureTarget, null);
+        effects.applySettings({ fog: true, motionBlur: false }); effects.render(renderer, world, camera, frame);
+        const main = seen.at(-1)!; let disposed = 0; main.addEventListener('dispose', () => disposed++);
+        current = output; effects.render(renderer, world, camera, frame);
+        const capture = seen.at(-1)!; assert.notEqual(capture, main);
+        current = null; effects.render(renderer, world, camera, frame);
+        assert.equal(seen.at(-1), main); assert.equal(main.width, 3840); assert.equal(capture.width, 1920); assert.equal(disposed, 0);
+        capture.addEventListener('dispose', () => disposed++);
+        effects.applySettings({ fog: false, motionBlur: false }); assert.equal(disposed, 2);
+    } finally { effects.dispose(); output.dispose(); }
+});

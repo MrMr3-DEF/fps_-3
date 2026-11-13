@@ -144,6 +144,7 @@ export class ForgottenMecha {
     private mixer: THREE.AnimationMixer | null = null;
     private readonly actions = new Map<string, THREE.AnimationAction>();
     private action: THREE.AnimationAction | null = null;
+    private readonly lavaFeet: THREE.SkinnedMesh[] = [];
     private readonly meshes: THREE.SkinnedMesh[] = [];
     private readonly skeletons = new Set<THREE.Skeleton>();
     private readonly bones = new Map<string, THREE.Bone>();
@@ -212,6 +213,7 @@ export class ForgottenMecha {
             if (node instanceof THREE.Bone) this.bones.set(node.name, node);
             if (node instanceof THREE.SkinnedMesh) {
                 this.meshes.push(node);
+                if (node.name === 'M_Foot_L' || node.name === 'M_Foot_R') this.lavaFeet.push(node);
                 this.skeletons.add(node.skeleton);
                 node.castShadow = node.receiveShadow = true;
                 // Animated skin bounds are recomputed below; a bind-pose sphere
@@ -644,8 +646,7 @@ export class ForgottenMecha {
     }
     private updateLava(delta: number): void {
         let contact = false;
-        for (const name of ['M_Foot_L', 'M_Foot_R']) {
-            const foot = this.meshes.find(mesh => mesh.name === name)!;
+        for (const foot of this.lavaFeet) {
             this.meshBounds.setFromObject(foot, true);
             if (this.meshBounds.min.y > 0.15) continue;
             contact ||= this.lava.some(pool => this.meshBounds.max.x >= pool.position.x - LAVA_POOL_HALF_SIZE && this.meshBounds.min.x <= pool.position.x + LAVA_POOL_HALF_SIZE
@@ -1261,7 +1262,7 @@ export class ForgottenMecha {
         this.stompTargets = []; this.stompTargetHit = () => {};
         this.pilot.dispose();
         this.headEffects.dispose();
-        this.colliders.length = 0;
+        this.colliders.length = 0; this.lavaFeet.length = 0;
         this.legColliders.length = this.movementParts.length = 0;
         this.movement = null;
     }

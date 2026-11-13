@@ -1,3 +1,6 @@
-import { WebWorkerMLCEngineHandler } from '@mlc-ai/web-llm';
-const handler = new WebWorkerMLCEngineHandler();
-self.onmessage = (event: MessageEvent) => { void handler.onmessage(event); };
+import { MLCEngine } from '@mlc-ai/web-llm';
+import { createGothWorkerHandler } from './gothChatWorkerRuntime.js';
+import type { GothWorkerRequest } from './gothChatProtocol.js';
+
+const handle = createGothWorkerHandler(new MLCEngine({ logLevel: 'WARN' }), response => self.postMessage(response));
+self.onmessage = (event: MessageEvent<GothWorkerRequest>) => handle(event.data);

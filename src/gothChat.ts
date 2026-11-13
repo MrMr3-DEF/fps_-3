@@ -283,7 +283,7 @@ export class GothChat {
             this.activeAnswer = null;
         }
         if (this.preloadTask && !this.automaticLoad) this.cancelLoad();
-        else if (this.pending && !this.preloadTask) { this.engine?.dispose(); this.engine = null; }
+        else if (this.pending && !this.preloadTask) { void this.engine?.interrupt(); }
         this.pending = false;
     }
 

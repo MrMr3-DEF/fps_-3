@@ -1,3 +1,4 @@
+import type { TargetHitResult } from './damage.js';
 import type * as THREE from 'three';
 import type { HomingTargetPacket, NetworkPacket } from './networkTypes.js';
 import type { PeerData } from './state.js';
@@ -41,7 +42,7 @@ export interface MeleeNetworkPort {
     players(): MeleePlayer[];
     ready(peerId: string): boolean;
     reserve(peerId: string): void;
-    hitTarget(index: number, damage: number, attacker: MeleePlayer, sequence: number): void;
+    hitTarget(index: number, damage: number, attacker: MeleePlayer, sequence: number): TargetHitResult;
     sendCommand(packet: import('./networkTypes.js').MeleeCommand): void;
     emit(packet: import('./networkTypes.js').MeleeEvent): void;
     confirmHit(packet: import('./networkTypes.js').MeleeHitEvent): void;

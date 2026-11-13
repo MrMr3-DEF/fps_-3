@@ -121,6 +121,8 @@ export class AtmosphereEffects {
     private readonly quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
     private readonly weather: THREE.DataTexture;
     private target: THREE.WebGLRenderTarget | null = null;
+    private captureTarget: THREE.WebGLRenderTarget | null = null;
+    private targetResized = false;
     private fog = true;
     private blur = true;
     private disposed = false;
@@ -146,30 +148,41 @@ export class AtmosphereEffects {
         if (!this.fog && !this.blur) this.releaseTarget();
     }
     resetHistory(): void { this.history.reset(); }
-    private releaseTarget(): void { this.target?.dispose(); this.target = null; }
+    private releaseTarget(): void {
+        this.target?.dispose(); this.captureTarget?.dispose(); this.target = this.captureTarget = null;
+    }
     private supportsDepth(renderer: THREE.WebGLRenderer): boolean {
         return renderer.capabilities.isWebGL2 || renderer.extensions.has('WEBGL_depth_texture');
     }
-    private ensureTarget(renderer: THREE.WebGLRenderer): void {
-        // A nested helmet capture already has its own bounded output size.
+    private ensureTarget(renderer: THREE.WebGLRenderer, capture = renderer.getRenderTarget() !== null): THREE.WebGLRenderTarget {
         const output = renderer.getRenderTarget();
-        if (output) this.size.set(output.width, output.height); else renderer.getDrawingBufferSize(this.size);
-        if (!this.target) {
-            this.target = new THREE.WebGLRenderTarget(this.size.x, this.size.y, {
+        if (capture && output) this.size.set(output.width, output.height); else renderer.getDrawingBufferSize(this.size);
+        if (capture) this.size.multiplyScalar(Math.min(1, 1920 / Math.max(this.size.x, this.size.y))).round();
+        this.size.x = Math.max(1, this.size.x); this.size.y = Math.max(1, this.size.y);
+        const key = capture ? 'captureTarget' : 'target';
+        let target = this[key];
+        this.targetResized = !target || target.width !== this.size.x || target.height !== this.size.y;
+        if (!target) {
+            target = this[key] = new THREE.WebGLRenderTarget(this.size.x, this.size.y, {
                 depthTexture: new THREE.DepthTexture(this.size.x, this.size.y, THREE.UnsignedIntType),
                 samples: renderer.capabilities.isWebGL2 ? Math.min(2, renderer.capabilities.maxSamples) : 0,
             });
-            this.target.texture.generateMipmaps = false;
-        } else if (this.target.width !== this.size.x || this.target.height !== this.size.y) {
-            this.target.setSize(this.size.x, this.size.y); this.resetHistory();
-        }
+            target.texture.generateMipmaps = false;
+        } else if (this.targetResized) target.setSize(this.size.x, this.size.y);
+        return target;
     }
     async prepare(renderer: THREE.WebGLRenderer): Promise<void> {
         if (this.disposed || (!this.fog && !this.blur) || !this.supportsDepth(renderer)) return;
-        this.ensureTarget(renderer); renderer.initTexture(this.weather);
+        renderer.initTexture(this.weather);
         // Allocates framebuffer storage under loading cover, not on the first turn.
         const previous = renderer.getRenderTarget();
-        try { renderer.setRenderTarget(this.target); renderer.clear(); }
+        try {
+            for (const capture of [false, true]) {
+                renderer.setRenderTarget(previous);
+                const target = this.ensureTarget(renderer, capture);
+                renderer.setRenderTarget(target); renderer.clear();
+            }
+        }
         finally { renderer.setRenderTarget(previous); }
         await renderer.compileAsync(this.scene, this.camera); this.resetHistory();
     }
@@ -183,15 +196,18 @@ export class AtmosphereEffects {
             if (this.disposed || !supported || (!this.fog && !this.blur)) {
                 this.resetHistory(); renderer.render(scene, camera); return;
             }
-            this.ensureTarget(renderer);
             camera.updateMatrixWorld(true);
             const u = this.material.uniforms;
             u.previousViewProjection.value.copy(this.history.previousViewProjection);
             const moving = this.history.advance(camera, frame.delta, frame.cameraKey);
-            const blur = this.blur && frame.blurAllowed && moving;
+            let blur = this.blur && frame.blurAllowed && moving;
             if (!frame.blurAllowed) this.resetHistory();
             if (!this.fog && !blur) { renderer.render(scene, camera); return; }
-            u.picture.value = this.target!.texture; u.sceneDepth.value = this.target!.depthTexture;
+            const target = this.ensureTarget(renderer);
+            if (this.targetResized) {
+                this.resetHistory(); this.history.advance(camera, frame.delta, frame.cameraKey); blur = false;
+            }
+            u.picture.value = target.texture; u.sceneDepth.value = target.depthTexture;
             u.inverseViewProjection.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
             u.eye.value.copy(camera.position); u.resolution.value.copy(this.size);
             u.haze.value.copy(scene.background instanceof THREE.Color ? scene.background : this.fallbackFog.color).multiplyScalar(1.08).addScalar(.002);
@@ -203,7 +219,7 @@ export class AtmosphereEffects {
             const autoClear = renderer.autoClear, scissorTest = renderer.getScissorTest();
             renderer.getViewport(this.viewport); renderer.getScissor(this.scissor);
             try {
-                renderer.setRenderTarget(this.target); renderer.setScissorTest(false); renderer.autoClear = true;
+                renderer.setRenderTarget(target); renderer.setScissorTest(false); renderer.autoClear = true;
                 renderer.render(scene, camera);
                 renderer.setScissorTest(scissorTest);
                 renderer.setRenderTarget(previous);

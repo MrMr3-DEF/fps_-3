@@ -22,7 +22,7 @@ function fixture() {
         damage: number;
     }> = [], events: any[] = [];
     setMeleeNetworkPort({ players: () => players, ready: () => ready, reserve: () => { reserved++; }, sendCommand: () => { }, emit: e => events.push(e), confirmHit: () => {},
-        blocked: () => blocked, hitPlayer: (p, a, damage) => hits.push({ id: p.id, damage }), hitTarget: (index, damage) => hits.push({ id: `npc:${index}`, damage }), hitMecha: () => false });
+        blocked: () => blocked, hitPlayer: (p, a, damage) => hits.push({ id: p.id, damage }), hitTarget: (index, damage) => { hits.push({ id: `npc:${index}`, damage }); return { accepted: true, killed: false }; }, hitMecha: () => false });
     let seq = 0;
     const command = (action: 'start' | 'release' | 'cancel', fields = {}) => acceptMeleeCommand(attacker.id, { type: 'melee_command', action, sequence: ++seq, lifeId: 1, ...fields });
     return { attacker, victim, far, hits, events, command, block: (value: boolean) => blocked = value, ready: (value: boolean) => ready = value, reserved: () => reserved, remove: () => players = [] };

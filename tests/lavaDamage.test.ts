@@ -16,7 +16,7 @@ test('paused multiplayer lava continues through one death per life; offline paus
     state.isPlaying = true; state.isMultiplayer = true;
     rebuildEnvironmentWithSeed(42); resetPlayerState(); state.playerHp = 2;
     const pool = state.lavaPools[0]; state.camera.position.set(pool.position.x, 2, pool.position.z);
-    setDamageHandlers(() => {}, amount => { hits++; state.playerHp = Math.max(0, state.playerHp - amount); state.lastDamageTime = now; });
+    setDamageHandlers(() => ({ accepted: false, killed: false }), amount => { hits++; state.playerHp = Math.max(0, state.playerHp - amount); state.lastDamageTime = now; });
     try {
         checkLavaDamage(); assert.equal(state.playerHp, 1);
         checkLavaDamage(); assert.equal(hits, 1);

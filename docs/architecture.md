@@ -66,7 +66,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `seededScenery.ts` | Shared grass/pillar/lava/vegetation recipes and original RNG order, with explicit rendering/collision ownership ports |
 | `worldLoading.ts` | Loading-overlay paint, stage checkpoints, and cancellation generation |
 | `renderPreparation.ts` | Offscreen WebGL resource upload and day/night shader preparation before play |
-| `atmosphereEffects.ts` | Seeded moving altitude fog, depth-based camera blur, shared color/depth target and camera-history lifecycle |
+| `atmosphereEffects.ts` | Seeded moving altitude fog, depth-based camera blur, independent main/helmet color/depth targets and camera-history lifecycle |
 | `lavaGlow.ts` | Per-world texture baking for continuous lava light spill and source-chunk visibility |
 | `town.ts` | Seeded central-town plots, walls, gateways, building shells, interiors, and wilderness exclusion |
 | `physics.ts` | Local movement, gravity, hover fuel, ground/ceiling detection, and obstacle collision |
@@ -93,7 +93,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `mechaPilot.ts`, `mechaRockets.ts`, `lookInput.ts` | Cockpit boarding support, sampled pilot view/leg steering, immediate vehicle targeting, continuous pooled rocket guidance and shared timed touch/pointer look routing |
 | `mechaStomp.ts`, `mechaStompIcon.svg` | Shared enemy/pilot stomp event boundaries, cooldown and contact eligibility; typed pilot slots and approved static foot pictogram |
 | `mechaHeadView.ts`, `mechaHeadEffects.ts`, `mechaTransitionCamera.ts` | Actor-owned simulation-clock helmet/boot and exterior entry/exit camera phases; main owns DOM composition and temporary render-pose application |
-| `gothChat.ts`, `gothChatEngine.ts`, `gothChat.worker.ts` | Conversation UI, local WebLLM lifecycle, and inference worker |
+| `gothChat.ts`, `gothChatEngine.ts`, `gothChatProtocol.ts`, `gothChatWorkerRuntime.ts`, `gothChat.worker.ts` | Conversation UI, typed worker RPC, cancellation, and worker-only WebLLM runtime |
 | `gothKnowledge.ts`, `gothChatConsent.ts` | Character-file retrieval/prompt context and first-use model consent |
 | `settings.ts` | Settings schema, validation, persistence, renderer settings, particle scaling |
 | `multiplayer.ts` | PeerJS lifecycle, host/client topology, packet authorization and relay, world synchronization, peer avatars and interpolation |
@@ -166,7 +166,7 @@ A six-unit-wide straight stair cantilevers from the inside face of the west ston
 
 Town box visuals are batched into fourteen material instance sets: twelve for chunked structures and well water and two permanently rendered ground sets. The goth house is identified only in code and excluded from initial player spawns. It has charcoal masonry, solid stepped gables and buttresses, with decorative spires, lancet windows, a rose window, bat grotesques, iron cresting, candles, a chandelier, banners, a hearth and coffin-style furniture. These decorative shapes share six merged material meshes in one culled group; structural collision remains in the shared town box generator. Streets, the plaza, footpaths and room floors are partitioned into adjoining tiles at y=0, with no layered paving faces. The grass mesh has a matching cutout, and a separate invisible full-floor plane preserves grappling across both surfaces. Paving stays visible like the grass floor so distant chunk culling cannot expose a hole. Invisible colliders use the same box bounds as the solid geometry and remain in the spatial index when culled. Movement handles elevated lintels and roof slabs using each collider's bottom and top, with upward ceiling collision and floor support evaluated at the accepted horizontal position. Explicit `rebuildEnvironmentWithSeed` calls preserve their seed in both offline and multiplayer modes; ordinary new offline matches still choose a fresh seed.
 
-Gameplay queries do not iterate the whole world. `world.ts` maintains separate spatial hashes for obstacles, lava pools, and targets. Point-radius queries support movement and nearby hits; grid-traversing segment queries support bullets, sniper rays, and grappling. Collision helpers use swept segment/sphere and segment/AABB tests to avoid tunnelling between frames. The goth girlfriend has one fixed 1.1-by-3.564-by-0.8 box proxy registered in the obstacle hash; movement, projectiles, sniper rays and grapples use this proxy without tracing her animated GLB meshes. Her own conversation and goggles visibility rays explicitly ignore that proxy after accounting for other intervening geometry.
+Gameplay queries do not iterate the whole world. `world.ts` maintains separate spatial hashes for obstacles, lava pools, and targets. Point-radius queries support movement and nearby hits; grid-traversing segment queries support bullets, sniper rays, grappling, and nearby NPC interaction. Collision helpers use swept segment/sphere and segment/AABB tests to avoid tunnelling between frames. The goth girlfriend has one fixed 1.1-by-3.564-by-0.8 box proxy registered in the obstacle hash; movement, projectiles, sniper rays and grapples use this proxy without tracing her animated GLB meshes. Her own conversation and goggles visibility rays explicitly ignore that proxy after accounting for other intervening geometry.
 
 Shot queries include the ground half-space without indexing an arena-sized
 collider. Projectile centers stop one `PROJECTILE_RADIUS` above it; sniper rays
@@ -276,7 +276,7 @@ client A <----> host <----> client B
                     <----> client C
 ```
 
-Clients do not connect directly to each other. The host parses and authorizes client packets, applies authoritative target changes, and relays approved presentation/gameplay messages to the other clients. The maximum room size is five sessions including the host. Names are fixed for the session and unique within the lobby regardless of capitalization. Departure releases the name; unadmitted reservations expire after five minutes. The host broadcasts `peer_left` so every client removes the departed avatar.
+Clients do not connect directly to each other. The host parses and authorizes client packets, applies authoritative target changes, and relays approved presentation/gameplay messages to the other clients. The maximum room size is five sessions including the host. Names are fixed for the session and unique within the lobby regardless of capitalization. Departure releases the name; new unadmitted reservations expire after 90 seconds. The host broadcasts `peer_left` so every client removes the departed avatar.
 
 Before play, the host also owns an ordered `lobby_roster`: host first, then admitted connections in admission order. Clients report only their validated 24-bit `lobby_color`; they cannot set identities or roster positions. The host republishes the roster after admissions, departures, and color reports. Clients queue it while preparing their world and accept it only from the expected host. The menu renders the host at center and successive guests alternating left/right and receding by row. Lobby previews reuse the animated peer scan for every other player, with a typed name and no stats panel or homing lock. Each room size has explicit callout preferences; placement avoids other names and the left menu once, then retains its corner and leader length until membership or viewport changes. Reused spawn-house slots do not alter admission order. Starting play hides the previews but retains host admission order for the held-Tab list; disconnecting clears both.
 
@@ -307,7 +307,7 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 | `target_state` | Host only | Replicates target health and other incremental state |
 | `kill_target` | Host only | Replicates target respawn and score |
 
-Every received value first passes `parseNetworkPacket()`. It rejects unknown packet types, malformed structures, invalid usernames/weapons, non-finite or excessive coordinates, invalid directions, and oversized target snapshots. Do not handle a newly introduced packet before adding strict parsing for it.
+Every received value first passes `parseNetworkPacket()`. It rejects unknown packet types, malformed structures, invalid usernames/weapons, non-finite or excessive coordinates, invalid directions, and oversized target snapshots. Accepted packets are reconstructed from known fields, including nested snapshots and vectors, so extra payload is never relayed or retained. Gameplay updates use the host-stored lobby color; only lobby customization changes it. Do not handle a newly introduced packet before adding strict parsing for it.
 
 Movement allowance replenishes at `NETWORK_MOVEMENT_SPEED`, derived from enemy
 grapple pull, walking and jump values, and is capped by `NETWORK_MOVEMENT_BURST`.
@@ -398,7 +398,7 @@ The host is authoritative enough to reject many fabricated hits and target mutat
 
 Build and verification requirements are documented in [Development](development.md). Cloudflare credential and room behavior is documented in [Cloudflare operations](operations.md).
 
-Gameplay atmosphere renders the world once into a shared color/depth target and
+Gameplay atmosphere renders the world once into the active color/depth target and
 composites fog and camera blur in one fullscreen draw. Stock scene fog is disabled
 on this path; the independently saved toggles can bypass both effects entirely.
 Four ray samples read two layers of a seeded 16×16 noise texture, with density
@@ -412,7 +412,9 @@ is reset at life/view/input/resize/settings boundaries and rejects pose cuts,
 projection changes and long or stopped frame clocks. Photosensitivity/reduced
 motion suppress blur without overwriting its stored preference. The renderer
 warms resources under the loading cover and disposes them with the match; disabled
-effects release the target. Depth-texture support is required, otherwise Fog uses
+effects release both targets. Main output and bounded helmet captures use
+independent warmed targets with shared shaders and weather texture, so captures
+do not resize the main framebuffer. Depth-texture support is required, otherwise Fog uses
 distance fog and blur is skipped. Helmet video captures contain fog but
 no blur; katana overlays draw afterward. Menu and terminal cinematic rendering
 remain independently authored.
@@ -455,7 +457,7 @@ claims. See [Katana](katana.md) for module ownership, packet validation, tilted
 body-height hit volumes, cancellation and verification.
 
 Charged katana presentation is isolated in `katanaEffects.ts`: sampled world-space
-ribbons and bounded baked enemy snapshots render without mutating gameplay meshes.
+fixed-capacity dynamic ribbons and bounded baked enemy snapshots render without mutating gameplay meshes.
 The main temporary render boundary invokes its attacker-only impact overlay and
 restores camera and renderer state afterward. Strictly parsed `melee_hit` packets
 are host-origin feedback, never damage requests. `mechaNape.ts` attaches the fitted

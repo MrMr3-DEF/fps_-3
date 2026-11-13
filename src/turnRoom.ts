@@ -1,3 +1,4 @@
+import { ROOM_PENDING_SESSION_MS } from './config.js';
 import { parseJsonBody } from './boundedJson.js';
 import { isAdmissionGeneration, isCapability, isPeerId, isUsername, usernameKey } from './roomIdentity.js';
 
@@ -54,8 +55,7 @@ export class TurnRoomStateMachine {
             if (!validSession(body) || !isCapability(body.closeToken) || !future(body.expiresAt) || !future(body.sessionExpiresAt)) return json({ error: 'Invalid room registration.' }, 400);
             const next: RoomRecord = { closeToken: body.closeToken, expiresAt: body.expiresAt, hostPeerId: body.peerId as string, admissionGeneration: 0,
                 sessions: { [body.turnSessionToken as string]: session(body, Math.min(body.expiresAt, body.sessionExpiresAt), true) } };
-            await this.state.storage.put('room', next);
-            await this.state.storage.setAlarm(next.expiresAt);
+            await this.save(next);
             return json({ expiresAt: next.expiresAt }, 201);
         }
         if (!record) return json({ error: 'Room is inactive.' }, 404);
@@ -72,22 +72,23 @@ export class TurnRoomStateMachine {
             if (sessions.some(s => usernameKey(s.username) === usernameKey(body.username as string))) return json({ error: 'That username is already in this lobby. Choose another name.' }, 409);
             if (sessions.some(s => s.peerId === body.peerId)) return json({ error: 'Peer is already in this lobby.' }, 409);
             if (sessions.length >= this.maxPlayers) return json({ error: 'Room is full.' }, 409);
-            record.sessions[body.turnSessionToken as string] = session(body, Math.min(record.expiresAt, body.expiresAt), false);
-            await this.state.storage.put('room', record);
-            return json({ expiresAt: body.expiresAt }, 201);
+            const expiresAt = Math.min(record.expiresAt, body.expiresAt, Date.now() + ROOM_PENDING_SESSION_MS);
+            record.sessions[body.turnSessionToken as string] = session(body, expiresAt, false);
+            await this.save(record);
+            return json({ expiresAt }, 201);
         }
         if (path === '/admit' || path === '/depart') {
             if (body.closeToken !== record.closeToken || !isPeerId(body.peerId) || body.peerId === record.hostPeerId) return json({ error: 'Invalid host capability or peer.' }, 403);
             const entry = Object.entries(record.sessions).find(([, s]) => s.peerId === body.peerId);
             if (!entry) return json({ error: 'Room session is inactive.' }, 404);
             const [token, s] = entry;
-            if (path === '/depart') { delete record.sessions[token]; await this.state.storage.put('room', record); return empty(); }
+            if (path === '/depart') { delete record.sessions[token]; await this.save(record); return empty(); }
             if (s.admitted || !isCapability(body.admissionToken) || s.admissionToken !== body.admissionToken) return json({ error: 'Invalid or used admission ticket.' }, 403);
             if (record.admissionGeneration === Number.MAX_SAFE_INTEGER) return json({ error: 'Room admission limit reached.' }, 503);
             s.admitted = true;
             s.admissionGeneration = ++record.admissionGeneration;
             s.expiresAt = Math.min(record.expiresAt, Date.now() + SESSION_MS);
-            await this.state.storage.put('room', record);
+            await this.save(record);
             return json({ username: s.username, admissionProof: s.admissionProof, admissionGeneration: s.admissionGeneration });
         }
         if (path === '/claim-credential') {
@@ -98,13 +99,13 @@ export class TurnRoomStateMachine {
             if (Date.now() - s.credentialWindow >= SESSION_MS) { s.credentialWindow = Date.now(); s.credentialIssues = 0; }
             if (s.credentialIssues >= 2) return json({ error: 'Room session exhausted.' }, 429);
             s.credentialIssues++;
-            await this.state.storage.put('room', record);
+            await this.save(record);
             return json({ allowed: true });
         }
         if (path === '/release-session') {
             if (!isCapability(body.turnSessionToken)) return json({ error: 'Invalid room-session capability.' }, 400);
             delete record.sessions[body.turnSessionToken];
-            await this.state.storage.put('room', record);
+            await this.save(record);
             return empty();
         }
         if (path === '/heartbeat') {
@@ -121,8 +122,7 @@ export class TurnRoomStateMachine {
                     if (s.admissionGeneration <= acknowledged || s.expiresAt <= Date.now()) delete record.sessions[token];
                 } else s.expiresAt = Math.min(record.expiresAt, Date.now() + SESSION_MS);
             }
-            await this.state.storage.put('room', record);
-            await this.state.storage.setAlarm(record.expiresAt);
+            await this.save(record);
             return json({ expiresAt: record.expiresAt });
         }
         if (path === '/close') {
@@ -134,8 +134,17 @@ export class TurnRoomStateMachine {
     async alarm(): Promise<void> {
         await this.serialized(async () => {
             const record = await this.readActiveRecord();
-            if (record) await this.state.storage.setAlarm(record.expiresAt);
+            if (record) await this.schedule(record);
         });
+    }
+    private async schedule(record: RoomRecord): Promise<void> {
+        let expiry = record.expiresAt;
+        for (const s of Object.values(record.sessions)) if (!s.admitted) expiry = Math.min(expiry, s.expiresAt);
+        await this.state.storage.setAlarm(expiry);
+    }
+    private async save(record: RoomRecord): Promise<void> {
+        await this.state.storage.put('room', record);
+        await this.schedule(record);
     }
     private async readActiveRecord(): Promise<RoomRecord | null> {
         const record = await this.state.storage.get<RoomRecord>('room');
@@ -157,7 +166,7 @@ export class TurnRoomStateMachine {
         for (const [token, s] of Object.entries(record.sessions)) {
             if (!s || (!s.admitted && s.expiresAt <= Date.now())) { delete record.sessions[token]; changed = true; }
         }
-        if (changed) await this.state.storage.put('room', record);
+        if (changed) await this.save(record);
         return record;
     }
 }

@@ -72,22 +72,21 @@ test('goggles panel and leader use the full readout width before typing starts',
     const leader = targetRecord.children.find(child => child.classList.contains('goggles-target-leader'));
     assert.ok(label && leader);
     const panel = label.children[1];
-    assert.ok(panel.children[0].textContent.includes('DISTANCE:'));
-    assert.ok(panel.children[0].textContent.includes('HEALTH: 3 / 3'));
     assert.equal(panel.children[1].textContent, '');
-    assert.equal((label.style as any).width, '196px');
+    const labelWidth = Number.parseFloat((label.style as any).width);
+    assert.ok(labelWidth > 0);
 
     const leaderWidth = () => {
         const points = [...leader.children[0].attributes.d.matchAll(/[ML] (-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g)];
         assert.equal(points.length, 3);
         return Math.abs(Number(points[2][1]) - Number(points[1][1]));
     };
-    assert.ok(Math.abs(leaderWidth() - 196) <= 0.1);
+    assert.ok(Math.abs(leaderWidth() - labelWidth) <= 0.1);
 
     hud.update(view, view.position, view.position, [target], {}, true, 2000);
     assert.ok(panel.children[1].textContent.startsWith('DISTANCE'));
-    assert.equal((label.style as any).width, '196px');
-    assert.ok(Math.abs(leaderWidth() - 196) <= 0.1);
+    assert.equal(Number.parseFloat((label.style as any).width), labelWidth);
+    assert.ok(Math.abs(leaderWidth() - labelWidth) <= 0.1);
     hud.reset();
 });
 

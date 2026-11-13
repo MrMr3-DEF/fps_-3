@@ -220,7 +220,22 @@ export function setupMainMenu(): void {
     }
     colorInput.addEventListener('input', () => setColor(colorInput.value)); setColor(characterColor);
     let width = 0, height = 0, last = 0, scanActive = false, lobbyScanActive = false;
+    let previewVisible = true;
     renderPreview = () => {
+        const visible = blocker.style.display !== 'none' && !document.hidden;
+        if (!visible) {
+            if (previewVisible) {
+                stopDrag(); scan.reset(); lobbyScan.reset(); weaponScan.hide();
+                scanActive = lobbyScanActive = false;
+                for (const id of lobbyModels.keys()) disposeLobbyModel(id);
+                if (transition?.incoming) scene.remove(transition.incoming);
+                if (weaponModel) scene.remove(weaponModel);
+                transition = null; displayedWeapon = null; weaponModel = null;
+            }
+            previewVisible = false; return;
+        }
+        previewVisible = true;
+        if (performance.now() - last < 33) return;
         const weaponsOpen = isWeaponsOpen();
         const lobbyOpen = !state.isPlaying && state.lobbyPlayers.length > 0 &&
             (document.getElementById('panel-host-waiting')!.style.display === 'flex' ||
@@ -278,7 +293,6 @@ export function setupMainMenu(): void {
         if (!shouldScan && scanActive) { scan.reset(); scanActive = false; }
         if (!lobbyOpen && lobbyScanActive) { lobbyScan.reset(); lobbyScanActive = false; }
         if (!weaponsOpen) weaponScan.hide();
-        if (blocker.style.display === 'none' || document.hidden || performance.now() - last < 33) return;
         last = performance.now();
         const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;
         if (w !== width || h !== height) { width = w; height = h; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }

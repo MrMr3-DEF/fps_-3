@@ -4,7 +4,8 @@ export interface MechaWeaponHit {
     /** Incoming final flight segment, independent of the muzzle-to-hit vector for homing shots. */
     direction?: Vec3Like;
 }
-type TargetHitHandler = (targetIndex: number, damage: number, attackerPeerId?: string) => void;
+export interface TargetHitResult { accepted: boolean; killed: boolean }
+type TargetHitHandler = (targetIndex: number, damage: number, attackerPeerId?: string) => TargetHitResult;
 type PlayerDamageHandler = (damage: number, attackerName: string, attackerPeerId?: string) => void;
 
 let targetHitHandler: TargetHitHandler | null = null;
@@ -21,9 +22,9 @@ export function processMechaHit(damage: number, hit?: MechaWeaponHit): void {
  * without creating a runtime cycle. Calling before initialization is a real
  * lifecycle error, not a silently discarded hit.
  */
-export function processTargetHit(targetIndex: number, damage: number, attackerPeerId?: string): void {
+export function processTargetHit(targetIndex: number, damage: number, attackerPeerId?: string): TargetHitResult {
     if (!targetHitHandler) throw new Error('Damage handlers have not been initialized.');
-    targetHitHandler(targetIndex, damage, attackerPeerId);
+    return targetHitHandler(targetIndex, damage, attackerPeerId);
 }
 
 export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {
