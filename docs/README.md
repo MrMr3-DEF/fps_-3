@@ -1,42 +1,29 @@
 # FPS Arena documentation
 
-For a project overview and quick start, see the [project README](../README.md).
+Start with the [project overview and quick start](../README.md), then use the
+[development workflow](development.md) and [module ownership map](architecture.md).
+Guides describe current behavior; requested work belongs in the explicit
+[follow-up list](to_be_changed.md).
 
 ## Development
 
-Start with [Development](development.md) for setup, local run modes, tests, and
-the contribution workflow. Use [Architecture](architecture.md) to find the
-owning module and understand runtime state, lifecycle, and multiplayer data flow.
-Feature guides below cover current behavior and manual checks.
-
 | Guide | Contents |
 | --- | --- |
-| [Architecture](architecture.md) | Runtime layers, module ownership, world generation, gameplay, and networking |
-| [Development](development.md) | Prerequisites, scripts, tests, browser fixtures, CI, and generated output |
-| [Cloudflare operations](operations.md) | Deployment, bindings, TURN, Turnstile, API routes, and troubleshooting |
-| [Planned changes](to_be_changed.md) | Original feature requests and follow-up list |
-| [Audit repair plan](audit-repair-plan.md) | Crosschecked October audit findings, repair order, cleanup scope, and acceptance checks |
-| [Audit repair progress](audit-repair-progress.md) | Completed implementation, dated verification evidence and deployment/device limits |
+| [Architecture](architecture.md) | Runtime layers, module ownership, lifecycle, world generation and networking |
+| [Development](development.md) | Setup, scripts, test policy, browser fixtures, CI and generated output |
+| [Cloudflare operations](operations.md) | Deployment, bindings, TURN, Turnstile, API routes and troubleshooting |
+| [Multiplayer checks](multiplayer-live-test.md) | Repeatable host/join, combat, lifecycle and relay-network checks |
 
 ## Features and assets
 
 | Guide | Contents |
 | --- | --- |
-| [Full-screen menu](main-menu.md) | Character customization, controls, and weapon specifications |
-| [Settings](settings.md) | Graphics, atmosphere, accessibility, input and saved preferences |
-| [Katana](katana.md) | Melee controls, charge effects, damage geometry and authority |
-| [Mobile controls](mobile-controls.md) | Touch input, layout editing, landscape behavior, and device validation |
-| [Forgotten Mecha](forgotten-mecha.md) | Siege robot behavior, combat, mounting, piloting, and manual acceptance checks |
-| [Blender assets](../blender_assets/README.md) | Asset layout and exports |
-| [NPC character files](../public/npc/goth/README.md) | Editing character behavior and knowledge for local chat |
+| [Full-screen menu](main-menu.md) | Character customization, lobby lineup and weapon specifications |
+| [Settings](settings.md) | Graphics, accessibility, input and saved preferences |
+| [Desktop pointer input](pointer-input.md) | Aim sampling, sensitivity, zoom and pointer-lock behavior |
+| [Mobile controls](mobile-controls.md) | Touch actions, layout editing, input lifecycle and device checks |
+| [Katana](katana.md) | Melee controls, effects, damage geometry and authority |
+| [Forgotten Mecha](forgotten-mecha.md) | Combat, mounting, piloting, shared ending and module ownership |
+| [Blender assets](../blender_assets/README.md) | Source assets, exports and authoring guides |
+| [NPC character files](../public/npc/goth/README.md) | Local chat configuration, character behavior and knowledge |
 | [Fonts](../public/fonts/README.md) | Font provenance and licensing |
-
-## Validation and historical records
-
-[Multiplayer live test](multiplayer-live-test.md) tracks deployed networking
-checks. Physical-device checks live in [Mobile controls](mobile-controls.md).
-
-The September audit documents were removed from this checkout; earlier versions
-remain in Git history. The October repair plan and progress record describe the
-current audit effort. Dated verification results describe the environment and
-code tested at that time; use the development guide to verify a new change.

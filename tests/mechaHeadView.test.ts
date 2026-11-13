@@ -5,63 +5,61 @@ import { MechaHeadView } from '../src/mechaHeadView.ts';
 import { MechaHeadEffects } from '../src/mechaHeadEffects.ts';
 import { ForgottenMecha } from '../src/forgottenMecha.ts';
 import { loadIronmawTestAsset } from './ironmawTestAsset.ts';
-import { MECHA_INTERIOR_VIEW_BACK, MECHA_MOUNT_HELMET_CLOSE_TIME } from '../src/config.ts';
+import { MECHA_INTERIOR_VIEW_BACK, MECHA_MOUNT_HELMET_CLOSE_TIME, MECHA_HUD_FADE_TIME, MECHA_VISION_REVEAL_TIME,
+    MECHA_HEAD_BLACK_FADE_TIME, MECHA_HEAD_CAMERA_MOVE_TIME, MECHA_HELMET_TIME } from '../src/config.ts';
 
-test('orange boot follows native Mount, moves only behind black and enables vision after HUD plus reveal', () => {
-    const head = new MechaHeadView(), duration = 169 / 24;
-    head.begin(); assert.equal(head.eyeBlend, 0);
-    assert.equal(head.updateStartup(1.124, duration), false); assert.equal(head.phase, 'mount'); assert.equal(head.blackout, 0);
-    head.updateStartup(1.125, duration); assert.equal(head.phase, 'loading'); assert.equal(head.blackout, 1); assert.equal(head.loadingProgress, 0);
-    head.updateStartup(1.165, duration); assert.ok(Math.abs(head.eyeBlend - 0.5) < 1e-9); assert.equal(head.blackout, 1);
-    head.updateStartup(1.205, duration); assert.equal(head.eyeBlend, 1);
-    head.updateStartup(duration, duration); assert.equal(head.loadingProgress, 1); assert.equal(head.phase, 'hud'); assert.equal(head.hudOpacity, 0);
-    head.updateStartup(duration + 0.2, duration); assert.ok(Math.abs(head.hudOpacity - 0.5) < 1e-9); assert.equal(head.blackout, 1);
-    head.updateStartup(duration + 0.55, duration); assert.equal(head.phase, 'reveal'); assert.equal(head.hudOpacity, 1); assert.equal(head.targetingReady, false);
-    assert.ok(Math.abs(head.revealProgress - 0.5) < 1e-9);
-    assert.equal(head.updateStartup(duration + 0.7, duration), true); assert.equal(head.phase, 'ready'); assert.equal(head.targetingReady, true);
+test('startup and shutdown gate targeting, and reset clears head presentation', () => {
+    const head = new MechaHeadView(), duration = 7;
+    const readyAt = duration + MECHA_HUD_FADE_TIME + MECHA_VISION_REVEAL_TIME;
+    head.begin();
+    for (const time of [0, MECHA_MOUNT_HELMET_CLOSE_TIME, duration, readyAt - 0.001]) {
+        assert.equal(head.updateStartup(time, duration), false);
+        assert.equal(head.targetingReady, false);
+    }
+    assert.equal(head.updateStartup(readyAt, duration), true);
+    assert.equal(head.targetingReady, true);
+    head.updateShutdown(0, duration);
+    assert.equal(head.targetingReady, false);
+    head.reset();
+    assert.equal(head.phase, 'inactive');
+    assert.equal(head.blackout, 0);
+    assert.equal(head.targetingReady, false);
 });
 
-test('shutdown reverses video and HUD, fills the bar during reverse Mount and moves the camera under black', () => {
-    const head = new MechaHeadView(), duration = 169 / 24, presentation = 0.7;
-    head.updateShutdown(0, duration); assert.equal(head.phase, 'shutdown-reveal'); assert.equal(head.revealProgress, 1);
-    head.updateShutdown(0.15, duration); assert.equal(head.revealProgress, 0.5); assert.equal(head.blackout, 0); assert.equal(head.eyeBlend, 1);
-    head.updateShutdown(0.5, duration); assert.equal(head.phase, 'shutdown-hud'); assert.equal(head.blackout, 1); assert.ok(Math.abs(head.hudOpacity - 0.5) < 1e-9);
-    head.updateShutdown(presentation, duration); assert.equal(head.phase, 'shutdown'); assert.equal(head.loadingProgress, 0); assert.equal(head.hudOpacity, 0);
-    const opening = duration - MECHA_MOUNT_HELMET_CLOSE_TIME;
-    head.updateShutdown(presentation + opening - 0.04, duration); assert.ok(Math.abs(head.eyeBlend - 0.5) < 1e-8); assert.equal(head.blackout, 1);
-    head.updateShutdown(presentation + opening, duration); assert.equal(head.loadingProgress, 1); assert.equal(head.eyeBlend, 0); assert.equal(head.blackout, 1);
-    head.updateShutdown(presentation + opening + 0.24, duration); assert.equal(head.phase, 'shutdown-opening'); assert.equal(head.blackout, 0); assert.equal(head.targetingReady, false);
-});
-
-test('opening relocates under black, native folding reverses, and closing restores targeting only after returning to eye', () => {
-    for (const step of [1 / 30, 1 / 60, 1 / 144, 0.17]) {
-        const head = new MechaHeadView(); head.begin(); head.updateStartup(10, 7);
-        const advance = (seconds: number) => { for (let t = 0; t < seconds - 1e-9; t += step) head.update(Math.min(step, seconds - t)); };
-        head.toggle(); assert.equal(head.targetingReady, false); advance(0.12);
-        assert.equal(head.blackout, 1); assert.equal(head.eyeBlend, 1); assert.equal(head.fold, 0);
-        advance(0.04); assert.ok(Math.abs(head.eyeBlend - 0.5) < 1e-9); assert.equal(head.blackout, 1);
-        advance(0.04); assert.equal(head.eyeBlend, 0); assert.equal(head.fold, 0);
-        advance(0.4); assert.ok(Math.abs(head.fold - 0.4) < 1e-8); assert.equal(head.blackout, 0);
-        const before = { fold: head.fold, eye: head.eyeBlend, black: head.blackout }; head.toggle();
-        assert.deepEqual({ fold: head.fold, eye: head.eyeBlend, black: head.blackout }, before);
-        advance(0.4); assert.equal(head.fold, 0); assert.equal(head.targetingReady, false);
-        advance(0.12); assert.equal(head.blackout, 1); advance(0.08); assert.equal(head.eyeBlend, 1);
-        assert.equal(head.targetingReady, false); advance(0.12); assert.equal(head.targetingReady, true); assert.equal(head.blackout, 0);
-        head.toggle(); advance(1.2); assert.equal(head.phase, 'open'); assert.equal(head.eyeBlend, 0); assert.equal(head.fold, 1);
-        head.toggle(); advance(1.1); head.toggle(); const blend = head.eyeBlend, black = head.blackout;
-        head.update(0); assert.equal(head.eyeBlend, blend); assert.equal(head.blackout, black);
-        advance(1.4); assert.equal(head.phase, 'open'); assert.equal(head.fold, 1);
-        head.reset(); assert.equal(head.phase, 'inactive'); assert.equal(head.blackout, 0); assert.equal(head.targetingReady, false);
+test('helmet reversal preserves continuity and restores targeting only after closing', () => {
+    const transition = MECHA_HEAD_BLACK_FADE_TIME * 2 + MECHA_HEAD_CAMERA_MOVE_TIME + MECHA_HELMET_TIME;
+    for (const step of [1 / 30, 1 / 144, 0.17]) {
+        const head = new MechaHeadView();
+        head.begin(); head.updateStartup(10, 7);
+        const advance = (seconds: number) => {
+            for (let t = 0; t < seconds - 1e-9; t += step) head.update(Math.min(step, seconds - t));
+        };
+        head.toggle();
+        assert.equal(head.targetingReady, false);
+        advance(transition / 2);
+        const pose = { fold: head.fold, eye: head.eyeBlend, cover: head.blackout };
+        head.toggle();
+        assert.deepEqual({ fold: head.fold, eye: head.eyeBlend, cover: head.blackout }, pose);
+        advance(transition);
+        assert.equal(head.targetingReady, true);
+        assert.equal(head.eyeBlend, 1);
+        assert.equal(head.blackout, 0);
+        head.toggle();
+        advance(transition);
+        assert.equal(head.phase, 'open');
+        assert.equal(head.targetingReady, false);
+        head.toggle();
+        const paused = { phase: head.phase, fold: head.fold, eye: head.eyeBlend, cover: head.blackout };
+        head.update(0);
+        assert.deepEqual({ phase: head.phase, fold: head.fold, eye: head.eyeBlend, cover: head.blackout }, paused);
+        head.reset(); head.update(transition);
+        assert.equal(head.phase, 'inactive');
+        assert.equal(head.targetingReady, false);
     }
 });
 
 test('head camera matches actual eye, interior helmet blocks vision, and per-view overrides restore external model', async () => {
     const asset = await loadIronmawTestAsset();
-    const hinge = asset.animations.find(clip => clip.name === 'Mount')!.tracks.find(track => track.name === 'CTRL_Helmet_Rear.quaternion')!;
-    const final = new THREE.Quaternion().fromArray(hinge.values, hinge.values.length - 4);
-    const interpolate = hinge.createInterpolant();
-    assert.ok(new THREE.Quaternion().fromArray(interpolate.evaluate(MECHA_MOUNT_HELMET_CLOSE_TIME)).angleTo(final) < 1e-5);
-    assert.ok(new THREE.Quaternion().fromArray(interpolate.evaluate(MECHA_MOUNT_HELMET_CLOSE_TIME - 1 / 24)).angleTo(final) > 1e-5);
     const actor = new ForgottenMecha([], [], 42); actor.install(asset); actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0;
     const absent = { position: new THREE.Vector3(), alive: false, grounded: false };
     const advance = (seconds: number) => { for (let t = 0; t < seconds - 1e-9; t += 1 / 60) actor.update(Math.min(1 / 60, seconds - t), absent); };

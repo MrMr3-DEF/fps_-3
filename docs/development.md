@@ -4,470 +4,199 @@
 
 1. Inspect `git status` and preserve unrelated changes.
 2. Use the [documentation index](README.md) and
-   [architecture ownership table](architecture.md#module-ownership) to find the
-   relevant system. Read its feature guide and inspect the current code before
-   editing. [Planned changes](to_be_changed.md) holds the original requests;
-   September audit documents are historical records.
-3. Keep success, cancellation, reset, and disposal paths aligned. Update the
-   owning documentation when behavior or workflows change.
-4. Run the checks in [Validation by change type](#validation-by-change-type).
-   Include regenerated `dist/` output for production changes and distinguish
-   automated results from browser, device, and deployed-network validation.
+   [module ownership table](architecture.md#module-ownership) to find the system.
+   Read its feature guide and inspect current code before editing.
+3. Keep success, cancellation, reset and disposal paths aligned. Update the
+   owning guide with concise current behavior; report verification results in
+   the task response rather than adding a log to the docs.
+4. Follow [validation by change type](#validation-by-change-type). Include
+   regenerated `dist/` for production changes. Modify `AGENTS.md` only when the
+   user explicitly requests it.
 
-## Prerequisites
+## Prerequisites and setup
 
-- Node.js 22.15 or newer, matching the `engines` requirement in `package.json`.
-- npm, using the committed `package-lock.json`.
-- Git LFS for the Blender binaries and generated model/chat assets.
-- A WebGL-capable browser.
-- Wrangler authentication and Cloudflare credentials only when exercising or deploying secure multiplayer.
+- Node.js 22.15 or newer, npm and the committed `package-lock.json`.
+- Git LFS for Blender binaries, model assets and generated chat bundles.
+- A WebGL-capable browser; local chat also needs WebGPU and shader-f16.
+- Cloudflare credentials only for secure multiplayer or deployment.
 
-Install dependencies with:
-
-```bash
-npm ci
-```
-
-Use `npm install` instead when intentionally changing dependencies and the lockfile.
-
-### Git LFS assets
-
-On macOS, install Git LFS before cloning:
+Install Git LFS before cloning:
 
 ```bash
 brew install git-lfs
 git lfs install
 git clone https://github.com/MrMr3-DEF/fps_-3.git
 cd fps_-3
-git lfs install --local
 git lfs pull
+npm ci
 ```
 
-For an existing checkout, run `git lfs install --local` and `git lfs pull` in
-its root after installing Git LFS. Normal clones and pulls then download LFS
-contents automatically. If checkout skipped those downloads, run `git lfs pull`
-before development, tests, builds, previews, or deployment: pointer files cannot
-replace real GLBs or JavaScript bundles. Any external build/deployment checkout
-must also enable LFS downloads; `npm run deploy` uses the hydrated local files.
+For an existing checkout, use `git lfs install --local` and `git lfs pull`.
+Development, tests and builds need real assets, not LFS pointer files. External
+build/deployment checkouts must also download LFS contents.
 
-`.gitattributes` tracks `.blend`, `.glb`, `.png`, `.jpg`, and `.mp4` recursively
-under `blender_assets/`, plus generated GLBs and the Goth chat engine/worker
-bundles under `dist/assets/`. Scripts, JSON, Markdown, character knowledge, and
-other bundles remain in regular Git. Chat model weights still download from
-their existing external hosts. Add and commit asset changes normally; Git LFS
-stores pointers in Git and uploads the contents through its pre-push hook.
-The initial conversion preserves existing commits, so older copies remain in
-regular Git history.
-
-[GitHub's LFS allowances](https://docs.github.com/en/billing/concepts/product-billing/git-lfs)
-are shared across the repository owner's account: Free/Pro plans include 10 GiB
-of storage and 10 GiB of download bandwidth per month; Team/Enterprise Cloud
-include 250 GiB of each. Each changed file version consumes its full size in
-storage, and downloads by collaborators or CI consume bandwidth. Overage behavior
-depends on the account's budget and payment settings.
+`.gitattributes` tracks Blender `.blend`, `.glb`, `.png`, `.jpg` and `.mp4` files,
+plus generated GLBs and Goth engine/worker bundles under `dist/assets/`.
+Scripts, JSON, Markdown and character knowledge stay in regular Git. Chat model
+weights download from external hosts. Commit assets normally; the LFS pre-push
+hook uploads their contents. Storage and bandwidth use the repository owner's
+[GitHub LFS allowances](https://docs.github.com/en/billing/concepts/product-billing/git-lfs).
 
 ## Scripts
 
 | Command | Purpose |
 | --- | --- |
-| `npm run dev` | Start Vite with hot reload. `/api` requests are proxied to `127.0.0.1:8787`. |
-| `npm run worker:dev` | Start the Cloudflare Worker locally through Wrangler. |
-| `npm run typecheck:client` | Check browser source with `tsconfig.json`. |
-| `npm run typecheck:worker` | Check the Worker entry and its dependencies with `tsconfig.worker.json`. |
-| `npm run typecheck` | Run both TypeScript checks. |
-| `npm test` | Run all `tests/*.test.ts` files with Node's built-in test runner and type stripping. The test-only resolution hook maps source `.js` imports to `.ts` and substitutes deterministic PeerJS/physics-query doubles. |
-| `npm run check` | Run type checking and unit tests. |
-| `npm run build` | Run type checking, then generate the production bundle in `dist/`. |
-| `npm run preview` | Serve the existing `dist/` bundle locally. It does not rebuild first. |
-| `npm run deploy` | Build and deploy the Worker and static assets with Wrangler. |
+| `npm run dev` | Vite with hot reload; proxies `/api` to `127.0.0.1:8787` |
+| `npm run worker:dev` | Local Cloudflare Worker through Wrangler |
+| `npm run typecheck:client` | Browser graph with `tsconfig.json` |
+| `npm run typecheck:worker` | Worker graph with `tsconfig.worker.json` |
+| `npm run typecheck` | Both TypeScript checks |
+| `npm test` | All `tests/*.test.ts` with Node's test runner and type stripping |
+| `npm run check` | Type checking and tests |
+| `npm run build` | Type checking and production output in `dist/` |
+| `npm run preview` | Serve existing `dist/` without rebuilding |
+| `npm run deploy` | Build and deploy Worker plus static assets |
 
-Stop any development or preview server with `Ctrl+C` in the terminal that owns it.
+Stop local servers with Ctrl+C in their owning terminal. Use `npm install` only
+when intentionally updating dependencies and the lockfile.
 
 ## Local run modes
 
-For the offline siege-robot presentation, `/tests/mecha-preview.html` reviews the real
-match with controls for finding/scanning the robot, firing, stomps, death, wall
-punch and cleanup. Place at wall exercises the production cutscene and final overlay;
-leave/restart checks cancellation and clean replacement. Body height, automatic sideways evasion, phase history and
-event pauses review laser pitching, horizontal misses, shield drop and rebuild.
-It uses temporary touch input without saving settings; use a
-landscape viewport. See [Forgotten Mecha](forgotten-mecha.md) for gameplay and
-resource ownership. Focused checks are in `tests/forgottenMecha.test.ts`,
-`tests/mechaCombat.test.ts` and `tests/mechaWeapons.test.ts`.
-Armor hit setup holds the vulnerable actor still for actual bullet/sniper shots;
-continuous firing, pause-on-impact, night lighting and temporary 20%/100% particle
-controls support dust/spark review without saving graphics settings.
-For defeat shake, set Distance to 150–200 m and Body height to 80 m, enable
-Hold height, then Find Mecha and Kill Mecha. The status reports separate knee/fist
-render-rotation peaks and grounding; both impacts should visibly shake while
-airborne. Repeat beyond 200 m for no shake. These controls also work at ground
-height and in third person; ordinary stomp shake still stops at 50 m.
-Mounting controls additionally expose cockpit aim/grapple, turning, forward/reverse
-movement, third-person view, targets ahead, rocket firing and a held shield.
-Fitted pillar approach, leg-supported stomp and sideways defeat controls review
-the movement/contact changes; event pauses expose torso alignment and immediate
-breakup/release.
-Finishing-touch controls add a ground-level upper-cabin approach, O helmet toggle,
-rocket/helmet event pauses, safe lava placement, front asset inspection, and
-player/pilot damage for death/respawn review. Head-view controls also pause before Mount's helmet closure, during
-orange loading, black goggles boot, video tearing and toggle blackout. The gentle
-reveal button changes the fixture's in-memory Photosensitivity Mode without saving
-settings. Inspect first-person eye alignment, the physical interior fold, smooth
-reversal while moving, scoped open-head scans and unchanged third-person framing.
-`tests/mechaHeadView.test.ts` covers clip cues, protected startup, camera geometry,
-reversals across frame rates, paused clocks, bounded captures and render restoration.
-`tests/mechaTransitionCamera.test.ts` checks full-body exterior framing, swivel
-and return geometry, swept clearance, actual-GLB perspective timing parity,
-perspective locks, scope release and voluntary camera handoff. The existing
-preview adds Exit, Try perspective / scope, and pause events for camera swivel,
-return, reversed Mount and release. These use the production transition camera;
-leave Front asset review off when reviewing transitions.
-Hold helmet blackout freezes only the actor clock at opaque cover during active
-piloting. Unlike ordinary pause, it leaves the real HUD active so the camera
-cover's layering and held-Aim FOV can be inspected; uncheck it to continue.
-Front asset review changes only the
-fixture draw camera; turn it off for acquisition and first/third-person checks.
-`tests/mechaLifecycle.test.ts` checks fitted sweep/slide/escape/border behavior,
-real-asset clearance, defeat alignment, leg contact at varied rates, living release
-with normal gravity and the collision-safe camera handoff.
-`tests/mechaMount.test.ts` checks actual asset containment, boarding/FinalDeath,
-grapple arrival, steering and manual shielding; `tests/mechaRockets.test.ts`
-checks immediate acquisition, continuous guidance, straight launch, range, interception,
-splash, target lives and wandering landing distance. `tests/mechaFinishing.test.ts`
-checks the eleven-clip export, animated cassette socket, firing phases, helmet
-layering/reversal, sampled pointer stopping, grounded lava ticks, yellow eye cues
-and normal cockpit grappling/occlusion.
-
 ### Offline gameplay and client UI
 
-For the shared whole-castle Game Over presentation, open
-`/tests/mecha-cutscene-preview.html` with the Vite server running. This standalone
-review loads the production Ironmaw GLB and seeded town geometry without starting
-a match. The approved seeded landscape and pillar collisions run on actual wall
-arrival in singleplayer and multiplayer, using the same presentation as the preview.
-Replay runs fade-out, on-demand activation under black, close-shot reveal,
-punch, castle-wide chain reaction, main detonation and aftermath;
-the timeline and moment buttons support paused inspection and backwards seeks.
-Pillar bounce and Pillar breakup jump to recorded contacts visible in the shot.
-The footer reports baked bounce/breakup totals, activation time and the bounded
-camera adjustment. The preview derives its effects seed the same way as the host.
-Approach, wall offset, seed, lighting, viewport, particle amount and gentle-effects controls
-are temporary preview preferences and never save settings. The frame stays 16:9
-with letterboxing. See [Forgotten Mecha](forgotten-mecha.md#game-over-cutscene-preview)
-for production takeover, synchronization and timing. This fixture is served by Vite in development
-and is not included in the production bundle.
-
-Run `npm run dev` and open the Vite URL. Offline singleplayer, rendering, settings, input, and most menu work do not require the Worker.
-
-The multiplayer menu will report that secure multiplayer is unavailable if nothing is listening on port 8787 or the Worker is missing its required configuration. This is intentional fail-closed behavior.
+Run `npm run dev` and open the Vite URL. Offline play, rendering, settings,
+input and menu work do not require the Worker. Secure multiplayer fails closed
+when the Worker or its security configuration is unavailable.
 
 ### Full client and Worker
 
-Use two terminals:
-
-```bash
-# terminal 1
-npm run worker:dev
-
-# terminal 2
-npm run dev
-```
-
-Vite serves source changes and forwards `/api` to Wrangler. Provide local Worker values through Wrangler's supported local environment mechanism and never commit them. Turnstile also has to accept the hostname used by the browser; a token issued for `localhost` is rejected when the Worker expects the production hostname.
-
-The complete variable list and service setup are in [Cloudflare operations](operations.md).
+Run `npm run worker:dev` and `npm run dev` in separate terminals. Vite forwards
+API requests to Wrangler. Supply local secrets through Wrangler's local
+configuration mechanism; never commit them. Turnstile must accept the browser
+hostname and match the Worker's expected hostname. See
+[Cloudflare operations](operations.md) for variables and service setup.
 
 ### Production bundle
 
-Run `npm run build`, then `npm run preview`. Preview is useful for checking chunk loading and the generated HTML, but Worker API routes still need a compatible backend if multiplayer is tested through the preview origin.
+Use `npm run build`, then `npm run preview` for production chunk-loading checks.
+Worker API routes still need a compatible backend at the preview origin.
 
 ## Source and build conventions
 
-The project uses strict TypeScript, ES modules, and browser-oriented bundler resolution. Source imports include `.js` extensions even though the files on disk are `.ts`; preserve that convention.
+Source uses strict TypeScript and ES modules. Preserve `.js` import suffixes;
+TypeScript resolves them to `.ts`. Browser and Worker TypeScript configurations
+remain separate; shared modules must be valid in both importing graphs.
 
-`tsconfig.json` checks the browser graph and excludes `src/worker.ts`. `tsconfig.worker.json` checks the Worker graph with Cloudflare runtime types. Code shared by both sides, such as `config.ts` and `turnRoom.ts`, must remain valid in each graph that imports it.
+Vite empties `dist/` before building. Production output is tracked: change source,
+regenerate the bundle and include added/deleted hashed assets with `dist/index.html`.
+Never hand-edit bundles. Explicitly add new source, tests and generated files;
+`git commit -a` does not include untracked paths.
 
-Vite writes to `dist/`, empties the directory first, and splits Three.js into its own chunk. `dist/` is committed because deployment and CI treat it as a checked-in artifact. Do not edit hashed bundle files manually. Change source, run the build, and commit the resulting additions/deletions under `dist/assets/` together with `dist/index.html`.
-
-Local-only material is ignored by `.gitignore`: dependencies, `.wrangler/`, `.env*`, logs, editor/OS clutter, coverage, screenshots, and analysis artifacts. Tests are not temporary output and must remain tracked.
-
-Before committing, inspect `git status --short` and explicitly add new source files,
-tests, and generated `dist/assets/` files. `git commit -a` only includes paths that
-Git already tracks; omitted new modules can pass local checks but fail CI's clean
-checkout, and omitted bundles leave `dist/index.html` pointing at missing assets.
+Dependencies, Wrangler state, secrets, logs, screenshots and analysis artifacts
+are local-only. Tests and maintained preview fixtures remain tracked.
 
 ## Tests
 
-The test suite focuses on deterministic logic and security boundaries that can run without WebGL or a browser:
+Add tests only for significant gameplay, security, lifecycle or reliability
+requirements, or meaningful reproducible bugs. Identify the failure and inspect
+existing coverage first. Cosmetic changes, routine refactors, presentation timing
+and tuning values normally need no new test. Assert observable outcomes and
+essential relationships rather than duplicated constants or animation samples.
+Keep setup proportional to risk and update or remove obsolete assertions.
 
-| Test file | Coverage |
-| --- | --- |
-| `config.test.ts` | Valid weapon statistics and projectile-budget assumptions |
-| `gameplayMath.test.ts` | Frame-delta clamping and swept sphere/AABB collision |
-| `mouseButtons.test.ts` | Simultaneous pointer buttons and safe bitmask decoding |
-| `pointerLockControls.test.ts`, `mouseMovement.test.ts` | Mouse/trackpad resampling across input/render rates, zoom gain, cancellation and optional spike protection |
-| `pointerAimIntegration.test.ts` | Published crosshair, actual homing acquisition/firing, sniper exclusion and grappling agree during queued turns |
-| `multiplayerVisuals.test.ts` | Overlapping remote damage pulses and material restoration |
-| `locatorBar.test.ts`, `hudPresentation.test.ts` | Locator bearings/elevation, confirmed colors, entity retirement, mecha occupancy and HUD visibility across scope and lifecycle transitions |
-| `weaponIndicator.test.ts`, `weaponLifecycle.test.ts` | Static silhouettes, icon caching/reset, actual weapon-swap commit timing, mecha selection and safe touch placement |
-| `networkTypes.test.ts` | Accepted packets and rejection of malformed or excessive network data |
-| `town.test.ts` | 1,000 seeded layouts, street/door clearance, real world rebuilds/disposal, hazard exclusion, collision, ceilings, rooftop edges, projectile/grapple geometry, culling and enemy placement |
-| `spatialHash.test.ts` | Radius queries, reusable outputs, clearing, segment traversal, deduplication, negative cells, grid corners |
-| `turnRoom.test.ts` | Room capacity, capability checks, credential quotas, and cleanup |
-| `worldLoading.test.ts` | Loading-overlay paint, cancellation, and replacement-screen ownership |
-| `renderPreparation.test.ts` | Temporary render objects, render target, and lighting restoration after preparation |
-| `lavaGlow.test.ts` | Baked spill coverage and night-strength transitions |
-| `dayNightCycleSettings.test.ts` | Runtime shadow settings and camera-following, stable sun shadows |
+Useful boundaries include packet parsing/authority, shot and damage rules,
+collision, deterministic world generation, admission quotas, input cancellation,
+state resets and resource ownership. Keep testable logic independent of the DOM,
+renderer, PeerJS and Cloudflare bindings where practical.
 
-Additional regression suites cover bounded streaming JSON, deterministic shot authority and life transitions, movement/collision, Worker-backed admission, case-insensitive username reservations, concurrent room mutations, departure, waiting-room synchronization, and stale callbacks. PeerJS signalling and Cloudflare upstream services are simulated in these integration tests; they do not replace a real relay-network smoke test.
-
-On 25 September 2026, `npm run check` passed both TypeScript projects and all 237 Node tests. Counts in older feature notes below describe their original validation runs; rerun the current suite for a present-day result.
-
-Keep testable logic independent of the DOM, Three.js renderer, PeerJS implementation, and Cloudflare bindings where practical. The `TurnRoomStateMachine` storage interface is an example: tests use an in-memory implementation while production supplies Durable Object storage.
-
-Add or update tests for changes to packet parsing, authorization rules, geometry math, state-machine quotas, input decoding, shared-material lifecycle, and configuration invariants. Browser-only changes still require manual validation.
-
-## Locator bar review
-
-With Vite running, open `/tests/player-list-preview.html?locator-preview` to
-review the production locator renderer with duplicate suit colors, a distant
-player beyond render range, elevation arrows and a rust-spotted silver mecha.
-Camera yaw/pitch, scope, third-person and mobile-HUD controls exercise bearing
-and layout. Remote pilot suppresses that player's colored marker; Empty track
-and Reset markers review retirement and rebuilding. The unparameterized player
-list fixture retains its scoreboard review.
-
-Check that all dots stay 20px at every distance/zoom, overlap directly on the
-line, and retain exact suit colors. Markers use the shared 4px corner radius;
-the mecha's rust patches are square. The locator's outer width must match the
-health/reload bars: 484px desktop and 124px mobile, with the shared 4px radius.
-In real gameplay, verify first/third-person and cockpit turns, scoped visibility,
-pause/death/loading concealment, respawn and leave/restart cleanup. This local
-fixture does not establish deployed multiplayer or physical-device behavior.
-
-October 30, 2026: both TypeScript projects and all 493 tests passed; the
-production build regenerated `dist/`. Browser review measured equal outer
-widths of 484px desktop and 124px mobile, 10px markers with 4px corners, duplicate
-suit colors, pixelated rust, elevation arrows, remote-pilot suppression and
-scoped visibility. The real gameplay fixture also verified a mecha marker in
-first/third-person scoped views, concealment on death and restoration on respawn.
-Active cockpit review retained the empty track without a self-mecha marker;
-leaving the match hid the track and cleared all markers.
-
-Locator sizing follow-up: markers are now 20 × 20px, twice their original side
-length, with larger pixelated rust patches and elevation arrows. Endpoint
-insets keep the enlarged squares within the existing track width; the 4px
-corner radius and distance-independent sizing are retained.
-
-## Weapon indicator assets and review
-
-The playable-stomp pictogram drafts are preview-only. Open
-`/tests/player-list-preview.html?stomp-icons` to compare three treatments at
-140 × 70px desktop and 88 × 44px mobile sizes, using the production panel's
-resolved styling. They use the actual left-foot mesh and a cropped ankle edge.
-Approved direction C has impact rays beneath the sole and no line above the
-foot. Its production asset is `src/mechaStompIcon.svg`; A and B remain available
-for comparison.
-Regenerate these drafts with
-`node --experimental-strip-types --import ./tests/register.mjs scripts/generate-stomp-icon-previews.mjs`.
-The review fixture does not drive gameplay; C was explicitly approved before
-the playable attack was implemented.
-
-The HUD's seven static white SVG silhouettes use the actual weapon meshes,
-rocket hull/nose and approved stomp SVG. After changing those models/assets, run
-`node --experimental-strip-types --import ./tests/register.mjs scripts/generate-weapon-icons.mjs`
-and include the updated `src/weaponIndicatorIcons.ts` with the normal build.
-Dormant muzzle effects and the rocket flame are excluded. This is an authoring
-step; gameplay does not load models or allocate a renderer for the indicator.
-
-Open `/tests/player-list-preview.html?weapon-preview` for the shared HUD review.
-Weapon, Piloting mecha, Pilot attack, Power jump and HUD state controls exercise all icons,
-ordinary visibility and the neutral panel styling. Mobile HUD shows the real
-touch-control layout so panel clearance can be inspected. Desktop outer size is
-140 × 70px; touch size is 88 × 44px. Both share the health/ammo stack height and
-4px radius. Short desktop windows shorten the hover bar to leave 12px above
-the bottom-right panel. Also review switching, cockpit entry/exit and cleanup
-in the real match fixture.
-
-`tests/mechaStomp.test.ts` compares actual enemy/pilot leg poses at frame 39 at
-30/60/144 Hz and across hitches; it covers player/NPC contact, health, immunity,
-independent cooldowns, movement/look/shields, deferred exit and cancellation.
-`tests/mechaNetwork.test.ts` checks validated slots, host repetition/input expiry,
-attribution, render acknowledgment and late-join stomp poses. In
-`/tests/mecha-preview.html`, Rockets (1), Stomp (2), E, both scroll buttons and
-touch Weapon use actual selection controls. Stomp targets places two grounded
-NPCs and one floating target; Hold/release Fire reviews repetition and reload.
-
-November 1, 2026: `npm run check` passed both TypeScript projects and all 507
-tests; `npm run build` regenerated tracked `dist/`, and whitespace checks passed.
-The live singleplayer fixture verified slot 2, E and both scroll directions,
-the visible touch Weapon button, first/third-person stomp presentation, 10 HP
-grounded NPC hits with the floating target unchanged, pause freezing, deferred
-exit, ordinary-gun restoration and leave cleanup. Touch pointer ownership and
-cycling were also exercised by the automated input tests. The HUD fixture
-measured 140 × 70px desktop and 88 × 44px at 844 × 390 landscape, 4px corners,
-matching stack heights, 10px action clearance and unchanged neutral panel styling
-with Power Jump enabled. Scope and overlay visibility were checked in that fixture.
-
-Live multiplayer limitation: two browser clients reached Host/Join, but local
-room creation returned HTTP 502 with no Worker listening on port 8787, so no
-room code or live peer connection could be established. Host/client authority,
-expiry, attribution and late-join pose results above are automated coverage;
-a real two-client WebRTC stomp and physical-device touch check remain pending.
-
-October 30, 2026: both TypeScript projects and all 497 tests passed, and the
-production build regenerated `dist/`. Browser review covered all six silhouettes,
-matching 140 × 70px/88 × 44px panel and bar-stack sizing, 4px corners, neutral
-styling while Power Jump is enabled, 10px touch-action clearance and 12px hover
-clearance in a short desktop window. The real match confirmed sniper selection,
-scope/pause concealment, hidden boarding/startup/shutdown and the rocket icon
-during active piloting. Exiting restored the sniper icon; death hid it, respawn
-restored the equipped sniper, and leaving hid and cleared the indicator.
-These are local browser checks, not physical-device or
-deployed multiplayer validation.
-
-## CI contract
-
-GitHub Actions runs on pushes and pull requests using Node 22. Checkout downloads
-LFS contents (`lfs: true`), then `git lfs fsck` checks the objects and pointers
-before the existing verification steps:
-
-1. `npm ci`
-2. `npm run check`
-3. `npm run build`
-4. `test -z "$(git status --porcelain --untracked-files=all -- dist)"` (checks changed and newly generated assets)
-
-The complete-world baseline test normalizes object positions to nine decimal
-places before hashing: ARM64 and x64 V8 builds produce tiny trigonometric rounding
-differences. Instance matrices and other scene metadata remain exact, as do the
-separate checks for unintended live-scene mutations.
-
-The last step fails when committed generated assets do not match the source. A local change is ready for CI when `npm run check` and `npm run build` both pass and `git status` shows only intended source, documentation, and regenerated bundle changes.
+The test resolution hook in `tests/register.mjs` maps source `.js` imports to
+`.ts` and provides deterministic PeerJS/physics doubles. Room state-machine tests
+use in-memory storage; integration tests simulate upstream services. These do
+not establish external TURN behavior or physical-device input quality.
 
 ## Validation by change type
 
-| Change | Minimum validation |
+| Change | Required checks and focused review |
 | --- | --- |
-| Pure helper, parser, quota, or configuration | Relevant unit test plus `npm run check` |
-| Rendering, HUD, input, settings, weapons, physics | `npm run check`, production build, and manual browser play |
-| Multiplayer packet behavior | Unit tests, two browser clients, host/client join, hit/death/respawn, disconnect and rejoin |
-| Worker API or Cloudflare configuration | Worker typecheck, local or staging API exercise, full host/join flow, deployment logs |
-| Dependency or build configuration | Clean `npm ci`, check, build, preview, and inspection of generated chunks |
+| Documentation only | Check changed facts and links; no gameplay run needed |
+| Tests only | `npm run check` |
+| Source | `npm run check`; use affected existing suites while diagnosing failures |
+| Production code, public assets or build configuration | `npm run check` and `npm run build`; include regenerated `dist/` |
+| Visible behavior | Inspect the affected interaction or existing preview when needed |
+| Packet or room authority | Focused parser/authority coverage; use the multiplayer checklist for transport behavior |
+| Dependency installation | `npm ci` when dependencies or lockfile change, then check and build |
 
-For manual multiplayer testing, use separate browser profiles or a private window when useful; each peer needs its own page and Turnstile completion. Exercise both direct-looking connections and environments likely to require TURN, because a successful same-network test does not prove relay credentials work.
-
-## Debugging guide
-
-- If the game UI loads but multiplayer says it is unavailable, inspect `GET /api/security-config` and the Worker environment.
-- If Vite returns a proxy error, verify Wrangler is running on port 8787.
-- If a room is authorized but peers never connect, inspect PeerJS errors, WebRTC ICE candidate state, TURN issuance, and the 20-second data-channel timeout.
-- If worlds differ, verify the client received and applied `world_snapshot` before play and that all procedural randomness uses the seeded world generator.
-- If shots pass through fast targets or pillars, test the segment helpers rather than replacing swept collision with endpoint distance checks.
-- If visuals change permanently after a temporary effect, inspect material sharing, cloned materials, timers, and disposal. Shared materials must not be mutated without restoration or per-object isolation.
-- If a bug appears only after leaving and starting again, inspect reset functions, interval/timeout cancellation, event listeners, object pools, and Three.js disposal.
-
-Use the ownership table and data-flow notes in [Architecture](architecture.md) before moving responsibilities between files.
+Run the required checks once after the final changes. Repeat for failures or
+later relevant edits. Extended browser/device/network sweeps require an explicit
+request. Report automated, local-browser, physical-device and deployed-service
+results separately; do not turn task results into permanent documentation.
 
 ## Browser visual checks
 
-With `npm run dev` running, open `/tests/lighting-preview.html` to inspect sun shadows, lava glow and atmosphere. It has noon, low-sun, night, shadow-quality, glow, render-distance, camera-motion, fog, blur, wind, altitude-offset and weather-time controls. Weather time can be scrubbed with wind paused to compare ground patches and high-altitude clearings; 0 and 480 seconds produce the same field. Compare nearby surfaces and chunk edges at different phases. The status includes total draw calls and an averaged frame duration (including display/vsync); compare effects on/off at the same view rather than interpreting this as GPU timing. Shader compilation and actual WebGL output need browser inspection in addition to Node tests. Actual match startup also exercises the loading overlay and render preparation, which this fixture does not. Fixture controls do not save settings.
+Run Vite and use the existing fixture for the affected feature. Fixtures use
+production modules, are excluded from the production entry and keep review
+preferences temporary. Real input capture and external-service checks use the
+main application.
 
-Atmosphere verification on November 8, 2026: `npm run check` passed 554 tests and
-the production build passed. In-app browser inspection covered ground/elevated
-fog, weather scrubbing and drift, night lighting, camera movement and Graphics
-toggle defaults/draft actions without shader errors. At the same stationary lava
-view, effects off/on used 90/91 draw calls and both averaged about 8.3 ms/frame
-including vsync; this is not a GPU timing or other-device performance guarantee.
-The browser rejected pointer lock, so full mouse-controlled gameplay and physical
-mobile-device performance were not validated in that inspection.
+| Fixture | Review scope |
+| --- | --- |
+| `/tests/lighting-preview.html` | Sun/shadows, lava glow, fog, blur, wind, altitude and weather phase |
+| `/tests/town-preview.html` | Seeded streets/interiors, walls, stairs, rooftops, well and spawn views |
+| `/tests/player-list-preview.html` | Multiplayer Tab list and sample scores |
+| `/tests/player-list-preview.html?locator-preview` | Direction markers, elevation, culling and pilot occupancy |
+| `/tests/player-list-preview.html?weapon-preview` | Equipped/vehicle icons and touch HUD placement |
+| `/tests/player-list-preview.html?stomp-icons` | Stomp pictogram drafts |
+| `/tests/goggles-preview.html` | Scans; `?crowded-preview`, `?homing-preview`, `?celestial-preview`, `?elimination-pan` and `?brick-preview` select cases |
+| `/tests/goth-preview.html` | NPC rig poses |
+| `/tests/goth-chat-preview.html` | Real local model, retriever and chat UI without pointer lock |
+| `/tests/mecha-preview.html` | Combat, boarding, piloting, blocked exits and cleanup |
+| `/tests/mecha-cutscene-preview.html` | Shared ending, absolute-time seeks and seeded debris |
+| `/tests/katana-preview.html` | Melee input, contact, charge and cancellation |
+| `/tests/katana-feedback-preview.html` | Trail, impact frame and rear-nape volume |
 
-Open `/tests/player-list-preview.html` to inspect the five-row multiplayer Tab list and its suit-colored pixel bean faces without a TURN-backed room. It uses the real list renderer and stylesheet with sample scores; input handling and host score replication still need an actual room check.
+Lighting fixture frame duration includes vsync and is not GPU timing. Actual
+match startup separately exercises loading and renderer preparation. Emulation
+does not establish physical multi-touch, safe areas or device performance.
+Feature-specific procedures live in [Mecha](forgotten-mecha.md),
+[Katana](katana.md), [Mobile controls](mobile-controls.md) and
+[Multiplayer checks](multiplayer-live-test.md).
 
-### Town
+## Generated HUD icons
 
-With `npm run dev` running, open `/tests/town-preview.html` to inspect the real world generator with a chosen seed. The Aerial, Street, Doorway, Interior, Rooftop, Church, Church interior, Rampart, Stairs, Stair landing and Lookout buttons expose repeatable camera views and renderer draw/triangle counts. This development-only HTML fixture is outside the production Vite entry and is not included in `dist/`. Test actual match startup and HUD separately in the main game and production preview.
+Regenerate static weapon/rocket silhouettes after model changes:
 
-Central-town validation (September 7, 2026): the then-current check and build passed, including a 1,000-seed layout test. Browser visual checks covered aerial, doorway and interior views on seeds 0 and 42. The production bundle was smoke-tested in Safari for offline startup, pointer lock, movement, jumping and grapple input. The embedded Chromium browser rendered the visual fixture but could not acquire pointer lock in that environment. Multiplayer admission/authority was covered by simulated integration tests; a live relay-network session was not exercised for that change.
+```bash
+node --experimental-strip-types --import ./tests/register.mjs scripts/generate-weapon-icons.mjs
+```
 
-The taller-wall/church follow-up adds regression coverage for exactly one church per seed, the configured church tower height, all four covered gate lintels, and the church ceiling and grapple surfaces. The 1,000-seed sweep includes church plot variation and unobstructed approaches.
+Include `src/weaponIndicatorIcons.ts` with the build. The stomp source is
+`src/mechaStompIcon.svg`; drafts in `tests/fixtures/stomp-icons/` are produced by
+`scripts/generate-stomp-icon-previews.mjs`. Gameplay uses cached SVGs without
+loading a model or allocating an icon renderer.
 
-Rampart/roof polish validation: the suite now covers walking the full ascent, a complete rampart loop through all four open lookouts, descent without jumping, and roof/shell separation. The viewer also offers a Roof motion button to orbit a house at roof height while checking for flicker. The church tower is now 80% of wall height.
+## CI contract
 
-Ground-paving regression checks cover non-overlapping tiles and exact paved area across 100 seeds, the grass cutout, floor grappling, distant ground visibility, and coplanar rampart/landing joins. The Ground motion viewer button checks streets and footpaths at changing camera angles and heights.
+GitHub Actions uses Node 22 and LFS-enabled checkout, then runs:
 
-Straight-ascent/well validation adds actual walking-input tests at 20–240 FPS plus variable frame times, near-limit step heights, gate clearance, deterministic well geometry, and safe spawn/detour checks. The Well viewer button shows the fixed central prop.
+1. `git lfs fsck`
+2. `npm ci`
+3. `npm run check`
+4. `npm run build`
+5. A Git status check for changed or untracked output under `dist/`.
 
-Town spawn regression checks cover distinct houses and doorway orientation across 1,000 seeds, walking out after initial spawn and repeated church respawns, host-assigned house slots, departure/replacement, and rejection of invalid or duplicate snapshots. The development town viewer includes House spawn and Death respawn views using the real spawn placement helper.
+CI requires the committed output to match the source. The complete-world
+fingerprint test rounds positions to nine decimal places for ARM64/x64
+trigonometric differences; instance matrices and scene ownership remain exact.
 
-The town viewer has Goth house and Goth interior views. Regression checks verify one goth house across 1,000 seeds, exclusion from player house assignments, clear interiors, roof collision and disposal of merged ornament geometry.
+## Debugging guide
 
-`/tests/goggles-preview.html` exercises the production smart-goggles renderer without pointer lock. It includes spinning in-range and out-of-range enemies, the girlfriend's corrupted scan, a moving target that crosses the field of view, and a timed elimination after 2.2 seconds. Add `?crowded-preview` for eight nearby enemies plus separate 1199 m and 1200 m targets and a moving target that crosses 1200 m. Move the pointer horizontally to pan: every detected target keeps corners, only the five closest scan-box centers to the crosshair have full callouts, and incoming typing/leader reveal overlaps outgoing retraction. The fixture shows scan, selected callout and retracting callout counts; the moving boundary target loses its overlay immediately beyond range and reacquires on return. Add `?homing-preview` to hold an enemy under the reticle and verify the yellow scan followed by red homing-lock brackets at 12, 3, 6 and 9 o'clock. Add `?celestial-preview` to include sun and moon discs with their one-line astronomical distance scans. Add `?elimination-pan` to turn the camera during the kill confirmation and verify that its world-anchored overlay tracks across the screen, then clears at the goggles FOV edge. Add `?brick-preview` to play the terminal CRT shutdown after 0.9 seconds and switch to the TV-noise restart state after the 520 ms collapse. Combine it with `&photosensitive` to verify the Photosensitivity Mode replacement: a steady black screen with no static animation. This makes stable rotation-independent framing, bracket convergence, leader drawing, typed readouts, anomaly glitches, tracking, warning pulses, kill confirmation, hardware failure, collapse, and reacquisition repeatable in the embedded browser.
+- Multiplayer unavailable: inspect `/api/security-config` and Worker configuration.
+- Vite proxy failure: check Wrangler on port 8787.
+- Authorized peers cannot connect: inspect PeerJS, ICE state, TURN issuance and
+  the data-channel timeout.
+- Worlds differ: check snapshot application and seeded random-stream ordering.
+- Missed fast collisions: inspect swept queries and closest-hit selection.
+- Persistent visual changes: inspect shared materials and restoration/disposal.
+- Restart-only failures: inspect reset helpers, pending work, listeners and pools.
 
-## Goth girlfriend and local chat
-
-The supplied rigged GLB stands inside the guaranteed goth house. A fixed box roughly matching her 3.564-unit fitted height supplies movement, bullet, sniper and grapple collision without tracing the animated mesh. In singleplayer or as the multiplayer lobby creator/host, approach within four units, look at her, and press **F**. Joined players can see her standing in the house, but receive no interaction prompt and cannot trigger the wave, camera move, notice or chat. Losing host eligibility closes an existing conversation. She waves, pointer lock releases, and a typed conversation panel opens. Over 0.55 seconds the actual player camera eases to a centered spot 3.2 units in front of her and turns toward her face. Conversation owns the pose until Esc; closing mid-move cancels without snapping. Third-person players temporarily get the same unobstructed conversation view. Her supplied model is uniformly fitted to 3.564 units, 8% taller than the visible 3.3-unit player mesh, with its soles kept on the floor. Smart goggles detect that fixed proxy and show a readable distance beside deliberately corrupted, continuously glitching health. Scanning her without losing detection for 30 seconds bricks the goggles for the rest of that match; a CRT shutdown disengages them, and later attempts show only TV noise until a new game is started. An information banner requires explicit approval before the first model load. After approval, chat loads SmolLM2-360M-Instruct-q0f16-MLC through WebLLM in a browser worker. Subsequent answers stream into the panel, with an Explain, Shrug or Agree gesture queued when generated text begins. The wave completes before a queued talking gesture starts.
-
-Character files live in `public/npc/goth/`. Start with [the editing guide](../public/npc/goth/README.md). Identity and behavior are always included, optional example replies can establish tone, and lexical RAG retrieves relevant Markdown passages. The current unnamed character is already the player's adult girlfriend and has a dry, goth, commanding and dominant personality. Model responses remain probabilistic; a 360M model can miss instructions or ignore relevant facts even when retrieval succeeds.
-
-Save character-file edits and refresh the browser to try them in a fresh conversation. Chat hides the game HUD, uses a bottom input bar with Enter to send and Esc to return, and routes keyboard and wheel input to the conversation. The first-use notice links to WebLLM and the existing legal pages; approval is remembered in versioned browser storage. Initial downloads need network access; inference is local. WebGPU requires HTTPS or localhost, and f16 requires shader-f16. Loading errors, cancellation and timeouts are shown in the chat. No dialogue content is sent to an AI service. Conversations and gestures are local to each player's browser, and no game actions are executed from model text.
-
-`/tests/goth-preview.html` inspects individual rig poses; `/tests/goth-chat-preview.html` tests the actual character, chat UI, model and retriever without pointer lock. Both fixtures are excluded from the production entry. The production build includes the character's public files and the lazy-loaded WebLLM engine/worker assets. Update the generated `dist/` output with source changes.
-
-Validation when local chat was implemented: the then-current tests covered prompt size/Unicode handling, retrieval of actual lore, role-pair history, configuration validation, and wave-to-talk sequencing. Real WebGPU browser tests exercised model downloads, cached startup, streamed responses and character prompting. Safari gameplay verified F-key opening, the wave, pointer-lock release/resume, zero movement/fire input while chatting, and cancelling/reopening a model load. On that Safari/GPU combination model initialization failed; the UI supports retry and reports a browser/GPU compatibility error. Successful inference was verified in the embedded Chromium preview. Model quality remains inconsistent: the tiny model sometimes answers correctly and sometimes drifts or repeats despite correct retrieval.
-
-The compiled production worker was also served with `vite preview`, loaded real model weights, and generated a correct minimal factual reply. Cancellation of an active generated reply and reopening into a fresh request were verified without browser console errors.
-
-Camera transition checks cover 30/60/144 Hz, cancellation/reopening, the actual player mesh height, and collision-free centered destinations across 1,000 town seeds. The direct chat fixture starts off-center to make the camera move easy to inspect.
-
-Chat consumes Escape keydown and repeats, then closes on keyup so mouse capture is not reacquired while the browser is still handling its unlock key. Normal chat exit does not open the pause panel. Native Chrome and Safari checks confirmed active pointer lock after chat exit; a separate Escape press still pauses normal gameplay. Regression tests cover held keys, IME cancellation and closing during a pending Escape press.
-
-The idle pose rolls both forearms inward so palms face the thighs. This rotation blends out only for the gesturing arm and returns smoothly afterward; palm orientation is checked against the supplied rig at three world orientations.
-
-Power jump starts disabled on every house spawn and church respawn, including multiplayer placement. The first horizontal crossing beyond the castle walls (`TOWN_HALF_SIZE + TOWN_WALL_THICKNESS / 2`) enables it once per life. Returning inside does not disable it, and later crossings do not override Ctrl or the HUD toggle. The activation does not change a normal jump already in progress.
-
-## Mecha follow-up verification workflow
-
-For the 2 October scan/combat/shutdown changes, run only the affected existing
-suites while iterating. Final validation is one `npm run check`, one
-`npm run build` (including generated `dist/`) and `git diff --check`; repeat only
-for relevant failures or later changes. Capture logs and report the summary,
-not individual passing test lines. Existing actual-GLB tests cover pilot/head
-clearance, walking-hit guidance, reverse Mount, life/ownership cleanup and
-render-before-damage behavior. Do not add a second browser harness or repeat an
-exhaustive visual review: the user will perform interactive acceptance using
-[the compact checklist](forgotten-mecha.md#current-manual-acceptance). Record those results separately from
-automated checks; this change has not established physical-device or pointer-lock
-feel, visual quality or deployed-network behavior.
-
-2 October repair/balance results: affected suites passed 51 tests, then one final
-`npm run check` passed both TypeScript projects and all 345 tests. One production
-build regenerated `dist/` successfully (existing large-chunk warning), and
-whitespace validation passed. No interactive acceptance was performed by the agent.
-
-2 October cylinder/dome results: affected combat/actor suites passed 40 tests;
-the updated lifecycle suite passed 11. Final `npm run check` passed both
-TypeScript projects and all 349 tests after correcting two older high-altitude
-defeat fixtures. One production build regenerated `dist/` successfully with the
-existing large-chunk warning; whitespace checks passed. Interactive acceptance
-remains with the user, and `to_be_changed.md` was untouched.
-
-### Multiplayer mecha checks
-
-`tests/mechaNetwork.test.ts` covers real-asset sparse-pose replication, bounded
-BinaryPack packets, target retention, multi-player stomp/laser/rocket contact,
-exclusive boarding, stale commands, input expiry, pilot departure, host-death
-simulation and victim render acknowledgment. The real host integration suite
-also checks shield/body claims, damage fabrication, duplicate pellets and shots
-from before mounting. Existing mecha suites retain offline lifecycle coverage.
-
-Run the focused suites during iteration, then `npm run check` and
-`npm run build`. Browser acceptance requires two actual clients and a third late
-joiner; use the checklist in [Forgotten Mecha](forgotten-mecha.md#multiplayer-acceptance).
-Update [Multiplayer live test](multiplayer-live-test.md) with dated results and
-separate local fixtures from deployed service/device verification.
-
-### Katana review
-
-`/tests/katana-preview.html` exercises production melee input, charge, area damage,
-HUD and temporary gentle-effects/third-person settings. See [Katana](katana.md)
-for expected target HP and authority regression coverage.
+See [Architecture](architecture.md) before moving responsibilities between files.

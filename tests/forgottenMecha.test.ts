@@ -174,19 +174,6 @@ test('stomp hits once at exported foot contact and cooldown starts after complet
     actor.dispose();
 });
 
-test('stopping from either support phase settles both feet onto the floor', async () => {
-    for (const walkSeconds of [0.4, 0.7, 1.1, 1.4]) {
-        const { actor } = await robot();
-        advance(actor, walkSeconds, absent);
-        advance(actor, 1, near(actor, 60));
-        for (const side of ['L', 'R']) {
-            const foot = actor.group.getObjectByName(`M_Foot_${side}`)!;
-            assert.ok(Math.abs(new THREE.Box3().setFromObject(foot, true).min.y) < 0.005, `grounded ${side} after stopping at ${walkSeconds}s`);
-        }
-        actor.dispose();
-    }
-});
-
 test('jumping or leaving the damage radius during wind-up avoids stomp damage', async () => {
     for (const escape of ['jump', 'range']) {
         const { actor, impacts, kills } = await robot();

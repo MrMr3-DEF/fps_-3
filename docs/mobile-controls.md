@@ -12,7 +12,7 @@ Devices whose primary pointer is coarse default to touch controls; other devices
 | Jump | Jump or detach from a pulling grapple |
 | Hold Hover | Use hover thrusters in the air |
 | Grapple | Fire or release the grappling hook |
-| Weapon | Cycle through all five weapons |
+| Weapon | Cycle through all six weapons |
 | Inspect / View | Inspect the weapon / toggle third person |
 | Power jump | Toggle power jump |
 | Pause | Show Resume and Leave Game/Lobby |
@@ -52,17 +52,16 @@ Selecting Fire also exposes **Joystick / Button** options beside its size contro
 
 The preview reuses the actual gameplay control markup and layout geometry, but has no gameplay event handlers, pointer lock, renderer, or world generation. A paused match stays paused. The editor cancels drags on rotation, focus loss, and app backgrounding, removes its listeners on close, and restores focus to Edit controls. In portrait it shows a rotate notice with Exit still available.
 
-## Validation
+## Device checks
 
-- Apply follow-up on September 30, 2026, native Chrome at an emulated 924 × 412: editor Apply stayed open and persisted Fire type, a pending Touch selection, and FOV from another category across reload. Exit after Apply returned to settings with only Back. Further size edits triggered the leave confirmation; Go back retained them and Leave returned to clean settings. Restored Touch, FOV 75, and Fire joystick after checking persistence.
-- September 30, 2026, native Chrome at an emulated 821 × 400 mobile viewport: verified desktop Keybinds, mobile Touch defaults, keyboard/touch category changes and applied mode persistence across reload, blank sky editor, drag/selection, the 50% and 250% slider endpoints, tapping the sky to deselect, Save persistence across reload, Go back preserving edits, Leave discarding edits, and the preview Pause button remaining nonfunctional. Started an offline touch match with the saved layout and opened/saved the editor from pause settings; returning to Pause did not resume the match. Restored the default Touch mode and layout after testing.
-- Fire/HUD follow-up on the same Chrome viewport: verified the Fire selection's Joystick/Button options, saved Button persistence across reload, switching back to Joystick, and drag aiming during an offline match with the knob recentering after release. Visually checked the equal-sized health/reload bars and the full stack's top/bottom alignment with hover and the default Power jump toggle.
-- Regression coverage includes stored input/layout migration and validation, cloned draft isolation, safe-area/viewport placement at both size limits, proportion-preserving viewport fitting, and input-mode changes releasing the previous session without resuming.
-- Fire joystick regression coverage exercises the real pointer handlers with simultaneous movement/fire owners, drag aiming, scoped sensitivity, off-center presses, foreign pointers, cancellation, app blur, mode changes while held, and the Button variant not turning the camera. Storage checks cover joystick defaults, invalid-value fallback and saved Button mode.
-- Client and Worker TypeScript checks and production build pass.
-- The then-current automated suite passed, including touch-session start/stop, portrait rejection, fullscreen rejection fallback, partial joystick speed, diagonal speed capping and paused movement suppression. For the current suite, run `npm run check`.
-- Native Chrome device emulation at 821 × 400 and 400 × 821: verified the portrait gate, landscape menu/HUD, camera dragging, weapon switching, pause/resume and fullscreen-exit pause; exercised joystick, fire and jump gestures.
-- Physical iOS/Android testing is still needed for simultaneous multi-finger input, actual orientation/fullscreen support, safe areas, sustained performance and mobile-to-desktop multiplayer. Desktop emulation does not establish these results.
+Use physical iOS/Android devices for simultaneous movement/look/fire, orientation,
+fullscreen support, safe areas and sustained performance. Desktop emulation only
+checks layout and simulated pointer behavior. Check the affected interaction,
+including cancellation on blur/portrait, pause/resume and saved layout reload.
+
+Existing tests cover input capture/cancellation, mode changes, layout validation,
+draft isolation and viewport bounds. See [Development](development.md#tests) for
+when new tests are justified.
 
 Implementation: `src/inputSession.ts` owns input activation and mode switching; `src/mobileControls.ts` owns pointer capture and touch actions; `src/mobileControlsView.ts` shares the control markup and DOM layout with `src/mobileControlsEditor.ts`; `src/mobileControlLayout.ts` owns placement math, size limits, cloning and storage validation; `src/mobile.css` owns the mobile/editor styles. `src/settings.ts` persists input mode and layout, and `src/settingsMenu.ts` builds the input selector and editor entry point for all devices.
 

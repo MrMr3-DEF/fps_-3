@@ -24,7 +24,7 @@ The Worker also serves the static Vite output through its `ASSETS` binding. The 
 
 ## Client startup and lifecycle
 
-`index.html` owns the markup and CSS for the menu, settings panels, HUD, scope, pause screen, and death overlay. It loads `src/main.ts` as the module entry point.
+`index.html` owns the markup for the menu, settings panels, HUD, scope, pause screen, and death overlay; `src/gameUI.css`, `src/mobile.css` and `src/gothChat.css` own their styles. It loads `src/main.ts` as the module entry point.
 
 `init()` in `main.ts` performs startup in this order:
 
@@ -413,7 +413,7 @@ projection changes and long or stopped frame clocks. Photosensitivity/reduced
 motion suppress blur without overwriting its stored preference. The renderer
 warms resources under the loading cover and disposes them with the match; disabled
 effects release the target. Depth-texture support is required, otherwise Fog uses
-the old distance fog and blur is skipped. Helmet video captures contain fog but
+distance fog and blur is skipped. Helmet video captures contain fog but
 no blur; katana overlays draw afterward. Menu and terminal cinematic rendering
 remain independently authored.
 

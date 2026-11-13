@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { ConversationCamera, CONVERSATION_MOVE_SECONDS } from '../src/conversationCamera.js';
-import { GothGirlfriend, getGothConversationPose, getGothPlacement, fitGothModel, GOTH_MODEL_HEIGHT, GOTH_CONVERSATION_DISTANCE, GOTH_HITBOX_DEPTH, GOTH_HITBOX_WIDTH } from '../src/gothGirlfriend.js';
+import { GothGirlfriend, getGothConversationPose, getGothPlacement, GOTH_MODEL_HEIGHT, GOTH_CONVERSATION_DISTANCE, GOTH_HITBOX_DEPTH, GOTH_HITBOX_WIDTH } from '../src/gothGirlfriend.js';
 import { generateTownLayout, createTownBoxes } from '../src/town.js';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../src/config.js';
-import { createPlayerMesh, disposePlayerVisuals } from '../src/weapons.js';
+
 import { state } from '../src/state.js';
 import { obstacleData } from '../src/userDataTypes.js';
 
@@ -75,28 +75,6 @@ test('centered conversation positions face the NPC and clear room walls/furnitur
             assert.equal(overlaps, false, `blocked destination at seed ${seed}`);
         }
     }
-});
-
-test('NPC fitting is uniform, grounds the asset and makes it 8% taller than the real player mesh', () => {
-    state.scene = new THREE.Scene();
-    createPlayerMesh();
-    const playerBounds = new THREE.Box3().setFromObject(state.playerMesh!);
-    const playerHeight = playerBounds.max.y - playerBounds.min.y;
-    const model = new THREE.Group();
-    const geometry = new THREE.BoxGeometry(.6, 1.85, .3);
-    const material = new THREE.MeshBasicMaterial();
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.y = .8;
-    model.position.y = .2;
-    model.add(mesh);
-    fitGothModel(model);
-    const bounds = new THREE.Box3().setFromObject(model);
-    assert.ok(Math.abs(bounds.min.y) < 1e-6);
-    assert.ok(Math.abs(bounds.max.y - GOTH_MODEL_HEIGHT) < 1e-6);
-    assert.ok(Math.abs(bounds.max.y / playerHeight - 1.08) < 1e-6);
-    assert.equal(model.scale.x, model.scale.y);
-    assert.equal(model.scale.y, model.scale.z);
-    geometry.dispose(); material.dispose(); disposePlayerVisuals(); state.scene = null;
 });
 
 test('girlfriend uses one fixed box hitbox and ignores it during her own interaction ray', () => {

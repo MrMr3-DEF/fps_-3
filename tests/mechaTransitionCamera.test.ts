@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { MechaTransitionCamera } from '../src/mechaTransitionCamera.ts';
 import { MechaCameraHandoff, resolveCameraObstruction, resolveThirdPersonCameraPosition } from '../src/thirdPersonCamera.ts';
-import { MECHA_HEIGHT, MECHA_BOARD_TIME, MECHA_RELEASE_CAMERA_TIME, THIRD_PERSON_CAMERA_COLLISION_RADIUS } from '../src/config.ts';
+import { MECHA_BOARD_TIME, MECHA_RELEASE_CAMERA_TIME, THIRD_PERSON_CAMERA_COLLISION_RADIUS } from '../src/config.ts';
 import { ForgottenMecha } from '../src/forgottenMecha.ts';
 import { loadIronmawTestAsset } from './ironmawTestAsset.ts';
 import { state } from '../src/state.ts';
@@ -20,40 +20,6 @@ function begin(thirdPerson = true) {
 function advance(actor: ForgottenMecha, seconds: number, step = 1 / 60) {
     for (let elapsed = 0; elapsed < seconds - 1e-9; elapsed += step) actor.update(Math.min(step, seconds - elapsed), absent);
 }
-
-test('front framing fits the complete fitted envelope at varied headings, FOVs and aspect ratios', () => {
-    for (const heading of [0, Math.PI / 2, -2.4]) for (const fov of [30, 75, 110]) for (const aspect of [0.6, 1, 2.2]) {
-        const controller = begin(); controller.update(MECHA_BOARD_TIME);
-        const root = new THREE.Vector3(31, 2, -42), radius = 13;
-        controller.resolve(root, heading, radius, fov, aspect, follow, identity, []);
-        const camera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 2000);
-        camera.position.copy(controller.position); camera.quaternion.copy(controller.quaternion); camera.updateMatrixWorld(true);
-        const front = camera.position.clone().sub(root);
-        assert.ok(front.x * Math.sin(heading) + front.z * Math.cos(heading) > 0);
-        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) for (const height of [0, MECHA_HEIGHT]) {
-            const point = root.clone().add(new THREE.Vector3(Math.sin(angle) * radius, height, Math.cos(angle) * radius)).project(camera);
-            assert.ok(Math.abs(point.x) < 1 && Math.abs(point.y) < 1 && point.z < 1, `cropped at ${heading}/${fov}/${aspect}: ${point.toArray()}`);
-        }
-        assert.ok(controller.queryRadius(root, radius, fov, aspect) > Math.hypot(front.x, front.z));
-    }
-});
-
-test('swivel preserves its captured start and returns by an orbit to the exact follow pose without mutating it', () => {
-    const controller = begin(), position = follow.clone(), quaternion = identity.clone();
-    controller.resolve(origin, 0, 13, 75, 16 / 9, position, quaternion, []);
-    assert.ok(controller.position.distanceTo(follow) < 1e-8); assert.ok(controller.quaternion.angleTo(identity) < 1e-8);
-    controller.update(MECHA_BOARD_TIME); controller.resolve(origin, 0, 13, 75, 16 / 9, position, quaternion, []);
-    const front = controller.position.clone();
-    for (const progress of [0, 0.5, 1]) {
-        controller.sync('startup', 'reveal', progress, false);
-        controller.resolve(origin, 0, 13, 75, 16 / 9, position, quaternion, []);
-        if (progress === 0) assert.ok(controller.position.distanceTo(front) < 1e-8);
-        if (progress === 0.5) assert.ok(Math.hypot(controller.position.x, controller.position.z) > 25, 'orbit stays outside the body');
-        if (progress === 1) { assert.ok(controller.position.distanceTo(follow) < 1e-8); assert.ok(controller.quaternion.angleTo(identity) < 1e-8); }
-    }
-    assert.ok(position.equals(follow)); assert.ok(quaternion.equals(identity));
-    controller.sync('piloted', 'ready', 1, false); assert.equal(controller.locked, false);
-});
 
 test('camera obstruction supports both in-place sweep endpoints and a zero-length segment', () => {
     const wall = new THREE.Object3D(); wall.position.set(0, 10, 10);

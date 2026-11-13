@@ -11,6 +11,6 @@ subscription is needed for web use. Keep `OFL-ScienceGothic.txt` with the font
 files when redistributing them. The license and copyright notice came from the
 [Google Fonts distribution](https://github.com/google/fonts/blob/main/ofl/sciencegothic/OFL.txt).
 
-The WOFF2 files were downloaded from the official `fonts.gstatic.com` URLs in
+The WOFF2 subsets use the official `fonts.gstatic.com` URLs in
 the [Google Fonts Science Gothic stylesheet](https://fonts.googleapis.com/css2?family=Science+Gothic:wght@100..900&display=swap)
-on 28 September 2026 and renamed by language subset.
+and are named by language subset.

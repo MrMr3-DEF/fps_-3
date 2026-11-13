@@ -1,952 +1,244 @@
 # Forgotten Mecha
 
-Every match prepares one Ironmaw siege robot. Multiplayer activates it when the host starts play. The model
-is `blender_assets/ironmaw/ironmaw_siege_robot.glb`; its rig and authored animation
-events are documented in that directory's README. The host owns multiplayer simulation; joining clients prepare the same asset and apply its replicated pose.
-
-## Multiplayer
-
-The host simulates the shared actor, armor collision, attacks, lava damage and
-rockets throughout an active match, including while its own player is paused or
-dead. Preparing the lobby leaves the actor idle. Ordinary player movement and
-health still use the existing client simulation and host plausibility checks;
-this is a browser-hosted room, not a dedicated authoritative server.
-
-Enemy acquisition chooses the nearest eligible living player in host admission
-order and retains that identity while detection and LOS hold. Committed attacks
-retain their existing recovery/cancellation rules. Stomps and lasers test every
-physical player body, and rocket blasts test every eligible player within the
-cover-blocked blast radius. Each attack damages each contacted life once.
-Enemy kills count as deaths with `Forgotten Mecha` attribution and award no PvP
-kill. Committing the wall punch locks the loss for the entire room. All viewers,
-including dead, paused and late-joining players, receive the shared ending scene;
-Game Over appears after the punch and three-second destruction hold.
-
-The first valid cockpit arrival accepted by the host owns the single seat.
-Other players keep their own camera, controls, HUD and weapons; their view shows
-the seated pilot's correctly colored bean. A lost boarding race restores the
-requester's approach pose and reports that they should reposition and retry.
-The pilot sends movement/look, shield, fire, helmet and exit intent; the host
-applies the normal collision, angular limits, animation cues and cooldowns.
-There is no speculative shared-state prediction. First/third-person presentation
-uses the pilot's own saved view, and host rocket acquisition reconstructs that
-view using physical targets rather than the host's render mask.
-
-Piloted rockets target NPCs and other players. Player weapons can damage the
-mecha, while its seated pilot is protected. PvP rocket kills credit the launching
-pilot. Defeating the enemy adds one shared NPC score; destroying a piloted mecha
-adds no NPC score and releases its living pilot without a PvP death. Voluntary
-shutdown retains the collision-checked exit/recovery loop and permits remounting.
-A pilot disconnect immediately cancels attacks and returns the actor to its
-mountable defeated pose at the current location. FinalDeath remains permanently
-unavailable for boarding.
-
-`mechaNetwork.ts` owns commands, sequencing, input expiry, replication and the
-victim-side render queue. `mechaNetworkTypes.ts` owns bounded state/command/event
-DTOs and their parser. Changed bone transforms, including scale during breakup,
-are sent sparsely against the asset's neutral pose. Client copies interpolate
-armor and observer visuals and never run AI or apply collision damage. The
-initial world snapshot includes ownership, health, combat/head phases, active
-rockets and terminal match state; ordered updates wait for world preparation.
-Snapshots normally follow the 33 ms network tick, transitions send immediately,
-and quiet state refreshes within 250 ms. Held inputs expire after 250 ms without
-a refresh, and releasing local input sends neutral controls immediately.
-
-Weapon claims reference the host's existing shot/pellet ledger. The host checks
-exact weapon damage, range, geometry, terrain, the nearest body/shield contact,
-and the actor revision captured at firing. Homing serializes a mecha revision
-and uses bounded host history/replay. A stale shot cannot damage a newly mounted
-revision. Enemy-mecha death reports require a recent host-issued damage event.
-Laser/stomp damage waits for a corresponding local draw; laser requires its
-actual mesh draw callback. This presentation queue never gates host simulation.
-Respawning clears stale local-life effects without clearing other players'
-rockets or rebuilding the shared actor.
-
-All participants must use the same build. Existing secure admission, room
-capacity and host-disconnection behavior apply. No Worker credentials or room
-capabilities are added to gameplay packets. The approach warning remains
-singleplayer-only.
+Each match prepares one 28 m, 50 HP Ironmaw siege robot from
+`blender_assets/ironmaw/ironmaw_siege_robot.glb`. Singleplayer simulates locally;
+the multiplayer host activates and simulates the shared actor when play starts.
+See the [asset guide](../blender_assets/ironmaw/ironmaw_README.md) for rig/export cues.
+Shared gameplay values live in `src/config.ts`.
 
 ## Behavior
 
-The top-center locator shows the mecha as a fixed-size 20 × 20px silver marker with
-three offset, stepped rust clusters in one warm bronze tone, distinct from solid player-color
-markers. All markers are rounded squares with the shared 4px corner radius.
-The locator tracks the animated body center through cover and beyond render distance in singleplayer
-and multiplayer. The defeated, mountable robot remains tracked; final
-destruction removes it. An occupied robot replaces its remote pilot's colored
-marker until exit, and the local pilot never tracks their own vehicle.
-The locator stays available during scoped aiming and active piloting, including
-helmet toggles, and hides during boarding/startup/shutdown and other gameplay
-overlays. Dots map the forward 120-degree arc, with above/below-view arrows and
-no distance scaling.
+- A seeded, footprint-clear border route leads toward an outer castle wall.
+  Navigation avoids architecture, pillars and lava. Its independent random
+  stream preserves the rest of the generated world.
+- Detection uses a 130 m horizontal cylinder from ground height through 28 m,
+  then a ground-centered 130 m sphere above that ceiling. Static cover blocks
+  acquisition independently of render distance.
+- The actor retains an eligible living target while detection and LOS hold.
+  Waist yaw is capped independently of hip movement; close circles and fast
+  grappling can outrun it. Committed attacks finish under their cancellation rules.
+- Below the ceiling, attacks are stomp at up to 25 m, rockets beyond 25 m and
+  below 60 m, and laser from 60–130 m. The upper dome uses rockets.
+- Zero HP cancels attacks and aligns the torso to the legs before the full
+  Death clip. The solid kneeling wreck is mountable after completion. Defeat
+  awards one shared NPC score; ordinary play continues without robot respawn.
+- Wall arrival commits room-wide loss before the first HeavyPunch tick and
+  makes the actor invulnerable. The shared ending owns the terminal presentation.
 
-The selected-weapon panel follows the ordinary health/ammo HUD. During active
-local piloting it shows a flat white side view of the selected rocket hull/nose
-or the stomp foot and impact rays. Boarding/startup/shutdown hide the panel; exiting or
-losing the mecha restores the equipped player's weapon icon.
+Singleplayer displays **Something’s approaching...** once per match after loading.
+Pause freezes its countdown; respawn does not replay it. Accessibility modes use
+steady presentation. Multiplayer omits this warning.
 
-- A fresh singleplayer match shows **Something’s approaching...** once after
-  loading, centered in white for three active gameplay seconds with a gentle
-  opacity pulse. Photosensitivity/reduced-motion modes keep it steady. Pause
-  hides it and freezes its countdown; death, reset, cancellation and disposal
-  clear it. Respawning does not replay it; multiplayer never shows it.
-- Standing height is 28 m and health is 50 HP. Fitting the actual skin gives a
-  scale of approximately 4.063; the authored 1.5 m/s gait therefore moves at
-  approximately 6.095 m/s at full playback speed.
-- A seed-derived random border position is chosen only when it has a clear path
-  to an intact outer castle wall. A separate random stream preserves all
-  procedural world placements. Navigation reserves the entire robot footprint
-  around pillars, solid architecture and lava, forbids diagonal corner cutting,
-  and checks smoothed segments and the final wall approach against actual bounds.
-- Detection and attack acquisition share one classifier, measured from the
-  robot’s ground position using the existing player-position anchor. At heights
-  0–28 m inclusive, the detection cylinder keeps its full 130 m horizontal radius:
-  stomp at ≤25 m, rockets at >25–<60 m, and laser at 60–130 m. Above 28 m, rockets
-  cover the ground-centered sphere where r² + h² ≤130², ending directly overhead
-  at 130 m. Negative heights and positions outside both volumes are undetected.
-  A living player with line of sight causes the robot to stand still and aim its
-  upper body independently of its hips; readiness, alignment and cooldowns still
-  gate attacks. Static world proxies block visibility even beyond render distance.
-  Losing sight or the detection region resumes the route after committed recovery.
-- Waist yaw is capped at 0.366 rad/s (about 21 degrees/s), calibrated against
-  actual normal walking at a 50 m circle. Closer circles and faster grappling can
-  outrun it. The cap also applies when returning the torso to its walking pose.
-- A visible player in the lower cylinder’s ≤25 m region triggers Stomp.
-  Its exported frame-39 foot contact checks range and grounding again, dealing
-  lethal damage to a player supported by the arena floor or touching either
-  animated foot, shin/knee or thigh. Leg contact counts even when elevated or
-  airborne; fully jumping clear remains safe. Rooftops and pillars avoid the
-  ground shockwave. Contact uses the yaw-oriented bean body, its normal camera
-  offset and 0.1 m tolerance. Slow frames sample the exact impact pose. The hit
-  is captured at contact and delivered only on the active frame after a completed
-  render; leaving the radius afterward cannot evade it. Pause retains the hit,
-  while a changed player life, actor defeat or disposal discards it. Another stomp cannot start
-  until five simulation seconds after the whole previous clip has finished.
-- Stomp impact creates radial dust, stone chips and a shockwave. Heavy camera
-  shake reaches 50 m from the body's horizontal center and fades with distance.
-  Ordinary steps have small dust bursts without camera shake.
-- Accepted player-weapon hits on vulnerable armor throw fourteen yellow/orange
-  sparks and six gray/brown dust particles at full particle quality. Sparks
-  scatter back along the final incoming flight segment, fall under gravity and
-  cool toward orange over 0.25–0.55 seconds; dust expands and disappears over
-  0.4–0.8 seconds. Sniper, straight and homing bullets use the same burst per
-  accepted bullet/pellet, including the killing hit. Shield hits retain their
-  blue ripple. Rejected hits and context-free damage such as lava add no burst.
-  These world-space effects share the existing pooled particle budget and pause/
-  disposal paths; they add no camera shake, lights, sound or damage changes.
-  Multiplayer's host-issued hit event carries the canonical contact position
-  and normalized incoming direction. Every viewer draws it once; replicated
-  visual bullets do not add another burst. Clients cannot supply effect contacts.
-- At zero HP, Death cancels navigation and any pending attack. Its knee and fist
-  impacts each create debris and a distinct 0.65-second camera-shake pulse at
-  exported frames 40 and 64 (1.67 and 2.67 seconds into Death). Defeat shake
-  reaches 200 m horizontally from the mecha, fading with distance while remaining
-  noticeable at the edge. Jumping, hovering and standing on roofs receive the
-  same shake as grounded players at that horizontal distance, including through
-  cover and beyond render distance. Ordinary stomp shake retains its 50 m reach.
-  Eye emission fades out, and the final open, kneeling pose remains solid.
-  Normal gameplay continues;
-  there is no robot respawn or victory overlay. The cockpit becomes mountable
-  after the whole Death clip completes.
-- Reaching the wall commits the loss before the first HeavyPunch animation tick
-  and makes the robot immune to damage. Ordinary simulation/input stop, then the
-  shared cutscene destroys the castle. Its final Game Over screen retains the
-  existing Back to Main Menu button.
-
-## Game Over cutscene preview
-
-The approved whole-castle ending now runs in singleplayer and multiplayer. The
-standalone `/tests/mecha-cutscene-preview.html` fixture uses the same presentation
-for replay/scrubbing and further visual review, without starting a match.
-
-`wallPunchStarted` commits the loss before advancing HeavyPunch. `main.ts` starts
-`MechaEndingPlayback`, releases input, hides HUD/chat/settings/pause/death overlays,
-and freezes the live canvas while fading it to black. The terminal frame branch
-continues cinematic rendering independently of player life and input/pause state;
-ordinary weapons, physics, hazards and network combat stop immediately. The final
-Game Over overlay is a separate transition, so the committed loss never skips the
-punch or aftermath. Leaving, disconnecting or replacing a match disposes playback,
-including async preparation that completes after cancellation.
-
-`mechaEndingTimeline.ts` owns the authored clock and host readiness barrier.
-Validated `MechaState.ending` snapshots carry a scene ID, world/effects seeds,
-committed position/heading, frozen day/night phase, preparation/play/completion
-phase and elapsed time. Each connected admitted viewer sends a scene/revision
-acknowledgment after local activation, even if paused or dead. The host holds
-black until its own scene and those viewers are ready; a departed viewer is
-removed, and a ten-second timeout after host readiness bounds a stalled viewer.
-Late joiners are not added to this initial barrier. They prepare under local black
-and seek the latest host time, including the final shot if the scene has finished.
-Only the admitted host can supply ending snapshots. Readiness cannot commit a
-loss; duplicate/stale packets cannot restart or change its camera/identity.
-Clients extrapolate elapsed time between snapshots and never rewind the shot.
-
-`MechaGameOverScene.prepare()` loads and fits the real Ironmaw asset, measures
-its fist at the existing `35 / 24` second contact cue, and prepares the cameras.
-It creates no castle geometry, fragment buffers, particles or blast lights.
-`begin(renderer?, checkpoint?)` is the explicit activation boundary. Call it
-only once the cutscene's 0.45-second fade-out has reached black. It builds the
-replacement in cooperative batches, warms shaders, and keeps the public clock
-at opaque cover until ready. Duplicate calls share the activation promise;
-cancellation or failure disposes partial resources and cannot restart playback.
-The original gameplay castle and collision data are never converted or modified.
-
-The cinematic copy preserves all four walls, lookouts, seeded building positions,
-the church tower/cross and recognizable roof silhouettes. Interiors use coarse
-hollow building shells, three-tier pitched roofs and shared flat-color materials;
-furniture, room detail, small ornamentation and stairs are omitted. Ground paving
-remains static. All above-ground geometry belongs to material-batched instanced
-fragments created at activation, with a hard 4,096-fragment cap. Seed 42 uses
-2,176 fragments. Positions, spins, blast times and ballistic trajectories are
-sampled from absolute time, so backwards scrubbing reconstructs the entire castle.
-
-After preparation, the wide shot fades in over 0.6 seconds and holds for 0.5
-seconds before the unchanged 3.542-second HeavyPunch. Contact triggers the first
-blast; the chain reaction crosses the compound over 0.8 seconds. A huge central
-detonation follows at 0.85 seconds. Every wall, tower, house, church shell and
-above-ground fixture has detonated within one second of contact. The mecha stays
-intact. The original close, low three-quarter camera frames the full mecha and
-struck wall section while the explosion spreads through the rest of the castle.
-Three seconds after the punch ends, the existing Game Over
-presentation appears. The timeline lasts about 8.092 seconds, plus any black hold
-needed for preparation; the shot stays 16:9 within other viewport shapes.
-
-Effects are bounded at 96 fire puffs, 112 smoke/dust puffs, 480 sparks and four
-unshadowed blast lights. Particle quality reduces cosmetic density without
-changing castle destruction. Photosensitivity Mode/reduced motion remove sparks,
-soften light/glow onset, reduce shockwave brightness and disable camera shake.
-Otherwise, heavy stomp-style rotational shake runs from contact through the last
-fireball, with extra blast pulses and a stronger main detonation. Its final 0.6
-seconds fade smoothly to zero before the smoke-only aftermath. The envelope uses
-actual fire-puff lifetimes and absolute cutscene time, so replay, backwards seeks
-and late joins reproduce the same shake. Rotation is applied only during rendering
-and restored afterward, including on rendering errors.
-All meshes share geometry/material batches, and debris uses analytic movement
-rather than rigid-body simulation. Preparation and disposal own all cinematic
-buffers, textures, skeletons and lighting. Rendering restores viewport/scissor
-and clear state.
-
-The fixture initially activates under its black loading cover. Replay fades the
-intact stand-in view out, rebuilds under black, then resumes the reveal only after
-readiness. Review shortcuts include Contact, Chain reaction, Main detonation,
-Aftermath and Game Over. Controls cover four approach directions/offsets, seeded
-layouts, day/sunset/night, phone viewports, particles and gentle effects. Preview
-preferences never save settings. The footer reports fragment count, geometry/
-activation time and playback FPS/draw calls.
-
-`tests/mechaGameOverScene.test.ts` covers allocation-free asset preparation,
-readiness gating, shared activation, partial cancellation/failure cleanup,
-actual fist contact and close impact framing at all sixteen route goals, complete
-compound destruction across seeds, deterministic replay/settled rubble, quality
-invariants, resource caps and renderer restoration. `tests/mechaEnding.test.ts`
-covers preparation/clock barriers, late playback, duplicates, final overlay timing,
-failed preparation and async cancellation. Real-GLB network tests cover immediate
-commitment, snapshot validation, paused/dead readiness, departure and stale events;
-the actual router integration checks guest authority rejection and late snapshots.
-
-### Seeded scenery and pillar collisions
-
-The preview and gameplay both set `MechaGameOverOptions.seededScenery: true`
-following visual approval. Singleplayer, host, client and late-joining viewers use
-the same activation and trajectory bake, derived from the committed world/effects
-seeds. The camera, explosion timing and original castle-fragment budget remain in
-place; no additional collision packets are needed.
-
-`seededScenery.ts` extracts the original grass, horizon, pillar, lava and vegetation
-stages behind explicit ownership ports. Gameplay retains chunk batching, collision
-registries and disposal. Texture recipes and placement deliberately consume the
-same random stream in the same order: splitting those streams would change old
-seeds. Complete-world baseline fingerprints cover seeds 0, 1, 42, 91234 and
-4294967295, including enemies generated after scenery. The cinematic adapter owns
-an isolated scene graph and private collision bounds, clones shared plant assets,
-and builds only during activation under black. It never rebuilds or edits the
-live world. Plants and distant billboard pillars remain decorative.
-
-`mechaEndingDebris.ts` bakes fixed 120 Hz swept contacts against a spatial index.
-Contacts are resolved chronologically, with stable fragment/pillar IDs for ties.
-Every distinct impact has a deterministic 20% breakup / 80% bounce roll derived
-from the effects seed and contact ordinal. A surviving pillar may break on a later
-impact; remaining inside a contact does not reroll. Reflections retain 0.8 of the
-tangential velocity and use 0.45 normal restitution. Each real pillar shatters at
-most once, launching four coarse wooden sections that use the same contact rules
-and ignore their own source. Castle fragments remain capped at 4096, pillar chunks
-at four per real pillar (at most 3600), and pillar contacts at eight per fragment.
-After the bake, rendering samples analytic trajectory segments and destruction
-timestamps; replay, backwards seeks and late viewers need no live physics
-or additional network events. Particle quality and gentle mode do not affect paths.
-
-The camera checks the body area and fist connection against real pillar bounds.
-It chooses one deterministic pose under black within ±15 degrees, +10 m height and
-10% extra distance of the approved close shot. If dense scenery prevents complete
-clearance, it selects the least-obstructed composition while retaining mecha framing;
-props are never moved or hidden to clear the camera. The camera remains fixed
-throughout destruction. Pillar bounce/breakup preview buttons select recorded
-visible contacts, and the footer shows counts, preparation time and camera adjustment.
-
-Regression coverage includes original seed fingerprints, matching live/cinematic
-pillars/plants/lava/horizon, contact probability, repeated hits, secondary chunks,
-chronological/tied collisions, tunneling, resource caps, all sixteen approaches,
-quality-independent replay, restored pillars and cancellation/texture ownership.
-
-Preview verification (20 October 2026): both TypeScript projects and all 482 tests
-pass. Browser review covered seeds 0 and 42, daylight/night, gentle effects at
-20% particles, portrait/landscape letterboxing, changing controls during activation,
-contact shortcuts and replay. The preview reported no console warnings/errors;
-observed activation was about 0.7–0.9 seconds on this desktop. Normal offline
-startup, actor combat and departure cleanup were also smoke-tested after the
-shared extraction. The production build was regenerated for that refactor, with
-the seeded ending option still disabled in gameplay until visual approval.
-
-Integration verification (20 October 2026, after approval): seeded scenery is
-enabled in the common singleplayer/multiplayer presentation factory. Three local
-RTC viewers, including a dead guest and mid-scene late joiner, produced identical
-camera, contact and final instance-matrix fingerprints. This seed generated
-2168 castle fragments, 900 real pillars, 177 bounces, 50 shattered pillars and 200
-secondary chunks. A guest delayed four seconds kept preparation under black;
-every viewer allocated zero castle/scenery/effect buffers before activation.
-Rejoining a completed ending recovered the same final shot. Host departure disposed
-all three scenes/renderers and reset the loss. A second room covered a host and
-guest already paused before commitment; an offline ending, new match and
-departure during delayed preparation also passed. Both TypeScript projects and
-all 482 tests pass, and tracked `dist/` is regenerated. The existing large-chunk
-build warning remains. These are local runtime checks; no deployment or physical
-device performance verification was performed.
+The locator tracks the actor through cover and beyond render distance, including
+its mountable wreck. An occupied remote mecha replaces its pilot's marker; the
+local pilot never tracks their own vehicle. Final destruction removes the marker.
+The weapon panel shows the selected rocket or stomp during active piloting and
+restores the bean's equipped weapon on release.
 
 ## Eye laser and shield
 
-Laser acquisition requires continuous LOS, horizontal distance from
-60 m through 130 m inclusive, and player-position anchor height from 0 through
-28 m above the robot’s ground position. Alignment within one degree for 0.15 simulation seconds starts
-a three-second charge. The yellow sphere grows to the actual fitted eye height
-(about 2.622 m diameter), with an inner glow and orbiting particles. Its anchor
-is the exported lens joint, rather than the skinned mesh's root origin.
+Laser charge requires continuous LOS and brief alignment, then follows capped
+torso yaw and player height. At release its lens origin and angles freeze. The
+finite beam reaches up to 700 m, stops at world/floor contact and tests actual
+oriented body boxes, including airborne bodies. It deals 10 damage once per life,
+including during its shrinking fade. Leaving acquisition range does not shorten
+a fired beam. LOS/life loss cancels a charge; region changes alone do not.
 
-Charging follows the capped torso yaw and automatically pitches to the player's
-current height. Horizontal lag alone does not cancel it. At firing, the origin,
-torso aim and both angles freeze. The beam uses 75% of the sphere radius, reaches
-up to 700 m, and stops where its width contacts world geometry or the floor.
-Its actual finite cylindrical volume is tested against the player's oriented
-body box, including airborne players. One firing deals 10 damage at most once,
-with contact captured on its first intersecting frame; this is lethal at the current
-10 HP maximum. Beam/core materials also draw their inside faces, so the struck
-camera can see the beam rather than only its charging orb. The actor queues the
-captured hit until the beam mesh's actual draw callback and scene acknowledgment,
-then main delivers it before advancing the next active frame. A lethal death
-screen therefore retains the visible beam as its frozen backdrop.
-Acquisition bounds no longer shorten a fired beam's physical reach.
+Laser/stomp contacts are captured by simulation and delivered after the victim's
+local drawing. Laser requires the beam mesh's actual draw callback. Pending hits
+clear across life, actor revision and disposal boundaries; rendering never gates
+host simulation.
 
-The beam lasts one second, then it and the sphere shrink over 0.2 seconds. Damage
-continues during ordinary shrinking with the same shrinking radius. Reload is
-eight seconds from the end of that fade. Range and height select the initial charge only. Once committed, the laser
-finishes even after entering the close zone or leaving acquisition range/height.
-Only loss of LOS or player life cancels charging. Released beams remain physical
-volumes regardless of LOS. A ready stomp waits until ranged recovery completes. Cancelled
-charges cost no shot or reload; cancelled fired beams count and reload after fading.
+The chest-centered 17 m spherical shield absorbs outside-origin weapon hits.
+Closest shield/body/terrain contact wins. Shots whose original muzzle is inside
+can damage the body. Shield surfaces do not block movement, grappling or scans.
+Impacts produce visual ripples without consuming energy or awarding damage.
 
-The chest joint centers a true spherical 17 m shield, extending below ground.
-It is absent from movement, grappling and scan obstacle queries. Outside-origin
-bullets, homing bullets and sniper shots compare shield, body and terrain
-contacts; the nearest applicable contact wins. Shield impacts cause expanding
-blue surface waves and a faint local highlight, but no HP loss, kill score or
-energy consumption. The powered sphere is otherwise invisible. Shots with an
-original muzzle inside the sphere can damage the body normally, including after
-steering; pooled shots reset that origin on every firing.
-
-Actual laser and enemy rocket releases are counted together in a rolling,
-inclusive 60-second simulation window. After the fourth attack finishes its
-beam fade or RocketFire recovery, new attacks are
-blocked: wait one second, blink red twice over 0.6 seconds, then drop protection
-at the start of a 0.3-second eye fade to gray. The full translucent shield reveals
-and dissolves into falling pixels over 0.6 seconds. Movement, animation attacks
-and torso tracking freeze for five seconds from shield drop. A 0.5-second rebuild
-then sweeps bottom to top while the eye returns to red; protection returns only
-at completion. Firing history resets and ordinary behavior resumes. Death or the
-committed wall punch cancels combat; recovery never revives a dead actor.
-
-The five legacy GLB clips have a 1/24-second leading offset. Runtime impact times
-use exported frame / 24 and animation duration, rather than the Blender timeline's
-(frame - 1) / 24. Walk, turning, HeadOpen/HeadClose and RocketFire clips start at zero. Phase-aligned transitions
-use a runtime two-link leg solver to keep supporting feet planted while blending.
+Four actual ranged releases within the rolling 60-second simulation window
+trigger a warning and shield shutdown after attack recovery. The actor freezes
+for five seconds from shield drop, then rebuilds protection. Death and terminal
+loss cancel recovery permanently.
 
 ## Enemy rockets
 
-The lower cylinder’s exclusive 25–60 m band and the entire spherical dome above
-28 m start the same three-second RocketFire layer used by piloting. Its anatomical
-right-arm cassette releases at 1.5 seconds, starts the
-same two-second reload and finishes recovery at three seconds: releases are at
-least 3.5 seconds apart. Range changes and close-zone entry do not interrupt an
-accepted windup. Acquisition remains LOS-dependent; no other ranged attack or
-stomp starts until the committed attack finishes.
+RocketFire releases from the animated anatomical-right cassette at its shot cue.
+Range changes cannot cancel a committed windup. The shoulder correction solves
+the actual moving muzzle ray toward a visible player intercept.
 
-An enemy-only rigid shoulder aim correction points the actual animated socket at
-a moving-player intercept, including downward aim from the elevated launcher
-and upward aim into the dome. The correction solves the barrel ray about the
-actual shoulder pivot, accounting for the muzzle’s movement during rotation so
-close overhead targets do not cause oscillation.
-The rocket preserves its initial three-meter barrel-axis segment and 120 m/s
-speed, then guides with a 3 rad/s cap and response 4 instead of the pilot's 6/8.
-Enemy guided shots omit the pilot's loft. Launch-time profiles preserve pilot
-behavior and do not change with later helmet state or ownership.
-
-If LOS is absent at release, the windup still finishes but launches the existing
-open-helmet wandering route with its original steering profile and authored
-launcher pose. The torso holds its last visible aim; hidden movement cannot
-steer the arm or muzzle. LOS restoration
-cannot acquire a target afterward. Enemy shots are bound to the captured player
-life and apply nine damage once within the existing five-meter, cover-blocked
-blast. They do not damage NPCs or the launching actor; stale player lives retire
-these shots. Physical cover intercepts rockets normally. Clear-ground regression
-checks cover continuous normal sideways walking in both directions at the band
-edges and center at 30 and 144 Hz.
+Rockets retain a straight three-meter barrel segment before bounded guidance at
+120 m/s. Enemy guidance is weaker than pilot guidance and has no pilot loft.
+Loss of LOS at release produces a wandering shot with captured aim; later hidden
+movement cannot retarget it. Launch profiles and target life are immutable.
+Physical cover intercepts travel and blocks the five-meter blast. Enemy rockets
+deal nine damage once to eligible player lives, excluding the launching actor.
 
 ## Mounting and piloting
 
-Grapple directly inside the defeated cockpit. Exact animated-armor rays validate
-the opening; exterior armor remains an ordinary surface grapple. The 375 m/s
-straight enemy pull ignores this mech's coarse body proxies, sweeps world
-obstacles and clamps arrival to the chest-owned seat. A uniformly fitted bean hides
-its weapons and turns forward over 0.45 seconds. First person eases to a
-separate interior head anchor at normal FOV. The complete 7.042-second Mount follows.
-The closed viewport is at the actual lens center; a second anchor sits 0.75 m behind
-it. Both belong to the chest, independent of the folding hinge and physical seat.
-First-person folding renders the interior helmet/lens faces, restoring material
-sides and visibility after drawing; third person retains the complete model.
-In first person, at Mount frame 27 (1.125 s), the helmet finishes closing and the view turns black.
-An orange (`#ff9a32`) spawn-style **Loading...** bar follows the remaining clip time
-and reaches 100% when the mech finishes standing. The camera moves to the eye
-under the opaque screen. Orange goggles fade in over black for 0.4 seconds, then
-a 0.3-second horizontal tearing/held-picture reveal restores live vision. Controls
-and startup protection remain until the reveal completes. The mounted yellow eye
-(`#ffd34d`) still powers on at frames 44–56; Blender previews retain their authored blue cue.
+Grapple into the defeated cockpit's actual front opening. Armor remains an ordinary
+surface grapple. The pull sweeps world cover and clamps arrival to the physical
+seat. Boarding and complete Mount startup protect the occupant. The visual pilot,
+physical seat and optical camera use separate anchors.
 
-Third-person entry captures the saved perspective, even when C/right-click is
-temporarily showing the cockpit. The camera swivels to the front during the
-existing 0.45-second boarding phase and shows the whole Mount animation. Framing
-uses the fitted mecha radius, 28 m height, FOV and aspect ratio with a 10% margin.
-World cover can shorten the view; both the boom and travel between camera frames
-are swept, excluding the mech's own proxies. The camera orbits back to the normal
-mecha follow view during the existing 0.3-second reveal. There is no boot bar,
-black hardware overlay, goggles or video tearing in this external sequence.
-Both perspectives become controllable on the same animation frame.
+First-person startup relocates behind opaque cover, fills an orange loading bar,
+then reveals mounted goggles. Third-person entry captures the saved view, swivels
+to the front and returns to the normal follow boom without first-person hardware.
+Both become controllable on the same frame. Transition camera sweeps prefer cover
+clearance over complete-body framing. P/View and temporary Aim changes are ignored
+through entry, shutdown and release; they are not queued.
 
-P/View and temporary C/right-click/Aim perspective changes are ignored during
-entry, shutdown and the external release handoff. They are not queued; a held
-secondary mouse button must be released before it can zoom again. Input releases
-and pause still work. The captured render pose never replaces the logical pilot
-camera used by simulation.
+| Control | Piloted action |
+| --- | --- |
+| W/S | Align legs, then walk forward/reverse with fitted swept collision |
+| Look | Capped world-space torso aim; sampled input clears on pause/transition |
+| 1 / 2 | Select Rockets / Stomp |
+| E, wheel, touch Weapon | Alternate the two attacks without resetting cooldowns |
+| Fire | Repeat the selected ready attack |
+| O / touch Helmet | Open or close the helmet |
+| Shift / touch Shield | Manual shield using the hover-energy bar |
+| Grapple action / touch Exit | Request voluntary shutdown |
+| Aim | Scoped first person; temporarily enters first person from third person |
 
-First-person goggles remain at normal FOV after startup;
-C/right-click zoom to configured scoped FOV. Third person uses a collision-safe
-45 m back, 10 m up, 8 m shoulder boom, ignoring own body proxies. Targeting remains
-active without its overlay; C/right-click temporarily enters zoomed first person.
-Closed-helmet goggles use a dedicated orange (`#ff9a32`) tint, glow, corners and center dot, preserving scan/lock colors. Mounted hardware operates independently of the bean's match-scoped failure.
+The bean's weapon identity remains separate and returns on exit. On-foot jump,
+hover, strafe, inspection and conversation are unavailable while piloting.
+Piloted movement can cross lava; grounded foot contact costs one HP per tick
+through shields. Enemy navigation still avoids lava.
 
-O toggles the one-second HeadOpen/HeadClose animation; mounted touch offers Helmet
-in the grapple slot. Opening fades to black for 0.12 seconds and eases the camera
-back to the interior anchor under black for 0.08 seconds. The physical opening
-starts there, with a 0.12-second fade from black overlapping its start. Closing
-first plays the visible fold, then uses the same blackout/move/fade durations to
-return to the eye. These toggles do not repeat startup loading or tearing. Reversals
-inherit current hinge, camera and opacity values; windup toggles wait until release.
-Only helmet tracks are layered, so movement, look, shield and recoil continue.
-Health, reload, shield, FPS and eligible motion readouts also remain visible
-through the toggle in either perspective. The first-person camera cover sits
-below ordinary HUD; it does not reset the G-meter. Holding C/right-click keeps
-the same zoom intent/FOV through the blackout, while scans and reticles still
-require unobscured vision. Startup/shutdown and exit recovery retain their own
-full-screen presentation and ordinary-HUD visibility rules.
-Opening immediately disables acquisition and permanent goggles. Open/folding uses
-normal presentation and ordinary cyan scans while C/right-click is held, without
-red lock markers or homing. Fully closing and finishing the eye-view transition
-restores orange goggles and targeting. Third person keeps its external camera with
-no blackout; its shoulder boom remains eye-centered. Existing rockets retain their
-release-time flight mode.
+Closed-helmet goggles support immediate target acquisition and guidance. Opening
+disables acquisition; ordinary scoped scans remain available without homing.
+Already launched rockets keep their captured flight mode. Helmet reversals retain
+current phase instead of snapping. Ordinary health/reload/shield/FPS telemetry
+stays visible during active helmet toggles; startup/shutdown have separate HUD
+rules. Camera relocation occurs under the cover below ordinary telemetry.
 
-`mechaHeadView.ts` owns the simulation-clock presentation state; `mechaHeadEffects.ts`
-owns one prewarmed render target and fullscreen shader. Video capture updates in
-three steps during the reveal, without stalling simulation. The target's longest
-edge is capped at 1920 pixels. Photosensitivity Mode and reduced motion replace
-tearing with a gentle fade. Pause freezes the bar, camera blend, fold and video;
-destruction clears the presentation, and leaving disposes the GPU resources.
-
-Mouse/trackpad/touch motion is averaged over a 50 ms sample window, capped at
-0.366 rad/s in world space even while the legs turn. W/S first align the legs
-within two degrees using the 30-degree/s turn clips, then walk forward/reverse
-at 6.095 m/s with planted feet. Reverse plays Walk backward. Moving turns have a
-12 m minimum radius; the torso cap usually yields a 16.7 m sustained circle.
-Piloted collision uses separate height-aware animated body bounds with a 0.1 m contact margin, rather than the enemy route grid and its 14.78 m clearance circle. Swept movement slides along architecture, permits escaping existing overlaps, and uses the real border without a grid setback. Accepted distance drives walk playback; blocked travel retains acceleration/alignment intent. Enemy navigation still uses its original conservative route clearance.
-
-Release movement for tighter turns. Turning stops within 100 ms of horizontal input ending; pitch keeps normal controls. Pause, boarding, windup and destruction clear recent input. Solid architecture/pillar and border clearance remain. Piloted travel permits lava, while enemy routes still avoid it. Ground-contacting feet cost one HP every 0.5 seconds of contact, once regardless of the number of feet, bypassing shields.
-A/D, jump, hover, ordinary grapple, on-foot weapon switching, inspection and conversation
-are disabled. The configured Grapple action (R by default) requests voluntary
-shutdown instead; touch adds Exit in the inactive Inspect slot and retains Helmet
-in the grapple slot. Touch uses Shield in place of Hover.
-
-An accepted fire request plays the full three-second RocketFire animation. Translation and look freeze until the 1.5-second shot cue; look input during this period is discarded. The cassette's exported socket on `CTRL_RocketSlide_R` supplies the animated muzzle position/direction. This is the anatomical right arm despite its legacy `PART_Forearm_L_02` parent. Upper-body recoil then layers over locomotion and independent world yaw. Reload starts at release and lasts two seconds; another windup needs both reload and recovery completed, giving at least 3.5 seconds between releases. Held fire repeats.
+Pilot rockets acquire the nearest unobstructed eligible target to the rendered
+crosshair at release, independently of host render chunks. They follow the
+captured life off-screen without retargeting. Closed-helmet unlocked shots coast;
+open/folding shots wander toward a 75–100 m landing point. Swept collision uses
+fitted radius/hull endpoints. A five-meter cover-blocked blast deals 10 damage
+once per eligible body, without extra direct or self-damage. Firing freezes travel
+and look until release, then permits recoil locomotion; recovery gates repetition.
 
 ### Pilot attack slots and stomp
 
-Fresh boarding selects **1: Rockets**. **2: Stomp** selects the second attack;
-E, scrolling either direction and touch Weapon alternate the two. The bean's
-equipped/desired gun stays separate and returns on exit. Selecting another slot
-does not cancel a committed animation or reset either cooldown. The indicator
-shows the selected attack: the rocket or the approved white right-facing actual
-foot with impact rays beneath the sole (no line above it).
-
-Fire starts a ready stomp even without a nearby target. Held Fire repeats after
-the complete authored `Stomp` clip (about 3.042 seconds) and its five-second
-cooldown. Enemy and pilot share `mechaStomp.ts` timing and the actor's contact
-execution: frame 39 at 1.625 seconds is sampled exactly even across hitches,
-with the same dust, chips, shockwave and camera shake. Each affected living
-player or NPC takes **10 damage once**, with a 25 m ground-centered radius.
-Jumping and elevated supports avoid the floor wave; contact with animated feet,
-shins or thighs still counts. Floating NPCs are safe unless touching a leg.
-Tougher NPCs survive according to their health. The pilot/vehicle are immune;
-player kills and NPC hits use the existing pilot-owned attribution paths.
-
-The actor remains `piloted` with a separate stomp substate. Travel and leg
-turning stop for the full clip; normal capped torso looking, cockpit ownership,
-helmet, camera following and manual shields remain available. Walking and foot
-planting cannot overwrite the clip. Rockets and stomps cannot overlap. Any
-committed attack keeps the reload bar empty, including when another slot is
-selected; after stomp completion it fills over five seconds. Exit requested
-during an attack waits for its full animation, then begins normal shutdown.
-Destruction, ownership loss and disposal cancel an unfinished stomp.
-
-Offline pause freezes animation and cooldowns. Multiplayer host simulation
-finishes committed attacks while a viewer is paused; released or 250 ms expired
-Fire input cannot start repetitions. Required validated input selection and
-replicated selection, stomp activity/time/cooldown and rocket recovery preserve
-authority, late-join poses and victim render-before-damage delivery. All room
-participants must use the same build.
-
-Rockets fit 90% of the 0.52 m native barrel bore: 1.9015 m diameter after scaling, with 3.2 m hull/nose length. They travel the first three meters along the actual barrel axis with collision active. Thereafter guided flight steers current velocity toward a smoothly updated moving-target intercept at 120 m/s, with bounded angular changes and reduced loft near the shared 700 m travel limit. Acquisition at release uses the visible unobstructed NPC nearest the rendered crosshair, independent of HUD animation. The captured life/revision remains tracked off-screen; invalidation drops guidance without retargeting. Closed-helmet shots without a lock coast straight. Open/folding shots instead follow a launch-owned wandering route toward a landing point 75–100 m away; unobstructed ground contact cannot precede 50 m horizontal travel. Cover can intercept earlier.
-
-Bounded 1/240-second curved sweeps use the fitted radius and hull endpoints; the nearest body/world contact wins. Cover intercepts rather than being routed around. Blast damage is 10 once per NPC within five meters, without falloff, additional direct damage or self-damage; cover blocks splash.
-
-Mounting restores 50 HP without regeneration and a full shield-energy bar. The
-pilot is protected and damage goes to the mech. Shift uses the hover bar: five
-seconds of energy and three seconds to refill. Protection starts after the
-0.5-second bottom-up shield build. Release/exhaustion removes protection instantly
-and reverses the animation top-down, including partial builds. Recharge starts
-on deactivation; exhaustion requires release before another activation. The
-17 m surface, external-shot absorption, inside-origin bypass and ripples remain.
-Rockets do not drain energy or trigger enemy shutdown, movement/firing continue,
-and the eye stays yellow.
-
-Enemy zero HP stops attacks/shielding/travel and first aligns the torso to the
-unchanged leg heading along the shortest arc at 90 degrees/s. Within one degree
-it finishes at zero offset and plays the full normal Death clip. Eye power fades
-continuously from its defeat state through both phases. Only the completed Death
-opens mounting; knee/fist cues remain relative to that clip.
-
-Mounted zero HP captures the cockpit bean pose, ends pilot ownership and releases
-the living bean immediately. FinalDeath starts at exported time 1.25 s with no
-anticipation/crossfade, releases all collision and finishes its remaining 3.79 s
-independently. The wreck cannot mount again. The pilot falls normally with zero
-initial velocity; HP, life identity, weapon, hover fuel and death count survive.
-Normal controls, weapons, goggles and HUD return without a death screen. Normal
-health presentation resumes without a damage flash; mounted damage cannot leave
-an expiry callback attached to the returning on-foot bar. Armor grapples follow
-their hit collider as it animates and release when destruction removes solidity.
-Normal hazards can subsequently hurt the released player.
-
-Third person remains selected through breakup and afterward. A collision-safe
-0.3-second simulation-clock handoff contracts the eye-centered mech boom to the
-normal falling bean's shoulder camera. First person returns to the bean eye.
-Release clears scope/fire/shield input and orange presentation; pause freezes the
-handoff and destruction, and ordinary player death or leaving clears the handoff.
+Fresh boarding selects Rockets. A stomp keeps `piloted` ownership while stopping
+travel/leg turning for the complete clip. Looking, helmet controls and shielding
+remain available. Enemy and pilot share exact exported contact sampling across
+slow frames. Each eligible player/NPC takes 10 damage once: the floor wave reaches
+25 m, while animated leg contact also reaches elevated/airborne bodies. The pilot
+and vehicle are immune. Cooldown begins after completion. Switching slots does
+not cancel an attack; exit waits for committed animation to finish.
 
 ### Visible pilot and voluntary shutdown
 
-The visual bean uses a separate chest-owned anchor and uniform scale 2, with its
-head centered at the neutral lens height and its visor behind the lens. The
-original grapple seat and both optical camera anchors are unchanged. Actual
-skinned-armor triangle checks cover Mount, HeadOpen/Close, RocketFire and reversed
-Mount. First-person draws hide the bean temporarily; third person shows the
-complete occupant. Release restores the normal 1.5 scale and body bounds.
+Manual shielding needs a completed build. Release/exhaustion removes protection
+immediately; recharge begins on deactivation, and exhaustion requires release
+before reactivation. It does not run enemy automatic-shutdown logic.
 
-Only fully piloted ownership accepts Exit, once, deferring it until a committed
-attack's animation finishes. `shutting-down` ends firing,
-motion, manual shield and targeting, closes any open/folding helmet smoothly and
-aligns the torso with its legs. The startup video reveal then runs backward for
-0.3 seconds, followed by a 0.4-second HUD fade under black, before the original
-Mount plays backward. Photosensitivity/reduced-motion modes use the same gentle
-fade as startup, in reverse. The actor is protected like startup. A black screen carries the orange **Shutting
-down...** bar from zero through 100%; camera relocation stays behind black, then
-the opening cabin becomes visible. Third person instead swivels to the front as
-shutdown begins, overlapping helmet closure and the existing preparation time.
-It shows the full reversed Mount without first-person shutdown presentation.
-Pause freezes closure, reverse playback, camera motion,
-presentation and release.
+Voluntary exit closes the helmet, aligns the torso and reverses the startup
+presentation and Mount. Clearance is checked before shutdown and again at release.
+A blocked preflight leaves controls active and reports a retry message. A newly
+blocked exit restores piloting without refilling energy. A valid exit restores
+normal bean size, controls, weapon, view and gravity while preserving HP, life,
+fuel and score. The zero-HP wreck remains mountable; remounting restores 50 HP
+and full shield energy.
 
-After reverse Mount completes, a normal-sized living bean exits in front of the
-open cabin, searching its sides if cover blocks the front. Placement checks both the actor's coarse proxies and static world
-geometry; static swept clearance prevents passing through nearby cover. A
-completely blocked exit shows a brief message and returns control so the pilot
-can reposition and retry. Clearance is checked before shutdown and again at
-release; a newly blocked release restores the standing cockpit behind the boot
-reveal in first person, or a brief neutral fade in third person, without
-refilling shield energy. Ownership ends before the one-shot
-release callback; HP, life, weapon, fuel, death count and selected view survive.
-The 0.3-second third-person camera handoff starts at the actual front camera pose
-and follows the released bean as normal gravity resumes. Destruction retains its
-original eye-boom handoff.
-The robot remains mountable at zero HP, and remounting restores the original
-50 HP/full shield. Mounted lethal destruction still uses immediate FinalDeath
-breakup and cannot remount.
+Mounted lethal destruction immediately releases the living pilot at FinalDeath's
+breakup cue, clears collision and finishes independently. The wreck cannot mount
+again. Third-person release uses a collision-safe handoff; scope/fire/shield input
+and mounted presentation clear without resetting the player's life.
+
+## Multiplayer
+
+The host owns AI, collision, attacks, health and exclusive cockpit admission even
+when its player is dead or paused. Clients interpolate replicated bones/effects
+and never run actor damage simulation. Other players keep independent cameras,
+controls and HUD. A losing boarding request cannot move a respawned life.
+
+Pilot commands validate sequence, life, actor revision and ownership. Held inputs
+expire after 250 ms; release sends neutral intent immediately. Pilot departure
+cancels attacks and returns the actor to a mountable defeated state. FinalDeath
+remains unavailable. Late snapshots include current ownership, attacks, rockets,
+head phases and ending state, without replaying old damage.
+
+Weapon claims use the host shot/pellet ledger, exact damage, physical contacts,
+terrain and firing revision. Stale shots cannot damage a newly mounted actor.
+Pilot kills use existing attribution; destroying a piloted mecha releases its
+living occupant without a PvP death or NPC score. All clients need matching builds.
+
+## Game Over cutscene preview
+
+`MechaEndingPlayback` releases input, hides other overlays and freezes ordinary
+combat while the live canvas fades to black. `MechaGameOverScene.prepare()` loads
+assets without allocating destruction/scenery buffers; `begin()` activates under
+opaque cover in cooperative batches. Cancellation/failure disposes partial work.
+The gameplay castle and collision data remain untouched.
+
+The host readiness barrier waits for its scene and admitted viewers, with a
+bounded timeout for remote viewers. Departures release the barrier; late joiners
+prepare locally and seek current host time. Only host ending snapshots authorize
+playback. Scene identity, seeds and camera cannot be changed by stale/duplicate
+packets. Completion shows Game Over after punch and aftermath.
+
+The isolated scene reproduces seeded castle shells and scenery. Debris contacts
+are baked with bounded swept queries; chronological contacts and stable IDs make
+replay/late joins deterministic. Graphics quality changes cosmetic density only.
+Camera shake is temporary render rotation; accessibility modes suppress shake
+and reduce bright effects. Rendering restores caller state, including on errors.
+
+Open `/tests/mecha-cutscene-preview.html` under Vite for replay, seeks, approach,
+seed, lighting and viewport controls. Pillar bounce/breakup shortcuts select
+recorded visible contacts. Preview preferences do not save settings.
 
 ## Ownership and lifecycle
 
-`forgottenMecha.ts` owns the actor, animation clock, independent waist targeting,
-skin fitting, twenty-five moving skin/material proxies and model resources. `mechaNavigation.ts`
-owns the static navigation grid; `mechaFootPlant.ts` owns the foot constraint.
-The actor owns `mechaCombat.ts` (shared detection/attack-region classifier,
-simulation clocks, laser volumes, shot history and shield transitions) and `mechaCombatEffects.ts` (reusable meshes, eight
-shader impact slots and at most 192 instanced particles). The effect group uses
-world coordinates as a scene sibling of the actor; it is warmed during renderer
-preparation and disposed with the actor. All attack tuning lives in `config.ts`.
-`world.ts` awaits asset loading before renderer preparation and appends the small
-dynamic proxy set to spatial queries without rebuilding the static world hash.
-Cancelled loads dispose late-arriving assets without attaching them to a new match.
+| Module | Responsibility |
+| --- | --- |
+| `forgottenMecha.ts` | Actor modes, rig fitting/layers, anchors, moving proxies and actor resources |
+| `mechaNavigation.ts`, `mechaMovement.ts`, `mechaFootPlant.ts` | Enemy routes, piloted swept movement and planted feet |
+| `mechaCombat.ts`, `mechaCombatEffects.ts`, `mechaStomp.ts` | Attack eligibility/clocks, contacts, shields and pooled effects |
+| `mechaPilot.ts`, `mechaRockets.ts`, `lookInput.ts` | Pilot steering, timed input, targeting and rocket pools |
+| `mechaHeadView.ts`, `mechaHeadEffects.ts`, `mechaTransitionCamera.ts` | Simulation-clock head/camera phases and temporary rendering |
+| `mechaPilotRelease.ts`, `thirdPersonCamera.ts` | Living release and collision-safe camera handoff |
+| `mechaNetwork.ts`, `mechaNetworkTypes.ts` | Commands, parsing, host authority, replication and victim draw queue |
+| `mechaEndingTimeline.ts`, `mechaEndingPlayback.ts` | Shared terminal clock/readiness and asynchronous playback lifecycle |
+| `mechaGameOverScene.ts`, `mechaEndingCastle.ts`, `mechaEndingScenery.ts`, `mechaEndingDebris.ts`, `mechaEndingCamera.ts` | Isolated cinematic resources, scenery, trajectories and camera |
 
-`mechaMovement.ts` owns fitted sweeps/slide/overlap escape separately from enemy navigation; `mechaPilotRelease.ts` restores the on-foot body/input without resetting player life. `thirdPersonCamera.ts` owns shared camera sweeps and the bounded release transition. The actor's `mechaTransitionCamera.ts` owns the captured perspective, swivel/return phases and scope-release latch; it advances only on the actor's simulation clock and resets on death/disposal. Main applies its pose only during drawing and restores the logical camera afterward.
-
-`mechaPilot.ts` owns timed pointer samples and actual view yaw and manual locomotion; its
-`mechaRockets.ts` owns immediate targeting, sixteen reusable rockets and 192
-instanced smoke/blast slots. The actor owns seat/visual-pilot/view/muzzle anchors and the
-boarding/startup/piloted/shutdown/destruction modes, masked animation layers, firing/helmet phases and lava tick time. `lookInput.ts` routes both pointer-lock
-and touch intent. Manual shielding reuses combat's surface/effects without
-running enemy shutdown logic. Offline pause freezes these simulation clocks and
-leaving disposes them; externally owned bean visuals detach before GLB disposal.
-
-Projectile and sniper obstacle hits dispatch through the `damage.ts` seam. Goggles
-use the existing orange enemy scan with the exact name and live health when LOS
-is clear. Through cover, only four subtle orange jittering/flickering corners
-remain; they never acquire a homing lock. Photosensitivity/reduced motion makes
-the hint steady. Detection uses the physical envelope independently of chunk
-visibility, and the hint applies only to a living enemy actor. An
-oversized body keeps its callout inside the scope viewport. Their
-homing identity is invalidated on defeat or boarding. Multiplayer serializes only
-the actor revision, never a Three.js object. The scan ignores the robot's own proxies but other queries retain
-them, including movement, weapons, grappling and camera collision.
-
-Metallic armor receives one match-owned, prefiltered reflection texture, baked
-during preparation and dimmed at night. Ground particles share the existing
-instance pool with armor-hit sparks and dust. Combat particles use a fixed instance buffer scaled by the applied
-particle setting and remaining graphics budget, without extra lights.
-`cameraShake.ts` changes only the temporary
-render quaternion; the logical camera pose is restored after each draw.
-
-Pause and player death freeze the offline actor, effects and cooldown. Player
-respawn keeps the same robot; leaving disposes it. Wall-punch commitment sets
-`matchEnded` and blocks input reacquisition while the separate cinematic continues.
-A new match resets that latch and creates a fresh actor.
-
-## Verification
-
-`tests/mechaArmorImpact.test.ts` covers spark direction, gravity, orientation,
-color cooling, dust/spark quality scaling, the shared cap, expiry and disposal.
-Weapon and network tests cover straight/sniper/homing body contacts, lethal and
-rejected hits, visual-only duplicates, canonical host contacts, strict event
-parsing, guest authority rejection and event replay suppression.
-
-For visual review in `/tests/mecha-preview.html`, start singleplayer, choose
-distance/body height and Hold height, then use Armor hit setup. It holds only
-the actor still with its shield down; Fire weapon and Fire / stop bullets run
-the real weapon, damage and particle paths. Equip sniper switches the actual
-weapon. Pause on armor hit freezes the match shortly after a confirmed impact
-for inspection. Uncheck it and resume before reviewing continuous fire. Noon/
-Night lighting and the 100%/20% particle selector affect only the preview's
-in-memory preferences. Leaving or starting a new match clears review firing and
-the held actor; no graphics settings are saved.
-
-`tests/forgottenMecha.test.ts` uses the actual GLB skin and baked clips, stripping
-only browser image decoding for Node tests. Coverage includes fitting, border
-routes, LOS, independent targeting, impact timing, evasion, cooldown, death hold,
-punch immunity/completion, goggles/homing and temporary camera shake.
-`tests/mechaCombat.test.ts` covers acquisition and exclusion boundaries, charge
-cancellation, exact yaw and frozen fire angles, airborne contact, physical reach,
-single-hit and shrinking damage, reload, rolling shot history, shutdown timings,
-pause and permanent death cancellation. `tests/mechaWeapons.test.ts` exercises
-actual sniper and homing paths, inside-origin damage and nearer terrain. Real
-asset tests also cover eye fitting, walking circles, committed attacks before
-stomp, frozen shutdown and death during recovery.
-
-On 2026-10-01, the initial in-app browser review verified real match preparation,
-stationary torso tracking, orange goggles health/name, lethal grounded stomp,
-death hold with ongoing gameplay, punch invulnerability, Game Over and menu cleanup.
-The laser/shield review additionally verified the charged sphere, blue impact
-ripple with unchanged HP/score, an upward pitched beam missing a sideways dodge,
-obstacle termination, the complete two-shot warning/drop/rebuild sequence, an
-aligned lethal airborne hit, paused combat clocks during player death, retained
-robot and shot history after respawn, inside-origin sniper damage and ordinary
-death with continuing play. The recorded cycle dropped protection at 115.77 s,
-started rebuilding at 125.77 s and restored it at 126.27 s of combat time.
-These reviews used temporary touch controls in the fixture; physical-device
-touch and desktop pointer lock were not exercised.
-A separate route audit found reachable wall approaches for all 64 seeds from
-0 through 63.
-
-The mounting review on 2026-10-01 exercised the real grapple into the completed
-Death pose, boarding and complete Mount startup, the 23.31 m eye view at normal
-75-degree FOV, permanent goggles, third-person targeting without its overlay,
-and scoped first-person entry/release back to third person. Walking moved away
-from the border; stationary turns and reverse playback retained the model's
-gait, and blocked travel stopped at nearby pillars/lava. Guided rockets launched
-from the right forearm with the two-second interval and eliminated test targets.
-Manual shielding built upward, exhausted after five seconds, recharged while
-remaining off until release, and held its partial build/energy/clock unchanged
-through pause. FinalDeath completed at 5.04 seconds, then showed ordinary death
-UI; respawn restored bean weapons and controls while the destroyed robot stayed
-unavailable. Leaving removed the actor and scene. This review also used the
-fixture's in-memory touch mode; physical-device touch and desktop pointer lock
-remain separate device checks.
-
-`tests/mechaMount.test.ts` checks exact cockpit/armor hits, front entry, boarding
-arrival without overshoot, startup and helmet timing, fitted head-aligned bean
-clearance against actual animated cabin/helmet skin through Mount, folding, recoil
-and reverse Mount, world-yaw caps, turning
-and reversing, manual shield transitions and one-shot final destruction.
-`tests/mechaRockets.test.ts` checks immediate camera targeting, guided curves,
-moving targets, stale life revisions, the 700 m boundary, cover interception,
-unguided fire and cover-blocked single-application splash. The finishing-touch regression suite adds shot cue/freeze/recovery, exported socket and bore fitting, helmet reversal/layering, varied event/frame-rate turning, grounded lava ticks through shields, normal grapple binding from ground level, straight launch sweeps, continuous moving-target guidance and wandering landing checks.
-
-Use `/tests/mecha-preview.html` under Vite to review the real game with visible
-controls for finding the robot, changing distance and body height, holding an
-airborne height, scanning, firing, death, the wall attack and match cleanup.
-Cockpit aim/grapple and a ground-level upper-cabin approach, a one-second pointer turn, helmet toggling, lava placement, forward/reverse walking, view switching,
-targets ahead, continuous rockets and held shield controls exercise piloting.
-Automatic sideways evasion creates real horizontal misses without changing AI
-or damage. Event pause controls expose charge, firing, shield drop, mid-rebuild, rocket windup and helmet folding
-frames while keeping simulation frozen; visible clocks and phase history help
-verify pauses. It selects touch input in memory so
-pointer lock is not required; it does not save settings. The iframe keeps the
-review toolbar visible instead of requesting fullscreen. This fixture is not
-included in the production entry.
-
-Finishing-touch validation on 2026-10-01 passed `npm run check` (both TypeScript
-projects and 319 tests) and `npm run build`, regenerating tracked `dist/`. The
-in-app browser reviewed normal ground-level upper-cabin grapple entry, complete
-startup, the yellow eye in front asset view, orange normal/scoped goggles, cyan
-open-helmet scans with zero lock classes, third-person presentation, paused
-right-cassette windup at 1.25 seconds, release/recovery with a live guided kill,
-post-release walking/turning and helmet folding. Lava placement damaged the mech
-through the manual shield and completed FinalDeath; ordinary deaths were reviewed
-in both views and mounted deaths in both views had no frozen blue particle burst.
-Respawn restored normal controls and leaving removed actor ownership/effects.
-Input event/frame rates and wandering landing distances were covered by the
-regression suite; physical trackpad, pointer-lock and touch-device feel remain
-device checks.
-
-Head-view validation on 2026-10-01 passed both TypeScript projects and all 323
-tests via `npm run check`, then `npm run build` regenerated tracked `dist/`.
-The real-game browser fixture reviewed the physical helmet blocking the rear
-camera before frame 27, paused orange loading, the full bar and black goggles at
-the standing pose, broad video tearing, and the gentle Photosensitivity Mode
-fade. Opening/closing returned between the interior and eye-center views; open
-scoped scans kept their normal cyan styling, and third person retained the full
-model/external camera during folding. Destruction during a paused helmet blackout
-cleared that presentation, completed FinalDeath and showed the normal death UI.
-Respawn restored normal controls and removed both mecha presentation classes;
-leaving removed the actor and scene. This used the fixture's temporary touch mode;
-physical pointer-lock, trackpad and touch-device checks remain separate.
-
-Movement and survival validation on 2026-10-02 passed both TypeScript projects
-and all 334 tests with `npm run check`; `npm run build` regenerated tracked
-`dist/`. The new lifecycle suite covers fitted sweeps, sliding, corners, overlap
-escape, height/border clearance, blocked gait recovery, both defeat-turn
-directions and the wraparound boundary, gray-eye continuity, all six animated
-leg volumes at regular and irregular frame rates, living release and camera
-contraction. These destruction checks supersede the earlier pilot-death behavior
-recorded above.
-
-The real-game browser fixture reviewed a sideways defeat with paused alignment,
-fixed leg heading and complete Death before cockpit availability. A real grapple
-entered the cockpit; the mounted mech then walked beside a pillar inside the old
-navigation setback. Piloted zero HP paused immediately at the 1.25-second breakup
-cue with ownership ended, player HP unchanged at 10 and third person retained.
-After resuming, the player fell to the floor, the wreck remained unavailable,
-and ordinary weapons/jumping worked. A subsequent ordinary death and respawn
-retained third person, and leaving removed the actor and scene. Standing above
-an animated foot without floor grounding was lethal at the 1.625-second stomp
-impact. This review used temporary touch input in the fixture; physical-device
-touch and pointer-lock feel remain separate checks.
-
-Initial Mecha follow-up automated validation on 2026-10-02 passed `npm run check`:
-both TypeScript projects and all 341 tests. Regressions cover 25/60/130 m
-selection, committed attacks before stomp, lost-LOS wandering release, normal
-sideways walking at 30/144 Hz, covered scans losing homing and accessibility
-fallback, shared three-release shield shutdown, render acknowledgment and stale
-hit cleanup, actual-skin pilot clearance, reversed Mount, protected shutdown,
-one-shot living release and remounting. The production build was regenerated.
-Those initial checks did not cover inside-beam visibility, the authored covered
-rocket pose or wall-blocked exit with free side space. No interactive browser
-acceptance was run for this follow-up; the user owns the checklist below.
-Earlier browser reviews remain historical
-and do not verify these changed behaviors.
-
-Repair and balance validation on 2026-10-02: the affected suites passed 51 tests;
-final `npm run check` passed both TypeScript projects and all 345 tests.
-`npm run build` regenerated production assets successfully with the existing
-large-chunk warning. Regressions cover inside-beam visibility and actual draw
-acknowledgment, covered authored launch independent of hidden movement, safe
-side release at a front wall, four mixed releases/five-second shield downtime,
-and reversed video/HUD presentation before Mount. Interactive acceptance remains
-unperformed by the agent and belongs to the user below. The original requests
-have been restored verbatim in `to_be_changed.md`, rather than rewritten as results.
-
-Cylinder/dome validation on 2026-10-02: affected combat/actor suites passed
-40 tests, and the updated lifecycle suite passed 11. Final `npm run check` passed
-both TypeScript projects and all 349 tests; `npm run build` regenerated `dist/`
-with the existing large-chunk warning. Whitespace validation passed. Regression
-coverage includes translated ground origins, the 25/60/130 m and 28 m seams,
-spherical boundaries and apex, LOS, committed region changes, and actual animated
-launcher aim/physical airborne hits. Older defeat fixtures now hold laser reload
-in the lower cylinder instead of using heights that correctly acquire dome rockets.
-No interactive acceptance was performed; `to_be_changed.md` remained untouched.
+`world.ts` owns preparation/disposal and dynamic query registration. Late asset
+loads cannot attach to replacement worlds. Damage and weapon-network ports remain
+the dependency seams. Offline pause/death freezes actor clocks; respawn retains
+the same actor. Leaving cancels pending work and disposes resources. Fresh matches
+reset terminal latches and create a new actor.
 
 ## Current manual acceptance
 
-Approach-warning validation on 2026-10-02: one `npm run check` passed both
-TypeScript projects and all 345 existing tests; one production build regenerated
-`dist/` successfully with the existing large-chunk warning. Whitespace validation
-passed. Visual acceptance remains with the user, and `to_be_changed.md` was unchanged.
+Use `/tests/mecha-preview.html` for affected interactions. Its controls cover
+finding/scanning, distance/height, armor hits, automatic evasion, attack phase
+pauses, cockpit entry, piloting, blocked exits, lava and cleanup. Touch mode is
+temporary; this fixture does not establish physical input capture or device feel.
 
-The user performs these checks; automated results do not mark them complete.
-
-- Start singleplayer: check the three-second white warning, pause/resume and
-  steady accessibility presentation; it should not replay on respawn.
-- Scan through/without cover, at low render distance and with accessibility modes.
-- Check the 28 m ceiling and overhead dome: laser/stomp below, rockets above,
-  with no acquisition outside the ground-centered 130 m sphere above the ceiling.
-- Walk sideways across the rocket band; lose LOS during windup. Four mixed ranged
-  releases should trigger the shield routine, with five seconds down before rebuild.
-- Die to laser/stomp: see the beam/contact before damage and behind the death screen.
-- Inspect the open-helmet pilot; exit with closed/open/folding helmet and near a wall.
-  Check first-person reversed goggles, pause/resume, living release and remounting.
-- Toggle O/Helmet repeatedly in each perspective, including reversals and held
-  Aim. Health/reload/shield/FPS must stay steady; an eligible G-meter must not
-  reset. First-person vision still blacks out briefly below the readouts, while
-  third person stays clear. Check pause and resume during the toggle too.
-- In third person, board from several directions and while holding Aim: check the
-  quick front swivel, complete standing animation, visible pilot and smooth return
-  without boot overlays. Entry should become controllable at the same time as first person.
-- Exit in third person: check full reverse Mount, the front-to-bean handoff and
-  normal falling. Try P/View, C/Aim and right-click during both transitions and
-  pause in swivel/return/release; there must be no queued perspective change.
-- Repeat with portrait/wide viewports, different FOVs, cover near the camera and
-  blocked exits. Prefer collision clearance over whole-body framing when cramped;
-  a newly blocked exit should fade back to piloting without a stuck camera lock.
-
-### Third-person transition verification — 19 October 2026
-
-Automated camera checks cover fitted-envelope framing, swept movement, exact
-render-pose handoff, scope-release handling and actual-GLB control-timing parity
-at 30 FPS, 144 FPS and irregular frame steps. The production perspective setter,
-blocked third-person release/recovery, remount and disposal are also exercised.
-
-Local Chrome fixture checks sampled external startup, the complete standing pose,
-paused return, shutdown and paused release. The standing mecha remained fully
-visible without boot hardware; fixture P/C attempts retained the captured view.
-Release preserved third person, player HP and the mountable wreck. The browser
-reported no captured runtime errors. This fixture uses temporary touch input;
-physical pointer/touch feel and the full visual acceptance checklist remain open.
-
-Final validation passed both TypeScript projects and all 432 tests with
-`npm run check`. `npm run build` regenerated `dist/` with the existing large-chunk
-warning. Generated asset references, documentation links and whitespace checks
-passed; `to_be_changed.md` remained untouched.
-
-### Helmet-toggle HUD verification — 19 October 2026
-
-The follow-up keeps ordinary telemetry independent of helmet-camera blackout and
-preserves mounted ADS intent. Phase-sampled tests cover opening/closing, partial
-and full blackouts, rapid reversals, both perspectives, held aim, touch eligibility
-and retained HUD values. Existing lifecycle and terminal-HUD regressions remain.
-The focused run passed 19 tests; final `npm run check` passed both TypeScript
-projects and all 433 tests. The build regenerated `dist/` with the existing
-large-chunk warning.
-
-Local Chrome review held the production helmet clock at opaque cover: ordinary
-readouts stayed visible above the black first-person view, while third person
-kept its clear view and crosshair. Held aim continued zooming during blackout.
-Both opening and closing blackouts retained the readouts. Pause removed the
-helmet-cover modifier and hid HUD normally; leaving disposed the match, with no
-captured browser runtime errors. The fixture uses temporary touch input;
-physical input feel remains manual.
-
-## Audit repair verification — 19 October 2026
-
-The audit repair adds a shared bounded exit search before shutdown and at final
-release. A blocked preflight leaves piloting active and shows a brief reposition
-and retry message. If the exit becomes blocked during shutdown, startup restores
-the cockpit, health/energy ownership and input; the player can reposition and
-retry. It does not teleport through the obstruction.
-
-Real-asset tests cover blocked release, recovery, energy retention, safe side
-release, destruction, remount and cancellation. A local Chrome 155 application
-check also passed both blocked-exit paths, the visible warning, restored control
-and G-meter, safe retry, every sampled startup/shutdown HUD phase, and mounted
-pause. Input capture and phase stepping were controlled by the fixture. These
-results do not complete the physical-control and visual-art checklist above.
-See [audit-repair-progress.md](audit-repair-progress.md) for the full verification
-record and limits.
+Check only the affected behavior: acquisition through/without cover, attack
+contacts, render-before-damage, shield cycling, helmet/view transitions, living
+release, blocked recovery or leave/restart. Visual timing and particle appearance
+belong in this preview rather than exact-value automated assertions.
 
 ### Multiplayer acceptance
 
-- With two current-build clients, compare pose, health, shield transitions and
-  impacts; pause or kill the host player while the shared actor keeps running.
-- Use ordinary, sniper and guided weapons against external shields and internal
-  body contacts. Check terrain interception, shield ripples and shared defeat.
-- Race two real grapples into the defeated cockpit. Exactly one wins; the other
-  keeps ordinary controls. Inspect the visible pilot from another client.
-- Pilot with normal/scoped first person and third person, open/close the helmet,
-  shield, fire at NPCs/players, release input, and exercise blocked exit/recovery.
-- Join a third client during startup, a laser, rocket flight, active piloting and
-  destruction. It should recover the live pose without gaining cockpit controls.
-- Verify pilot rocket kill credit, ordinary respawn, voluntary exit/remount,
-  pilot disconnect and living release during lethal destruction.
-- Reach the wall and inspect the shared cutscene and delayed Game Over while active, paused, dead and
-  joining. Leave the room and create another match with fresh state.
-- Repeat with low render distance and relay-required connections. Local fixture
-  results do not verify external TURN credential refresh or physical input feel.
+Use two clients and a late joiner when changing shared actor/transport behavior:
 
-### Multiplayer automated verification — 20 October 2026
+- Compare pose, health and attacks while the host player is paused/dead.
+- Race cockpit entry; only one pilot owns controls and other views remain independent.
+- Check rockets/stomps, target-life expiry, kill credit and render-before-damage.
+- Exercise blocked exit, remount, pilot disconnect and lethal living release.
+- Join during startup, attacks, destruction and the shared ending.
+- Leave and start again with fresh state; include relay-required connections when relevant.
 
-Both TypeScript projects and all 450 tests pass with `npm run check`.
-`npm run build` regenerated the tracked production output with the existing
-large-chunk warning. Production HTML asset references, changed documentation
-links and Git whitespace checks pass. The protected follow-up file is unchanged.
-
-New coverage uses the real 160-joint rig, sparse pose/scale replication and
-BinaryPack. It checks physical multi-player contacts, host-only packet authority,
-exclusive boarding, pilot departure in boarding/startup/play, 250 ms input
-expiry, synchronous shutdown release, stale boarding replies after respawn,
-solo-host weapon claims, mounted revision retirement, first-shot homing history,
-observer camera ownership and late laser/startup/breakup snapshots. Existing
-offline mecha and multiplayer security regressions remain passing.
-
-The local three-client relay acceptance is recorded in
-[Multiplayer live test](multiplayer-live-test.md). A final focused regression
-also verifies that a blocked-exit recovery flag reaches the owning client
-camera without taking over an observer camera.
+See [Multiplayer checks](multiplayer-live-test.md) for admission/network scope.
 
 ## Charged katana rear-nape weak spot
 
-`MechaNape` fits an invisible box to `M_HelmetShell` in the neutral head's
-anatomical frame. The eye-facing direction defines front; world up in the neutral
-pose defines height. Its dimensions are 60% helmet width, 30% height and 30% depth,
-centered on the lower rear edge. The fitted frame is attached to `CTRL_Head`, so
-head animation, turning and piloted motion carry the volume with them.
-
-During a fully charged katana's existing active damage window, the host checks
-this box first using accepted attacker poses. The attacker must be behind its
-anatomical rear edge and have an unobstructed volume contact within 10 m.
-Close contact inside the rear half of the enlarged box remains valid. An accepted
-contact deals remaining HP through `damage`, preserving shields, protected
-phases, kill credit and pilot release. A body hit already accepted for that
-Mecha revision in the swing prevents a subsequent nape execution. Normal swings
-remain ordinary body damage. The volume is never included in movement colliders
-or firearm hitboxes. Disposal detaches its anchor with the model lifecycle.
+`mechaNape.ts` attaches a helmet-proportioned rear box to `CTRL_Head`; it follows
+animation without joining movement or firearm hitboxes. During a charged katana's
+active window, a clear rear contact within 10 m deals remaining HP through normal
+damage rules. Shields, protected phases, actor revision, kill credit and pilot
+release still apply. A body hit already consumed by that swing prevents upgrading
+to a nape execution. Normal swings use ordinary body damage.

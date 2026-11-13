@@ -28,7 +28,7 @@ when loading settings saved before these options existed:
   external mouse; system-adjusted input remains available for either device.
   Raw input falls back only when explicitly unsupported. Legacy void-returning
   requests, duplicate requests and permission failures retain their handling.
-- **Mouse spike protection** retains the historical Windows workaround for
+- **Mouse spike protection** filters
   isolated extreme erroneous deltas. Enable it only if those jumps occur: it can
   discard a genuine extreme flick or delay two comparable fast samples until
   confirmation. Ordinary input does not use this lossy heuristic by default.
@@ -46,12 +46,3 @@ pitch limits, zoom projection, cancellation and pilot routing.
 code to check completed-lock firing, pending turns, lock loss/reacquisition,
 captured guidance and sniper exclusion. These deterministic checks do not establish
 the subjective feel of a physical device or browser-specific input precision.
-
-19 October validation: `npm run check` passed both TypeScript projects and all
-422 tests; `npm run build` regenerated tracked production output. Native Chrome
-checked sensitivity 3 with system-adjusted and raw input, movement, grappling,
-scope, third-person switching and pause/resume without console errors. Native Zen
-checked raw pointer lock, movement, grapple/scope input and pause at sensitivity 3.
-Physical mouse/trackpad feel and live multiplayer browser play remain manual
-acceptance; the homing/crosshair agreement above was checked with real modules in
-deterministic integration tests.

@@ -1,52 +1,68 @@
 # Full-screen menu
 
-The main menu fills the window with a clear-sky gradient and a smart-goggles overlay. The game title sits at the top center; play, multiplayer, weapons, settings, and the introductory text sit at the lower left. The playable bean faces the viewer at screen center, gently hovers, and runs a small fixed-cost booster flame. The menu uses the production multiplayer peer scan renderer to bracket the bean and type `Character`. Its leader and readout follow the hovering avatar, always from the upper-right side of the scan box instead of changing sides. The menu readout replaces multiplayer distance and health with the character color controls. The menu has no center reticle; gameplay goggles retain theirs. The scan runs only on the main panel while no match is active; it does not acquire a homing lock. Pause and all Multiplayer screens use the same lower-left button column, width, and colors as the main menu. Their headings and the optional pause lobby code sit above the controls. Host shows its room code in a full-width button; clicking anywhere on that button copies the ready code while the code remains visible. Join uses a matching full-width input. Offline pause fully stops gameplay and exposes the same editable settings panel; Back returns to Pause. Multiplayer pause keeps the simulation running and does not expose settings. Pause and leave flows remain available.
+The main menu uses a sky background, a hovering bean preview and shared goggles
+scans. Play, Multiplayer, Weapons and Settings occupy the lower-left column.
+Character scans expose suit colors without acquiring gameplay homing locks.
+Pause and multiplayer panels reuse the same button layout. The Host room-code
+button copies its ready code; Join uses a matching input.
 
-`index.html` owns the static menu buttons, weapons panel, goggles overlay, and color controls so they exist before JavaScript runs. `src/mainMenu.ts` initializes their behavior and renders the preview once per page. `src/gameUI.css` is loaded directly from the document head and owns the menu, settings, and HUD styling. Touch controls and desktop/touch description visibility live in `src/mobile.css`, also loaded from the document head, and girlfriend chat styling lives in `src/gothChat.css`. The preview renders only while the menu is visible, at up to 30 FPS. The gun's center projects to the center of the screen's right half. Its booster uses one fixed pool of instanced boxes; the flame stays outside the avatar's fixed peer scan envelope.
+Offline pause freezes simulation and exposes settings; Back returns to Pause.
+Multiplayer pause keeps simulation running and offers resume/leave without
+settings. Color customization is unavailable throughout a match.
 
-Menus and scoped gameplay share four cyan screen-frame brackets. Their outer edges sit flush with the viewport corners on desktop and mobile, using the shared `.goggles-tl`, `.goggles-tr`, `.goggles-bl`, and `.goggles-br` styles.
+## Ownership and shared presentation
 
-All interface text uses the self-hosted Science Gothic variable font in `public/fonts/`, including mobile controls, chat, HUD, loading screen, and multiplayer canvas name tags. `src/gameUI.css` owns the shared font faces and family; keep explicit font shorthands in the other stylesheets on that family. The font is a free Bank Gothic revival under the SIL Open Font License; its required notice is `public/fonts/OFL-ScienceGothic.txt`, with download provenance in `public/fonts/README.md`.
+| File | Responsibility |
+| --- | --- |
+| `index.html` | Static menu, weapon panel, scan overlays and color controls |
+| `src/mainMenu.ts` | Preview models, menu actions and visible-only rendering |
+| `src/appearance.ts` | Validated suit color and independent local-storage persistence |
+| `src/lobbyLineup.ts` | Lobby slot geometry and callout placement preferences |
+| `src/weaponMenuScan.ts` | Visible weapon bounds, camera fitting and stable scan frames |
+| `src/smartGoggles.ts`, `src/gogglesScanTemplates.ts` | Shared scans, typing and measured callout layout |
+| `src/gameUI.css`, `src/mobile.css`, `src/gothChat.css` | Main UI, touch/editor and conversation styles |
 
-Gameplay, character, lobby and weapon scans share reusable corner-scan and info-overview templates with the existing CSS transitions. Menu scans reuse their overlays when reopened or switched; typed text, name-only lobby labels and interactive color controls retain their existing behavior.
+Preview resources are separate from gameplay peer meshes. Disposal preserves
+shared gameplay geometry/materials. Scans reuse overlays; text measurements
+refresh on content/font changes and stay within the viewport. Cyan screen
+brackets and the self-hosted Science Gothic font are shared across the UI.
+Keep the font's [license notice](../public/fonts/OFL-ScienceGothic.txt) with it.
 
-Smart-goggles leader placement measures the complete readout before the typing animation starts in `src/smartGoggles.ts`. The panel and horizontal leader use that same width from the first frame, with measurement refreshed only when the content or font load state changes. The label stays within the viewport and wraps on narrow screens. The menu passes a single interactive custom peer readout; gameplay scans continue to show `Distance:` and `Health:` facts.
+## Character and lobby
 
-The goggles callout contains six squares: a multicolor custom picker, then Cobalt, Coral, Mint, Gold, and Lilac presets. It shows no color label or hex value. `src/appearance.ts` validates and saves the selection in local storage independently of gameplay settings. The color updates the menu preview and local third-person model and travels as an optional validated 24-bit `bodyColor` in multiplayer state packets. Older packets without a color remain accepted.
+The character readout offers a custom picker plus Cobalt, Coral, Mint, Gold and
+Lilac presets. Selection updates the preview and local third-person model.
+Multiplayer carries validated suit color in lobby and player state.
 
-After room admission, the host and guests see the same 3D waiting-room lineup. The host occupies the center even on a guest's screen; guests alternate left and right in the host's admission order, with the second pair farther back. The first two guests sit a little closer to the host. Each avatar keeps its chosen suit color, slow hover, and booster flame. The existing goggles animation frames other players and types their names; lobby scans have no stats panel, and each client omits their own scan. Each supported room size (one to five players) has an explicit corner and leader preference per roster slot. The initial placement can choose another corner to avoid names and menu controls, then stays fixed for that roster and viewport while following the avatars' hover. A membership or viewport change allows a new placement. The host sends the ordered roster whenever someone joins, leaves, or reports their lobby color. A replacement goes to the end of the lineup even if it reuses an earlier spawn house. The lineup disappears when the match begins or the room closes. `src/lobbyLineup.ts` owns the side/depth geometry and corner preferences; `src/mainMenu.ts` owns preview models separate from gameplay peer meshes.
+The admitted roster places the host at center and guests alternating left/right
+in admission order. Each viewer scans other players by name without gameplay
+stats. Callouts avoid names/menu controls and retain their placement until roster
+or viewport changes. Departures remove previews; replacement peers join the end
+of admission order even when reusing a spawn slot. Starting play hides the lineup.
 
-The weapons screen derives damage, pellets, maximum damage per shot, rate, spread, recoil and cooldown from `WEAPON_STATS`. It also reports the shared 900 m/s simulated-projectile speed from `PROJECTILE_SPEED`, while the sniper is labeled as hitscan. Minigun ramp and rate values use the minigun constants. No duplicate editable stat table is maintained.
+## Weapons
 
-Weapon choices and Back form a uniform lower-left stack. The gun sits in the center of the right half. Preview scaling compresses the raw weapon-size range so the pistol remains readable while the guns retain different visible sizes; the camera fits each gun's full rotation envelope. The scan uses the production goggles corners, 45-degree callout geometry, left-side gradient, and animation timing. Every specification is a `label: value` fact in the same one-column readout style as gameplay. Switching guns first retracts the existing scan, then slides the old gun out and the new gun in, and finally restarts bracket convergence, leader drawing, identifier typing, and sequential fact typing. Selecting a lower button moves both guns downward; selecting an upper button reverses that direction. Quick repeated selections use the latest choice after the current slide. `src/weaponMenuScan.ts` excludes dormant muzzle effects, measures the farthest visible mesh vertex from the preview pivot once per gun, and projects that gun's complete rotation-swept sphere. Its padded scan rectangle stays fixed while the gun rotates and is the smallest screen-aligned box that contains every orientation. Viewport changes recompute the rectangle; short landscape layouts keep the readout between the button column and gun.
+Weapon choices and Back form a lower-left stack; the model occupies the right
+half. Stats derive from `WEAPON_STATS` and shared projectile/minigun constants.
+Sniper is labeled hitscan. [Katana](katana.md) shows melee damage, radius, charge
+and swing facts instead of firearm statistics.
 
-Validation when this menu was implemented: both TypeScript checks, the then-current test suite, production build, and diff whitespace checks passed. Browser checks covered desktop and 821×400 touch layout, preset selection and persistence, and weapon-tab navigation including minigun values. Physical-phone usability and live multiplayer color replication remain deployment checks; see [Follow-up validation](to_be_changed.md) for the current list.
-
-Color customization is unavailable throughout a match, including pause. The weapons screen replaces the character preview with the selected gameplay gun model. The gun slowly rotates on its own; drag with mouse or touch, or focus the preview and use arrow keys to rotate freely. After input stops, it pauses briefly, eases back to its original pose, and resumes spinning. The on-screen rotation hint has been removed. Models are cached per weapon, centered and scaled to fit; reopening the panel and selecting a gun reset its pose. Reduced-motion mode skips the automatic spin and switch slide. Preview-owned resources are disposed without disposing shared gameplay geometry/materials. Browser checks verified pistol rotation and minigun selection.
-
-The 28 September 2026 redesign passed `npm run check` (241 tests) and `npm run build`. The in-app browser showed the main scan and its six squares at a narrow default window and an 821×400 landscape viewport; preset selection and custom color input both updated the preview, then the original Coral selection was restored. Weapons preview and Settings were also checked during the redesign. The fixed upper-right callout direction has a focused geometry test. Physical mobile devices and live multiplayer remain separate checks.
-
-The fixed-frame and fact-readout revision passed `npm run check` (244 tests), `npm run build`, and `git diff --check`. Browser checks covered the in-game colon labels, gun-specific scan sizes, a rotated minigun whose brackets did not move, typed stats after switching and reopening Weapons, and the 687×909 and 821×400 menu layouts. Focused geometry tests check the exact visible-vertex radius, different frame sizes under one camera, and containment through full yaw and pitch rotations at both viewport sizes.
-
+Mouse/touch drag or focused arrow keys rotate the model; automatic spin resumes
+after input. Switching retracts the scan, slides models and types the new facts;
+rapid selection retains the latest choice. Reduced motion skips spin/sliding.
+Visible-mesh rotation envelopes keep scan rectangles stable while models turn;
+dormant muzzle effects do not affect their size. Resizing recomputes fitting.
 
 ## Local chat download settings
 
-Consent authorizes local AI use and is remembered in the browser. An already
-approved player is not shown the consent notice again when enabling immediate
-downloads. That option remains a draft until Apply; declining or Discard starts
-no download. The consent dialog traps focus and returns it to the setting.
+Local AI consent is remembered separately from the immediate-download setting.
+The setting stays a draft until Apply; declining/Discard starts no download.
+The consent dialog traps focus and returns it to the setting.
 
-The applied immediate-download setting owns a background model load. Closing
-chat detaches its UI while that load continues. With the setting off, closing
-chat cancels an unfinished interaction-owned knowledge fetch/import/worker load;
-reopening starts a fresh generation. A stale completion cannot replace the new
-engine or update its UI. Completed models may remain available within a match;
-leaving with immediate downloads disabled releases them. In-flight replies are
-interrupted on close, and conversation text is cleared. Cached model files may
-remain in browser storage. No GLB/model-weight cache was added by the October
-audit repairs.
-
-The sixth arsenal entry is [Katana](katana.md), with a shared black-blade/silver-grip
-model and melee-specific damage, radius, charge and swing facts. It does not show
-firearm projectile speed, spread, caliber or ammunition facts. V is its default
-rebindable equip key; cycling includes it after the minigun.
+Applied immediate download owns a background load that continues after chat
+closes. Otherwise, closing cancels unfinished interaction-owned loading;
+reopening starts a fresh generation. Stale completions cannot replace the engine
+or UI. Closing interrupts replies and clears conversation text. Completed models
+can remain within the match; leaving releases them when immediate download is off.
+Cached model files may remain in browser storage. See the
+[character/chat guide](../public/npc/goth/README.md) for model configuration.

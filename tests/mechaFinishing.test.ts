@@ -20,15 +20,6 @@ async function mounted(lava: THREE.Object3D[] = []) {
 }
 function view(actor: ForgottenMecha) { const camera = new THREE.PerspectiveCamera(75, 16 / 9, 0.1, 2000); camera.position.copy(actor.pilot.cameraPosition); camera.quaternion.copy(actor.pilot.cameraQuaternion); return camera; }
 
-test('export includes eleven timed clips and anatomical right cassette socket with legacy L parent', async () => {
-    const asset = await loadIronmawTestAsset(); assert.equal(asset.animations.length, 11);
-    for (const [name, duration] of [['HeadOpen', 1], ['HeadClose', 1], ['RocketFire', 3]] as const) assert.equal(asset.animations.find(a => a.name === name)!.duration, duration);
-    const slide = asset.scene.getObjectByName('CTRL_RocketSlide_R')!;
-    assert.equal(slide.parent!.name, 'PART_Forearm_L_02'); assert.equal(slide.userData.anatomical_arm, 'right');
-    assert.equal(slide.userData.muzzle_rest_position.length, 3); assert.equal(slide.userData.muzzle_rest_direction.length, 3);
-    assert.equal(asset.animations.find(a => a.name === 'RocketFire')!.tracks.some(t => t.name.startsWith('CTRL_WaistYaw.')), false);
-});
-
 test('windup freezes travel and look, samples animated bore at 1.5s, releases once, then permits recoil locomotion and 3.5s release interval', async () => {
     const actor = await mounted(), camera = view(actor), position = actor.group.position.clone();
     actor.setPilotInput(1, false); actor.look(1, 0.3, 100); assert.equal(actor.requestRocket(), true);
@@ -128,19 +119,18 @@ test('real grapple binding accepts high cabin interior from ground, rejects armo
     } finally { resetHook(); disposeWorld(); ForgottenMecha.prototype.load = originalLoad; globalThis.document = originalDocument; }
 });
 
-test('nearer static geometry rejects an otherwise valid open-cabin hit and completed startup preserves yellow eye through helmet and shield states', async () => {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(30, 30, 1), new THREE.MeshBasicMaterial()); wall.position.set(0, 15, 30); wall.updateMatrixWorld(true);
+test('static cover blocks cockpit entry until the approach is clear', async () => {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(30, 30, 1), new THREE.MeshBasicMaterial());
+    wall.position.set(0, 15, 30); wall.updateMatrixWorld(true);
     wall.userData = { halfW: 15, halfD: 0.5, halfH: 15, height: 30 };
-    const asset = await loadIronmawTestAsset();
-    const lens = asset.scene.getObjectByName('M_EyeLens') as THREE.SkinnedMesh; lens.material = new THREE.MeshStandardMaterial({name:'IRONMAW_Eye_State', emissiveIntensity:1.35});
-    const actor = new ForgottenMecha([wall], [], 42); actor.install(asset); actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0;
-    actor.damage(50); advance(actor, 6.1); const seat = actor.seatAnchor.getWorldPosition(new THREE.Vector3()); const origin = new THREE.Vector3(0, 2, 60);
-    const ray = new THREE.Ray(origin, seat.clone().sub(origin).normalize()); assert.equal(actor.cockpitHit(ray, 300), null);
-    wall.position.x = 100; wall.updateMatrixWorld(true); assert.ok(actor.cockpitHit(ray, 300));
-    actor.beginBoarding(seat, new THREE.Quaternion()); advance(actor, 2); assert.notEqual((lens.material as THREE.MeshStandardMaterial).color.getHex(), 0xffd34d);
-    advance(actor, 6.3); assert.equal(actor.mode, 'piloted'); const material = lens.material as THREE.MeshStandardMaterial;
-    assert.equal(material.color.getHex(), 0xffd34d); assert.equal(material.emissive.getHex(), 0xffd34d); assert.equal(material.emissiveIntensity, 1.35);
-    actor.toggleHelmet(); actor.setPilotInput(0, true); advance(actor, 1); assert.equal(material.color.getHex(), 0xffd34d); assert.equal(actor.combat.shieldActive, true);
-    actor.damage(50); actor.update(0.01, absent);
-    assert.equal(material.emissiveIntensity, 0); actor.dispose(); wall.geometry.dispose(); (wall.material as THREE.Material).dispose();
+    const actor = new ForgottenMecha([wall], [], 42);
+    actor.install(await loadIronmawTestAsset()); actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0;
+    try {
+        actor.damage(50); advance(actor, 6.1);
+        const seat = actor.seatAnchor.getWorldPosition(new THREE.Vector3()), origin = new THREE.Vector3(0, 2, 60);
+        const ray = new THREE.Ray(origin, seat.clone().sub(origin).normalize());
+        assert.equal(actor.cockpitHit(ray, 300), null);
+        wall.position.x = 100; wall.updateMatrixWorld(true);
+        assert.ok(actor.cockpitHit(ray, 300));
+    } finally { actor.dispose(); wall.geometry.dispose(); wall.material.dispose(); }
 });

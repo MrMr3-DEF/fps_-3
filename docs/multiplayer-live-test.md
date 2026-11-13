@@ -1,148 +1,51 @@
-# Deployed multiplayer smoke test — 5 September 2026
+# Multiplayer checks
 
-Tested https://fps.luigi.host/ against the deployed Worker, with real Turnstile and PeerJS connections. The deployed client bundle was `index-VhCzF5Kt.js`.
+Use the current client and matching Worker build. Start from
+[local setup](development.md#full-client-and-worker) or the configured deployment
+in [Cloudflare operations](operations.md). Use separate browser profiles so each
+client has its own session and Turnstile completion.
 
-## Passed
+Local doubles and loopback relays exercise application behavior without proving
+external Turnstile, signalling or Cloudflare TURN availability. For relay checks,
+confirm the selected ICE candidate pair is actually relayed. Report the tested
+environment and limitations in the task response, not in this guide.
 
-- Host registration and automatic Turnstile verification; two additional browser clients joined and synchronized with the host.
-- Host `AuditHost` rejected joining username `audithost` with the duplicate-name message. A distinct username joined successfully.
-- Leaving and rejoining released the client username: `AuditPilot` could return as `auditpilot`.
-- A room registered at 11:27:49 UTC accepted another synchronized rejoin at 11:38:36 UTC, beyond the initial five-minute lease.
-- Two foreground native Chrome tabs entered multiplayer with working pointer lock. Jumping and automatic-rifle firing worked.
-- Client killed host: client gained one kill and host showed the death screen. Host respawned with one death.
-- Host killed client: host gained one kill and client showed the death screen. Client respawned with one kill and one death.
-- Host explicitly left the lobby: both players returned to the main menu and the client match stats reset.
+## Admission and room lifecycle
 
-## Finding and local correction
+- Host a room; join two distinct clients and compare seed, roster and suit colors.
+- Reject a case-insensitive duplicate username. Leave and rejoin with that name.
+- Check all five room slots, full-room rejection and replacement after departure.
+- Join after the initial session lease and exercise credential renewal in a
+  relay-required environment.
+- Test denied input capture: lobby controls remain usable until activation succeeds.
+- Exercise explicit leave and abrupt host loss; clients leave the match, clear
+  avatars and scores, and can create or join another room.
 
-Embedded Chromium and the automated Chrome tab rejected pointer lock. Host Start Game and client Join Game hid the menu before the request succeeded, leaving an unusable arena view. Native foreground Chrome accepted pointer lock and completed the gameplay checks above.
+## Gameplay and authority
 
-The local correction removes premature menu hiding from both multiplayer start handlers. The existing successful `lock` event owns menu hiding, so rejection leaves the lobby controls available. Client and Worker typechecks and the production build validate this correction; it has not been deployed or retested live.
+- Move, grapple, fire and switch weapons on host and guest; compare accepted hits,
+  obstruction and cooldown behavior.
+- Kill and respawn both players; verify one death per life and correct kill credit.
+- Keep a client waiting in the lobby while the host plays; check target and score
+  synchronization before that client enters.
+- Lower render distance; physical cover and target authority remain unchanged.
+- Check departure/avatar cleanup, rejoin, late snapshots and a fresh match reset.
 
-## Limits and remaining checks
+## Mecha and shared ending
 
-- Connections were not forced through TURN. Successful same-network play and a late rejoin do not prove relay credential refresh or recovery after a network change.
-- Third-client departure/avatar cleanup and target/score updates while waiting to enter play were not exercised in a live match.
-- Explicit host Leave Lobby passed. Abrupt tab-close cleanup was inconclusive: an embedded waiting client still showed Ready to join after its host tab closed, before the remaining test tabs were closed. Retest transport loss and its eventual timeout separately.
-- Sequential foreground tabs were used for combat; this is not a latency, sustained concurrent-input, or background-host performance test.
+Use the [Mecha multiplayer checklist](forgotten-mecha.md#multiplayer-acceptance)
+for shared actor ownership, exclusive boarding, pilot attacks and late joins.
 
-All test-created browser tabs were closed after testing. No deployment was performed during this test.
+For wall arrival, compare the ending on an active viewer, paused viewer, dead
+viewer and late joiner. Preparation stays behind black; all use the same host
+clock and seeded destruction. Departure during preparation cannot attach a scene
+to a replacement match. Joining after completion shows the final shot without
+replaying attacks or damage.
 
-## Local audit-repair acceptance — 19 October 2026
+## Device and network scope
 
-This is a new local result; it does not refresh the deployed September result.
-Two native Chrome 155 browser clients used the actual application, PeerJS
-BinaryPack and encrypted RTC data channels through a temporary loopback TURN
-relay. Both selected candidate pairs were confirmed relay/relay over UDP.
-The actual Worker and SQLite Durable Objects ran locally with dummy credentials
-and mocked Turnstile/Cloudflare ICE responses; signalling used a local broker.
-
-The final run passed host/join, movement, Pistol/AR damage in both directions,
-attributed Sniper death and respawn, moving-peer homing under visual culling,
-Shotgun and Minigun damage, departure/avatar cleanup, rejoin, abrupt host
-signalling loss, exactly one renderer disposal per browser, and fresh room
-creation/cancellation. It reported no page errors. Input capture and positioning
-were controlled; the real combat, packet authorization and lifecycle code ran.
-
-Switch phases publish immediately and start their local clocks after intent,
-so a delayed movement update or preceding long frame does not shorten a phase
-relative to the host. Both TypeScript projects and 416 tests pass; the production
-build is regenerated. Clients in one room must use the same build.
-
-No deployment occurred. External service behavior, relay credential refresh,
-physical devices and changing-network recovery remain separate checks. See
-[audit-repair-progress.md](audit-repair-progress.md) for fixture details, bounded
-homing compensation and the complete acceptance record.
-
-## Multiplayer mecha local acceptance — 20 October 2026
-
-Three native Chrome 155 pages exercised the actual application over encrypted
-PeerJS data channels through the loopback TURN fixture. The final connected host
-and late-joining client both reported relay/relay selected candidate pairs; the
-relay forwarded 30,975 channel-data datagrams during the run. Local Worker and
-SQLite Durable Objects used dummy credentials with mocked external verification
-and ICE responses. No production service configuration or deployment changed.
-
-The final run passed shared actor preparation/pose/health, external Sniper shield
-absorption, five actual inside-shield Sniper hits, complete enemy defeat, actual
-grapple boarding by a guest, and independent host controls. A guest-piloted rocket
-killed the host and credited the guest; simulation continued while the host was
-dead. A third client joined during piloting and recovered the occupied cockpit
-without gaining local ownership. Voluntary shutdown released the living pilot,
-remounting worked, pilot departure restored a mountable wreck, and lethal piloted
-destruction released the surviving replacement pilot into ordinary play. The
-host terminal event reached the dead host and third client, and host departure
-disposed both remaining scenes/renderers. The final run recorded no page errors.
-
-Input capture, travel and encounter phases were controlled by the fixture. The
-weapon hits, cockpit grapple, rocket damage, attribution, serialization, host
-commands and teardown used production code. Final destruction and terminal
-broadcast were triggered directly to review their lifecycle; exact wall-punch
-completion and enemy multi-player contacts are covered separately by real-asset
-Node tests. This is local runtime evidence, not external Cloudflare/PeerJS,
-credential-refresh, changing-network or physical-control verification.
-
-The run exposed a synchronous shutdown-input revocation race; the repair and its
-regression were included in the successful replay. A subsequent inspection added
-replication of the blocked-exit camera recovery flag, covered by a focused owning
-client/observer regression. Final current-source validation passes both
-TypeScript projects and all 450 tests, and the production build is regenerated.
-Production asset references, changed documentation links and whitespace pass;
-the protected follow-up list remains unchanged. All fixture browser pages and
-local signalling, Worker and TURN services were closed afterward.
-
-
-## Shared Game Over cutscene — 20 October 2026
-
-The approved close camera and whole-castle explosion are connected to actual
-wall arrival. Three embedded browser pages exercised production client code and
-real PeerJS RTC channels through the temporary loopback TURN/signalling fixture.
-The Worker and SQLite Durable Objects ran locally with dummy credentials and
-mocked external Turnstile/ICE responses; production security configuration was
-unchanged. Test controls placed the actor at its actual route destination and
-selected viewer pause/death; the real wall-commit callback and network lifecycle ran.
-
-A paused host and dead guest both hid their prior overlays and completed the
-shared cutscene. A four-second delayed guest preparation held the host's scene
-before reveal. A subsequent three-viewer run covered a waiting/paused guest and
-a third browser joining during destruction: it caught up to the current shot
-and reached the final Game Over without replaying the punch. Rejoining after
-completion recovered the final shot directly. Host departure
-removed all active renderers and cleared the committed loss. The successful
-runs reported no browser warnings/errors. The temporary loader was corrected
-before the final late-join run to avoid importing the composition root twice.
-
-Both TypeScript projects and all 469 tests pass. The production build regenerated
-tracked `dist/`, including a lazy presentation chunk; its existing large-chunk
-warning remains. Focused regressions cover malformed/forged ending packets,
-duplicate readiness, stale events, mid-scene/final snapshots, readiness timeout,
-async cancellation, deterministic destruction and renderer/resource ownership.
-These are local results; no deployment or external-service/device verification
-was performed for this change. All temporary browser pages and loopback services
-were closed after validation.
-
-## Seeded ending scenery integration — 20 October 2026
-
-After visual approval, gameplay enables the same seeded scenery and baked pillar
-contacts as the preview. Three embedded browsers ran the production wall-arrival
-path through the loopback Worker, SQLite Durable Objects, signalling and TURN
-fixture described above. Temporary controls placed the actor at its real route
-goal, selected pause/death and delayed one guest's asset preparation by four seconds.
-
-The host, dead guest and mid-scene late joiner produced identical camera,
-complete contact-list and final instance-matrix fingerprints. For world seed
-3291961222 and effects seed 2837196403, each viewer built 2168 castle fragments,
-900 real pillars, 177 bounces, 50 shattered pillars and 200 secondary chunks.
-Preparation began and completed under opaque black, with zero breakable/scenery
-resources allocated by asset preparation. All viewers reached the same final
-Game Over; leaving and rejoining afterward recovered that shot directly. Host
-departure cleared the loss and released all three presentation resources/renderers.
-No console warnings or errors were recorded. A second room covered both host and
-guest already paused before commitment. Offline completion, new-match reset and
-cancellation during delayed preparation were also checked.
-
-Both TypeScript projects and all 482 tests pass; the production build regenerates
-tracked `dist/`, retaining the existing chunk-size warning. The fixture used dummy
-credentials and mocked external verification/ICE responses. No deployment or
-production security configuration changed; external services and physical-device
-performance remain unverified. Temporary acceptance tabs and services were closed.
+Exercise changing networks, credential refresh and a background host when those
+behaviors are affected. Sequential foreground tabs do not establish sustained
+concurrent input or latency behavior. Physical touch devices are needed for
+multi-finger input, orientation/fullscreen support and safe-area checks; desktop
+emulation does not establish them.

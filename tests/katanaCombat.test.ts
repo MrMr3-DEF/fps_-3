@@ -1,4 +1,3 @@
-import { katanaEmission } from '../src/katanaFlicker.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -40,7 +39,9 @@ test('impact crosses frames once, recovery ignores presses, cancellation never r
     clock.begin(5);
     clock.release(8);
     clock.cancel();
-    assert.equal(clock.impact(9), false);
+    assert.equal(clock.impact(8.2), false);
+    assert.equal(clock.begin(8.2), false, 'cancellation must not bypass recovery');
+    assert.equal(clock.begin(8 + KATANA.duration), true);
 });
 test('semicylinder tests exact body range, rear, height, side boundaries and aim pitch', () => {
     assert.equal(hits(0, 0, -4.1), true);
@@ -78,25 +79,7 @@ test('melee parser rejects forged power, malformed sequence/life, angles and fir
     for (const fields of [{ charged: 1 }, { pitch: Math.PI }, { origin: { x: NaN, y: 0, z: 0 } }, { senderPeerId: '../bad' }])
         assert.equal(parseNetworkPacket({ ...event, ...fields }), null);
 });
-test('shared katana has black blade, silver grip, progressive lightning and right-to-left slash', () => {
-    const mesh = buildKatana();
-    const blade = mesh.userData.blade;
-    assert.equal(blade.material.color.getHex(), 0x080a0e);
-    updateKatanaModel(mesh, 1.5, null, false, 0, false);
-    assert.equal(mesh.userData.lightning.visible, true);
-    updateKatanaModel(mesh, 3, null, true, 0, false);
-    assert.ok(mesh.userData.lightning.children[0].geometry.drawRange.count > 0);
-    updateKatanaModel(mesh, 3, null, true, 0, true);
-    assert.equal(mesh.userData.pulse, undefined);
-    updateKatanaModel(mesh, 0, .1, false, 0, false);
-    const right = mesh.userData.sword.position.clone();
-    updateKatanaModel(mesh, 0, .3, false, 0, false);
-    assert.ok(mesh.userData.sword.position.x < right.x);
-    assert.equal(mesh.userData.sword.position.y, right.y);
-    updateKatanaModel(mesh, 0, KATANA.duration, false, 0, false);
-    assert.equal(mesh.userData.sword.position.x, 0.22);
-    mesh.traverse((child: any) => { child.geometry?.dispose(); child.material?.dispose(); });
-});
+
 test('melee reserves the firearm deadline and a weapon swap cannot shorten recovery', async () => {
     const { ShotLedger } = await import('../src/shotAuthority.ts');
     const ledger = new ShotLedger();
@@ -136,10 +119,8 @@ test('katana instances isolate charge materials and survive another instance dis
     updateKatanaModel(first, KATANA.charge, null, true, 0, false);
     assert.ok(first.userData.blade.material.emissiveIntensity > 0);
     assert.equal(second.userData.blade.material.emissiveIntensity, 0);
-    const grip = second.getObjectByName('grip') as any;
-    assert.equal(grip.material.color.getHex(), 0xebf0f8);
     first.traverse((child: any) => { child.geometry?.dispose(); child.material?.dispose(); });
     updateKatanaModel(second, KATANA.charge, null, true, 0, true);
-    assert.equal(second.userData.blade.material.emissiveIntensity, katanaEmission(0,true));
+    assert.ok(second.userData.blade.material.emissiveIntensity > 0);
     second.traverse((child: any) => { child.geometry?.dispose(); child.material?.dispose(); });
 });

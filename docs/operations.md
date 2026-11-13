@@ -161,11 +161,9 @@ requires a fresh verified join. Existing connections can remain alive when a
 refresh fails, but new relay-dependent connections may require leaving and
 rejoining. A live relay-network smoke test is still required after deployment.
 
-The limiter stores each bucket's expiry. Alarm delivery checks that stored
-expiry and reschedules a live replacement window instead of erasing it. Local
-workerd probes verified concurrent quota enforcement and forced a delayed alarm
-after renewal. The existing storage gates already protect the read/modify/write
-sequence; no additional request serialization was added. See Cloudflare's
+The limiter stores each bucket's expiry. Alarm delivery checks that expiry and
+reschedules a live replacement window instead of erasing it. Durable Object
+storage gates protect the read/modify/write sequence. See Cloudflare's
 [storage gate documentation](https://developers.cloudflare.com/durable-objects/api/legacy-kv-storage-api/#get)
 and [alarm semantics](https://developers.cloudflare.com/durable-objects/api/alarms/).
 

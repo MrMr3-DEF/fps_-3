@@ -78,31 +78,8 @@ and share one render target/pass; disabling both removes that overhead. Devices
 without depth-texture support use ordinary distance fog and skip motion blur.
 Menu previews and the terminal cinematic retain their own presentation.
 
-Layout validation on September 30, 2026: native Chrome desktop and mobile emulation
-at 821 × 400, 821 × 300, and 500 × 300. Checked independent sidebar/content scrolling,
-Up/Down and Home/End navigation, narrow graphics/crosshair/input controls, visible
-Apply/Back with an unsaved draft, hidden headings in settings, and title restoration
-after Back. The existing Apply/Back draft lifecycle was retained.
-
-Category-button follow-up on September 30, 2026: native Chrome at 1728 × 918,
-924 × 412, 500 × 300, and 500 × 250 confirmed matching main-menu button widths,
-horizontal positions and styles, plus alignment with the settings box's top edge.
-The short layout retained independent tab scrolling and visible Apply/Back buttons.
-
-Sidebar-action follow-up on September 30, 2026: native Chrome at 1728 × 918,
-924 × 412, and 500 × 250 confirmed Back below the categories, side-by-side
-Apply/Discard after an edit, restored values after Discard, and Apply persistence
-across reload. Actions remain visible while short-screen categories scroll. Escape
-discards a pending draft without leaving settings; a subsequent Escape goes Back.
-
-Input-selector follow-up on September 30, 2026: native Chrome desktop showed both
-input options, renamed the category to Keybinds/Controls when switching, exposed
-the touch editor, and retained the previously saved Touch choice. Pointer-handler
-regressions exercise touch movement, firing, aiming and release with either a
-coarse or fine primary pointer.
-
 Implementation: `settings.ts` handles storage and cloning, `controlSettings.ts`
 handles binding translation and reticle rendering, and `settingsMenu.ts` builds
-category navigation and the new controls. `main.ts` retains the Apply lifecycle
+category navigation and controls. `main.ts` retains the Apply lifecycle
 and translates physical keyboard input before dispatching gameplay actions. Touch
 buttons dispatch the existing action codes directly.

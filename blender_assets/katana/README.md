@@ -21,7 +21,7 @@ incorporate them into the script first.
 
 Game coordinates use Y up, with the grip centered at the origin, blade tip at
 Y=1.30, and grip bottom at Y=-0.135. Blender uses Z up; export converts coordinates
-with (x, y, z) -> (x, z, -y). The game uses a 1.14 presentation scale and holds the cutting edge forward.
+with (x, y, z) -> (x, z, -y). The game uses a 1.368 presentation scale and holds the cutting edge forward.
 Colors in JSON are sRGB hex values; Blender materials use their linear equivalents.
 Each game model creates independent geometry and materials for safe charge effects
 and disposal. GLB export excludes studio lights/cameras.

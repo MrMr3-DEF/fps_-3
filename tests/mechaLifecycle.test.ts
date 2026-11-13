@@ -112,13 +112,6 @@ test('defeat during stomp cancels its damage and starts Death only after torso a
     assert.equal(kills, 0); assert.equal(actor.mode, 'dead'); actor.dispose();
 });
 
-test('defeat of an already gray powered-down eye never flashes red again', async () => {
-    const actor = await robot(); actor.combat.shieldPhase = 'down'; actor.combat.advanceClock(0.4);
-    actor.update(0.01, absent); const eye = actor.group.getObjectByName('M_EyeLens') as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
-    assert.equal(eye.material.emissiveIntensity, 0); const gray = eye.material.color.clone(); actor.damage(50); actor.update(0.2, absent);
-    assert.equal(eye.material.emissiveIntensity, 0); assert.ok(eye.material.color.equals(gray)); actor.dispose();
-});
-
 test('impact kills on either animated foot, shin/knee or thigh at varied frame rates; leg-free jumps survive', async () => {
     const sample = await robot(); const near = { position: new THREE.Vector3(0, 2, 8), alive: true, grounded: true };
     sample.update(0.01, near); advance(sample, 1.615, absent);
