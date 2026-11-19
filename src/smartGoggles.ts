@@ -160,6 +160,7 @@ interface HomingCandidate {
 const _bodyCenter = new THREE.Vector3();
 const _peerRootPosition = new THREE.Vector3();
 const _envelopeSize = new THREE.Vector3();
+const _npcEnvelope: StableTargetEnvelope = { center: new THREE.Vector3(), halfWidth: 0, halfHeight: 0 };
 const _anomalyEnvelope: StableTargetEnvelope = {
     center: new THREE.Vector3(),
     halfWidth: 0,
@@ -363,7 +364,8 @@ export class SmartGogglesHud {
     private worldGeneration = -1;
     private readonly hiddenHealthBars = new Map<THREE.Object3D, boolean>();
     private readonly layer: HTMLElement;
-    private readonly reducedMotion: boolean;
+    private readonly reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    private get reducedMotion(): boolean { return this.reducedMotionQuery?.matches ?? false; }
     private readonly calloutDirection?: Readonly<{ horizontal: CalloutHorizontalDirection; vertical: CalloutVerticalDirection }>;
     private readonly customPeerReadout?: HTMLElement;
     private readonly lobbyPreview: boolean;
@@ -394,7 +396,6 @@ export class SmartGogglesHud {
         this.lobbyPreview = options?.lobbyPreview ?? false;
         this.gameplayLimits = options?.gameplayLimits ?? !this.lobbyPreview;
         this.lobbyAvoidElements = options?.lobbyAvoidElements ?? [];
-        this.reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
         ensureAnomalyTearFilters(layer);
         for (let i = 0; i < GOGGLES_MAX_TARGETS; i++) this.availableRecords.push(this.buildRecord());
     }
@@ -423,7 +424,7 @@ export class SmartGogglesHud {
         celestialTargets: readonly CelestialScanTarget[] = [],
         homingEnabled = true,
         mecha: ForgottenMecha | null = null,
-        mountedLock?: RocketLock | null,
+        mountedLock?: RocketLock | string | null,
     ): void {
         if (this.gameplayLimits && this.worldGeneration !== worldGeneration) { this.reset(); this.worldGeneration = worldGeneration; }
         this.anomalyDetectedThisFrame = false;
@@ -513,13 +514,13 @@ export class SmartGogglesHud {
 
             const record = this.records.get(targetKey);
             const projectionBounds = record?.bounds ?? createScreenBounds();
-            if (!projectStableTargetSphereToScreen(
-                localSphere,
-                data.bodyMesh.matrixWorld,
-                camera,
-                viewportWidth,
-                viewportHeight,
-                projectionBounds,
+            localBox.getSize(_envelopeSize).multiplyScalar(0.5);
+            _envelopeSize.multiply(_npcEnvelope.center.setFromMatrixScale(data.bodyMesh.matrixWorld));
+            _npcEnvelope.center.copy(_bodyCenter);
+            _npcEnvelope.halfWidth = Math.hypot(_envelopeSize.x, _envelopeSize.z);
+            _npcEnvelope.halfHeight = _envelopeSize.y;
+            if (!projectStableTargetEnvelopeToScreen(
+                _npcEnvelope, _worldIdentity, camera, viewportWidth, viewportHeight, projectionBounds,
             )) continue;
 
             const reachableDistance = distanceToOrientedBox(
@@ -534,8 +535,8 @@ export class SmartGogglesHud {
                 'Enemy',
                 projectionBounds,
                 _bodyCenter,
-                localSphere.radius * data.bodyMesh.matrixWorld.getMaxScaleOnAxis(),
-                localSphere.radius * data.bodyMesh.matrixWorld.getMaxScaleOnAxis(),
+                _npcEnvelope.halfWidth,
+                _npcEnvelope.halfHeight,
                 playerPosition.distanceTo(_bodyCenter),
                 reachableDistance,
                 data.hp,
@@ -554,13 +555,14 @@ export class SmartGogglesHud {
 
         for (const [peerId, peer] of Object.entries(peers)) {
             const targetKey = `peer:${peerId}`;
-            if (peer.hp <= 0) {
-                const previousRecord = this.records.get(targetKey);
+            const previousRecord = this.records.get(targetKey);
+            const revision = peer.lifeId ?? 0;
+            if (peer.hp <= 0 || previousRecord && previousRecord.targetRevision !== revision) {
                 if (previousRecord) {
                     this.eliminate(previousRecord, now);
                     this.records.delete(targetKey);
                 }
-                continue;
+                if (peer.hp <= 0) continue;
             }
             if (!peer.mesh.visible) continue;
             peer.mesh.getWorldPosition(_peerRootPosition);
@@ -583,7 +585,7 @@ export class SmartGogglesHud {
                     camera.position,
                     localBox,
                     worldMatrix,
-                    queryObstaclesAlongSegment,
+                    mountedLock !== undefined ? queryMechaOccluders : queryObstaclesAlongSegment,
                     _enemyOccluders,
                     peer.mesh,
                 ),
@@ -593,7 +595,7 @@ export class SmartGogglesHud {
             const peerWorldScale = peer.mesh.matrixWorld.getMaxScaleOnAxis();
             const trackedRecord = this.observeTarget(
                 targetKey,
-                0,
+                revision,
                 'peer',
                 peer.username,
                 projectionBounds,
@@ -659,7 +661,7 @@ export class SmartGogglesHud {
                     camera.position,
                     localBox,
                     hitbox.matrixWorld,
-                    queryObstaclesAlongSegment,
+                    mountedLock !== undefined ? queryMechaOccluders : queryObstaclesAlongSegment,
                     _enemyOccluders,
                     hitbox,
                 ) && projectStableTargetEnvelopeToScreen(
@@ -710,9 +712,10 @@ export class SmartGogglesHud {
                 camera.position,
                 localBox,
                 mesh.matrixWorld,
-                queryObstaclesAlongSegment,
+                mountedLock !== undefined ? queryMechaOccluders : queryObstaclesAlongSegment,
                 _enemyOccluders,
                 mesh,
+                (start, end) => start.y >= 0 && end.y < 0,
             )) continue;
 
             const targetKey = `celestial:${celestial.key}`;
@@ -758,7 +761,10 @@ export class SmartGogglesHud {
             // Vehicle acquisition is immediate and remains active without this
             // DOM overlay. These red brackets merely display its chosen target.
             for (const record of this.records.values()) record.root.classList.remove('is-homing-locking', 'is-homing-locked');
-            if (mountedLock) this.records.get(`npc:${mountedLock.index}`)?.root.classList.add('is-homing-locked');
+            if (mountedLock) {
+                const targetKey = typeof mountedLock === 'string' ? `peer:${mountedLock}` : `npc:${mountedLock.index}`;
+                this.records.get(targetKey)?.root.classList.add('is-homing-locked');
+            }
         }
 
         for (const [targetKey, record] of this.records) {
@@ -1418,6 +1424,7 @@ export class SmartGogglesHud {
 
 /** The gameplay HUD supplies its world query; authority shares the geometry. */
 export function hasLineOfSightToOrientedBox(origin: THREE.Vector3, localBox: THREE.Box3, worldMatrix: THREE.Matrix4,
-    obstacleQuery: TargetObstacleQuery = queryObstaclesAlongSegment, additionalOccluders: THREE.Object3D[] = [], ignoredTargetRoot?: THREE.Object3D): boolean {
-    return boxLineOfSight(origin, localBox, worldMatrix, obstacleQuery, additionalOccluders, ignoredTargetRoot);
+    obstacleQuery: TargetObstacleQuery = queryObstaclesAlongSegment, additionalOccluders: THREE.Object3D[] = [],
+    ignoredTargetRoot?: THREE.Object3D, additionalBlocker?: (start: THREE.Vector3, end: THREE.Vector3) => boolean): boolean {
+    return boxLineOfSight(origin, localBox, worldMatrix, obstacleQuery, additionalOccluders, ignoredTargetRoot, additionalBlocker);
 }

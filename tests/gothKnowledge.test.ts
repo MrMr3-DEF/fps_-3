@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildCharacterPrompt, characterContextSize, GothChatSession, byteLength, clipBytes, parseLore, retrieveLore, validateCharacterConfig, PROMPT_BYTE_BUDGET, type CharacterKnowledge } from '../src/gothKnowledge.ts';
+import { buildCharacterPrompt, characterContextSize, GothChatSession, byteLength, clipBytes, parseLore, retrieveLore, validateCharacterConfig, type CharacterKnowledge } from '../src/gothKnowledge.ts';
 const root = new URL('../public/npc/goth/', import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, root), 'utf8');
 const config = validateCharacterConfig(JSON.parse(read('character.json')));
@@ -34,7 +34,7 @@ test('personality stays in every prompt, RAG adds facts, and no conversation tur
 
 test('long and multibyte messages are bounded without damaging Unicode', () => {
     const result = buildCharacterPrompt(knowledge, '🦇秘密'.repeat(500));
-    assert.ok(result.messages.reduce((sum, m) => sum + byteLength(m.content), 0) <= PROMPT_BYTE_BUDGET);
+    assert.ok(result.messages.reduce((sum, m) => sum + byteLength(m.content), 0) <= characterContextSize() - knowledge.config.maxReplyTokens - 256);
     assert.ok(!result.messages.some(m => m.content.includes('\ufffd')));
     assert.equal(result.messages.at(-1)!.role, 'user');
     assert.equal(clipBytes('a🦇b', 4), 'a');

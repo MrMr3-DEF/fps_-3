@@ -9,13 +9,19 @@ function markerElement(): HTMLElement | null {
     return document.getElementById('hitmarker');
 }
 
-export function applyHitmarkerSettings(settings: CrosshairSettings = userSettings.crosshair): void {
+export function resetHitmarker(): void {
     pulse?.cancel(); pulse = null; killUntil = -Infinity;
     if (killTimer !== null) clearTimeout(killTimer);
     killTimer = null;
     const marker = markerElement();
     if (!marker) return;
     marker.classList.remove('is-kill');
+}
+
+export function applyHitmarkerSettings(settings: CrosshairSettings = userSettings.crosshair): void {
+    resetHitmarker();
+    const marker = markerElement();
+    if (!marker) return;
     marker.innerHTML = hitmarkerSvg(settings);
     marker.style.setProperty('--hitmarker-duration', `${settings.hitmarkerDuration}ms`);
 }

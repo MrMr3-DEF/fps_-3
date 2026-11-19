@@ -66,7 +66,7 @@ export function setPlayerListVisible(visible: boolean): void {
     const panel = document.getElementById('player-list');
     if (!panel) return;
     if (visible && (!state.isMultiplayer || !state.isPlaying)) return;
-    if (visible) renderPlayerList();
+    if (visible && panel.hidden) renderPlayerList();
     panel.hidden = !visible;
     panel.setAttribute('aria-hidden', String(!visible));
 }

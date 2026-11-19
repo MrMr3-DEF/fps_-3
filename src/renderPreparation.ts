@@ -15,42 +15,46 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     if (!scene || !camera || !renderer) return;
     const elapsed = cycle.elapsedTimeSeconds;
     const previousTarget = renderer.getRenderTarget();
-    const target = new THREE.WebGLRenderTarget(32, 32);
-    const effects = prepareParticleResources();
-    const projectile = state.projectilePool[0];
-    const representatives: THREE.Object3D[] = [...effects, ...(infantry?.warmModels ?? [])];
-    const sword = state.katanaMesh;
-    const katanaEffects = state.katanaMesh ? new KatanaEffects() : null;
-    const slash = state.katanaMesh ? createKatanaSlash() : null;
-    if (katanaEffects && state.katanaMesh && slash) {
-        updateKatanaLightning(state.katanaMesh.userData.lightning, KATANA.charge, 0, false);
-        katanaEffects.sample('warm', 'warm', state.katanaMesh, KATANA.windup + KATANA.chargedSlash, 0, scene);
-        katanaEffects.confirm('warm', 'warm', undefined, new THREE.Vector3(), 0, false);
-        representatives.push(slash, katanaEffects.impactScene, ...katanaEffects.trails.map(trail => trail.mesh));
-    }
-    if (projectile && !projectile.parent) representatives.push(projectile);
-    if (state.hookMesh && !state.hookMesh.parent) representatives.push(state.hookMesh);
-    for (const object of representatives) scene.add(object);
+    let target: THREE.WebGLRenderTarget | undefined;
+    let katanaEffects: KatanaEffects | null = null;
+    let slash: ReturnType<typeof createKatanaSlash> | null = null;
+    const representatives: THREE.Object3D[] = [];
     const visibility = new Map<THREE.Object3D, { visible: boolean; frustumCulled: boolean }>();
-    const warmObject = (object: THREE.Object3D) => {
-        if (!visibility.has(object)) visibility.set(object, { visible: object.visible, frustumCulled: object.frustumCulled });
-        object.visible = true;
-        object.frustumCulled = false;
-    };
-    // Hidden weapon/effect geometry otherwise waits until the first switch/shot
-    // to reach WebGL. Draw it only into the tiny offscreen preparation target.
-    for (const object of [...representatives, state.leftGun, state.pistolMesh, state.shotgunMesh,
-        state.arMesh, state.sniperMesh, state.minigunMesh, state.katanaMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group,
-        gothGirlfriend?.group]) object?.traverse(warmObject);
-    const textures = new Set<THREE.Texture>();
-    scene.traverse(object => {
-        const material = (object as THREE.Mesh).material;
-        for (const mat of Array.isArray(material) ? material : material ? [material] : []) {
-            for (const value of Object.values(mat)) if (value instanceof THREE.Texture) textures.add(value);
-        }
-    });
+    const sword = state.katanaMesh;
     try {
+        target = new THREE.WebGLRenderTarget(32, 32);
+        representatives.push(...prepareParticleResources(), ...(infantry?.warmModels ?? []));
+        if (sword) {
+            katanaEffects = new KatanaEffects();
+            slash = createKatanaSlash();
+            updateKatanaLightning(sword.userData.lightning, KATANA.charge, 0, false);
+            katanaEffects.sample('warm', 'warm', sword, KATANA.windup + KATANA.chargedSlash, 0, scene);
+            katanaEffects.confirm('warm', 'warm', undefined, new THREE.Vector3(), 0, false);
+            representatives.push(slash, katanaEffects.impactScene, ...katanaEffects.trails.map(trail => trail.mesh));
+        }
+        const projectile = state.projectilePool[0];
+        if (projectile && !projectile.parent) representatives.push(projectile);
+        if (state.hookMesh && !state.hookMesh.parent) representatives.push(state.hookMesh);
+        for (const object of representatives) scene.add(object);
+        const warmObject = (object: THREE.Object3D) => {
+            if (!visibility.has(object)) visibility.set(object, { visible: object.visible, frustumCulled: object.frustumCulled });
+            object.visible = true;
+            object.frustumCulled = false;
+        };
+        // Hidden weapon/effect geometry otherwise waits until the first switch/shot
+        // to reach WebGL. Draw it only into the tiny offscreen preparation target.
+        for (const object of [...representatives, state.leftGun, state.pistolMesh, state.shotgunMesh,
+            state.arMesh, state.sniperMesh, state.minigunMesh, state.katanaMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group,
+            gothGirlfriend?.group]) object?.traverse(warmObject);
+        const textures = new Set<THREE.Texture>();
+        scene.traverse(object => {
+            const material = (object as THREE.Mesh).material;
+            for (const mat of Array.isArray(material) ? material : material ? [material] : []) {
+                for (const value of Object.values(mat)) if (value instanceof THREE.Texture) textures.add(value);
+            }
+        });
         await forgottenMecha?.headEffects.prepare(renderer);
+        await checkpoint();
         let uploads = 0;
         for (const texture of textures) {
             renderer.initTexture(texture);
@@ -80,13 +84,14 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
                 try {
                     actor.preparePilotView(true, true);
                     await renderer.compileAsync(scene, camera);
+                    await checkpoint();
                     renderer.setRenderTarget(target); renderer.render(scene, camera);
                 } finally { actor.restorePilotView(); renderer.setRenderTarget(previousTarget); }
             }
         }
     } finally {
         renderer.setRenderTarget(previousTarget);
-        target.dispose();
+        target?.dispose();
         katanaEffects?.dispose(); slash?.geometry.dispose(); slash?.material.dispose();
         for (const [object, original] of visibility) {
             object.visible = original.visible;

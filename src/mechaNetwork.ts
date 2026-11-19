@@ -8,21 +8,24 @@ import { isPilotWeapon, type PilotWeapon } from './mechaStomp.js';
 import { PLAYER_BODY_CAMERA_OFFSET } from './playerHitbox.js';
 import type { ForgottenMecha, MechaEvents, MechaPlayer } from './forgottenMecha.js';
 import type { MechaPilotRelease } from './mechaPilotRelease.js';
-import type { MechaBoardPacket, MechaInputPacket, MechaState, MechaEvent, MechaEventPacket } from './mechaNetworkTypes.js';
+import type { MechaBoardPacket, MechaDeniedPacket, MechaInputPacket, MechaState, MechaEvent, MechaEventPacket } from './mechaNetworkTypes.js';
 import { MechaEndingAuthority, type MechaEndingState } from './mechaEndingTimeline.js';
 import type { MechaEndingReadyPacket } from './mechaNetworkTypes.js';
 import type { NetworkPacket } from './networkTypes.js';
+import type { RocketPlayer } from './mechaRockets.js';
+import { PacketRate } from './packetRate.js';
 
 export interface MechaNetworkPort {
     send(packet: NetworkPacket): void;
+    sendTo?(peerId: string, packet: NetworkPacket): void;
     players(): MechaPlayer[];
     endingPeers?(): string[];
     hitTarget(index: number, damage: number, owner: string | null): void;
-    acceptedDamage(peerId: string, lifeId: number, attacker: string | null): void;
+    acceptedDamage(peerId: string, lifeId: number, attacker: string | null, damage: number, mechaSequence?: number): void;
 }
 export interface MechaPresentation {
     impact: MechaEvents['impact']; release(pose: MechaPilotRelease): void; blocked(): void;
-    damage(damage: number, attackerPeerId: string | null): void; gameOver(): void;
+    damage(damage: number, attackerPeerId: string | null, sequence: number): void; gameOver(): void;
     hit(killed: boolean, score: number, local: boolean): void;
     ending?(scene: MechaEndingState): void;
 }
@@ -40,8 +43,10 @@ let yaw = 0, pitch = 0, helmet = false, exit = false;
 let requestedWeapon: PilotWeapon | null = null;
 let boardStart: { lifeId: number; position: THREE.Vector3; quaternion: THREE.Quaternion } | null = null;
 const commandSequences = new Map<string, number>();
+const commandRates = new Map<string, { input: PacketRate; board: PacketRate; exit: PacketRate }>();
+let boardSequence = -1;
 const approaches = new Map<string, THREE.Vector3>();
-const pendingDamage: { packet: MechaEventPacket; beamDraw: number; rendered: boolean }[] = [];
+const pendingDamage: { packet: MechaEventPacket; beamDraw: number; rendered: boolean; expiresAt: number }[] = [];
 const aimCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 const aimRotation = new THREE.Euler(0, 0, 0, 'YXZ');
 const seat = new THREE.Vector3(), ray = new THREE.Ray();
@@ -57,7 +62,7 @@ export function resetMechaNetwork(): void {
     lastPublish = lastInputSent = lastInputReceived = -Infinity; previousFingerprint = previousPhase = '';
     replica = input = null; boardStart = null; yaw = pitch = 0; helmet = exit = false;
     requestedWeapon = null;
-    commandSequences.clear(); approaches.clear(); pendingDamage.length = 0;
+    commandSequences.clear(); commandRates.clear(); approaches.clear(); pendingDamage.length = 0; boardSequence = -1;
 }
 export function captureMechaSnapshot(): MechaState | undefined {
     const actor = activeActor;
@@ -116,8 +121,11 @@ function emit(event: MechaEvent): void {
     if (!state.isHost || endingAuthority) return;
     const snapshot = captureMechaSnapshot(); if (!snapshot) return;
     const packet: MechaEventPacket = { type: 'mecha_event', sequence: ++eventSequence, state: snapshot, event };
-    if (event.kind === 'damage') port?.acceptedDamage(event.peerId, event.lifeId, event.attackerPeerId);
     port?.send(packet); applyEvent(packet);
+    if (event.kind === 'damage') {
+        port?.acceptedDamage(event.peerId, event.lifeId, event.attackerPeerId, event.damage,
+            event.attack === 'rocket' ? undefined : packet.sequence);
+    }
 }
 const vector = (p: THREE.Vector3) => ({ x: p.x, y: p.y, z: p.z });
 export function multiplayerMechaEvents(): MechaEvents {
@@ -136,7 +144,9 @@ export function multiplayerMechaEvents(): MechaEvents {
             if (actor) actor.pilotPeerId = null;
             input = null;
         },
-        exitBlocked: () => { if (activeActor?.pilotPeerId) emit({ kind: 'blocked', peerId: activeActor.pilotPeerId }); },
+        exitBlocked: () => {
+            if (activeActor?.pilotPeerId) deny(activeActor.pilotPeerId, activeActor.pilotLifeId, 'exit', ++eventSequence);
+        },
     };
 }
 export function initializeNetworkMecha(actor = forgottenMecha): void {
@@ -169,9 +179,33 @@ export function receiveMechaState(snapshot: MechaState): void {
     } else if (snapshot.matchEnded) { state.matchEnded = true; presentation?.gameOver(); }
 }
 export function receiveMechaEvent(packet: MechaEventPacket): void {
-    if (packet.sequence <= receivedEvent) return;
-    receivedEvent = packet.sequence; receiveMechaState(packet.state); applyEvent(packet);
+    if (packet.sequence <= receivedEvent || !activeActor?.ready ||
+        replica && packet.state.revision < replica.revision) return;
+    receiveMechaState(packet.state);
+    if (replica?.revision !== packet.state.revision) return;
+    receivedEvent = packet.sequence;
+    applyEvent(packet);
 }
+function deny(peerId: string, lifeId: number, action: MechaDeniedPacket['action'], sequence: number): void {
+    const packet: MechaDeniedPacket = { type: 'mecha_denied', peerId, lifeId, action, sequence };
+    if (peerId === state.peer?.id) receiveMechaDenial(packet);
+    else port?.sendTo?.(peerId, packet);
+}
+
+export function receiveMechaDenial(packet: MechaDeniedPacket): void {
+    if (packet.peerId !== state.peer?.id || packet.lifeId !== state.lifeId) return;
+    if (packet.action === 'board') {
+        if (packet.sequence !== boardSequence || activeActor?.ownsLocalPilot) return;
+        boardSequence = -1;
+        if (boardStart?.lifeId === state.lifeId) {
+            const position = boardStart.position.clone(); position.y -= PLAYER_BODY_CAMERA_OFFSET;
+            presentation?.release({ position, quaternion: boardStart.quaternion, viewPosition: boardStart.position });
+            boardStart = null;
+        }
+    }
+    presentation?.blocked();
+}
+
 function applyEvent(packet: MechaEventPacket): void {
     if (endingAuthority || replica?.ending) return;
     const event = packet.event;
@@ -210,7 +244,10 @@ function applyEvent(packet: MechaEventPacket): void {
             viewPosition: new THREE.Vector3(event.pose.viewPosition.x, event.pose.viewPosition.y, event.pose.viewPosition.z), quaternion: new THREE.Quaternion().fromArray(event.pose.quaternion) });
         return;
     }
-    if (pendingDamage.length < 32 && state.playerHp > 0) pendingDamage.push({ packet, beamDraw: activeActor?.combat.effects.beamDraws ?? 0, rendered: false });
+    if (event.attack !== 'rocket' && pendingDamage.length < 32 && state.playerHp > 0) {
+        pendingDamage.push({ packet, beamDraw: activeActor?.combat.effects.beamDraws ?? 0,
+            rendered: false, expiresAt: performance.now() + 1000 });
+    }
 }
 export function acknowledgeMechaRender(): void {
     for (const hit of pendingDamage) {
@@ -222,9 +259,9 @@ export function flushMechaDamage(): void {
     if (state.matchEnded) { pendingDamage.length = 0; return; }
     for (let i = 0; i < pendingDamage.length;) {
         const hit = pendingDamage[i], event = hit.packet.event;
-        if (event.kind !== 'damage' || event.lifeId !== state.lifeId || state.playerHp <= 0 || hit.packet.state.revision !== activeActor?.revision) { pendingDamage.splice(i, 1); continue; }
+        if (event.kind !== 'damage' || event.lifeId !== state.lifeId || state.playerHp <= 0 || hit.packet.state.revision !== activeActor?.revision || performance.now() >= hit.expiresAt) { pendingDamage.splice(i, 1); continue; }
         if (!hit.rendered) { i++; continue; }
-        pendingDamage.splice(i, 1); presentation?.damage(event.damage, event.attackerPeerId);
+        pendingDamage.splice(i, 1); presentation?.damage(event.damage, event.attackerPeerId, hit.packet.sequence);
     }
 }
 export function queueMechaLook(yawDelta: number, pitchDelta: number): void { yaw += yawDelta; pitch += pitchDelta; }
@@ -253,16 +290,28 @@ export function requestMechaBoard(): void {
     const actor = activeActor; if (!actor?.canMount) return;
     requestedWeapon = null;
     const packet: MechaBoardPacket = { type: 'mecha_board', sequence: ++inputSequence, revision: actor.revision, lifeId: state.lifeId, thirdPerson: state.isThirdPerson, secondaryHeld: state.rightClickActive };
+    boardSequence = packet.sequence;
     if (state.isHost && state.peer) acceptMechaCommand(state.peer.id, packet); else port?.send(packet);
 }
 export function acceptMechaCommand(peerId: string, packet: MechaInputPacket | MechaBoardPacket): boolean {
-    const actor = activeActor, player = port?.players().find(p => p.peerId === peerId);
-    if (!state.isHost || !state.isPlaying || state.matchEnded || !actor?.ready || !player?.alive || player.lifeId !== packet.lifeId ||
+    const actor = activeActor;
+    if (!state.isHost || !state.isPlaying || state.matchEnded || !actor?.ready ||
         packet.senderPeerId !== undefined && packet.senderPeerId !== peerId || packet.type === 'mecha_input' && !isPilotWeapon(packet.weapon) ||
         packet.sequence <= (commandSequences.get(peerId) ?? -1)) return false;
+    if (packet.type === 'mecha_input' && (actor.revision !== packet.revision || actor.pilotPeerId !== peerId ||
+        actor.pilotLifeId !== packet.lifeId || !actor.ownsPilot)) return false;
+    let rates = commandRates.get(peerId);
+    if (!rates) {
+        rates = { input: new PacketRate(60, 10), board: new PacketRate(4, 2), exit: new PacketRate(4, 2) };
+        commandRates.set(peerId, rates);
+    }
+    const now = performance.now();
+    if (!(packet.type === 'mecha_board' ? rates.board : rates.input).accept(now)) return false;
+    const player = port?.players().find(p => p.peerId === peerId);
+    if (!player?.alive || player.lifeId !== packet.lifeId) return false;
     commandSequences.set(peerId, packet.sequence);
     if (packet.type === 'mecha_board') {
-        const denied = () => { emit({ kind: 'board_denied', peerId, lifeId: packet.lifeId }); return false; };
+        const denied = () => { deny(peerId, packet.lifeId, 'board', packet.sequence); return false; };
         if (actor.revision !== packet.revision) return denied();
         actor.seatAnchor.getWorldPosition(seat);
         const approach = approaches.get(peerId) ?? player.position;
@@ -276,12 +325,11 @@ export function acceptMechaCommand(peerId: string, packet: MechaInputPacket | Me
         if (!actor.beginBoarding(player.position, rotation, packet.thirdPerson, packet.secondaryHeld)) { actor.pilotPeerId = null; return false; }
         input = null; publish(true); return true;
     }
-    if (actor.revision !== packet.revision || actor.pilotPeerId !== peerId || actor.pilotLifeId !== packet.lifeId || !actor.ownsPilot) return false;
-    input = packet; lastInputReceived = performance.now();
+    input = packet; lastInputReceived = now;
     actor.selectPilotWeapon(packet.weapon);
     actor.look(packet.yaw, packet.pitch, lastInputReceived);
     if (packet.helmet) actor.toggleHelmet();
-    if (packet.exit) {
+    if (packet.exit && rates.exit.accept(now)) {
         const accepted = actor.requestExit(packet.thirdPerson, packet.secondaryHeld);
         if (accepted) {
             input = { ...packet, direction: 0, fire: false, shield: false, yaw: 0, pitch: 0 };
@@ -311,10 +359,10 @@ export function syncRemoteMechaPilot(): void {
 }
 export function mechaPeerLeft(peerId: string): void {
     if (endingAuthority) { endingAuthority.removePeer(peerId); publish(true); }
-    approaches.delete(peerId); commandSequences.delete(peerId);
+    approaches.delete(peerId); commandSequences.delete(peerId); commandRates.delete(peerId);
     if (state.isHost && activeActor?.pilotPeerId === peerId) { detachRemotePilot(peerId); activeActor.abandonPilot(); input = null; publish(true); }
 }
-export function announceMechaHit(peerId: string, killed: boolean, position: THREE.Vector3, direction: THREE.Vector3): void {
+export function announceMechaHit(peerId: string | null, killed: boolean, position: THREE.Vector3, direction: THREE.Vector3): void {
     emit({ kind: 'hit', peerId, killed, score: state.score, position: vector(position), direction: vector(direction) }); publish(true);
 }
 export function updateMechaNetwork(delta: number): void {
@@ -361,6 +409,18 @@ export function updateMechaNetwork(delta: number): void {
 export function mechaPlayer(peerId: string, position: THREE.Vector3, yaw: number, lifeId: number, alive: boolean, velocity?: THREE.Vector3): MechaPlayer {
     return { peerId, position, yaw, lifeId, alive, velocity, grounded: position.y <= PLAYER_HEIGHT + 0.15 && position.y >= PLAYER_HEIGHT - 0.15 };
 }
+export function previewRocketPeer(actor: ForgottenMecha, camera: THREE.PerspectiveCamera, origin: THREE.Vector3): string | undefined {
+    if (!state.isMultiplayer) return undefined;
+    const players: RocketPlayer[] = [];
+    for (const peerId of state.peerIds) {
+        const peer = state.peers[peerId];
+        if (!peer || peer.hp <= 0) continue;
+        players.push({ peerId, position: peer.mesh.getWorldPosition(new THREE.Vector3()), yaw: peer.mesh.rotation.y,
+            lifeId: peer.lifeId ?? 0, alive: true, velocity: new THREE.Vector3() });
+    }
+    return actor.pilot.rockets.selectPlayer(camera, origin, players, queryObstaclesAlongSegment, state.peer?.id ?? null)?.peerId;
+}
+
 export function mountedPeerPosition(peerId: string): THREE.Vector3 | null {
     const actor = activeActor;
     if (!actor?.ownsPilot || actor.pilotPeerId !== peerId) return null;

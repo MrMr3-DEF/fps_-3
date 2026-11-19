@@ -41,7 +41,7 @@ export class GothChat {
     private opened = false;
     private greetingShown = false;
     private session = new GothChatSession();
-    private activeAnswer: HTMLElement | null = null;
+    private readonly listeners = new AbortController();
     get isOpen(): boolean { return this.opened; }
 
     constructor(hooks: ChatHooks) {
@@ -98,7 +98,7 @@ export class GothChat {
         });
         this.panel.querySelector('[data-action="decline"]')!.addEventListener('click', () => this.close(true));
         // Capture before the game's document/window handlers, including when the log has focus.
-        window.addEventListener('keydown', event => this.handleKey(event), true);
+        window.addEventListener('keydown', event => this.handleKey(event), { capture: true, signal: this.listeners.signal });
         window.addEventListener('keyup', event => {
             if (event.code === this.openingKey) {
                 this.openingKey = null;
@@ -108,7 +108,7 @@ export class GothChat {
             }
             if (this.escape.handle(event, this.opened, () => this.close(true))) return;
             if (this.opened) event.stopImmediatePropagation();
-        }, true);
+        }, { capture: true, signal: this.listeners.signal });
         window.addEventListener('wheel', event => {
             if (!this.opened) return;
             event.preventDefault();
@@ -116,7 +116,8 @@ export class GothChat {
             const scroller = this.consent.approved && !this.downloadApproval ? this.transcript : this.notice;
             const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroller.clientHeight : 1;
             scroller.scrollTop += event.deltaY * unit;
-        }, { capture: true, passive: false });
+        }, { capture: true, passive: false, signal: this.listeners.signal });
+        window.addEventListener('blur', () => { this.openingKey = null; }, { signal: this.listeners.signal });
         this.panel.addEventListener('click', event => {
             if (event.target === this.panel || event.target === this.conversation) this.focus();
         });
@@ -135,7 +136,7 @@ export class GothChat {
         if (event.key === 'Tab') { event.preventDefault(); this.input.focus(); return; }
         if (event.key === 'Enter') { event.preventDefault(); void this.submit(); return; }
         // Allow selecting/copying earlier messages. Other typing always returns to the draft.
-        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c') return;
+        if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) return;
         if (event.target !== this.input) {
             this.input.focus();
             if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -260,6 +261,7 @@ export class GothChat {
     }
 
     close(resume = false): void {
+        this.openingKey = null;
         if (!this.opened) return;
         this.opened = false;
         this.panel.hidden = true;
@@ -278,10 +280,6 @@ export class GothChat {
 
     private cancelPending(): void {
         this.epoch++;
-        if (this.activeAnswer) {
-            this.activeAnswer.textContent = `${this.activeAnswer.textContent === '…' ? '' : this.activeAnswer.textContent}\n[Reply interrupted]`.trim();
-            this.activeAnswer = null;
-        }
         if (this.preloadTask && !this.automaticLoad) this.cancelLoad();
         else if (this.pending && !this.preloadTask) { void this.engine?.interrupt(); }
         this.pending = false;
@@ -311,6 +309,12 @@ export class GothChat {
         }
     }
 
+    dispose(): void {
+        this.reset({ preserveLoadedModel: false });
+        this.listeners.abort();
+        this.panel.remove();
+    }
+
     private followsLatest(): boolean {
         return this.transcript.scrollHeight - this.transcript.scrollTop - this.transcript.clientHeight < 48;
     }
@@ -323,6 +327,7 @@ export class GothChat {
         body.textContent = text;
         row.append(body);
         this.transcript.append(row);
+        while (this.transcript.childElementCount > 64) this.transcript.firstElementChild?.remove();
         this.transcript.scrollTop = this.transcript.scrollHeight;
         return body;
     }
@@ -373,7 +378,6 @@ export class GothChat {
         this.input.value = '';
         this.message('user', text);
         const answer = this.message('assistant', '…');
-        this.activeAnswer = answer;
         this.status.textContent = 'She’s thinking…';
         let started = false;
         try {
@@ -386,16 +390,17 @@ export class GothChat {
                 if (follow) this.transcript.scrollTop = this.transcript.scrollHeight;
             });
             if (epoch !== this.epoch) return;
-            this.activeAnswer = null;
             answer.textContent = reply;
             this.session.complete(text, reply);
             this.setReady();
         } catch (error) {
             if (epoch !== this.epoch) return;
-            this.activeAnswer = null;
             answer.textContent = started ? `${answer.textContent}\n[Reply interrupted]` : '[No reply received]';
             if (!this.input.value) this.input.value = text;
-            this.showError(error);
+            if (this.engine?.ready) {
+                this.pending = false;
+                this.status.textContent = error instanceof Error ? error.message : 'The reply failed. Press Enter to retry.';
+            } else this.showError(error);
         }
     }
 }

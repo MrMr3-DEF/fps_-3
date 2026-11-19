@@ -67,8 +67,8 @@ export function cloneSettings(settings: UserSettings): UserSettings {
 
 export const userSettings: UserSettings = cloneSettings(DEFAULT_USER_SETTINGS);
 
-function clamp(value: number, min: number, max: number): number {
-    if (!Number.isFinite(value)) return min;
+function clamp(value: unknown, min: number, max: number, fallback: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
     return Math.max(min, Math.min(max, value));
 }
 
@@ -91,20 +91,20 @@ export function loadUserSettings(): UserSettings {
             userSettings.touchFireMode = parsed.touchFireMode === 'button' ? 'button' : 'joystick';
             userSettings.keybinds = readKeybinds(parsed.keybinds);
             userSettings.crosshair = readCrosshair(parsed.crosshair);
-            userSettings.sensitivity = clamp(parsed.sensitivity ?? DEFAULT_USER_SETTINGS.sensitivity, 0.1, 3.0);
+            userSettings.sensitivity = clamp(parsed.sensitivity, 0.1, 3.0, DEFAULT_USER_SETTINGS.sensitivity);
             userSettings.rawMouseInput = readBoolean(parsed.rawMouseInput, DEFAULT_USER_SETTINGS.rawMouseInput);
             userSettings.mouseSpikeProtection = readBoolean(parsed.mouseSpikeProtection, DEFAULT_USER_SETTINGS.mouseSpikeProtection);
-            userSettings.fov = clamp(parsed.fov ?? DEFAULT_USER_SETTINGS.fov, 55, 105);
-            userSettings.scopedFov = clamp(parsed.scopedFov ?? DEFAULT_USER_SETTINGS.scopedFov, 8, 35);
-            userSettings.renderScale = clamp(parsed.renderScale ?? DEFAULT_USER_SETTINGS.renderScale, 0.5, 1.0);
-            userSettings.particleAmount = clamp(parsed.particleAmount ?? DEFAULT_USER_SETTINGS.particleAmount, 0.2, 1.0);
-            userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks ?? DEFAULT_USER_SETTINGS.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS));
+            userSettings.fov = clamp(parsed.fov, 55, 105, DEFAULT_USER_SETTINGS.fov);
+            userSettings.scopedFov = clamp(parsed.scopedFov, 8, 35, DEFAULT_USER_SETTINGS.scopedFov);
+            userSettings.renderScale = clamp(parsed.renderScale, 0.5, 1.0, DEFAULT_USER_SETTINGS.renderScale);
+            userSettings.particleAmount = clamp(parsed.particleAmount, 0.2, 1.0, DEFAULT_USER_SETTINGS.particleAmount);
+            userSettings.renderDistanceChunks = Math.round(clamp(parsed.renderDistanceChunks, 1, MAX_RENDER_DISTANCE_CHUNKS, DEFAULT_USER_SETTINGS.renderDistanceChunks));
             userSettings.shadows = readBoolean(parsed.shadows, DEFAULT_USER_SETTINGS.shadows);
             userSettings.fog = readBoolean(parsed.fog, DEFAULT_USER_SETTINGS.fog);
             userSettings.motionBlur = readBoolean(parsed.motionBlur, DEFAULT_USER_SETTINGS.motionBlur);
             userSettings.lavaGlow = readBoolean(parsed.lavaGlow, DEFAULT_USER_SETTINGS.lavaGlow);
             userSettings.muzzleFlashes = readBoolean(parsed.muzzleFlashes, DEFAULT_USER_SETTINGS.muzzleFlashes);
-            userSettings.muzzleFlashOpacity = clamp(parsed.muzzleFlashOpacity ?? DEFAULT_USER_SETTINGS.muzzleFlashOpacity, 0, 1);
+            userSettings.muzzleFlashOpacity = clamp(parsed.muzzleFlashOpacity, 0, 1, DEFAULT_USER_SETTINGS.muzzleFlashOpacity);
             userSettings.bulletTrails = readBoolean(parsed.bulletTrails, DEFAULT_USER_SETTINGS.bulletTrails);
             userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
             userSettings.downloadWebLLMImmediately = readBoolean(parsed.downloadWebLLMImmediately, false);

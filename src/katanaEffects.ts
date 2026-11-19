@@ -67,7 +67,7 @@ export class KatanaEffects {
         const group = new THREE.Group();
         object?.updateWorldMatrix(true, true);
         object?.traverseVisible(node => {
-            if (!(node instanceof THREE.Mesh) || node.userData.damageTarget || !node.geometry.attributes.position) return;
+            if (!(node instanceof THREE.Mesh) || node.userData.damageTarget || (Array.isArray(node.material) ? node.material.every(material => !material.visible) : !node.material.visible) || !node.geometry.attributes.position) return;
             const geometry = node.geometry.clone();
             const positions = geometry.attributes.position, vertex = new THREE.Vector3();
             // Baking skinned vertices preserves the struck pose across death/respawn updates.

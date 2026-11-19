@@ -3,6 +3,8 @@ export interface MechaWeaponHit {
     shotId?: number; pelletIndex?: number; origin: Vec3Like; point: Vec3Like; surface: 'body' | 'shield';
     /** Incoming final flight segment, independent of the muzzle-to-hit vector for homing shots. */
     direction?: Vec3Like;
+    /** Local presentation samples a lethal pose before the actor breaks apart. */
+    beforeLethal?: () => void;
 }
 export interface TargetHitResult { accepted: boolean; killed: boolean }
 type TargetHitHandler = (targetIndex: number, damage: number, attackerPeerId?: string) => TargetHitResult;

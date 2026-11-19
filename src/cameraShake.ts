@@ -8,7 +8,7 @@ export class CameraShake {
     private readonly rotation = new THREE.Quaternion();
     private readonly euler = new THREE.Euler();
     trigger(strength: number, duration: number): void {
-        if (strength <= 0) return;
+        if (!Number.isFinite(strength) || !Number.isFinite(duration) || strength <= 0 || duration <= 0) return;
         if (this.pulses.length >= 8) this.pulses.shift();
         this.pulses.push({ start: this.time, duration, strength });
     }

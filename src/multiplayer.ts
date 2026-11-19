@@ -5,22 +5,25 @@ import { acceptMeleeCommand, invalidateMeleePeer, forgetMeleePeer, receiveMeleeE
 import { buildKatana } from './katanaModel.js';
 import { setMeleeNetworkPort } from './weaponNetworkPort.js';
 import { KATANA } from './config.js';
-import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, resetMechaNetwork, acceptMechaCommand, acceptMechaEndingReady, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
+import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, receiveMechaDenial, resetMechaNetwork, acceptMechaCommand, acceptMechaEndingReady, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
 import type { MechaHitPacket } from './mechaNetworkTypes.js';
 import { TargetMotionHistory, type HomingFireContext } from './projectileFlight.js';
 import { hasLineOfSightToOrientedBox } from './targetVisibility.js';
-import { updateHealthRegen } from './healthRegen.js';
+import { touchesLava } from './lavaDamage.js';
+import { createPlayerLife, damagePlayerLife, healPlayerLife, type PlayerLife } from './playerLife.js';
+import { getTownSpawn } from './town.js';
+import { PacketRate } from './packetRate.js';
 import { cancelHookForTarget } from './hookLifecycle.js';
 import { characterColor } from './appearance.js';
 import { endInput } from './inputSession.js';
 import { renderPlayerList, setPlayerListVisible } from './playerList.js';
 import { resetProjectiles } from './projectiles.js';
 import type { Peer } from 'peerjs';
-import { ShotLedger, spreadDirection, acceptLifeUpdate, acceptDeath, initialWeaponState, advanceWeaponState, type AcceptedWeaponState } from './shotAuthority.js';
-import { isCapability, isPeerId } from './roomIdentity.js';
+import { ShotLedger, spreadDirection, initialWeaponState, advanceWeaponState, type AcceptedWeaponState } from './shotAuthority.js';
+import { isCapability, isPeerId, usernameKey } from './roomIdentity.js';
 import * as THREE from 'three';
 import { state, resetPlayerState, resetMatchStats, type DataConnectionLike, type PeerData } from './state.js';
-import { placePlayerAtTownSpawn } from './playerSpawn.js';
+import { placePlayerAtTownSpawn, resetPlayerAtTownSpawn } from './playerSpawn.js';
 import { disposeParticles, spawnParticles, createLaserBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
 import {
     forgottenMecha, infantry, rebuildInfantryHash,
@@ -37,9 +40,12 @@ import {
     NETWORK_TICK_MS,
     NETWORK_POSITION_RESPONSE,
     MAX_PLAYERS,
+    MAX_PENDING_ROOM_CONNECTIONS, NETWORK_PROTOCOL_VERSION,
     PROJECTILE_RADIUS,
     TARGET_HIT_RANGE_MULTIPLIER,
     PLAYER_MAX_HP,
+    PLAYER_HEIGHT,
+    LAVA_DAMAGE_TICK_MS, LAVA_DAMAGE_PER_TICK,
     PILLAR_WIDTH,
     ROOM_CODE_LENGTH,
     MAP_HALF_SIZE,
@@ -63,6 +69,8 @@ import {
     type KillTargetPacket,
     type LobbyPlayer,
     type PlayerDiedPacket,
+    type PlayerHealthPacket,
+    type PlayerRespawnPacket,
     type PlayerListEntry,
     type NetworkPacket,
     type TargetState,
@@ -134,8 +142,6 @@ const UI = {
     joinErrorLog: null as HTMLElement | null,
     pvpStats: null as HTMLElement | null,
     btnJoinConnect: null as HTMLButtonElement | null,
-    blocker: null as HTMLElement | null,
-    panelMain: null as HTMLElement | null,
     score: null as HTMLElement | null,
     kills: null as HTMLElement | null,
 };
@@ -146,14 +152,21 @@ const DOM = {
     joinErrorLog: () => (UI.joinErrorLog || (UI.joinErrorLog = document.getElementById('join-error-log'))),
     pvpStats: () => (UI.pvpStats || (UI.pvpStats = document.getElementById('pvp-stats'))),
     btnJoinConnect: () => (UI.btnJoinConnect || (UI.btnJoinConnect = document.getElementById('btn-join-connect') as HTMLButtonElement | null)),
-    blocker: () => (UI.blocker || (UI.blocker = document.getElementById('blocker'))),
-    panelMain: () => (UI.panelMain || (UI.panelMain = document.getElementById('panel-main'))),
     score: () => (UI.score || (UI.score = document.getElementById('score'))),
     kills: () => (UI.kills || (UI.kills = document.getElementById('kills'))),
 };
 
 let cachedUsername = 'Guest1';
 let healthInterval: ReturnType<typeof setInterval> | null = null;
+let onLocalHealth: ((previousHp: number, feedback: boolean) => void) | undefined;
+let onLocalRespawn: ((packet: PlayerRespawnPacket) => void) | undefined;
+let pendingLocalHealth: { packet: PlayerHealthPacket; expiresAt: number } | null = null;
+export function setMultiplayerLifePresentation(
+    health: typeof onLocalHealth, respawn: typeof onLocalRespawn,
+): void {
+    onLocalHealth = health;
+    onLocalRespawn = respawn;
+}
 const matchStartListeners = new Set<() => void>();
 export function onMultiplayerStarted(listener: () => void): void { matchStartListeners.add(listener); }
 export interface MultiplayerDisconnect { wasHost: boolean; reason: string | null; }
@@ -170,13 +183,7 @@ function enterMultiplayerMatch(): void {
     state.isPlaying = true;
     state.pendingPlay = false;
     state.prevTime = performance.now();
-    // requestAnimationFrame can stop in a paused/background tab. This timer
-    // catches healing up from elapsed time and publishes only confirmed changes.
-    healthInterval = setInterval(() => {
-        if (state.matchEnded) return;
-        if (forgottenMecha?.ownsLocalPilot) state.regenUpdatedAt = performance.now();
-        else if (state.isMultiplayer && state.isPlaying && updateHealthRegen(0)) sendLocalState(true);
-    }, 250);
+    if (state.isHost) healthInterval = setInterval(updateHostPlayerLives, 100);
     sendLocalState(true);
     if (state.isHost) publishPlayerList();
     for (const listener of matchStartListeners) listener();
@@ -194,11 +201,17 @@ const spawnHouseSlots = new Map<string, number>();
 
 function publishLobbyRoster(): void {
     if (!state.isHost || !state.peer) return;
+    const players = refreshHostRoster();
+    broadcastToAll({ type: 'lobby_roster', players });
+    if (state.isPlaying) publishPlayerList();
+}
+
+function refreshHostRoster(): LobbyPlayer[] {
     // Connection order is the host's admission order. Rebuild after departures
     // so a replacement joins the end of the visible lineup, even if its house
     // slot reuses an earlier vacancy.
     const colors = new Map(state.lobbyPlayers.map(player => [player.peerId, player.bodyColor]));
-    const players: LobbyPlayer[] = [{ peerId: state.peer.id, username: getCachedUsername(),
+    const players: LobbyPlayer[] = [{ peerId: state.peer!.id, username: getCachedUsername(),
         bodyColor: Number.parseInt(characterColor.slice(1), 16) }];
     for (const conn of state.connections) {
         const username = admittedNames.get(conn.peer);
@@ -206,8 +219,7 @@ function publishLobbyRoster(): void {
             bodyColor: colors.get(conn.peer) ?? 0x3b5998 });
     }
     state.lobbyPlayers = players;
-    if (state.isPlaying) publishPlayerList();
-    else broadcastToAll({ type: 'lobby_roster', players });
+    return players;
 }
 
 function publishPlayerList(): void {
@@ -265,13 +277,9 @@ function getCachedUsername(): string {
 export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | null = null): void {
     if (!state.isMultiplayer) return;
     if (state.isHost && packet.type === 'player_hit' && !packet.senderPeerId) {
-        const now = performance.now();
-        packet = { ...packet, senderPeerId: state.peer?.id, attackerName: getCachedUsername() };
-        if (state.peer) lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: state.peer.id, at: now });
-    }
-    if (state.isHost && packet.type === 'player_died' && !packet.senderPeerId) {
-        const latest = state.peer ? lastDamageByVictim.get(state.peer.id) : null;
-        packet = { ...packet, senderPeerId: state.peer?.id, killerPeerId: packet.cause === 'player' ? latest?.attackerPeerId ?? null : null };
+        const hostId = state.peer?.id;
+        if (!hostId || hostLife.hp <= 0 || !commitPlayerDamage(packet.targetPeerId, packet.targetLifeId, packet.damage, 'player', hostId)) return;
+        packet = { ...packet, senderPeerId: hostId, attackerName: getCachedUsername() };
     }
     if (state.isHost && packet.type === 'hit_mecha' && state.peer) { authorizeMechaHit(state.peer.id, packet); return; }
     const recipients = [...state.connections];
@@ -291,6 +299,11 @@ export function broadcastToAll(packet: NetworkPacket, excludePeerId: string | nu
         }
     }
     if (state.isHost && packet.type === 'player_died') recordConfirmedDeath(packet);
+}
+
+function sendToPeer(peerId: string, packet: NetworkPacket): void {
+    const conn = state.connections.find(candidate => candidate.peer === peerId && candidate.open);
+    try { conn?.send(packet); } catch { conn?.close(); }
 }
 
 function flashPeerMesh(peerData: PeerData, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
@@ -315,9 +328,9 @@ let acknowledgedAdmissionGeneration = 0;
 
 const pendingConnectionPeers = new Set<string>();
 const targetStateFingerprints = new Map<number, string>();
-const lastDamageByVictim = new Map<string, { attackerPeerId: string; at: number }>();
 const MAX_PLAYER_HORIZONTAL_POSITION = MAP_HALF_SIZE + 100;
 const MAX_PLAYER_VERTICAL_POSITION = 600;
+const MAX_PLAYER_BARREL_OFFSET = 2;
 
 interface PeerRuntimeState {
     motion: TargetMotionHistory;
@@ -328,13 +341,157 @@ interface PeerRuntimeState {
     lastUpdateAt: number;
     travelAllowance: number;
     shots: ShotLedger;
-    lifeId: number;
-    deathReported: boolean;
+    life: PlayerLife;
+    jumpRate: PacketRate;
+    fireRate: PacketRate;
     weaponState: AcceptedWeaponState;
-    wasDead: boolean;
 }
 
 const peerRuntime = new Map<string, PeerRuntimeState>();
+let hostLife = createPlayerLife(0);
+
+function playerLife(peerId: string): PlayerLife | undefined {
+    return peerId === state.peer?.id ? hostLife : peerRuntime.get(peerId)?.life;
+}
+
+function applyLocalHealth(packet: PlayerHealthPacket, feedback: boolean): void {
+    if (packet.lifeId !== state.lifeId || state.playerHp === packet.hp) return;
+    const previousHp = state.playerHp;
+    state.playerHp = packet.hp;
+    onLocalHealth?.(previousHp, feedback);
+}
+
+function applyHealth(packet: PlayerHealthPacket): void {
+    if (packet.peerId !== state.peer?.id) {
+        const peer = state.peers[packet.peerId];
+        if (peer?.lifeId === packet.lifeId) peer.hp = packet.hp;
+        return;
+    }
+    if (packet.lifeId !== state.lifeId) return;
+    pendingLocalHealth = null;
+    if (packet.mechaSequence !== undefined) {
+        pendingLocalHealth = { packet, expiresAt: performance.now() + 1000 };
+    } else {
+        applyLocalHealth(packet, true);
+    }
+}
+
+export function presentMultiplayerHealth(mechaSequence?: number): void {
+    const pending = pendingLocalHealth;
+    if (!pending) return;
+    const acknowledged = mechaSequence !== undefined && pending.packet.mechaSequence === mechaSequence;
+    if (!acknowledged && performance.now() < pending.expiresAt) return;
+    pendingLocalHealth = null;
+    applyLocalHealth(pending.packet, acknowledged);
+}
+
+function publishHealth(peerId: string, life: PlayerLife, mechaSequence?: number): void {
+    const packet: PlayerHealthPacket = { type: 'player_health', peerId, lifeId: life.id, hp: life.hp,
+        ...(mechaSequence === undefined ? {} : { mechaSequence }) };
+    broadcastToAll(packet);
+    applyHealth(packet);
+}
+
+function commitPlayerDamage(
+    peerId: string, lifeId: number, damage: number, cause: PlayerDiedPacket['cause'],
+    attacker: string | null = null, mechaSequence?: number,
+): boolean {
+    const life = playerLife(peerId);
+    if (!state.isHost || !state.isPlaying || state.matchEnded || !life || life.id !== lifeId ||
+        mountedPeerPosition(peerId) || !damagePlayerLife(life, damage, performance.now())) return false;
+    publishHealth(peerId, life, mechaSequence);
+    if (life.hp > 0) return true;
+    const hostId = state.peer?.id;
+    (peerId === hostId ? hostMechaShots : peerRuntime.get(peerId)?.shots)?.retireLife();
+    invalidateMeleePeer(peerId);
+    const packet: PlayerDiedPacket = { type: 'player_died', senderPeerId: hostId, lifeId, cause,
+        victimPeerId: peerId, victimName: admittedNames.get(peerId) ?? 'Guest',
+        killerPeerId: attacker, killerName: attacker ? admittedNames.get(attacker) ?? 'Guest' :
+            cause === 'mecha' ? 'Forgotten Mecha' : cause === 'infantry' ? 'Enemy' : 'Lava' };
+    broadcastToAll(packet);
+    applyPlayerDeath(packet);
+    return true;
+}
+
+function updateHostPlayerLives(): void {
+    if (!state.isHost || !state.isPlaying || state.matchEnded) return;
+    const now = performance.now();
+    const tick = (peerId: string, life: PlayerLife, position: THREE.Vector3) => {
+        const mounted = Boolean(mountedPeerPosition(peerId));
+        if (!mounted && life.hp > 0 && now >= life.nextLavaAt && touchesLava(position)) {
+            life.nextLavaAt = now + LAVA_DAMAGE_TICK_MS;
+            commitPlayerDamage(peerId, life.id, LAVA_DAMAGE_PER_TICK, 'lava');
+        }
+        if (healPlayerLife(life, now, mounted)) publishHealth(peerId, life);
+    };
+    const hostPosition = state.controls?.getObject().position;
+    if (state.peer && hostPosition) tick(state.peer.id, hostLife, hostPosition);
+    for (const [peerId, runtime] of peerRuntime) tick(peerId, runtime.life, runtime.position);
+}
+
+function createPeerRuntime(username: string, slot: number): PeerRuntimeState {
+    const spawn = getTownSpawn(getWorldSeed(), 'house', slot);
+    return { username, motion: new TargetMotionHistory(), shots: new ShotLedger(), life: createPlayerLife(0), jumpRate: new PacketRate(4, 2), fireRate: new PacketRate(60, 8),
+        position: new THREE.Vector3(spawn.x, PLAYER_HEIGHT, spawn.z), yaw: spawn.yaw, pitch: 0,
+        lastUpdateAt: performance.now(), travelAllowance: NETWORK_MOVEMENT_BURST, weaponState: initialWeaponState('PISTOL') };
+}
+
+function applyRespawn(packet: PlayerRespawnPacket): void {
+    if (packet.peerId === state.peer?.id) {
+        if (packet.lifeId <= state.lifeId) return;
+        pendingLocalHealth = null;
+        state.activeWeaponName = packet.weapon;
+        if (onLocalRespawn) onLocalRespawn(packet);
+        else {
+            resetPlayerAtTownSpawn(getWorldSeed(), 'church');
+            state.lifeId = packet.lifeId;
+            state.fireCooldown = packet.cooldownMs / 1000;
+        }
+        sendLocalState(true);
+        return;
+    }
+    const peer = state.peers[packet.peerId];
+    if (!peer || packet.lifeId <= (peer.lifeId ?? -1)) return;
+    peer.lifeId = packet.lifeId;
+    peer.deathReported = false;
+    peer.hp = PLAYER_MAX_HP;
+    peer.targetPosition.set(packet.pos.x, packet.pos.y - PEER_Y_OFFSET, packet.pos.z);
+    peer.mesh.position.copy(peer.targetPosition);
+    peer.targetYaw = peer.mesh.rotation.y = packet.yaw;
+    peer.mesh.visible = true;
+}
+
+function grantRespawn(peerId: string, lifeId: number): void {
+    const runtime = peerRuntime.get(peerId);
+    const host = peerId === state.peer?.id;
+    const life = host ? hostLife : runtime?.life;
+    if (!state.isHost || !state.isPlaying || state.matchEnded || !life || life.id !== lifeId || life.hp > 0) return;
+    const spawn = getTownSpawn(getWorldSeed(), 'church');
+    const weapon = runtime?.weaponState.activeWeapon ?? getActiveWeaponName();
+    const packet: PlayerRespawnPacket = { type: 'player_respawn', peerId, lifeId: lifeId + 1, weapon,
+        pos: { x: spawn.x, y: PLAYER_HEIGHT, z: spawn.z }, yaw: spawn.yaw,
+        cooldownMs: (runtime?.shots ?? hostMechaShots).remainingCooldown(performance.now()) };
+    if (runtime) {
+        runtime.life = createPlayerLife(packet.lifeId);
+        runtime.position.set(packet.pos.x, packet.pos.y, packet.pos.z);
+        runtime.yaw = spawn.yaw;
+        runtime.pitch = 0;
+        runtime.weaponState = initialWeaponState(weapon);
+        runtime.motion = new TargetMotionHistory();
+        runtime.travelAllowance = NETWORK_MOVEMENT_BURST;
+        runtime.lastUpdateAt = performance.now();
+    } else {
+        hostLife = createPlayerLife(packet.lifeId);
+    }
+    broadcastToAll(packet);
+    applyRespawn(packet);
+}
+
+export function requestMultiplayerRespawn(): void {
+    if (!state.peer || state.playerHp > 0 || !state.isPlaying || state.matchEnded) return;
+    if (state.isHost) grantRespawn(state.peer.id, state.lifeId);
+    else broadcastToAll({ type: 'respawn_request', lifeId: state.lifeId });
+}
 let localMotion = new TargetMotionHistory(), localMotionLife = -1;
 const npcMotion = new Map<number, { object: THREE.Group; revision: number; history: TargetMotionHistory }>();
 function peerMotion(peerId: string, now: number): TargetMotionHistory | null {
@@ -371,6 +528,7 @@ let lastSentSnapshot: {
     hookX: number;
     hookY: number;
     hookZ: number;
+    hookState: UpdatePacket['hookState'];
     hp: number;
     maxHp: number;
 } | null = null;
@@ -524,6 +682,7 @@ function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): vo
         spawnHouseSlot,
         score: state.score,
         dayNightElapsedSeconds: state.dayNightElapsedSeconds,
+        players: refreshHostRoster(),
         targets,
         ...(mecha ? { mecha } : {}),
         ...(infantry ? { infantry: infantry.snapshot() } : {}),
@@ -552,7 +711,7 @@ function syncHostTargetStates(): void {
 
 // main.ts owns renderer preparation; networking supplies the seed and a session
 // validity predicate without importing the client composition root.
-let multiplayerWorldLoader: ((seed: number, current: () => boolean) => Promise<void>) | null = null;
+let multiplayerWorldLoader: ((seed: number, current: () => boolean, spawnSlot?: number) => Promise<void>) | null = null;
 // Preserve host packet order while a client builds its world. Apply the snapshot
 // first, then replay these updates; null means ordinary live packet handling.
 let pendingWorldPackets: { peer: string; packet: NetworkPacket }[] | null = null;
@@ -566,6 +725,7 @@ function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void
     state.dayNightSyncPending = true;
     state.dayNightSyncImmediate = true;
     placePlayerAtTownSpawn(packet.seed, 'house', packet.spawnHouseSlot);
+    if (packet.players?.[0].peerId === getHostPeerId()) state.lobbyPlayers = packet.players;
     for (const target of packet.targets) {
         applyTargetState(target);
     }
@@ -607,8 +767,8 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function resetLocalMatch(): void {
-    resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null; mechaDamageByVictim.clear();
-    infantryDamageByVictim.clear(); lastInfantryPublish = -Infinity;
+    resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null;
+    hostLife = createPlayerLife(0); pendingLocalHealth = null; lastInfantryPublish = -Infinity;
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     state.playerList = [];
     setPlayerListVisible(false);
@@ -616,6 +776,7 @@ function resetLocalMatch(): void {
     resetProjectiles();
     disposeParticles();
     resetPlayerState();
+    state.lifeId = 0;
     resetMatchStats();
 }
 
@@ -693,11 +854,13 @@ export async function hostGame(username: string, roomCode: string, turnstileToke
                 conn.close();
                 return;
             }
-            const metadata = conn.metadata as { admissionToken?: unknown } | null;
-            if (!isPeerId(conn.peer) || !isCapability(metadata?.admissionToken)) { conn.close(); return; }
-            const currentPlayers = state.connections.length + pendingConnectionPeers.size + 1;
+            const metadata = conn.metadata as { admissionToken?: unknown; version?: unknown } | null;
+            if (!isPeerId(conn.peer) || !isCapability(metadata?.admissionToken) || metadata?.version !== NETWORK_PROTOCOL_VERSION) {
+                conn.close(); return;
+            }
+            const currentPlayers = state.connections.length + 1;
             const duplicate = pendingConnectionPeers.has(conn.peer) || state.connections.some((item) => item.peer === conn.peer);
-            if (duplicate || currentPlayers >= MAX_PLAYERS) {
+            if (duplicate || currentPlayers >= MAX_PLAYERS || pendingConnectionPeers.size >= MAX_PENDING_ROOM_CONNECTIONS) {
                 console.warn(`Rejecting ${duplicate ? 'duplicate' : 'full-room'} connection from ${conn.peer}`);
                 conn.close();
                 return;
@@ -784,7 +947,8 @@ export async function joinGame(username: string, roomCode: string, turnstileToke
             if (joinError) joinError.innerText = `Searching room ${state.roomCode}...`;
             const hostPeerId = getHostPeerId();
             if (!hostPeerId) return;
-            const conn = peer.connect(hostPeerId, { metadata: { admissionToken: registration.admissionToken } });
+            const conn = peer.connect(hostPeerId, { metadata: { admissionToken: registration.admissionToken,
+                version: NETWORK_PROTOCOL_VERSION, bodyColor: Number.parseInt(characterColor.slice(1), 16) } });
 
             setupConnection(conn, generation);
         });
@@ -811,8 +975,8 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     if (disconnecting) return;
     const hadSession = state.isMultiplayer || peerInstance !== null;
     disconnecting = true;
-    resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null; mechaDamageByVictim.clear();
-    infantryDamageByVictim.clear(); lastInfantryPublish = -Infinity;
+    resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null;
+    hostLife = createPlayerLife(0); pendingLocalHealth = null; lastInfantryPublish = -Infinity;
     if (healthInterval) clearInterval(healthInterval);
     healthInterval = null;
     const roomToRelease = state.roomCode;
@@ -858,7 +1022,6 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     resetKatana();
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     pendingConnectionPeers.clear();
-    lastDamageByVictim.clear();
 
     const pvpStats = DOM.pvpStats();
     if (pvpStats) pvpStats.style.display = 'none';
@@ -876,7 +1039,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     Object.keys(state.peers).forEach((peerId) => {
         removePeer(peerId);
     });
-    state.peers = {};
+    state.peers = Object.create(null);
     state.peerIds = [];
 
     resetHook();
@@ -973,20 +1136,23 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
     let opening = false;
     const current = () => !closed && isCurrentSession(generation);
     const cleanup = () => { closed = true; clearTimeout(timeoutId); connectionCleanup.delete(conn); conn.close(); };
-    const timeoutId = setTimeout(() => {
+    const timeout = () => {
         if (!current() || admitted) return;
         if (!state.isHost) showJoinError('Connection authorization timed out. Please retry.');
         handleClose(); // PeerJS does not emit close for a channel that never opened.
         conn.close();
-    }, 20_000);
+    };
+    let timeoutId = setTimeout(timeout, state.isHost ? 5000 : 20_000);
     connectionCleanup.set(conn, cleanup);
     const handleOpen = async () => {
         if (!current() || opening) return;
         opening = true;
         if (!state.isHost) return; // Wait for the proof delivered by the verified host.
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(timeout, 20_000);
         const room = state.roomCode;
         const closeToken = roomCloseToken;
-        const metadata = conn.metadata as { admissionToken?: unknown } | null;
+        const metadata = conn.metadata as { admissionToken?: unknown; bodyColor?: unknown } | null;
         if (!room || !closeToken || !isCapability(metadata?.admissionToken)) { conn.close(); return; }
         let serverAdmitted = false;
         try {
@@ -996,17 +1162,25 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
                 acknowledgedAdmissionGeneration = Math.max(acknowledgedAdmissionGeneration, result.admissionGeneration);
             }
             if (!current()) { void departRoomPeer(room, closeToken, conn.peer).catch(() => {}); return; }
+            if ([...admittedNames.values()].some(name => usernameKey(name) === usernameKey(result.username))) {
+                throw new Error('Name is already in the room.');
+            }
             const usedSlots = new Set(spawnHouseSlots.values());
             let slot = 1;
             while (usedSlots.has(slot)) slot++;
             if (slot >= MAX_PLAYERS) throw new Error('No spawn house available.');
             spawnHouseSlots.set(conn.peer, slot);
             admittedNames.set(conn.peer, result.username);
+            peerRuntime.set(conn.peer, createPeerRuntime(result.username, slot));
             admitted = true;
             clearTimeout(timeoutId);
             pendingConnectionPeers.delete(conn.peer);
             state.connections.push(conn);
-            conn.send({ type: 'admission', proof: result.admissionProof });
+            const color = metadata.bodyColor;
+            if (typeof color === 'number' && Number.isInteger(color) && color >= 0 && color <= 0xffffff) {
+                state.lobbyPlayers.push({ peerId: conn.peer, username: result.username, bodyColor: color });
+            }
+            conn.send({ type: 'admission', proof: result.admissionProof, version: NETWORK_PROTOCOL_VERSION });
             sendWorldSnapshot(conn, slot);
             publishLobbyRoster();
             // A late join must see the host even when its render loop is paused
@@ -1025,8 +1199,13 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
         if (!current()) return;
         if (!admitted) {
             if (state.isHost) return;
-            const proof = data as { type?: unknown; proof?: unknown } | null;
+            const proof = data as { type?: unknown; proof?: unknown; version?: unknown } | null;
             if (!proof || proof.type !== 'admission' || !expectedHostProof || proof.proof !== expectedHostProof) { conn.close(); return; }
+            if (proof.version !== NETWORK_PROTOCOL_VERSION) {
+                showJoinError('Multiplayer requires the same client build. Reload both players and rejoin.');
+                disconnectMultiplayer({ preserveJoinError: true });
+                return;
+            }
             admitted = true;
             expectedHostProof = null;
             clearTimeout(timeoutId);
@@ -1050,8 +1229,6 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
         peerRuntime.delete(conn.peer);
         admittedNames.delete(conn.peer);
         spawnHouseSlots.delete(conn.peer);
-        lastDamageByVictim.delete(conn.peer);
-        infantryDamageByVictim.delete(conn.peer);
         removePeer(conn.peer);
         if (state.isHost) {
             if (admitted) {
@@ -1125,12 +1302,12 @@ function peerBodiesBlockSegment(shooter: string, victim: HomingTargetPacket, sta
     radius: number, at: number, filtered: boolean): boolean {
     for (const [id, runtime] of peerRuntime) {
         if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === id) continue;
-        if (id === shooter || victim.kind === 'peer' && id === victim.targetPeerId || runtime.wasDead) continue;
+        if (id === shooter || victim.kind === 'peer' && id === victim.targetPeerId || runtime.life.hp <= 0 || !runtime.motion.samples.length) continue;
         const yaw = runtime.motion.sample(at, _peerOcclusionPoint, filtered);
         const hit = segmentPlayerHitboxHitT(start, end, _peerOcclusionPoint, yaw, radius);
         if (hit !== null && hit < 1 - 1e-6) return true;
     }
-    if (!(forgottenMecha?.ownsLocalPilot) && state.peer?.id !== shooter && !(victim.kind === 'peer' && victim.targetPeerId === state.peer?.id) && state.playerHp > 0 && localMotion.samples.length) {
+    if (!(forgottenMecha?.ownsLocalPilot) && state.peer?.id !== shooter && !(victim.kind === 'peer' && victim.targetPeerId === state.peer?.id) && hostLife.hp > 0 && localMotion.samples.length) {
         const yaw = localMotion.sample(at, _peerOcclusionPoint, filtered);
         const hit = segmentPlayerHitboxHitT(start, end, _peerOcclusionPoint, yaw, radius);
         if (hit !== null && hit < 1 - 1e-6) return true;
@@ -1168,14 +1345,24 @@ function homingFireContext(fromPeerId: string, packet: FirePacket, now: number):
     const lock = packet.homingTarget;
     if (!lock || packet.weapon === 'SNIPER') return null;
     const origin = new THREE.Vector3(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
-    const occluders: THREE.Object3D[] = [];
+    const occluders: THREE.Object3D[] = [], candidates: THREE.Group[] = [];
+    const updated = new Set<THREE.Object3D>();
     if (state.peer) peerMotion(state.peer.id, now);
     const peersBlock = (at: number, filtered: boolean) => (start: THREE.Vector3, end: THREE.Vector3) =>
         peerBodiesBlockSegment(fromPeerId, lock, start, end, 0, at, filtered);
-    for (const target of state.targets) {
-        const data = targetData(target);
-        if (data.hp > 0 && data.bodyMesh) { target.updateWorldMatrix(true, true); occluders.push(data.bodyMesh); }
-    }
+    const occludersForRay = (spend: (cost: number) => boolean) =>
+        (start: THREE.Vector3, end: THREE.Vector3, obstacleCount: number) => {
+            queryTargetsAlongSegment(start.x, start.z, end.x, end.z, candidates);
+            if (!spend(1 + obstacleCount + candidates.length + peerRuntime.size)) return null;
+            occluders.length = 0;
+            for (const target of candidates) {
+                const data = targetData(target), body = data.bodyMesh;
+                if (data.hp <= 0 || !body || lock.kind === 'npc' && target === state.targets[lock.targetIndex]) continue;
+                if (!updated.has(body)) { body.updateWorldMatrix(true, false); updated.add(body); }
+                occluders.push(body);
+            }
+            return occluders;
+        };
     if (lock.kind === 'mecha') {
         const actor = forgottenMecha;
         if (!actor?.ready || actor.hp <= 0 || actor.revision !== lock.targetRevision) return null;
@@ -1190,9 +1377,9 @@ function homingFireContext(fromPeerId: string, packet: FirePacket, now: number):
         };
         const observed = body.matrixWorld.clone();
         return { history: mechaMotion.history, kind: 'sphere', radius, aimRadius: radius,
-            canAcquire: (position, _yaw, at, filtered) => {
+            canAcquire: (position, _yaw, at, filtered, spend) => {
                 observed.setPosition(position);
-                return hasLineOfSightToOrientedBox(origin, body.geometry.boundingBox!, observed, query, occluders, body, peersBlock(at, filtered));
+                return hasLineOfSightToOrientedBox(origin, body.geometry.boundingBox!, observed, query, occludersForRay(spend), body, peersBlock(at, filtered));
             } };
     }
     if (lock.kind === 'npc') {
@@ -1210,25 +1397,26 @@ function homingFireContext(fromPeerId: string, packet: FirePacket, now: number):
             box.copy(body.geometry.boundingBox!); matrix.copy(body.matrixWorld);
         } else matrix.setPosition(object.position);
         const offset = new THREE.Vector3().setFromMatrixPosition(matrix).sub(object.position);
-        return { history, kind: 'sphere', radius: TARGET_HIT_RANGE_MULTIPLIER * (data.scale || 1), aimRadius: Math.sqrt(3) * (data.scale || 1),
-            canAcquire: (position, _yaw, at, filtered) => {
+        const aimRadius = box.getSize(new THREE.Vector3()).multiply(new THREE.Vector3().setFromMatrixScale(matrix)).length() / 2;
+        return { history, kind: 'sphere', radius: TARGET_HIT_RANGE_MULTIPLIER * (data.scale || 1), aimRadius,
+            canAcquire: (position, _yaw, at, filtered, spend) => {
                 matrix.setPosition(position.clone().add(offset));
-                return hasLineOfSightToOrientedBox(origin, box, matrix, queryObstaclesAlongSegment, occluders, object, peersBlock(at, filtered));
+                return hasLineOfSightToOrientedBox(origin, box, matrix, queryObstaclesAlongSegment, occludersForRay(spend), object, peersBlock(at, filtered));
             } };
     }
     if (lock.targetPeerId === fromPeerId) return null;
     const host = lock.targetPeerId === state.peer?.id;
     const runtime = getPeerRuntime(lock.targetPeerId);
-    if (lock.targetLifeId !== (host ? state.lifeId : runtime?.lifeId) ||
-        (host ? state.playerHp <= 0 : runtime?.wasDead !== false) || (!host && !state.peers[lock.targetPeerId])) return null;
+    if (lock.targetLifeId !== (host ? hostLife.id : runtime?.life.id) ||
+        (host ? hostLife.hp <= 0 : (!runtime || runtime.life.hp <= 0)) || (!host && !state.peers[lock.targetPeerId])) return null;
     const history = peerMotion(lock.targetPeerId, now);
     if (!history) return null;
     const box = new THREE.Box3(new THREE.Vector3(PLAYER_HITBOX_MIN.x, PLAYER_HITBOX_MIN.y, PLAYER_HITBOX_MIN.z), new THREE.Vector3(PLAYER_HITBOX_MAX.x, PLAYER_HITBOX_MAX.y, PLAYER_HITBOX_MAX.z));
     const matrix = new THREE.Matrix4(), yawRotation = new THREE.Quaternion(), unit = new THREE.Vector3(1, 1, 1);
     return { history, kind: 'player', radius: PLAYER_HITBOX_BOUNDING_RADIUS,
-        canAcquire: (position, yaw, at, filtered) => {
+        canAcquire: (position, yaw, at, filtered, spend) => {
             yawRotation.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, yaw); matrix.compose(position, yawRotation, unit);
-            return hasLineOfSightToOrientedBox(origin, box, matrix, queryObstaclesAlongSegment, occluders, undefined, peersBlock(at, filtered));
+            return hasLineOfSightToOrientedBox(origin, box, matrix, queryObstaclesAlongSegment, occludersForRay(spend), undefined, peersBlock(at, filtered));
         } };
 }
 
@@ -1271,67 +1459,40 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             Math.abs(packet.pos.x) > MAX_PLAYER_HORIZONTAL_POSITION ||
             Math.abs(packet.pos.z) > MAX_PLAYER_HORIZONTAL_POSITION ||
             packet.pos.y < -20 || packet.pos.y > MAX_PLAYER_VERTICAL_POSITION) return null;
-        let runtime = getPeerRuntime(fromPeerId);
-        if (!runtime) {
-            if (packet.switchState !== 'IDLE' || packet.nextWeapon !== null) return null;
-            runtime = {
-                motion: new TargetMotionHistory(),
-                username: packet.username,
-                position: new THREE.Vector3(packet.pos.x, packet.pos.y, packet.pos.z),
-                yaw: packet.yaw,
-                pitch: packet.pitch,
-                lastUpdateAt: now,
-                travelAllowance: NETWORK_MOVEMENT_BURST,
-                shots: new ShotLedger(),
-                lifeId: packet.lifeId,
-                deathReported: false,
-                weaponState: initialWeaponState(packet.activeWeapon),
-                wasDead: packet.isDead
-            };
-            peerRuntime.set(fromPeerId, runtime);
-        } else {
-            // Validate a draft life state first. A rejected movement packet must
-            // not kill/revive the peer, reset its ledger, or change its weapon.
-            const life = { lifeId: runtime.lifeId, wasDead: runtime.wasDead, deathReported: runtime.deathReported };
-            if (!acceptLifeUpdate(life, packet.lifeId, packet.isDead)) return null;
-            const newLife = life.lifeId !== runtime.lifeId;
-            const allowance = Math.min(NETWORK_MOVEMENT_BURST,
-                runtime.travelAllowance + Math.max(0, now - runtime.lastUpdateAt) / 1000 * NETWORK_MOVEMENT_SPEED);
-            const nextPosition = _targetPos.set(packet.pos.x, packet.pos.y, packet.pos.z);
-            const travel = nextPosition.distanceTo(runtime.position);
-            if (!mounted && !newLife && travel > allowance + 1e-6) return null;
-            if (newLife && ((packet.activeWeapon !== runtime.weaponState.activeWeapon && packet.activeWeapon !== runtime.weaponState.nextWeapon) ||
-                packet.switchState !== 'IDLE' || packet.nextWeapon !== null)) return null;
-            const weaponState = newLife ? initialWeaponState(packet.activeWeapon) : advanceWeaponState(runtime.weaponState, packet, now);
-            if (!weaponState) return null;
-            if (newLife) { runtime.motion = new TargetMotionHistory(); runtime.shots.reset(); lastDamageByVictim.delete(fromPeerId); }
-            Object.assign(runtime, life);
-            runtime.travelAllowance = newLife ? NETWORK_MOVEMENT_BURST : Math.max(0, allowance - travel);
-            runtime.position.copy(nextPosition);
-            runtime.yaw = packet.yaw;
-            runtime.pitch = packet.pitch;
-            runtime.lastUpdateAt = now;
-            runtime.username = packet.username;
-            runtime.weaponState = weaponState;
-            runtime.wasDead = packet.isDead;
-        }
-        if (packet.isDead || packet.switchState !== 'IDLE' || packet.activeWeapon !== 'KATANA') invalidateMeleePeer(fromPeerId);
+        const runtime = getPeerRuntime(fromPeerId);
+        if (!runtime || packet.lifeId !== runtime.life.id) return null;
+        if (runtime.life.hp <= 0) return null;
+        const allowance = Math.min(NETWORK_MOVEMENT_BURST,
+            runtime.travelAllowance + Math.max(0, now - runtime.lastUpdateAt) / 1000 * NETWORK_MOVEMENT_SPEED);
+        const nextPosition = _targetPos.set(packet.pos.x, packet.pos.y, packet.pos.z);
+        const travel = nextPosition.distanceTo(runtime.position);
+        if (!mounted && travel > allowance + 1e-6) return null;
+        const weaponState = advanceWeaponState(runtime.weaponState, packet, now);
+        if (!weaponState) return null;
+        runtime.travelAllowance = mounted ? NETWORK_MOVEMENT_BURST : Math.max(0, allowance - travel);
+        runtime.position.copy(nextPosition);
+        runtime.yaw = packet.yaw;
+        runtime.pitch = packet.pitch;
+        runtime.lastUpdateAt = now;
+        runtime.weaponState = weaponState;
+        if (packet.switchState !== 'IDLE' || packet.activeWeapon !== 'KATANA') invalidateMeleePeer(fromPeerId);
         runtime.motion.add(now, _peerTargetPosition.copy(runtime.position).addScaledVector(THREE.Object3D.DEFAULT_UP, -PEER_Y_OFFSET), runtime.yaw);
         runtime.shots.updateTrigger(packet.isMouseDown && packet.activeWeapon === 'MINIGUN' && packet.switchState === 'IDLE', now);
-        return { ...packet, senderPeerId: fromPeerId };
+        return { ...packet, senderPeerId: fromPeerId, hp: runtime.life.hp, maxHp: PLAYER_MAX_HP, isDead: false };
     }
 
     const runtime = getPeerRuntime(fromPeerId);
-    if (!runtime) return null;
+    if (!runtime || runtime.life.hp <= 0 || !runtime.motion.samples.length) return null;
 
     if (packet.type === 'fire') {
+        if (!runtime.fireRate.accept(now)) return null;
         if (forgottenMecha?.pilotPeerId === fromPeerId && forgottenMecha.ownsPilot) return null;
         const stats = WEAPON_STATS[packet.weapon];
-        if (!stats || packet.weapon !== runtime.weaponState.activeWeapon || runtime.weaponState.switchState !== 'IDLE' || runtime.wasDead) return null;
+        if (!stats || packet.weapon !== runtime.weaponState.activeWeapon || runtime.weaponState.switchState !== 'IDLE') return null;
         _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
-        if (_barrelPos.distanceTo(runtime.position) > 5 || shotIsBlocked(runtime.position, _barrelPos, packet.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)) return null;
+        if (_barrelPos.distanceTo(runtime.position) > MAX_PLAYER_BARREL_OFFSET || shotIsBlocked(runtime.position, _barrelPos, packet.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)) return null;
         const firePacket = packet;
-        if (!runtime.shots.record(firePacket, now, runtime.wasDead, () => homingFireContext(fromPeerId, firePacket, now), forgottenMecha?.revision)) return null;
+        if (!runtime.shots.record(firePacket, now, false, () => homingFireContext(fromPeerId, firePacket, now), forgottenMecha?.revision)) return null;
         if (packet.weapon === 'SNIPER') {
             _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
             canonicalSniperBeamEnd(_barrelPos, _baseFireDir, packet.hitPoint, _targetPos);
@@ -1353,6 +1514,15 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         const history = targetMotion(packet.targetIndex, now)!;
         const identity = { kind: 'npc', targetIndex: packet.targetIndex, targetRevision } as const;
         const blocker = guidedPathBlocker(fromPeerId, identity);
+        const body = targetInfo.bodyMesh;
+        if (body && runtime.shots.isSniperShot(packet.shotId)) {
+            body.updateWorldMatrix(true, false);
+            if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
+            const offset = new THREE.Vector3().setFromMatrixPosition(body.matrixWorld).sub(target.position);
+            return runtime.shots.consumeSniperBox(packet.shotId, packet.pelletIndex, history, offset,
+                body.geometry.boundingBox!, body.matrixWorld, packet.damage, now, blocker)
+                ? { ...packet, senderPeerId: fromPeerId } : null;
+        }
         if (!runtime.shots.consumeHomingNpc(
             packet.shotId,
             packet.pelletIndex,
@@ -1382,10 +1552,10 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         const targetsHost = packet.targetPeerId === state.peer?.id;
         const targetPosition = getPeerHitPosition(packet.targetPeerId);
         const targetYaw = getPeerHitYaw(packet.targetPeerId);
-        peerMotion(packet.targetPeerId, now);
+        const history = peerMotion(packet.targetPeerId, now);
         const blocker = guidedPathBlocker(fromPeerId, { kind: 'peer', targetPeerId: packet.targetPeerId, targetLifeId: packet.targetLifeId });
-        if (packet.targetLifeId !== (targetsHost ? state.lifeId : getPeerRuntime(packet.targetPeerId)?.lifeId)) return null;
-        if ((targetsHost ? state.playerHp <= 0 : getPeerRuntime(packet.targetPeerId)?.wasDead !== false) || packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition || targetYaw === null ||
+        if (packet.targetLifeId !== (targetsHost ? hostLife.id : getPeerRuntime(packet.targetPeerId)?.life.id)) return null;
+        if ((playerLife(packet.targetPeerId)?.hp ?? 0) <= 0 || packet.targetPeerId === fromPeerId || (!targetsHost && !state.peers[packet.targetPeerId]) || !targetPosition || targetYaw === null ||
             (!runtime.shots.consumeHomingPeer(
                 packet.shotId,
                 packet.pelletIndex,
@@ -1405,39 +1575,13 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
                 now,
                 blocker,
                 { kind: 'peer', targetPeerId: packet.targetPeerId, targetLifeId: packet.targetLifeId },
+                history ?? undefined,
             ))) return null;
-        lastDamageByVictim.set(packet.targetPeerId, { attackerPeerId: fromPeerId, at: now });
         return { ...packet, senderPeerId: fromPeerId, attackerName: runtime.username };
     }
 
-    if (packet.type === 'player_died') {
-        let killerName = packet.cause === 'mecha' ? 'Forgotten Mecha' : packet.cause === 'infantry' ? 'Enemy' : 'Lava';
-        if (packet.cause === 'mecha') {
-            const hit = mechaDamageByVictim.get(fromPeerId);
-            if (!hit || hit.lifeId !== packet.lifeId || hit.attacker !== null || now - hit.at > 10000) return null;
-        }
-        if (packet.cause === 'infantry') {
-            const hit = infantryDamageByVictim.get(fromPeerId);
-            if (!hit || hit.lifeId !== packet.lifeId || now - hit.at > 10000) return null;
-        }
-        let killerPeerId: string | null = null;
-        if (packet.cause === 'player') {
-            const latestDamage = lastDamageByVictim.get(fromPeerId);
-            if (!latestDamage || now - latestDamage.at > 10000) return null;
-            killerPeerId = latestDamage.attackerPeerId;
-            const name = killerPeerId === state.peer?.id ? getCachedUsername() : admittedNames.get(killerPeerId);
-            // A killer leaving before the death report must not block the victim's next life.
-            killerName = name ?? 'Guest';
-        }
-        if (!acceptDeath(runtime, packet.lifeId)) return null;
-        runtime.shots.reset();
-        lastDamageByVictim.delete(fromPeerId);
-        infantryDamageByVictim.delete(fromPeerId);
-        return { ...packet, senderPeerId: fromPeerId, victimPeerId: fromPeerId,
-            victimName: runtime.username, killerName, killerPeerId };
-    }
-
     if (packet.type === 'jump') {
+        if (mountedPeerPosition(fromPeerId) || !runtime.jumpRate.accept(now)) return null;
         return { ...packet, senderPeerId: fromPeerId };
     }
 
@@ -1521,15 +1665,25 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             return;
         }
         if (!state.isPlaying || state.matchEnded) return;
+        if (msg.type === 'respawn_request') {
+            if (isKnownClient(fromPeerId)) grantRespawn(fromPeerId, msg.lifeId);
+            return;
+        }
         const authorized = authorizeClientPacket(fromPeerId, parsed);
         if (!authorized) return;
         msg = authorized;
         if (!state.isPlaying) return;
-        if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'hit_target' || msg.type === 'player_hit' || msg.type === 'player_died' || msg.type === 'jump') {
-            // The shooter also receives validated player hits so its copy of the
-            // victim's health changes immediately. Ordinary self-originated
-            // movement/fire events still do not need to echo back.
-            broadcastToAll(msg, msg.type === 'player_hit' || msg.type === 'hit_target' ? null : fromPeerId);
+        if (msg.type === 'hit_target') {
+            const result = processTargetHit(msg.targetIndex, msg.damage, fromPeerId);
+            if (result.accepted && !result.killed) sendToPeer(fromPeerId, msg);
+            syncHostTargetStates();
+            return;
+        }
+        if (msg.type === 'player_hit' && !commitPlayerDamage(msg.targetPeerId, msg.targetLifeId, msg.damage, 'player', fromPeerId)) return;
+        if (msg.type === 'update' || msg.type === 'fire' || msg.type === 'player_hit' || msg.type === 'jump') {
+            // Echo validated player hits for shooter feedback. Health is sent by
+            // the life authority. Ordinary self-originated visuals need no echo.
+            broadcastToAll(msg, msg.type === 'player_hit' ? null : fromPeerId);
         }
     } else {
         if (!isExpectedHost(fromPeerId)) return;
@@ -1541,15 +1695,28 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             } else if (msg.type !== 'world_snapshot') pendingWorldPackets.push({ peer: fromPeerId, packet: msg });
             return;
         }
+        if (msg.type === 'player_health' || msg.type === 'player_respawn') {
+            if (clientWorldSynchronized && state.isPlaying && !state.matchEnded) {
+                if (msg.type === 'player_health') applyHealth(msg);
+                else applyRespawn(msg);
+            }
+            return;
+        }
         if (msg.type === 'mecha_state') { receiveMechaState(msg.state); return; }
         if (msg.type === 'mecha_event') { receiveMechaEvent(msg); return; }
+        if (msg.type === 'mecha_denied') { receiveMechaDenial(msg); return; }
         if (msg.type === 'start_game') {
             if (clientWorldSynchronized) enterMultiplayerMatch();
             return;
         }
         if (msg.type === 'peer_left') { removePeer(msg.peerId); return; }
         if (msg.type === 'lobby_roster') {
-            if (!state.isPlaying && msg.players[0].peerId === getHostPeerId()) state.lobbyPlayers = msg.players;
+            if (msg.players[0].peerId === getHostPeerId()) {
+                for (const peerId of state.peerIds) {
+                    if (!msg.players.some(player => player.peerId === peerId)) removePeer(peerId);
+                }
+                state.lobbyPlayers = msg.players;
+            }
             return;
         }
         if (msg.type === 'player_list') {
@@ -1566,7 +1733,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             const snapshot = msg;
             pendingWorldPackets = [];
             clearWorldSyncTimeout();
-            void multiplayerWorldLoader(snapshot.seed, () => isCurrentSession(generation)).then(() => {
+            void multiplayerWorldLoader(snapshot.seed, () => isCurrentSession(generation), snapshot.spawnHouseSlot).then(() => {
                 if (!isCurrentSession(generation)) return;
                 const queued = pendingWorldPackets ?? [];
                 pendingWorldPackets = null;
@@ -1609,6 +1776,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
     const senderId = msg.senderPeerId || fromPeerId;
 
     if (msg.type === 'update') {
+        if (senderId === state.peer?.id || !state.lobbyPlayers.some(player => player.peerId === senderId)) return;
         let peerData = state.peers[senderId] as PeerData | undefined;
         let justJoined = false;
         if (!peerData) {
@@ -1821,33 +1989,8 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         if (targetPeer && targetPeer.lifeId === msg.targetLifeId) {
             flashPeerMesh(targetPeer, 0xff3333, 150);
         }
-        if (state.peer && msg.targetPeerId === state.peer.id && msg.targetLifeId === state.lifeId) {
-            updateHealthRegen(0);
-            takePlayerDamage(msg.damage, msg.attackerName, senderId);
-            // The victim owns health. Publish the result immediately so combat,
-            // all observers and the C inspection read exactly the same value.
-            sendLocalState(true);
-        }
     } else if (msg.type === 'player_died') {
-        const victimPeer = state.peers[msg.victimPeerId || senderId];
-        if (victimPeer && victimPeer.lifeId !== undefined && msg.lifeId < victimPeer.lifeId) return;
-        if (victimPeer?.deathReported && msg.lifeId === victimPeer.lifeId) return;
-        if (victimPeer && victimPeer.mesh) {
-            victimPeer.lifeId = msg.lifeId;
-            victimPeer.deathReported = true;
-            victimPeer.hp = 0;
-            spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
-            victimPeer.mesh.visible = false;
-            if (victimPeer.hookLine) victimPeer.hookLine.visible = false;
-        }
-
-        if (msg.cause === 'player' && msg.killerPeerId === state.peer?.id) {
-            state.kills++;
-            const killsEl = DOM.kills();
-            if (killsEl) killsEl.innerText = state.kills.toString();
-            
-            flashHitmarker(true);
-        }
+        applyPlayerDeath(msg);
     } else if (msg.type === 'jump') {
         const peerData = state.peers[senderId];
         if (peerData && peerData.mesh && peerData.mesh.visible) {
@@ -1856,6 +1999,28 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             spawnRocketFlame(_boosterPos, 50, true);
             createShockwave(_boosterPos, 15.0);
         }
+    }
+}
+
+function applyPlayerDeath(packet: PlayerDiedPacket): void {
+    const victimPeer = state.peers[packet.victimPeerId ?? ''];
+    if (victimPeer && victimPeer.lifeId !== undefined && packet.lifeId < victimPeer.lifeId) return;
+    if (victimPeer?.deathReported && packet.lifeId === victimPeer.lifeId) return;
+    if (victimPeer && victimPeer.mesh) {
+        victimPeer.lifeId = packet.lifeId;
+        victimPeer.deathReported = true;
+        victimPeer.hp = 0;
+        spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
+        victimPeer.mesh.visible = false;
+        if (victimPeer.hookLine) victimPeer.hookLine.visible = false;
+    }
+
+    if (packet.cause === 'player' && packet.killerPeerId === state.peer?.id) {
+        state.kills++;
+        const killsEl = DOM.kills();
+        if (killsEl) killsEl.innerText = state.kills.toString();
+
+        flashHitmarker(true);
     }
 }
 
@@ -1917,9 +2082,10 @@ export function sendLocalState(force = false): void {
     const username = getCachedUsername();
     const q2 = (value: number) => Math.round(value * 100) / 100;
     const q3 = (value: number) => Math.round(value * 1000) / 1000;
+    const hp = state.isHost ? hostLife.hp : state.playerHp;
     const flags =
         (state.isMouseDown ? 1 : 0) |
-        (state.playerHp <= 0 ? 2 : 0) |
+        (hp <= 0 ? 2 : 0) |
         (state.isHovering ? 4 : 0) |
         (state.moveForward ? 8 : 0) |
         (state.moveBackward ? 16 : 0) |
@@ -1935,7 +2101,7 @@ export function sendLocalState(force = false): void {
         y: q2(pos.y),
         z: q2(pos.z),
         yaw: q3(camEuler.y),
-        pitch: q3(camEuler.x),
+        pitch: THREE.MathUtils.clamp(q3(camEuler.x), -Math.PI / 2, Math.PI / 2),
         weapon: activeWeapon,
         switchState: state.switchState,
         nextWeapon: state.switchState === 'IDLE' ? null : state.nextWeaponName as WeaponName,
@@ -1943,7 +2109,8 @@ export function sendLocalState(force = false): void {
         hookX,
         hookY,
         hookZ,
-        hp: THREE.MathUtils.clamp(state.playerHp, 0, state.playerMaxHp),
+        hookState: state.hookState,
+        hp,
         maxHp: state.playerMaxHp,
     };
 
@@ -1957,6 +2124,7 @@ export function sendLocalState(force = false): void {
         snapshot.switchState !== lastSentSnapshot.switchState ||
         snapshot.nextWeapon !== lastSentSnapshot.nextWeapon ||
         snapshot.flags !== lastSentSnapshot.flags ||
+        snapshot.hookState !== lastSentSnapshot.hookState ||
         snapshot.hookX !== lastSentSnapshot.hookX ||
         snapshot.hookY !== lastSentSnapshot.hookY ||
         snapshot.hookZ !== lastSentSnapshot.hookZ ||
@@ -1979,7 +2147,7 @@ export function sendLocalState(force = false): void {
         switchState: snapshot.switchState,
         nextWeapon: snapshot.nextWeapon,
         isMouseDown: state.isMouseDown,
-        isDead: state.playerHp <= 0,
+        isDead: hp <= 0,
         hookState: state.hookState,
         hookPos: state.hookState !== 'IDLE' ? { x: hookX, y: hookY, z: hookZ } : null,
         isHovering: state.isHovering,
@@ -2059,7 +2227,7 @@ function broadcastLocalFire(
 
     if (state.isHost && forgottenMecha?.networked) {
         hostMechaShots.updateTrigger(state.isMouseDown && weapon === 'MINIGUN', performance.now());
-        hostMechaShots.record(packet, performance.now(), state.playerHp <= 0, () => homingFireContext(state.peer!.id, packet, performance.now()), forgottenMecha?.revision);
+        hostMechaShots.record(packet, performance.now(), hostLife.hp <= 0, () => homingFireContext(state.peer!.id, packet, performance.now()), forgottenMecha?.revision);
     }
     broadcastToAll(packet);
 }
@@ -2201,8 +2369,6 @@ function createPeerBean(username: string): PeerData {
 
 let hostMechaShots = new ShotLedger();
 let mechaMotion: { actor: NonNullable<typeof forgottenMecha>; revision: number; history: TargetMotionHistory } | null = null;
-const mechaDamageByVictim = new Map<string, { lifeId: number; attacker: string | null; at: number }>();
-const infantryDamageByVictim = new Map<string, { lifeId: number; at: number }>();
 let lastInfantryPublish = -Infinity;
 
 export function publishInfantryState(force = false): void {
@@ -2231,12 +2397,8 @@ function applyInfantryEvent(event: InfantryEvent): void {
         if (event.killer === state.peer?.id) flashHitmarker(true);
         return;
     }
-    const { start, end, victim } = event;
+    const { start, end } = event;
     if (event.robot === 'base') createLaserBeam(new THREE.Vector3(start.x, start.y, start.z), new THREE.Vector3(end.x, end.y, end.z), 0xfac377);
-    if (victim && victim.peerId === state.peer?.id && victim.lifeId === state.lifeId && state.playerHp > 0 && !forgottenMecha?.ownsLocalPilot) {
-        takePlayerDamage(INFANTRY[event.robot].damage, 'Enemy');
-        sendLocalState(true);
-    }
 }
 
 export function infantryAttack(kind: InfantryKind, start: THREE.Vector3, end: THREE.Vector3, victim?: InfantryPlayer): void {
@@ -2250,16 +2412,16 @@ export function infantryAttack(kind: InfantryKind, start: THREE.Vector3, end: TH
                 if (state.isMultiplayer) announceMechaShield(contact.point);
                 else actor.combat.shieldImpact(contact.point);
             } else if (contact) {
-                if (state.isMultiplayer) actor.damage(INFANTRY[kind].damage, { origin: start, point: contact.point, surface: 'body' });
-                else processMechaHit(INFANTRY[kind].damage, { origin: start, point: contact.point, surface: 'body' });
+                if (state.isMultiplayer) {
+                    const result = actor.damage(INFANTRY[kind].damage, { origin: start, point: contact.point, surface: 'body' });
+                    if (result.accepted) announceMechaHit(null, result.killed, contact.point, _baseFireDir.subVectors(end, start).normalize());
+                } else processMechaHit(INFANTRY[kind].damage, { origin: start, point: contact.point, surface: 'body' });
             }
         }
     } else if (victim) {
-        if (!state.isMultiplayer || victim.id === state.peer?.id) {
+        if (!state.isMultiplayer) {
             if (state.lifeId === victim.lifeId) takePlayerDamage(INFANTRY[kind].damage, 'Enemy');
-        } else {
-            infantryDamageByVictim.set(victim.id, { lifeId: victim.lifeId, at: performance.now() });
-            lastDamageByVictim.delete(victim.id);
+        } else if (commitPlayerDamage(victim.id, victim.lifeId, INFANTRY[kind].damage, 'infantry')) {
             remoteVictim = { peerId: victim.id, lifeId: victim.lifeId };
         }
     }
@@ -2273,6 +2435,7 @@ export function infantryPlayers(): InfantryPlayer[] {
     const actor = forgottenMecha;
     const mounted = actor?.mode === 'piloted' ? {
         revision: actor.revision, bounds: new THREE.Box3().setFromObject(actor.hitbox),
+        closestPoint: (origin: THREE.Vector3, out: THREE.Vector3) => actor.closestArmorPoint(origin, out),
     } : undefined;
     const local = state.controls?.getObject();
     const players = state.isMultiplayer ? mechaPlayers() : local ? [
@@ -2291,20 +2454,20 @@ function mechaPlayers() {
     return state.lobbyPlayers.flatMap(entry => {
         if (entry.peerId === state.peer?.id) {
             const object = state.controls?.getObject();
-            return object ? [mechaPlayer(entry.peerId, object.position.clone(), object.rotation.y, state.lifeId, state.playerHp > 0, state.velocity)] : [];
+            return object ? [mechaPlayer(entry.peerId, object.position.clone(), object.rotation.y, hostLife.id, hostLife.hp > 0, state.velocity)] : [];
         }
         const runtime = peerRuntime.get(entry.peerId);
-        if (!runtime) return [];
+        if (!runtime?.motion.samples.length) return [];
         const samples = runtime.motion.samples, previous = samples.at(-2), latest = samples.at(-1);
         const velocity = previous && latest && latest.at > previous.at ? latest.position.clone().sub(previous.position).multiplyScalar(1000 / (latest.at - previous.at)) : new THREE.Vector3();
-        return [mechaPlayer(entry.peerId, runtime.position.clone(), runtime.yaw, runtime.lifeId, !runtime.wasDead, velocity)];
+        return [mechaPlayer(entry.peerId, runtime.position.clone(), runtime.yaw, runtime.life.id, runtime.life.hp > 0, velocity)];
     });
 }
 export function authorizeMechaHit(peerId: string, packet: MechaHitPacket): boolean {
     const actor = forgottenMecha, host = peerId === state.peer?.id;
     const runtime = peerRuntime.get(peerId), ledger = host ? hostMechaShots : runtime?.shots;
     if (!state.isHost || !state.isPlaying || state.matchEnded || !actor?.networked || actor.revision !== packet.revision || actor.hp <= 0 || !ledger ||
-        (host ? state.playerHp <= 0 : !runtime || runtime.wasDead) || actor.ownsPilot && actor.pilotPeerId === peerId) return false;
+        (host ? hostLife.hp <= 0 : !runtime || runtime.life.hp <= 0) || actor.ownsPilot && actor.pilotPeerId === peerId) return false;
     let contact: ReturnType<typeof actor.weaponContact> = null;
     let origin = new THREE.Vector3();
     const direction = new THREE.Vector3();
@@ -2327,12 +2490,11 @@ export function authorizeMechaHit(peerId: string, packet: MechaHitPacket): boole
 setMechaNetworkPort({
     send: broadcastToAll,
     players: mechaPlayers,
+    sendTo: sendToPeer,
     endingPeers: () => state.connections.filter(conn => conn.open && isKnownClient(conn.peer)).map(conn => conn.peer),
     hitTarget: (index, damage, owner) => processTargetHit(index, damage, owner ?? undefined),
-    acceptedDamage: (peerId, lifeId, attacker) => {
-        mechaDamageByVictim.set(peerId, { lifeId, attacker, at: performance.now() });
-        if (attacker) lastDamageByVictim.set(peerId, { attackerPeerId: attacker, at: performance.now() });
-        else lastDamageByVictim.delete(peerId);
+    acceptedDamage: (peerId, lifeId, attacker, damage, mechaSequence) => {
+        commitPlayerDamage(peerId, lifeId, damage, attacker ? 'player' : 'mecha', attacker, mechaSequence);
     },
 });
 
@@ -2351,7 +2513,7 @@ setMeleeNetworkPort({
     players: () => {
         const local = localMeleePlayer();
         if (!state.isMultiplayer) return [local];
-        if (state.isHost) return [local, ...Array.from(peerRuntime, ([id, p]) => ({id, lifeId:p.lifeId, alive:!p.wasDead && !(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId===id),
+        if (state.isHost) return [local, ...Array.from(peerRuntime, ([id, p]) => ({id, lifeId:p.life.id, alive:p.motion.samples.length > 0 && p.life.hp > 0 && !(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId===id),
             ready:p.weaponState.activeWeapon==='KATANA' && p.weaponState.switchState==='IDLE' && !(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId===id),
             position:p.position.clone(), yaw:p.yaw, pitch:p.pitch, name:p.username}))];
         return [local, ...Object.entries(state.peers).map(([id,p]) => ({id,lifeId:p.lifeId??0,alive:p.hp>0 && !(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId===id),
@@ -2364,18 +2526,25 @@ setMeleeNetworkPort({
     blocked: (start,end,mecha) => { const t=shotObstructionT(start,end,0,mecha); return t!==null && t<1-1e-6; },
     hitPlayer: (victim,attacker,damage,sequence) => {
         if (state.isMultiplayer && !state.isHost) return;
-        lastDamageByVictim.set(victim.id,{attackerPeerId:attacker.id,at:performance.now()});
+        if (!state.isMultiplayer) {
+            takePlayerDamage(damage, attacker.name, attacker.id);
+            return;
+        }
+        if (!commitPlayerDamage(victim.id, victim.lifeId, damage, 'player', attacker.id)) return;
         const packet: PlayerHitPacket={type:'player_hit',shotId:sequence,pelletIndex:0,senderPeerId:attacker.id,
             targetPeerId:victim.id,targetLifeId:victim.lifeId,damage,attackerName:attacker.name};
-        if(victim.id===state.peer?.id && state.lifeId===victim.lifeId) takePlayerDamage(damage,attacker.name,attacker.id);
-        else if(state.peers[victim.id]) flashPeerMesh(state.peers[victim.id]);
+        if(state.peers[victim.id]) flashPeerMesh(state.peers[victim.id]);
         broadcastToAll(packet);
     },
-    hitMecha: (attacker,damage,origin,point) => {
+    hitMecha: (attacker,damage,origin,point,beforeLethal) => {
         const actor=forgottenMecha; if(!actor || state.isMultiplayer && !state.isHost) return false;
-        if(!state.isMultiplayer) { const hp = actor.hp; processMechaHit(damage,{origin,point,surface:'body'}); return actor.hp < hp; }
+        if(!state.isMultiplayer) { const hp = actor.hp; processMechaHit(damage,{origin,point,surface:'body',beforeLethal}); return actor.hp < hp; }
+        if (actor.combat.shieldActive && !actor.combat.isInsideShield(origin)) {
+            announceMechaShield(point);
+            return false;
+        }
         const mounted=actor.ownsPilot;
-        const result=actor.damage(damage,{origin,point,surface:'body'});
+        const result=actor.damage(damage,{origin,point,surface:'body',beforeLethal});
         if(!result.accepted) return false;
         if(result.killed && !mounted) state.score++;
         if(state.isMultiplayer) announceMechaHit(attacker.id,result.killed,point,point.clone().sub(origin).normalize());

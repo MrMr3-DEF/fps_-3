@@ -47,12 +47,12 @@ export class GothChatEngine {
             const response: unknown = event.data, pending = this.pending;
             if (this.worker !== worker || !pending || !isGothWorkerResponse(response) ||
                 response.generation !== this.generation || response.requestId !== pending.request.requestId) return;
-            if (response.type === 'error') { this.finish(new Error(response.message), true); return; }
+            if (response.type === 'error') { this.finish(new Error(response.message), pending.request.type !== 'reply'); return; }
             if (response.type === 'cancelled') { pending.cancelled = true; this.finish(); return; }
             if (response.type === 'complete') {
                 if (pending.request.type === 'load') this.ready = true;
                 if (!pending.cancelled && pending.request.type === 'reply' && !pending.visible.trim()) {
-                    this.finish(new Error('The model returned an empty reply. Please retry.'), true);
+                    this.finish(new Error('The model returned an empty reply. Please retry.'));
                 } else this.finish();
                 return;
             }

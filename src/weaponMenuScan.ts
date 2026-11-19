@@ -112,7 +112,8 @@ export class WeaponMenuScan {
     private readonly label: HTMLDivElement;
     private readonly panel: HTMLDivElement;
     private readonly identifier: HTMLSpanElement;
-    private readonly reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    private readonly reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    private get reducedMotion(): boolean { return this.reducedMotionQuery?.matches ?? false; }
     private readonly bounds = createScreenBounds();
     private readonly callout = createSmartGogglesCalloutLayout();
     private facts: Array<{ text: string; typed: HTMLSpanElement }> = [];

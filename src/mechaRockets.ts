@@ -14,7 +14,7 @@ export type RocketObstacleQuery = (sx: number, sz: number, ex: number, ez: numbe
 export type RocketFlightMode = 'guided' | 'straight' | 'wandering';
 export interface RocketPlayer { peerId?: string; position: THREE.Vector3; yaw: number; lifeId: number; alive: boolean; velocity: THREE.Vector3 }
 export interface RocketLaunch { mode: RocketFlightMode; target?: RocketLock | null; seed?: number;
-    player?: RocketPlayer; peerTarget?: RocketPlayer | null; ownerPeerId?: string | null; damage?: number; turnSpeed?: number; guidanceResponse?: number }
+    enemy?: boolean; player?: RocketPlayer; peerTarget?: RocketPlayer | null; ownerPeerId?: string | null; damage?: number; turnSpeed?: number; guidanceResponse?: number }
 interface Rocket { mesh: THREE.Group; active: boolean; start: THREE.Vector3; position: THREE.Vector3; forward: THREE.Vector3;
     end: THREE.Vector3; direction: THREE.Vector3; target: RocketLock | null; travel: number; age: number; smoke: number;
     mode: RocketFlightMode; targetPosition: THREE.Vector3; velocity: THREE.Vector3; landingDistance: number; noise: number;
@@ -29,7 +29,6 @@ const IDENTITY = new THREE.Quaternion();
 export class MechaRockets {
     readonly group = new THREE.Group();
     selected: RocketLock | null = null;
-    clock = 0;
     replica = false;
     onExplosion: ((position: THREE.Vector3) => void) | null = null;
     private readonly rockets: Rocket[] = [];
@@ -44,6 +43,9 @@ export class MechaRockets {
     private readonly maximum = new THREE.Vector3();
     private readonly point = new THREE.Vector3();
     private readonly projected = new THREE.Vector3();
+    private readonly hullScale = new THREE.Vector3();
+    private readonly hullMin = new THREE.Vector3();
+    private readonly hullMax = new THREE.Vector3();
     private readonly desired = new THREE.Vector3();
     private readonly steering = new THREE.Quaternion();
     private readonly side = new THREE.Vector3();
@@ -142,10 +144,11 @@ export class MechaRockets {
         for (const player of players) {
             if (!player.alive || player.peerId === owner) continue;
             closestPlayerBodyPoint(origin, player.position, player.yaw, this.point);
-            if (origin.distanceTo(this.point) > BULLET_TRAVEL_DISTANCE) continue;
+            if (origin.distanceTo(this.point) > BULLET_TRAVEL_DISTANCE || this.obstacleT(origin, this.point, query) !== null) continue;
+            closestPlayerBodyPoint(camera.position, player.position, player.yaw, this.point);
             this.projected.copy(player.position).project(camera);
             const next = this.projected.x ** 2 + this.projected.y ** 2;
-            if (this.projected.z < -1 || this.projected.z > 1 || Math.abs(this.projected.x) > 1 || Math.abs(this.projected.y) > 1 || next >= score || this.obstacleT(origin, this.point, query) !== null) continue;
+            if (this.projected.z < -1 || this.projected.z > 1 || Math.abs(this.projected.x) > 1 || Math.abs(this.projected.y) > 1 || next >= score || this.obstacleT(camera.position, this.point, query) !== null) continue;
             score = next; result = player;
         }
         return result;
@@ -175,7 +178,7 @@ export class MechaRockets {
         rocket.mode = launch.mode; rocket.travel = rocket.age = rocket.smoke = 0; rocket.velocity.set(0, 0, 0);
         // Profiles and target lives belong to each launch. A later mount or
         // helmet toggle cannot change a rocket already in flight.
-        rocket.enemy = launch.player !== undefined;
+        rocket.enemy = launch.enemy ?? (launch.player !== undefined);
         rocket.ownerPeerId = launch.ownerPeerId ?? null;
         rocket.playerPeerId = (launch.player ?? launch.peerTarget)?.peerId ?? null;
         rocket.playerLife = (launch.player ?? launch.peerTarget)?.lifeId ?? null;
@@ -274,7 +277,7 @@ export class MechaRockets {
     update(delta: number, targets: readonly THREE.Group[], query: RocketObstacleQuery, hit: (index: number, damage: number) => void,
         player?: RocketPlayer, playerHit: (damage: number) => void = () => {},
         players?: readonly RocketPlayer[], hitPlayer?: (player: RocketPlayer, damage: number, owner: string | null) => void): void {
-        if (!Number.isFinite(delta) || delta <= 0) return; this.clock += delta;
+        if (!Number.isFinite(delta) || delta <= 0) return;
         const offsets = [-1.2 + this.radius, 0, 2 - this.radius];
         const victims = players ?? (player ? [player] : []);
         for (const rocket of this.rockets) {
@@ -324,9 +327,13 @@ export class MechaRockets {
                         const d = targetData(target); if (d.hp <= 0 || !d.bodyMesh) continue;
                         const body = d.bodyMesh; body.updateWorldMatrix(true, false); if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
                         this.inverse.copy(body.matrixWorld).invert();
-                        this.point.copy(this.localStart).applyMatrix4(this.inverse); this.projected.copy(this.localEnd).applyMatrix4(this.inverse);
-                        const value = segmentRoundedBoxHitT(this.point, this.projected, body.geometry.boundingBox!.min, body.geometry.boundingBox!.max,
-                            this.radius / body.matrixWorld.getMaxScaleOnAxis());
+                        // Undo rotation without shrinking the spherical hull along thinner axes.
+                        this.hullScale.setFromMatrixScale(body.matrixWorld);
+                        this.point.copy(this.localStart).applyMatrix4(this.inverse).multiply(this.hullScale);
+                        this.projected.copy(this.localEnd).applyMatrix4(this.inverse).multiply(this.hullScale);
+                        this.hullMin.copy(body.geometry.boundingBox!.min).multiply(this.hullScale);
+                        this.hullMax.copy(body.geometry.boundingBox!.max).multiply(this.hullScale);
+                        const value = segmentRoundedBoxHitT(this.point, this.projected, this.hullMin, this.hullMax, this.radius);
                         if (value !== null && (contact === null || value < contact)) contact = value;
                     }
                 }

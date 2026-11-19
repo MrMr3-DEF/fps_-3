@@ -48,7 +48,7 @@ export interface MeleeNetworkPort {
     confirmHit(packet: import('./networkTypes.js').MeleeHitEvent): void;
     blocked(start: THREE.Vector3, end: THREE.Vector3, mecha: boolean): boolean;
     hitPlayer(player: MeleePlayer, attacker: MeleePlayer, damage: number, sequence: number): void;
-    hitMecha(attacker: MeleePlayer, damage: number, origin: THREE.Vector3, point: THREE.Vector3): boolean;
+    hitMecha(attacker: MeleePlayer, damage: number, origin: THREE.Vector3, point: THREE.Vector3, beforeLethal?: () => void): boolean;
 }
 let meleePort: MeleeNetworkPort | null = null;
 export function setMeleeNetworkPort(port: MeleeNetworkPort): void { meleePort = port; }

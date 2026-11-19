@@ -61,6 +61,33 @@ test('credential quota and IP binding survive concurrent claims', async () => {
     assert.equal(responses.filter(r=>r.status===200).length,2);
     assert.equal(responses.filter(r=>r.status===429).length,3);
 });
+test('release keeps admitted reservations and skips writes for absent tokens', async t => {
+    const { room, storage } = await setup();
+    await call(room, '/create-session', fields('a', 'Pilot'));
+    await call(room, '/admit', { closeToken: cap('X'), peerId: 'peer-a', admissionToken: cap('A') });
+    const writes = t.mock.method(storage, 'put');
+    for (const turnSessionToken of [cap('a'), cap('b')]) {
+        assert.equal((await call(room, '/release-session', { turnSessionToken })).status, 204);
+    }
+    assert.equal(writes.mock.callCount(), 0);
+    assert.equal((await call(room, '/create-session', fields('b', 'Pilot'))).status, 409);
+});
+
+test('credential refunds release only the matching reservation once', async () => {
+    const { room } = await setup();
+    const capability = { turnSessionToken: cap('h'), ip: '127.0.0.1' };
+    const claim = (id: string) => call(room, '/claim-credential', { ...capability, claimId: cap(id) });
+    const refund = (id: string) => call(room, '/refund-credential', { ...capability, claimId: cap(id) });
+    assert.equal((await claim('a')).status, 200);
+    assert.equal((await claim('b')).status, 200);
+    assert.equal((await refund('c')).status, 204);
+    assert.equal((await claim('c')).status, 429);
+    assert.equal((await refund('a')).status, 204);
+    assert.equal((await refund('a')).status, 204);
+    assert.equal((await claim('c')).status, 200);
+    assert.equal((await claim('d')).status, 429);
+});
+
 test('heartbeat renews admitted sessions, prunes departed names; old alarm cannot erase renewed room', async () => {
     const { room, storage }=await setup(); await call(room,'/create-session',fields('a'));
     await call(room,'/admit',{closeToken:cap('X'),peerId:'peer-a',admissionToken:cap('A')});

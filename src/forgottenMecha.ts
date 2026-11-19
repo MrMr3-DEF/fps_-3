@@ -2,7 +2,7 @@ import { MechaNape } from './mechaNape.js';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE } from './config.js';
+import { MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE, MAP_HALF_SIZE } from './config.js';
 import { obstacleData, targetData } from './userDataTypes.js';
 import { MechaStomp, stompContact, type PilotWeapon } from './mechaStomp.js';
 import { MechaNavigation, type NavigationBox, type MechaRoute } from './mechaNavigation.js';
@@ -75,6 +75,8 @@ export class ForgottenMecha {
     pilotLifeId = 0;
     private targetPeerId: string | null = null;
     private multiplayerPlayers: readonly MechaPlayer[] = [];
+    private readonly closestArmor = new THREE.Vector3();
+    private readonly laserBodyPosition = new THREE.Vector3();
     private readonly rocketPlayers = new Map<string, RocketPlayer>();
     private readonly laserVictims = new Set<string>();
     private readonly replicaPosition = new THREE.Vector3();
@@ -144,7 +146,7 @@ export class ForgottenMecha {
     private mixer: THREE.AnimationMixer | null = null;
     private readonly actions = new Map<string, THREE.AnimationAction>();
     private action: THREE.AnimationAction | null = null;
-    private readonly lavaFeet: THREE.SkinnedMesh[] = [];
+    private readonly lavaFeet: THREE.Mesh[] = [];
     private readonly meshes: THREE.SkinnedMesh[] = [];
     private readonly skeletons = new Set<THREE.Skeleton>();
     private readonly bones = new Map<string, THREE.Bone>();
@@ -181,6 +183,8 @@ export class ForgottenMecha {
     private readonly localYawAxis = new THREE.Vector3(0, 0, 1);
     private readonly obstacles: THREE.Object3D[];
     private readonly lava: readonly THREE.Object3D[];
+    private readonly lavaQuery?: (x: number, z: number, radius: number, out: THREE.Object3D[]) => readonly THREE.Object3D[];
+    private readonly lavaCandidates: THREE.Object3D[] = [];
     private readonly seed: number;
     private wallPunchHeld = false;
     private readonly events: MechaEvents;
@@ -188,10 +192,11 @@ export class ForgottenMecha {
     private readonly sightCandidates: THREE.Object3D[] = [];
 
     constructor(obstacles: readonly THREE.Object3D[], lava: readonly THREE.Object3D[], seed: number,
-        events: MechaEvents = { impact() {}, stompPlayer() {}, gameOver() {} }, obstacleQuery?: ObstacleQuery) {
+        events: MechaEvents = { impact() {}, stompPlayer() {}, gameOver() {} }, obstacleQuery?: ObstacleQuery, lavaQuery?: ForgottenMecha['lavaQuery']) {
         this.group.name = 'Forgotten Mecha';
         this.obstacles = [...obstacles];
         this.lava = lava;
+        this.lavaQuery = lavaQuery;
         this.seed = seed;
         this.events = events;
         this.combat = new MechaCombat(damage => this.captureHit('laser', damage));
@@ -213,7 +218,6 @@ export class ForgottenMecha {
             if (node instanceof THREE.Bone) this.bones.set(node.name, node);
             if (node instanceof THREE.SkinnedMesh) {
                 this.meshes.push(node);
-                if (node.name === 'M_Foot_L' || node.name === 'M_Foot_R') this.lavaFeet.push(node);
                 this.skeletons.add(node.skeleton);
                 node.castShadow = node.receiveShadow = true;
                 // Animated skin bounds are recomputed below; a bind-pose sphere
@@ -224,6 +228,7 @@ export class ForgottenMecha {
                 collider.name = `forgotten-mecha-${node.name}`;
                 collider.userData.damageTarget = 'forgotten-mecha';
                 this.colliders.push(collider);
+                if (node.name === 'M_Foot_L' || node.name === 'M_Foot_R') this.lavaFeet.push(collider);
                 if (/^M_(Foot|LowerLeg|Thigh)_[LR]$/.test(node.name)) this.legColliders.push(collider);
                 this.movementParts.push({ x: 0, z: 0, halfW: 0, halfD: 0, bottom: 0, top: 0 });
                 const materials = Array.isArray(node.material) ? node.material : [node.material];
@@ -405,6 +410,7 @@ export class ForgottenMecha {
             return { accepted: false, killed: false };
         }
         if (hit?.surface === 'shield') return { accepted: false, killed: false };
+        if (amount >= this.hp) hit?.beforeLethal?.();
         this.hp = Math.max(0, this.hp - amount);
         const killed = this.hp === 0;
         if (killed) {
@@ -433,6 +439,19 @@ export class ForgottenMecha {
             }
         }
         return { accepted: true, killed };
+    }
+    closestArmorPoint(origin: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+        let closest = Infinity;
+        out.copy(origin);
+        for (const collider of this.solidColliders) {
+            const data = obstacleData(collider);
+            this.beamMin.set(collider.position.x - data.halfW, collider.position.y - data.halfH, collider.position.z - data.halfD);
+            this.beamMax.set(collider.position.x + data.halfW, collider.position.y + data.halfH, collider.position.z + data.halfD);
+            const point = this.closestArmor.copy(origin).clamp(this.beamMin, this.beamMax);
+            const distance = point.distanceToSquared(origin);
+            if (distance < closest) { out.copy(point); closest = distance; }
+        }
+        return out;
     }
     weaponContact(start: THREE.Vector3, end: THREE.Vector3, origin: THREE.Vector3, radius: number): { t: number; surface: 'shield' | 'body'; point: THREE.Vector3 } | null {
         let t = this.combat.shieldContactT(start, end, origin, radius) ?? Infinity;
@@ -468,7 +487,7 @@ export class ForgottenMecha {
     get controlsFrozen(): boolean { return this.mode !== 'piloted' || !this.released && this.fireTime < MECHA_ROCKET_FIRE_TIME; }
     look(yaw: number, pitch: number, time?: number): void { if (!this.controlsFrozen) this.pilot.look(yaw, pitch, time); }
     toggleHelmet(): void {
-        if (this.mode !== 'piloted') return;
+        if (this.mode !== 'piloted' || this.queuedExit) return;
         if (this.controlsFrozen) { this.queuedHelmetToggle = !this.queuedHelmetToggle; return; }
         this.headView.toggle();
         this.pilot.rockets.selected = null;
@@ -608,7 +627,8 @@ export class ForgottenMecha {
             for (const [forward, side] of [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1]]) {
                 out.copy(start).addScaledVector(this.aim, forward * distance);
                 out.x += side * distance * this.aim.z; out.z -= side * distance * this.aim.x;
-                if (!this.obstacles.some(blocked) && !this.colliders.some(blocked)) return true;
+                if (Math.abs(out.x) <= MAP_HALF_SIZE - 1 && Math.abs(out.z) <= MAP_HALF_SIZE - 1 &&
+                    !this.colliders.some(blocked) && !this.obstacles.some(blocked)) return true;
             }
         }
         return false;
@@ -647,10 +667,14 @@ export class ForgottenMecha {
     private updateLava(delta: number): void {
         let contact = false;
         for (const foot of this.lavaFeet) {
-            this.meshBounds.setFromObject(foot, true);
-            if (this.meshBounds.min.y > 0.15) continue;
-            contact ||= this.lava.some(pool => this.meshBounds.max.x >= pool.position.x - LAVA_POOL_HALF_SIZE && this.meshBounds.min.x <= pool.position.x + LAVA_POOL_HALF_SIZE
-                && this.meshBounds.max.z >= pool.position.z - LAVA_POOL_HALF_SIZE && this.meshBounds.min.z <= pool.position.z + LAVA_POOL_HALF_SIZE);
+            const { x, y, z } = foot.position;
+            const { halfW, halfD, halfH } = obstacleData(foot);
+            if (y - halfH > 0.15) continue;
+            // The current pose already has exact skinned foot bounds.
+            const pools = this.lavaQuery?.(x, z, Math.max(halfW, halfD), this.lavaCandidates) ?? this.lava;
+            contact = pools.some(pool => Math.abs(x - pool.position.x) <= halfW + LAVA_POOL_HALF_SIZE &&
+                Math.abs(z - pool.position.z) <= halfD + LAVA_POOL_HALF_SIZE);
+            if (contact) break;
         }
         if (!contact) { this.lavaTime = 0; return; }
         this.lavaTime += delta;
@@ -679,7 +703,7 @@ export class ForgottenMecha {
                 this.updateHelmet(0);
             }
         } else {
-            const move = this.pilot.update(delta, this.group.position, this.group.rotation.y, this.speed, this.controlsFrozen ? 0 : this.pilotDirection,
+            const move = this.pilot.update(delta, this.group.position, this.group.rotation.y, this.speed, this.controlsFrozen || this.queuedExit ? 0 : this.pilotDirection,
                 this.resolvePilotMovement);
             this.group.rotation.y = move.heading;
             this.waistYaw = this.pilot.yaw - move.heading;
@@ -840,7 +864,7 @@ export class ForgottenMecha {
             this.muzzleAnchor.getWorldPosition(this.target);
             this.barrelDirection.set(0, 0, 1).transformDirection(this.muzzleAnchor.matrixWorld);
             const fired = this.pilot.rockets.fire(this.target, this.barrelDirection, [], {
-                mode: visible ? 'guided' : 'wandering', target: null, player: this.networked ? this.rocketPlayers.get(player.peerId!) : this.rocketPlayer,
+                mode: visible ? 'guided' : 'wandering', enemy: true, target: null, player: this.networked ? this.rocketPlayers.get(player.peerId!) : this.rocketPlayer,
                 damage: MECHA_ENEMY_ROCKET_DAMAGE, turnSpeed: visible ? MECHA_ENEMY_ROCKET_TURN_SPEED : undefined,
                 guidanceResponse: visible ? MECHA_ENEMY_ROCKET_GUIDANCE_RESPONSE : undefined,
             });
@@ -920,6 +944,7 @@ export class ForgottenMecha {
      * Interpolate the fitted pose so armor and observer visuals stay together. */
     applyNetworkState(s: MechaState, alpha = 1): void {
         if (!this.ready || this.disposed || s.boneCount !== this.bones.size) return;
+        if (s.mode === 'destroying' || s.mode === 'destroyed') this.headEffects.dispose();
         this.mode = s.mode; this.revision = s.revision; this.hp = s.hp; this.elapsed = s.elapsed; this.recoveringExit = s.recoveringExit;
         this.pilotPeerId = s.pilotPeerId; this.pilotLifeId = s.pilotLifeId;
         this.group.position.lerp(this.replicaPosition.set(s.position.x, s.position.y, s.position.z), alpha);
@@ -1092,6 +1117,7 @@ export class ForgottenMecha {
         const previousLaserPhase = this.combat.laserPhase;
         this.combat.updateLaser(delta, {
             robotPosition: this.group.position, playerPosition: player.position, playerYaw: player.yaw ?? 0,
+            playerBodyPosition: this.laserBodyPosition.copy(player.position).addScaledVector(THREE.Object3D.DEFAULT_UP, -PLAYER_BODY_CAMERA_OFFSET),
             playerAlive: player.alive, visible: this.hasLineOfSight(player), canCharge: this.mode === 'tracking',
             yaw: this.group.rotation.y + this.waistYaw,
             obstacleDistance: this.beamObstacleDistance,
@@ -1102,7 +1128,7 @@ export class ForgottenMecha {
                 for (const candidate of this.multiplayerPlayers) {
                     const key = `${candidate.peerId}:${candidate.lifeId}`;
                     if (!candidate.alive || this.laserVictims.has(key)) continue;
-                    if (segmentPlayerBeamHitT(this.combat.beamOrigin, this.combat.beamEnd, candidate.position, candidate.yaw ?? 0, this.combat.beamRadius) !== null) {
+                    if (segmentPlayerBeamHitT(this.combat.beamOrigin, this.combat.beamEnd, this.laserBodyPosition.copy(candidate.position).addScaledVector(THREE.Object3D.DEFAULT_UP, -PLAYER_BODY_CAMERA_OFFSET), candidate.yaw ?? 0, this.combat.beamRadius) !== null) {
                         this.laserVictims.add(key); this.events.playerHit?.(candidate, MECHA_LASER_DAMAGE, 'laser');
                     }
                 }

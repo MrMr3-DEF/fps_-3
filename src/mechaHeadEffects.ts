@@ -63,6 +63,8 @@ export class MechaHeadEffects {
             renderer.render(this.scene, this.camera);
         } finally { renderer.setRenderTarget(previous); }
     }
+    resetCapture(): void { this.captureStep = -1; }
+
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true; this.captureStep = -1;

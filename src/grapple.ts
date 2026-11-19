@@ -15,9 +15,9 @@ import {
     GUN_TIP_Z,
 } from './config.js';
 import { queryGrappleSurfacesAlongSegment, queryTargetsNear, queryObstaclesAlongSegment, forgottenMecha } from './world.js';
-import { segmentRoundedBoxHitT } from './gameplayMath.js';
+import { segmentAabbHitT } from './gameplayMath.js';
 import { obstacleData } from './userDataTypes.js';
-import { PLAYER_RADIUS, PLAYER_HEIGHT } from './config.js';
+import { PLAYER_RADIUS, PLAYER_HEIGHT, CAMERA_CEILING_CLEARANCE } from './config.js';
 import { triggerMuzzleFlash } from './muzzleFlash.js';
 
 // Reused scratch values for aiming and cable placement.
@@ -145,6 +145,7 @@ export function toggleGrapplingHook(aimRay?: THREE.Ray): void {
             resetHook();
             return;
         }
+        state.hookMesh.visible = false;
         state.scene.add(state.hookMesh);
     } else {
         resetHook();
@@ -188,6 +189,7 @@ export function updateHook(delta: number): void {
             if (state.hookTargetCockpit) {
                 const actor = state.hookTargetCockpit;
                 actor.seatAnchor.getWorldPosition(state.hookTarget);
+                state.hookPosition.copy(state.hookTarget);
                 _toEnemy.subVectors(state.hookTarget, playerObj.position);
                 const distance = _toEnemy.length(); const travel = Math.min(distance, HOOK_SPEED * 0.75 * delta);
                 _pullDir.copy(_toEnemy).normalize(); _rayEnd.copy(playerObj.position).addScaledVector(_pullDir, travel);
@@ -198,9 +200,11 @@ export function updateHook(delta: number): void {
                 for (const object of candidates) {
                     if (object.userData.damageTarget === 'forgotten-mecha') continue;
                     const d = obstacleData(object), hh = d.halfH ?? d.height / 2;
-                    _midPoint.set(object.position.x - d.halfW, object.position.y - hh - PLAYER_HEIGHT, object.position.z - d.halfD);
-                    _gunTip.set(object.position.x + d.halfW, object.position.y + hh + PLAYER_HEIGHT, object.position.z + d.halfD);
-                    if (segmentRoundedBoxHitT(playerObj.position, _rayEnd, _midPoint, _gunTip, PLAYER_RADIUS) !== null) { blocked = true; break; }
+                    _midPoint.set(object.position.x - d.halfW - PLAYER_RADIUS,
+                        object.position.y - hh - CAMERA_CEILING_CLEARANCE, object.position.z - d.halfD - PLAYER_RADIUS);
+                    _gunTip.set(object.position.x + d.halfW + PLAYER_RADIUS,
+                        object.position.y + hh + PLAYER_HEIGHT, object.position.z + d.halfD + PLAYER_RADIUS);
+                    if (segmentAabbHitT(playerObj.position, _rayEnd, _midPoint, _gunTip) !== null) { blocked = true; break; }
                 }
                 state.velocity.set(0, 0, 0);
                 if (blocked) { resetHook(); return; }
@@ -208,6 +212,7 @@ export function updateHook(delta: number): void {
                 if (distance <= travel + 0.001) { playerObj.position.copy(state.hookTarget); if (state.isMultiplayer) requestMechaBoard(); else actor.beginBoarding(playerObj.position, playerObj.quaternion, state.isThirdPerson, state.rightClickActive); resetHook(); return; }
             } else if (state.hookIsEnemy && state.hookTargetEnemy) {
                 state.hookTarget.copy(state.hookTargetEnemy.position);
+                state.hookPosition.copy(state.hookTarget);
                 _toEnemy.subVectors(state.hookTarget, playerObj.position);
                 const dist = _toEnemy.length();
 
@@ -249,7 +254,8 @@ export function updateHook(delta: number): void {
             state.leftGun.localToWorld(_gunTip);
             const distance = _gunTip.distanceTo(state.hookPosition);
 
-            if (distance > 0.05) {
+            state.hookMesh.visible = distance > 0.05;
+            if (state.hookMesh.visible) {
                 _midPoint.addVectors(_gunTip, state.hookPosition).multiplyScalar(0.5);
                 state.hookMesh.position.copy(_midPoint);
                 state.hookMesh.scale.set(1, 1, distance);

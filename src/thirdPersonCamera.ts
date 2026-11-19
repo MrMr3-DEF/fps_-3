@@ -14,6 +14,7 @@ import { obstacleData } from './userDataTypes.js';
 const _forward = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _desiredPosition = new THREE.Vector3();
+const _boomAnchor = new THREE.Vector3();
 const _minimum = new THREE.Vector3();
 const _maximum = new THREE.Vector3();
 
@@ -114,7 +115,20 @@ export function resolveThirdPersonCameraPosition(
         .addScaledVector(_right, dimensions?.shoulder ?? THIRD_PERSON_CAMERA_SHOULDER_OFFSET);
     _desiredPosition.y += dimensions?.height ?? THIRD_PERSON_CAMERA_HEIGHT;
 
-    return resolveCameraObstruction(logicalPosition, _desiredPosition, obstacles, out);
+    // The smaller player head clearance can put the eye just inside a
+    // ceiling's padded camera volume. Start the boom below that padding.
+    _boomAnchor.copy(logicalPosition);
+    for (const obstacle of obstacles) {
+        const data = obstacleData(obstacle), bottom = obstacle.position.y - (data.halfH || data.height / 2);
+        const pad = THIRD_PERSON_CAMERA_COLLISION_RADIUS;
+        if (logicalPosition.y < bottom && logicalPosition.y >= bottom - pad &&
+            Math.abs(logicalPosition.x - obstacle.position.x) <= data.halfW + pad &&
+            Math.abs(logicalPosition.z - obstacle.position.z) <= data.halfD + pad) {
+            _boomAnchor.y = Math.min(_boomAnchor.y, bottom - pad - 1e-6);
+        }
+    }
+    if (_boomAnchor.y < logicalPosition.y) _desiredPosition.y = Math.min(_desiredPosition.y, _boomAnchor.y);
+    return resolveCameraObstruction(_boomAnchor, _desiredPosition, obstacles, out);
 }
 
 /** Shared padded camera sweep for shoulder booms and cinematic motion. The

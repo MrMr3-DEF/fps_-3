@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { state, resetMatchStats } from '../src/state.js';
-import { beginInput, enableTouchMode, endInput, isInputActive, onInputStarted, onInputEnded, setTouchMode, touchMode, touchMove } from '../src/inputSession.js';
+import { beginInput, endInput, isInputActive, onInputStarted, onInputEnded, setTouchMode, touchMode, touchMove } from '../src/inputSession.js';
 
 test('desktop uses pointer lock; landscape touch uses the same session lifecycle without requesting it', async () => {
     let locks = 0, unlocks = 0, starts = 0, ends = 0;
@@ -38,7 +38,7 @@ test('desktop uses pointer lock; landscape touch uses the same session lifecycle
     assert.equal(ends, 2);
     assert.equal(unlocks, 2);
 
-    enableTouchMode();
+    setTouchMode(true);
     Object.defineProperty(globalThis, 'innerWidth', { value: 390, writable: true, configurable: true });
     Object.defineProperty(globalThis, 'innerHeight', { value: 844, writable: true, configurable: true });
     beginInput();

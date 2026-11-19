@@ -149,7 +149,7 @@ export function setupMobileControls(actions: Actions): () => void {
     onInputEnded(() => { reset(); layer.hidden = true; });
     const pause = () => { reset(); if (isInputActive()) endInput(); };
     window.addEventListener('blur', pause);
-    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) pause(); });
+    document.addEventListener('fullscreenchange', () => { if (touchMode && !document.fullscreenElement) pause(); });
     document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
     window.addEventListener('resize', () => {
         if (touchMode && innerWidth <= innerHeight) pause();

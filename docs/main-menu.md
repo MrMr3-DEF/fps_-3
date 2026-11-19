@@ -65,4 +65,4 @@ reopening starts a fresh generation. Stale completions cannot replace the engine
 or UI. Closing interrupts replies and clears conversation text. Completed models
 can remain within the match; leaving releases them when immediate download is off.
 Cached model files may remain in browser storage. See the
-[character/chat guide](../public/npc/goth/README.md) for model configuration.
+[character/chat guide](goth-character.md) for model configuration.

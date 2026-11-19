@@ -467,6 +467,7 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
 
+            if (Math.max(Math.abs(x), Math.abs(z)) < MAP_SIZE / 2 + LAVA_POOL_HALF_SIZE) continue;
             const mesh = new THREE.Mesh(fakeLavaGeo, fakeLavaMat);
             mesh.position.set(x, 0.075, z);
 
@@ -715,14 +716,15 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
 
             if (!overlapsWithFakePillars(x, z, 3.5)) {
                 const mat = spriteMaterials[Math.floor(worldRandom() * spriteMaterials.length)];
-                const sprite = new THREE.Sprite(mat);
                 const height = 4.0 + worldRandom() * 2.0;
                 const width = height * (0.8 + worldRandom() * 0.3);
+                spawned2DOutside++;
+                if (Math.max(Math.abs(x), Math.abs(z)) < MAP_SIZE / 2 + width / 2) continue;
+                const sprite = new THREE.Sprite(mat);
                 sprite.scale.set(width, height, 1.0);
                 sprite.position.set(x, height / 2, z);
                 addWorldObject(sprite);
                 addChunkedRenderObject(sprite);
-                spawned2DOutside++;
             }
         }
     }

@@ -7,11 +7,19 @@ import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed, rebuildTargetHash } from '../src/world.ts';
 import { state } from '../src/state.ts';
 import { setMultiplayerWorldLoader, onMultiplayerDisconnected, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, broadcastTargetKill, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
-import { BULLET_TRAVEL_DISTANCE, ENEMY_COUNT, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED, WEAPON_STATS } from '../src/config.ts';
-import { Peer, Connection } from './fakePeer.ts';
+import { BULLET_TRAVEL_DISTANCE, ENEMY_COUNT, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED, WEAPON_STATS, NETWORK_PROTOCOL_VERSION, MAX_PENDING_ROOM_CONNECTIONS } from '../src/config.ts';
+import { Peer, Connection as FakeConnection } from './fakePeer.ts';
+
+class Connection extends FakeConnection {
+    constructor(id: string, metadata?: unknown) {
+        super(id, metadata && typeof metadata === 'object' && 'admissionToken' in metadata
+            ? { version: NETWORK_PROTOCOL_VERSION, ...metadata } : metadata);
+    }
+}
 import worker, { TurnRateLimiter } from '../src/worker.ts';
 import { TurnRoomStateMachine } from '../src/turnRoom.ts';
 import { registerTurnSession } from '../src/turnSecurity.ts';
+import type { UpdatePacket, WeaponName } from '../src/networkTypes.ts';
 import { parseNetworkPacket } from '../src/networkTypes.ts';
 import { SHARED_BODY_MAT } from '../src/weapons.ts';
 
@@ -29,18 +37,52 @@ function namespace(factory:(s:any)=>any){
         return {fetch:(url:string,init:any)=>objects.get(id).fetch(new Request(url,init))};
     }};
 }
-function backend(){
+function backend(turnStatuses: number[] = []){
     const env:any={TURN_KEY_ID:'key',TURN_KEY_API_TOKEN:'secret',TURNSTILE_SECRET_KEY:'secret',TURNSTILE_SITE_KEY:'site',TURNSTILE_HOSTNAME:'local',
         ACTIVE_TURN_ROOM:namespace(s=>new TurnRoomStateMachine(s,5)),TURN_RATE_LIMITER:namespace(s=>new TurnRateLimiter(s)),ASSETS:{fetch:()=>new Response('missing',{status:404})}};
     globalThis.fetch=(async(input:any,init:any)=>{
         const url=String(input);
         if(url.includes('siteverify'))return Response.json({success:true,hostname:'local',action:new URLSearchParams(init.body).get('response')});
-        if(url.includes('generate-ice-servers'))return Response.json({iceServers:[{urls:'stun:local'}]});
+        if(url.includes('generate-ice-servers')) {
+            const status = turnStatuses.shift() ?? 200;
+            return Response.json({iceServers:[{urls:'stun:local'}]}, { status });
+        }
         return worker.fetch(new Request(new URL(url,'https://local'),init),env);
     }) as typeof fetch;
 }
 const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
 function update(name:string,lifeId=0){return {type:'update' as const,lifeId,username:name,pos:{x:0,y:2,z:0},yaw:0,pitch:0,activeWeapon:'SNIPER' as const,switchState:'IDLE' as const,nextWeapon:null,isMouseDown:false,isDead:false,hookState:'IDLE' as const,hookPos:null,isHovering:false,hoverKeys:null,hp:PLAYER_MAX_HP,maxHp:PLAYER_MAX_HP};}
+
+// Place fixtures by feeding movement and switching through normal host authority.
+function stagePeer(connection: Connection, packet: UpdatePacket): void {
+    const snapshot = connection.sent.find(item => item.type === 'world_snapshot');
+    const spawn = getTownSpawn(snapshot.seed, 'house', snapshot.spawnHouseSlot);
+    const steps = Math.ceil(Math.hypot(packet.pos.x - spawn.x, packet.pos.y - 2, packet.pos.z - spawn.z) / (NETWORK_MOVEMENT_BURST / 2));
+    const now = performance.now(), previous = Object.getOwnPropertyDescriptor(performance, 'now');
+    let clock = now - steps * 200 - 320;
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => clock });
+    const send = (pos: UpdatePacket['pos'], activeWeapon: WeaponName, switchState: UpdatePacket['switchState'], nextWeapon: WeaponName | null) => {
+        assert.ok(authorizeClientPacket(connection.peer, { ...packet, pos, activeWeapon, switchState, nextWeapon }));
+    };
+    try {
+        for (let i = 1; i <= steps; i++) {
+            clock += 200;
+            const t = i / steps;
+            send({ x: THREE.MathUtils.lerp(spawn.x, packet.pos.x, t), y: THREE.MathUtils.lerp(2, packet.pos.y, t),
+                z: THREE.MathUtils.lerp(spawn.z, packet.pos.z, t) }, 'PISTOL', 'IDLE', null);
+        }
+        if (packet.activeWeapon !== 'PISTOL') {
+            send(packet.pos, 'PISTOL', 'WITHDRAWING', packet.activeWeapon);
+            clock += 160;
+            send(packet.pos, packet.activeWeapon, 'BRINGING_IN', packet.activeWeapon);
+            clock += 160;
+        }
+        send(packet.pos, packet.activeWeapon, 'IDLE', null);
+    } finally {
+        if (previous) Object.defineProperty(performance, 'now', previous);
+        else Reflect.deleteProperty(performance, 'now');
+    }
+}
 
 test('termination reports once after invalidating stale signalling and preparation work', async () => {
     backend(); state.scene = null;
@@ -98,9 +140,12 @@ test('host movement allowance bounds cumulative bursts, capped silence and life 
     try {
         await hostGame('Host', 'ABCDEFGH', 'create-room');
         const admission = await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'moving-peer');
-        Peer.latest.emit('connection', new Connection('moving-peer', { admissionToken: admission.admissionToken }));
+        const moving = new Connection('moving-peer', { admissionToken: admission.admissionToken });
+        Peer.latest.emit('connection', moving);
         await tick(); await tick();
         const send = (x: number, rest = {}) => authorizeClientPacket('moving-peer', { ...update('Pilot'), pos: { x, y: 2, z: 0 }, ...rest });
+        stagePeer(moving, update('Pilot'));
+        now += 1000;
         assert.ok(send(0));
         let x = 0;
         for (let i = 0; i < 200; i++) if (send(x + 1)) x++;
@@ -119,12 +164,9 @@ test('host movement allowance bounds cumulative bursts, capped silence and life 
         x += NETWORK_MOVEMENT_BURST;
         assert.ok(send(x), 'silence replenishes a bounded burst');
         assert.equal(send(x + 1), null, 'a long silence does not bank an unbounded allowance');
-        assert.ok(authorizeClientPacket('moving-peer', { type: 'player_died', lifeId: 0, cause: 'lava', killerPeerId: null,
-            victimName: 'Pilot', killerName: 'Lava' }));
-        assert.ok(send(-500, { lifeId: 1 }), 'an accepted respawn starts a new budget at its spawn');
-        assert.ok(send(-500 + NETWORK_MOVEMENT_BURST, { lifeId: 1 }));
-        assert.equal(send(-498 + NETWORK_MOVEMENT_BURST, { lifeId: 1 }), null);
-        assert.equal(send(0, { lifeId: 2 }), null, 'an unreported extra life cannot reset the budget');
+        assert.equal(authorizeClientPacket('moving-peer', { type: 'player_died', lifeId: 0, cause: 'lava', killerPeerId: null,
+            victimName: 'Pilot', killerName: 'Lava' }), null);
+        assert.equal(send(-500, { lifeId: 1 }), null, 'a guest cannot choose a new life or its spawn');
     } finally { disconnectMultiplayer(); }
 });
 
@@ -144,6 +186,7 @@ test('the real host path canonicalizes shotgun pellets and rejects unfinished we
         state.scene = new THREE.Scene();
         const shooter = clients[0], viewer = clients[1];
         const packet = { ...update('Shooter'), activeWeapon: 'SHOTGUN' as const };
+        stagePeer(shooter, packet);
         shooter.emit('data', packet);
         shooter.emit('data', { type: 'fire', weapon: 'SHOTGUN', shotId: 1, spreadSeed: 1, pelletCount: 16,
             barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
@@ -174,7 +217,7 @@ test('admitted peers cannot author infantry state or hit another revision of a r
         Peer.latest.emit('connection', shooter);
         await tick(); await tick();
         assert.equal(startHostMatch(), true);
-        assert.ok(authorizeClientPacket(shooter.peer, update('Pilot')));
+        stagePeer(shooter, update('Pilot'));
         const fabricated = parseNetworkPacket({ type: 'infantry_state', state: { sequence: 30, day: 8, wallHp: 0, bots: [] } })!;
         assert.equal(authorizeClientPacket(shooter.peer, fabricated), null);
         const bot = new THREE.Group();
@@ -232,45 +275,36 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         assert.deepEqual(cb.sent.filter(p=>p.type==='player_list').at(-1).players, state.playerList);
         ca.emit('data', { type: 'player_list', players: [{ peerId: 'peer-a', username: 'Fake', bodyColor: 0, kills: 99, deaths: 0 }] });
         assert.equal(state.playerList[1].kills, 0, 'clients cannot forge scoreboard snapshots');
-        ca.emit('data',{...update('Forged'),hp:7,maxHp:PLAYER_MAX_HP});cb.emit('data',update('Other'));
+        const alpha = { ...update('Forged'), hp: 7 }, beta = { ...update('Other'), pos: { x: 0, y: 2, z: -8 } };
+        stagePeer(ca, alpha); stagePeer(cb, beta);
+        ca.emit('data', alpha); cb.emit('data', beta);
         assert.equal(cb.sent.find(p=>p.type==='update'&&p.senderPeerId==='peer-a').username,'Pilot');
-        assert.equal(state.peers['peer-a'].hp,7);
-        assert.equal(state.peers['peer-a'].maxHp,PLAYER_MAX_HP);
-        assert.equal(state.peers['peer-a'].username,'Pilot');
-        assert.equal(state.peers['peer-b'].hp,PLAYER_MAX_HP);
-        assert.equal(state.peers['peer-b'].username,'Other');
-        updateRemotePeers(0.02);
-        assert.equal(state.peers['peer-a'].hp,7,'inspection must not invent health regeneration');
+        assert.equal(state.peers['peer-a'].hp,PLAYER_MAX_HP,'the host replaces self-reported HP');
         ca.emit('data',{type:'fire',weapon:'SNIPER',shotId:1,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1},hitPoint:{x:4000,y:4000,z:-4000}});
         const relayedFire=cb.sent.find(p=>p.type==='fire'&&p.senderPeerId==='peer-a');
-        assert.deepEqual(relayedFire.hitPoint,{x:0,y:2,z:-BULLET_TRAVEL_DISTANCE},'host clamps and aligns relayed sniper beams');
+        assert.deepEqual(relayedFire.hitPoint,{x:0,y:2,z:-BULLET_TRAVEL_DISTANCE});
         ca.emit('data',{type:'player_hit',targetLifeId:0,shotId:1,pelletIndex:0,targetPeerId:'peer-b',damage:10,attackerName:'Forged'});
-        assert.equal(state.peers['peer-b'].hp,PLAYER_MAX_HP,'health waits for victim confirmation');
-        cb.emit('data',{...update('Other'),hp:0,isDead:true});
-        assert.equal(state.peers['peer-b'].hp,0,'inspection displays confirmed victim health');
-        assert.ok(ca.sent.some(p=>p.type==='player_hit'&&p.targetPeerId==='peer-b'),'shooter receives validated health changes');
-        state.playerHp=6;state.playerMaxHp=PLAYER_MAX_HP;sendLocalState(true);
-        const hostUpdate=ca.sent.filter(p=>p.type==='update').at(-1);
-        assert.equal(hostUpdate.hp,6);assert.equal(hostUpdate.maxHp,PLAYER_MAX_HP);
-        assert.equal(hostUpdate.dayNightElapsedSeconds,137.25,'host state packets carry the room clock');
-        state.playerHp=-4;sendLocalState(true);
-        assert.equal(ca.sent.filter(p=>p.type==='update').at(-1).hp,0,'outbound health is clamped to its validated range');
-        state.playerHp=PLAYER_MAX_HP;
+        assert.equal(state.peers['peer-b'].hp,0,'accepted damage is applied without victim acknowledgement');
+        cb.emit('data', beta);
+        assert.equal(state.peers['peer-b'].hp,0);
         broadcastToAll({type:'player_hit',targetLifeId:0,shotId:1,pelletIndex:0,targetPeerId:'peer-a',damage:10,attackerName:'Host'});
-        assert.equal(state.peers['peer-a'].hp,7,'host inspection waits for the victim instead of predicting health');
-        const death={type:'player_died' as const,lifeId:0,cause:'player' as const,killerPeerId:host.id,killerName:'Host',victimName:'Pilot',victimPeerId:'peer-a'};
-        ca.emit('data',death);assert.equal(state.kills,1);ca.emit('data',death);assert.equal(state.kills,1);
+        assert.equal(state.peers['peer-a'].hp,0);
         assert.deepEqual(state.playerList.map(player => [player.kills, player.deaths]),
-            [[1, 0], [0, 1], [0, 0]], 'validated death updates exactly one K/D event');
-        assert.deepEqual(cb.sent.filter(p=>p.type==='player_list').at(-1).players, state.playerList);
-        broadcastToAll({type:'player_died',lifeId:0,cause:'lava',killerPeerId:null,
-            victimName:'Host',killerName:'Lava',victimPeerId:host.id});
-        assert.deepEqual(state.playerList.map(player => [player.kills, player.deaths]),
-            [[1, 1], [0, 1], [0, 0]], 'host deaths also reach the authoritative list');
-        assert.equal(authorizeClientPacket('peer-a',{type:'fire',weapon:'SNIPER',shotId:2,spreadSeed:1,barrelPos:{x:0,y:2,z:0},dir:{x:0,y:0,z:-1}}),null);
+            [[1, 0], [1, 1], [0, 1]]);
+        const deaths = cb.sent.filter(p => p.type === 'player_died').length;
+        ca.emit('data',{type:'player_died',lifeId:0,cause:'lava',killerPeerId:null,victimName:'Pilot',killerName:'Lava'});
+        assert.equal(cb.sent.filter(p => p.type === 'player_died').length, deaths);
         ca.emit('data',{...update('Forged',1),pos:{x:80,y:2,z:40}});
+        assert.equal(state.peers['peer-a'].mesh.visible,false);
+        ca.emit('data',{type:'respawn_request',lifeId:0});
+        ca.emit('data',{type:'respawn_request',lifeId:0});
         assert.equal(state.peers['peer-a'].mesh.visible,true);
-        assert.deepEqual(state.peers['peer-a'].mesh.position.toArray(),state.peers['peer-a'].targetPosition.toArray(),'respawns snap instead of lerping from the death site');
+        const grants = ca.sent.filter(p => p.type === 'player_respawn');
+        assert.equal(grants.length,1);
+        const spawn = getTownSpawn(getWorldSeed(),'church');
+        assert.deepEqual(grants[0].pos,{x:spawn.x,y:2,z:spawn.z});
+        assert.ok(grants[0].cooldownMs > 0);
+        assert.deepEqual(state.peers['peer-a'].mesh.position.toArray(),state.peers['peer-a'].targetPosition.toArray());
         ca.close();await tick();assert.ok(cb.sent.some(p=>p.type==='peer_left'&&p.peerId==='peer-a'));
         assert.deepEqual(state.playerList.map(player => player.peerId), [host.id, 'peer-b']);
         const replacement=await registerTurnSession('ABCDEFGH','join-room','pilot','peer-new');
@@ -300,7 +334,7 @@ test('client rejects host without proof and applies kills while waiting to play'
         conn.emit('data',{type:'world_snapshot',gameStarted:false,username:'Guest3',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:0,targets:[]});assert.equal(state.isMultiplayer,false);
         await joinGame('Pilot','ABCDEFGH','join-room');peer=Peer.latest;peer.emit('open',peer.id);conn=peer.connections['testfps-room-ABCDEFGH'][0];
         const admitted=await fetch('/api/room-admissions/ABCDEFGH',{method:'POST',headers:{Authorization:`Bearer ${host.closeToken}`},body:JSON.stringify({peerId:peer.id,admissionToken:(conn.metadata as any).admissionToken})});
-        const admission=await admitted.json() as any;conn.emit('data',{type:'admission',proof:admission.admissionProof});
+        const admission=await admitted.json() as any;conn.emit('data',{type:'admission',proof:admission.admissionProof, version: NETWORK_PROTOCOL_VERSION});
         conn.emit('data',{type:'world_snapshot',gameStarted:false,username:'Guest3',spawnHouseSlot:2,seed:1,score:0,dayNightElapsedSeconds:42,targets:[]});
         assert.equal(state.isPlaying,false);
         assert.equal(state.dayNightElapsedSeconds,42);
@@ -341,7 +375,7 @@ test('client rejects host without proof and applies kills while waiting to play'
         conn.emit('data',{type:'start_game'});
         assert.equal(state.lifeId,life,'duplicate start never respawns');
         conn.emit('data',update('Host'));
-        conn.emit('data',{type:'player_died',lifeId:0,cause:'lava',killerPeerId:null,victimName:'Host',killerName:'Lava'});
+        conn.emit('data',{type:'player_died',lifeId:0,cause:'lava',killerPeerId:null,victimName:'Host',killerName:'Lava',victimPeerId:conn.peer});
         conn.emit('data',update('Host'));
         assert.equal(state.peers[conn.peer].mesh.visible,false,'queued living updates cannot resurrect a dead avatar');
         conn.emit('data',update('Host',1));
@@ -387,7 +421,7 @@ test('malformed unopened metadata cannot reserve any of the host pending slots',
             bad.open = false; host.emit('connection', bad);
             assert.equal(bad.handlers.has('open'), false);
         }
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < MAX_PENDING_ROOM_CONNECTIONS; i++) {
             const pending = new Connection(`pending-${i}`, { admissionToken: 'a'.repeat(43) });
             pending.open = false; host.emit('connection', pending);
             assert.equal(pending.handlers.has('open'), true);
@@ -439,9 +473,10 @@ test('host canonical sniper presentation stops on the floor', async () => {
     try {
         await hostGame('Host', 'ABCDEFGH', 'create-room');
         const ticket = await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'floor-peer');
-        Peer.latest.emit('connection', new Connection('floor-peer', { admissionToken: ticket.admissionToken }));
+        const floor = new Connection('floor-peer', { admissionToken: ticket.admissionToken });
+        Peer.latest.emit('connection', floor);
         await tick(); await tick();
-        assert.ok(authorizeClientPacket('floor-peer', update('Pilot')));
+        stagePeer(floor, update('Pilot'));
         const fire = authorizeClientPacket('floor-peer', { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
             barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: -1, z: 0 }, hitPoint: { x: 0, y: -500, z: 0 } });
         assert.equal(fire?.type, 'fire');
@@ -462,10 +497,11 @@ test('the real host checks homing acquisition, intervening bodies and captured r
     try {
         await hostGame('Host', 'ABCDEFGH', 'create-room');
         const ticket = await registerTurnSession('ABCDEFGH', 'join-room', 'Shooter', 'guided-peer');
-        Peer.latest.emit('connection', new Connection('guided-peer', { admissionToken: ticket.admissionToken }));
+        const guided = new Connection('guided-peer', { admissionToken: ticket.admissionToken });
+        Peer.latest.emit('connection', guided);
         await tick(); await tick();
         state.targets = [target, cover]; rebuildTargetHash();
-        assert.ok(authorizeClientPacket('guided-peer', { ...update('Shooter'), pos: { x: 0, y: 3, z: 0 }, activeWeapon: 'AR' }));
+        stagePeer(guided, { ...update('Shooter'), pos: { x: 0, y: 3, z: 0 }, activeWeapon: 'AR' });
         const packet = { type: 'fire' as const, weapon: 'AR' as const, shotId: 1, spreadSeed: 42,
             barrelPos: { x: 0, y: 3, z: 0 }, dir: { x: 0, y: 0, z: -1 },
             homingTarget: { kind: 'npc' as const, targetIndex: 0, targetRevision: 0 }, homingStartDistance: Math.hypot(1.5, 120) / 3 };
@@ -479,15 +515,18 @@ test('the real host checks homing acquisition, intervening bodies and captured r
         const peerTicket = await registerTurnSession('ABCDEFGH', 'join-room', 'Cover', 'cover-peer');
         const peerCover = new Connection('cover-peer', { admissionToken: peerTicket.admissionToken });
         Peer.latest.emit('connection', peerCover); await tick(); await tick();
-        assert.ok(authorizeClientPacket('cover-peer', { ...update('Cover'), pos: { x: 0.4, y: 3.35, z: -60 } }));
+        const pose = { ...update('Cover'), pos: { x: 0.4, y: 3.35, z: -60 } };
+        stagePeer(peerCover, pose);
+        now += 200;
+        assert.ok(authorizeClientPacket('cover-peer', pose));
         assert.equal(authorizeClientPacket('guided-peer', { ...packet, shotId: 2 }), null, 'a physical peer body can fully occlude acquisition too');
         peerCover.close();
         assert.ok(authorizeClientPacket('guided-peer', { ...packet, shotId: 2 }));
-        now = 1400;
+        now += 200;
         assert.ok(authorizeClientPacket('guided-peer', { ...claim, shotId: 2 }));
         assert.ok(authorizeClientPacket('guided-peer', { ...packet, shotId: 3 }));
         target.userData.eliminationRevision++;
-        now = 1600;
+        now += 200;
         assert.equal(authorizeClientPacket('guided-peer', { ...claim, shotId: 3 }), null, 'replacement revision cannot use the straight-hit fallback');
     } finally {
         disconnectMultiplayer(); state.targets = []; rebuildTargetHash();
@@ -502,7 +541,7 @@ test('departing avatars dispose each owned resource once even after the scene re
         const ticket = await registerTurnSession('ABCDEFGH', 'join-room', 'Guest', 'owned-peer');
         const connection = new Connection('owned-peer', { admissionToken: ticket.admissionToken });
         Peer.latest.emit('connection', connection); await tick(); await tick();
-        state.scene = new THREE.Scene(); startHostMatch(); connection.emit('data', update('Guest'));
+        state.scene = new THREE.Scene(); startHostMatch(); stagePeer(connection, update('Guest')); connection.emit('data', update('Guest'));
         const peer = state.peers['owned-peer'], root = peer.mesh;
         const geometry = new THREE.BoxGeometry(), texture = new THREE.Texture();
         const material = new THREE.MeshBasicMaterial({ map: texture }), spriteMaterial = new THREE.SpriteMaterial({ map: texture });
@@ -530,7 +569,11 @@ test('an accepted hit retains valid death attribution after the killer leaves, w
             clients.push(connection); Peer.latest.emit('connection', connection);
         }
         await tick(); await tick(); state.scene = new THREE.Scene(); startHostMatch();
-        for (const connection of clients) connection.emit('data', update(connection.peer));
+        for (const [i, connection] of clients.entries()) {
+            const pose = { ...update(connection.peer), pos: { x: 0, y: 2, z: -i * 8 } };
+            stagePeer(connection, pose);
+            connection.emit('data', pose);
+        }
         const [killer, victim, observer] = clients;
         killer.emit('data', { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
             barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } });
@@ -541,7 +584,7 @@ test('an accepted hit retains valid death attribution after the killer leaves, w
         const relayed = observer.sent.filter(p => p.type === 'player_died').at(-1);
         assert.ok(parseNetworkPacket(relayed)); assert.equal(relayed.killerPeerId, killer.peer);
         assert.equal(state.playerList.find(p => p.peerId === victim.peer)?.deaths, 1);
-        victim.emit('data', update('Beta', 1));
+        victim.emit('data', { type: 'respawn_request', lifeId: 0 });
         assert.equal(state.peers[victim.peer].lifeId, 1); assert.equal(state.peers[victim.peer].mesh.visible, true);
     } finally { disconnectMultiplayer(); state.scene = null; }
 });
@@ -606,7 +649,7 @@ test('client queues match start and clock updates while its world is preparing',
             body: JSON.stringify({ peerId: peer.id, admissionToken: (conn.metadata as any).admissionToken }),
         });
         const admission = await response.json() as any;
-        conn.emit('data', { type: 'admission', proof: admission.admissionProof });
+        conn.emit('data', { type: 'admission', proof: admission.admissionProof, version: NETWORK_PROTOCOL_VERSION });
         conn.emit('data', { type: 'world_snapshot', gameStarted: false, username: 'Guest3', spawnHouseSlot: 2,
             seed: 1, score: 0, dayNightElapsedSeconds: 42, targets: [] });
         conn.emit('data', { type: 'start_game' });
@@ -656,7 +699,7 @@ test('real host authorizes mecha shield/body claims once, rejects fabricated dam
         assert.equal(state.activeParticles.length, particleCount, 'guests cannot forge armor impact events');
         assert.equal(state.matchEnded, false); assert.equal(actor.hp, 50);
         const origin = actor.combat.shieldCenter.clone().add(new THREE.Vector3(0, 60, 0));
-        assert.ok(authorizeClientPacket('mecha-shooter', { ...update('Shooter'), pos: { x: origin.x, y: origin.y, z: origin.z } }));
+        stagePeer(connection, { ...update('Shooter'), pos: { x: origin.x, y: origin.y, z: origin.z } });
         const fire = (shotId: number) => authorizeClientPacket('mecha-shooter', { type: 'fire', shotId, spreadSeed: 1, weapon: 'SNIPER',
             barrelPos: { x: origin.x, y: origin.y, z: origin.z }, dir: { x: 0, y: -1, z: 0 } });
         const claim = (shotId: number, damage = 10) => ({ type: 'hit_mecha' as const, revision: actor.revision, shotId, pelletIndex: 0, damage });
@@ -696,9 +739,10 @@ test('real host authorizes mecha shield/body claims once, rejects fabricated dam
         state.isThirdPerson = false; setThirdPerson(true);
         assert.equal(state.isThirdPerson, true, 'another pilot transition cannot lock the host perspective');
         const guidedAdmission = await registerTurnSession('ABCDEFGH', 'join-room', 'Guided', 'mecha-guided');
-        Peer.latest.emit('connection', new Connection('mecha-guided', { admissionToken: guidedAdmission.admissionToken })); await tick(); await tick();
+        const guided = new Connection('mecha-guided', { admissionToken: guidedAdmission.admissionToken });
+        Peer.latest.emit('connection', guided); await tick(); await tick();
         const observedCenter = actor.hitbox.position.clone(), guidedOrigin = observedCenter.clone().add(new THREE.Vector3(0, 60, 12));
-        assert.ok(authorizeClientPacket('mecha-guided', { ...update('Guided'), activeWeapon: 'AR', pos: { x: guidedOrigin.x, y: guidedOrigin.y, z: guidedOrigin.z } }));
+        stagePeer(guided, { ...update('Guided'), activeWeapon: 'AR', pos: { x: guidedOrigin.x, y: guidedOrigin.y, z: guidedOrigin.z } });
         state.camera = new THREE.PerspectiveCamera(); state.camera.position.copy(soloOrigin).add(new THREE.Vector3(50, 0, 0));
         state.controls = { getObject: () => state.camera! } as any;
         sendLocalState(true); now += 33; actor.group.position.x += 0.6;
@@ -777,6 +821,7 @@ test('live client colors are frozen and extra fields never reach viewers', async
         await tick(); await tick(); startHostMatch(); state.scene = new THREE.Scene();
         const [a, b] = connections, color = state.playerList.find(p => p.peerId === 'Alpha')!.bodyColor;
         const lists = b.sent.filter(p => p.type === 'player_list').length;
+        stagePeer(a, update('Alpha'));
         a.emit('data', { ...update('Alpha'), bodyColor: 0x112233, extra: 'payload', pos: { x: 0, y: 2, z: 0, extra: true } });
         const relayed = b.sent.filter(p => p.type === 'update').at(-1);
         assert.equal(relayed.bodyColor, color); assert.equal(relayed.extra, undefined); assert.equal(relayed.pos.extra, undefined);
@@ -796,6 +841,17 @@ test('failed admission delivery releases the server reservation even without a c
         assert.equal(state.connections.length, 0);
         assert.ok(await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'replacement-peer'));
     } finally { disconnectMultiplayer(); }
+});
+
+test('TURN accepts bearer credentials and refunds explicit upstream failures', async () => {
+    backend([503, 502, 200, 200]);
+    const registration = await fetch('/api/rooms', { method: 'POST', body: JSON.stringify({
+        room: 'ABCDEFGH', turnstileToken: 'create-room', username: 'Host', peerId: 'testfps-room-ABCDEFGH',
+    }) });
+    const { turnSessionToken } = await registration.json();
+    assert.equal((await fetch(`/api/turn?room=ABCDEFGH&session=${turnSessionToken}`)).status, 401);
+    const request = () => fetch('/api/turn?room=ABCDEFGH', { headers: { Authorization: `Bearer ${turnSessionToken}` } });
+    for (const status of [503, 503, 200, 200, 429]) assert.equal((await request()).status, status);
 });
 
 test('unknown API routes return controlled JSON without touching static assets', async () => {

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { userSettings } from './settings.js';
 import { MECHA_HEIGHT, TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS } from './config.js';
 import type { TownBox, TownMaterial } from './town.js';
 import { createEndingCastle } from './mechaEndingCastle.js';
@@ -239,7 +240,7 @@ export class MechaGameOverScene {
         this.duration = this.punchStart + this.punchDuration + MECHA_ENDING_TIMING.aftermath;
         this.pose(0); this.frameCamera();
         this.coverScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.coverMaterial));
-        this.cycle = new DayNightCycle(this.scene, { shadows: true, shadowMapSize: 1024 });
+        this.cycle = new DayNightCycle(this.scene, { shadows: userSettings.shadows, shadowMapSize: userSettings.shadowQuality === 'high' ? 2048 : 1024 });
         this.cycle.synchronizeElapsedSeconds(options.lightingElapsed, true);
         this.cycle.update(0, this.camera.position);
         this.frame = sampleMechaEnding(0, this.punchDuration);
@@ -268,7 +269,9 @@ export class MechaGameOverScene {
                     this.debrisPaths = await prepareEndingDebris(this.fragmentBatches.flatMap(batch => batch.pieces), this.scenery.pillars,
                         this.duration - this.impactTime, this.options.effectsSeed ?? this.options.seed, step);
                     if (this.debrisPaths.secondary.length) {
-                        const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), this.scenery.pillarMesh.material, this.debrisPaths.secondary.length);
+                        const geometry = new THREE.BoxGeometry(1, 1, 1);
+                        geometry.groups.forEach((group, face) => { group.materialIndex = face === 2 || face === 3 ? 1 : 0; });
+                        const mesh = new THREE.InstancedMesh(geometry, this.scenery.pillarMesh.material, this.debrisPaths.secondary.length);
                         mesh.name = 'ending-pillar-fragments'; mesh.frustumCulled = false;
                         mesh.castShadow = mesh.receiveShadow = true; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
                         this.fragmentBatches.push({ mesh, pieces: this.debrisPaths.secondary }); this.scene.add(mesh);
@@ -505,7 +508,12 @@ export class MechaGameOverScene {
                     const e = this.dummy.matrix.elements;
                     const support = (Math.abs(e[1]) + Math.abs(e[5]) + Math.abs(e[9])) / 2;
                     const onGround = stone.segments ? stone.grounded && age >= stone.stopAt! : local >= stone.landing;
-                    this.dummy.position.y = onGround ? support : Math.max(support, this.dummy.position.y);
+                    // The bake uses a conservative sphere for contacts. Blend
+                    // the final drop into the actual rotated support height.
+                    const approach = stone.grounded && stone.stopAt !== undefined
+                        ? THREE.MathUtils.smoothstep(age, stone.stopAt - .12, stone.stopAt) : 0;
+                    this.dummy.position.y = onGround ? support : Math.max(support,
+                        this.dummy.position.y - Math.max(0, stone.size.length() / 2 - support) * approach);
                     this.dummy.updateMatrix();
                 }
                 mesh.setMatrixAt(index, this.dummy.matrix);

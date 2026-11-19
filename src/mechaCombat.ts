@@ -33,6 +33,7 @@ export function classifyMechaAttack(robotPosition: Vec3Like, playerPosition: Vec
 export interface MechaLaserInput {
     robotPosition: THREE.Vector3;
     playerPosition: THREE.Vector3;
+    playerBodyPosition?: THREE.Vector3;
     playerYaw: number;
     playerAlive: boolean;
     visible: boolean;
@@ -150,7 +151,7 @@ export class MechaCombat {
         const eligible = input.playerAlive && input.visible && classifyMechaAttack(input.robotPosition, input.playerPosition) === 'laser';
         // Range selects a windup, not its lifetime. Only LOS/life loss cancels
         // charging; a released beam remains a fixed physical volume.
-        if (!input.playerAlive || (this.laserPhase === 'charging' && !input.visible)) this.cancelLaser();
+        if (this.laserPhase === 'charging' && (!input.playerAlive || !input.visible)) this.cancelLaser();
         if (this.laserPhase === 'idle') {
             const desired = Math.atan2(input.playerPosition.x - input.robotPosition.x, input.playerPosition.z - input.robotPosition.z);
             const error = Math.atan2(Math.sin(desired - input.yaw), Math.cos(desired - input.yaw));
@@ -190,7 +191,7 @@ export class MechaCombat {
         this.beamLength = Math.max(0, Math.min(BULLET_TRAVEL_DISTANCE, input.obstacleDistance(this.beamOrigin, this.end, this.beamRadius)));
         this.beamEnd.copy(this.beamOrigin).addScaledVector(this.beamDirection, this.beamLength);
         if (this.laserPhase !== 'cancelling' && !this.damagedPlayer && input.playerAlive
-            && segmentPlayerBeamHitT(this.beamOrigin, this.beamEnd, input.playerPosition, input.playerYaw, this.beamRadius) !== null) {
+            && segmentPlayerBeamHitT(this.beamOrigin, this.beamEnd, input.playerBodyPosition ?? input.playerPosition, input.playerYaw, this.beamRadius) !== null) {
             this.damagedPlayer = true;
             this.laserPlayer(MECHA_LASER_DAMAGE);
         }

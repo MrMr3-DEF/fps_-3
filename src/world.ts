@@ -51,7 +51,7 @@ export async function prepareInfantry(events: Pick<InfantryEnvironment, 'attack'
 export async function prepareForgottenMecha(events: MechaEvents, checkpoint: () => Promise<void>): Promise<void> {
     if (!state.scene) return;
     const scene = state.scene;
-    const actor = new ForgottenMecha([...state.obstacles], [...state.lavaPools], worldSeed, events, queryObstaclesAlongSegment);
+    const actor = new ForgottenMecha([...state.obstacles], [...state.lavaPools], worldSeed, events, queryObstaclesAlongSegment, queryLavaPoolsNear);
     forgottenMecha = actor;
     scene.add(actor.group, actor.combat.effects.group, actor.pilot.rockets.group);
     await actor.load();
@@ -748,7 +748,6 @@ function createLavaPools(): void {
 
 function createEnemies(): void {
     const targetGeo = new THREE.BoxGeometry(2, 2, 2);
-    const targetMat = new THREE.MeshStandardMaterial({ roughness: 0.2 });
 
     const barBgGeo = new THREE.PlaneGeometry(1.8, 0.15);
     const barBgMat = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
@@ -768,7 +767,7 @@ function createEnemies(): void {
         data.index = i;
         data.eliminationRevision = 0;
 
-        const bodyMesh = new THREE.Mesh(targetGeo, targetMat.clone());
+        const bodyMesh = new THREE.Mesh(targetGeo, new THREE.MeshStandardMaterial({ roughness: 0.2 }));
         bodyMesh.castShadow = true;    
         bodyMesh.receiveShadow = true;
         targetGroup.add(bodyMesh);
@@ -872,6 +871,7 @@ function createTown(): void {
 }
 
 function finishStaticWorld(): void {
+    sceneryBuilder.reset();
     // An identity scene matrix must not force every frozen child to update.
     state.scene!.updateMatrix();
     state.scene!.matrixAutoUpdate = false;
@@ -919,9 +919,16 @@ export async function createEnvironmentAsync(seed: number, checkpoint: () => Pro
     setWorldSeed(seed);
     disposeWorld();
     resetWorldRandom();
-    for (const stage of WORLD_GENERATION_STAGES) {
-        await checkpoint();
-        stage();
+    const generation = worldGeneration;
+    try {
+        for (const stage of WORLD_GENERATION_STAGES) {
+            await checkpoint();
+            if (generation !== worldGeneration) throw new DOMException('Loading cancelled', 'AbortError');
+            stage();
+        }
+    } catch (error) {
+        if (generation === worldGeneration) disposeWorld();
+        throw error;
     }
 }
 

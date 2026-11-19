@@ -102,8 +102,10 @@ export function acceptMeleeCommand(peerId: string, packet: MeleeCommand): boolea
     if (packet.sequence <= attack.sequence)
         return false;
     attack.sequence = packet.sequence;
-    if (packet.action === 'cancel')
+    if (packet.action === 'cancel') {
+        if (attack.clock.started === null && !attack.clock.damageActive(time)) return false;
         attack.clock.cancel();
+    }
     else {
         if (!player.alive || !player.ready)
             return false;
@@ -111,7 +113,7 @@ export function acceptMeleeCommand(peerId: string, packet: MeleeCommand): boolea
             if (!getMeleeNetworkPort().ready(peerId) || !attack.clock.begin(time))
                 return false;
         }
-        else {
+        else if (packet.action === 'release') {
             if (!attack.clock.release(time))
                 return false;
             getMeleeNetworkPort().reserve(peerId);
@@ -125,7 +127,7 @@ export function acceptMeleeCommand(peerId: string, packet: MeleeCommand): boolea
                     attack.victims.add(`peer:${p.id}:${p.lifeId}`);
             if (forgottenMecha)
                 attack.victims.add(`mecha:${forgottenMecha.revision}`);
-        }
+        } else return false;
     }
     const pose = poseOf(player);
     const event: MeleeEvent = { type: 'melee_event', action: packet.action, sequence: packet.sequence, lifeId: player.lifeId, senderPeerId: peerId, charged: attack.clock.charged,
@@ -146,8 +148,10 @@ export function receiveMeleeEvent(event: MeleeEvent): void {
     }
     visual.sequence = event.sequence;
     visual.pose = { origin: new THREE.Vector3(event.origin.x, event.origin.y, event.origin.z), rotation: rotation(event.yaw, event.pitch) };
-    if (event.action === 'start')
+    if (event.action === 'start') {
+        visual.clock.reset();
         visual.clock.begin(time);
+    }
     if (event.action === 'cancel') {
         visual.clock.cancel();
         effects.cancel(event.senderPeerId, event.senderPeerId === id());
@@ -237,9 +241,14 @@ function resolve(attack: Attack): void {
         if (point) {
             // Reserve before callbacks; a shield/protected-phase rejection leaves it eligible.
             attack.damaged.add(mechaKey);
-            if (!getMeleeNetworkPort().hitMecha(attack.player, executionPoint ? actor.hp : amount, attack.pose!.origin, point))
+            let presented = false;
+            const present = () => {
+                presented = true;
+                confirmed(attack, mechaKey, point, Boolean(executionPoint));
+            };
+            if (!getMeleeNetworkPort().hitMecha(attack.player, executionPoint ? actor.hp : amount, attack.pose!.origin, point, present))
                 attack.damaged.delete(mechaKey);
-            else confirmed(attack, mechaKey, point, Boolean(executionPoint));
+            else if (!presented) present();
         }
     }
     if (hit && attack.player.id === id())
@@ -275,21 +284,24 @@ export function updateKatana(delta: number): void {
                 resolve(attack);
             }
         }
-    local.impact(time);
+    if (local.impact(time) && local.charged) wave(poseOf(localMeleePlayer()));
     for (const [peerId, visual] of visuals) {
         const mesh = peerId === id() ? state.katanaMesh : state.peers[peerId]?.katanaMesh;
         if (!mesh)
             continue;
         const clock = peerId === id() ? local : visual.clock;
-        if (visual.clock.impact(time) && visual.clock.charged) {
+        if (peerId !== id() && visual.clock.impact(time) && visual.clock.charged) {
             if (visual.pose)
                 wave(visual.pose);
         }
         updateKatanaModel(mesh, clock.started === null ? 0 : time - clock.started, clock.cancelled || clock.released === null ? null : time - clock.released, clock.charged, time, userSettings.photosensitivityMode, Math.max(0, (clock.started === null ? clock.chargeAtRelease + (time - (clock.released ?? time)) : time - clock.started) - KATANA.charge));
     }
+    if (state.katanaMesh && state.scene && local.charged && !local.cancelled && local.released !== null)
+        effects.sample(id(), `${state.lifeId}:${sequence}`, state.katanaMesh, time - local.released, time, state.scene);
     for (const [peerId, visual] of visuals) {
-        const mesh = peerId === id() ? state.katanaMesh : state.peers[peerId]?.katanaMesh;
-        const clock = peerId === id() ? local : visual.clock;
+        if (peerId === id()) continue;
+        const mesh = state.peers[peerId]?.katanaMesh;
+        const clock = visual.clock;
         if (mesh && state.scene && clock.charged && !clock.cancelled && clock.released !== null)
             effects.sample(peerId, `${visual.lifeId}:${visual.sequence}`, mesh, time - clock.released, time, state.scene);
     }
@@ -319,6 +331,12 @@ export function applyKatanaShake(camera: THREE.Camera): void {
     camera.rotateX(Math.sin(time * 57) * KATANA.shake);
     camera.rotateZ(Math.sin(time * 43) * KATANA.shake * 0.6);
 }
+export function resetLocalKatana(): void {
+    local.reset();
+    held = false;
+    forgetMeleePeer(id());
+}
+
 export function resetKatana(): void {
     time = 0;
     effects.reset();

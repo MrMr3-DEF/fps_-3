@@ -11,8 +11,6 @@ export interface SecurityConfig {
 export interface RegisteredHostRoom {
     closeToken: string;
     turnSessionToken: string;
-    admissionToken: string;
-    admissionProof: string;
     expiresAt: number;
 }
 
@@ -175,13 +173,16 @@ export class RoomAccessChallenge {
         const rejection = this.pendingReject;
         this.pendingReject = null;
         this.generation++;
-        if (this.widgetId !== null && window.turnstile?.remove) {
-            window.turnstile.remove(this.widgetId);
+        try {
+            if (this.widgetId !== null) window.turnstile?.remove?.(this.widgetId);
+        } catch {
+            // The challenge is already invalidated even if the widget cannot be removed.
+        } finally {
+            this.widgetId = null;
+            this.container?.replaceChildren();
+            this.container = null;
+            rejection?.(new Error('Room verification was cancelled.'));
         }
-        this.widgetId = null;
-        this.container?.replaceChildren();
-        this.container = null;
-        rejection?.(new Error('Room verification was cancelled.'));
     }
 }
 
@@ -192,7 +193,9 @@ export async function registerTurnRoom(room: string, turnstileToken: string, use
         body: JSON.stringify({ room, turnstileToken, username, peerId }),
         cache: 'no-store',
     });
-    return validateRegistration(await readJson<RegisteredHostRoom>(response));
+    const registration = await readJson<RegisteredHostRoom>(response);
+    if (!registration || !isCapability(registration.closeToken) || !isCapability(registration.turnSessionToken) || !Number.isFinite(registration.expiresAt)) throw new Error('Invalid host room registration.');
+    return registration;
 }
 
 export async function registerTurnSession(room: string, turnstileToken: string, username: string, peerId: string): Promise<RegisteredTurnSession> {
@@ -253,8 +256,10 @@ function isIceServer(value: unknown): value is RTCIceServer {
 }
 
 export async function fetchTurnIceServers(room: string, turnSessionToken: string): Promise<RTCIceServer[]> {
-    const params = new URLSearchParams({ room, session: turnSessionToken });
-    const response = await timedFetch(`/api/turn?${params}`, { cache: 'no-store' });
+    const params = new URLSearchParams({ room });
+    const response = await timedFetch(`/api/turn?${params}`, {
+        cache: 'no-store', headers: { Authorization: `Bearer ${turnSessionToken}` },
+    });
     const payload = await readJson<{ iceServers?: unknown }>(response);
     if (!Array.isArray(payload.iceServers) || payload.iceServers.length === 0 || !payload.iceServers.every(isIceServer)) {
         throw new Error('Secure multiplayer did not return valid relay credentials.');

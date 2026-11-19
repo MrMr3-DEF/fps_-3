@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFETIME, PROJECTILE_RADIUS, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM, SWITCH_DURATION, NETWORK_TICK_MS } from './config.js';
-import { segmentSphereHitT } from './gameplayMath.js';
+import { segmentSphereHitT, segmentAabbHitT } from './gameplayMath.js';
 import { segmentPlayerHitboxHitT, closestPlayerBodyPoint } from './playerHitbox.js';
 import type { FirePacket, HomingTargetPacket, UpdatePacket, WeaponName, FirearmName } from './networkTypes.js';
 import { PROJECTILE_GUIDANCE_STEP, HOMING_HISTORY_SAMPLES, HOMING_VERIFICATION_STEPS_PER_SECOND, HOMING_HIT_TOLERANCE, HOMING_HISTORY_LAG_MS, FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS } from './config.js';
+import { PacketRate } from './packetRate.js';
 import { canContinueHoming, isWithinHomingAimEnvelope } from './projectileHoming.js';
 import { stepProjectileFlight, homingReplayCandidates, type HomingFireContext, type HomingFlightTarget, type TargetMotionHistory } from './projectileFlight.js';
 
@@ -76,6 +77,7 @@ export class ShotLedger {
     private triggerRampMs = 0;
     private triggerHeld = false;
     private verificationCredits = HOMING_VERIFICATION_STEPS_PER_SECOND;
+    private homingRate = new PacketRate(60, 8);
     private verificationUpdatedAt = 0;
     private minigunSample: { key: string; distance: number; count: number; flight: HomingFlightTarget } | null = null;
     private spendVerification(now: number, steps: number): boolean {
@@ -95,8 +97,17 @@ export class ShotLedger {
         this.triggerHeld = held;
     }
     ready(now: number): boolean { return now >= this.nextFireAt; }
+    remainingCooldown(now: number): number { return Math.max(0, this.nextFireAt - now); }
+    isSniperShot(shotId: number): boolean { return this.shots.get(shotId)?.weapon === 'SNIPER'; }
     reserveMelee(now: number, duration: number): void { this.nextFireAt = Math.max(this.nextFireAt, now + duration * 1000); }
-    reset(): void { this.shots.clear(); this.nextFireAt = -Infinity; this.fireGraceMs = 0; this.triggerHeld = false; this.triggerRampMs = 0; this.triggerUpdatedAt = null; this.minigunSample = null; }
+    retireLife(): void {
+        this.shots.clear();
+        this.fireGraceMs = 0;
+        this.triggerHeld = false;
+        this.triggerRampMs = 0;
+        this.triggerUpdatedAt = null;
+        this.minigunSample = null;
+    }
     record(packet: FirePacket, now: number, dead: boolean, context?: HomingFireContext | (() => HomingFireContext | null), mechaRevision?: number): boolean {
         const stats = WEAPON_STATS[packet.weapon];
         if (!stats) return false;
@@ -115,7 +126,7 @@ export class ShotLedger {
             // Charge the bounded history/context search *before* doing it.
             // Otherwise fabricated distances with zero candidates bypass the
             // later replay/visibility budget entirely.
-            if (!this.spendVerification(now, HOMING_HISTORY_SAMPLES * 2)) return false;
+            if (!this.homingRate.accept(now) || !this.spendVerification(now, HOMING_HISTORY_SAMPLES * 2)) return false;
             const homing = typeof context === 'function' ? context() : context;
             if (!homing || !homing.history.samples.length || !Number.isFinite(packet.homingStartDistance) || packet.homingStartDistance! < 0 ||
                 packet.homingStartDistance! > (BULLET_TRAVEL_DISTANCE + (homing.aimRadius ?? homing.radius)) / 3) return false;
@@ -131,7 +142,7 @@ export class ShotLedger {
             const valid = candidates.filter(candidate => {
                 const yaw = homing.history.sample(now - candidate.lagMs, point, candidate.filtered);
                 return isWithinHomingAimEnvelope(origin, base, point, homing.aimRadius ?? homing.radius, BULLET_TRAVEL_DISTANCE) &&
-                    this.spendVerification(now, 32) && homing.canAcquire(point, yaw, now - candidate.lagMs, candidate.filtered);
+                    homing.canAcquire(point, yaw, now - candidate.lagMs, candidate.filtered, cost => this.spendVerification(now, cost));
             });
             if (!valid.length) return false;
             flightTarget = { history: homing.history, kind: homing.kind, radius: homing.radius, guidanceRadius: homing.aimRadius ?? homing.radius,
@@ -170,8 +181,9 @@ export class ShotLedger {
         if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS || damage !== WEAPON_STATS[shot.weapon].damage) return false;
         if (identity && shot.homingTarget?.kind === identity.kind) {
             if (identity.kind === 'mecha' && shot.homingTarget.kind === 'mecha' && identity.targetRevision !== shot.homingTarget.targetRevision) return false;
-            if (identity.kind === 'npc' && shot.homingTarget.kind === 'npc' && identity.targetIndex === shot.homingTarget.targetIndex && identity.targetRevision !== shot.homingTarget.targetRevision) return false;
-            if (identity.kind === 'peer' && shot.homingTarget.kind === 'peer' && identity.targetPeerId === shot.homingTarget.targetPeerId && identity.targetLifeId !== shot.homingTarget.targetLifeId) return false;
+            // A locked victim is only eligible through its moving history.
+            if (identity.kind === 'npc' && shot.homingTarget.kind === 'npc' && identity.targetIndex === shot.homingTarget.targetIndex) return false;
+            if (identity.kind === 'peer' && shot.homingTarget.kind === 'peer' && identity.targetPeerId === shot.homingTarget.targetPeerId) return false;
         }
         // Incidental contacts follow the recorded curve too. A failed guided
         // claim must never fall through to the old, unsteered shot ray.
@@ -221,6 +233,20 @@ export class ShotLedger {
         }
         return false;
     }
+    consumeSniperBox(shotId: number, pelletIndex: number, history: TargetMotionHistory, offset: THREE.Vector3,
+        box: THREE.Box3, worldMatrix: THREE.Matrix4, damage: number, now: number,
+        blocked: Parameters<ShotLedger['consume']>[6]): boolean {
+        const shot = this.shots.get(shotId);
+        if (shot?.weapon !== 'SNIPER') return false;
+        const from = new THREE.Vector3(), to = new THREE.Vector3(), target = new THREE.Vector3();
+        const observed = worldMatrix.clone(), inverse = new THREE.Matrix4();
+        return this.rewind(history, shot.at, (at, filtered) => {
+            history.sample(at, target, filtered);
+            inverse.copy(observed.setPosition(target.add(offset))).invert();
+            return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked, (start, end) =>
+                segmentAabbHitT(from.copy(start).applyMatrix4(inverse), to.copy(end).applyMatrix4(inverse), box.min, box.max));
+        });
+    }
     consumeMechaHit(shotId: number, pelletIndex: number, revision: number, damage: number, now: number,
         contact: (start: THREE.Vector3, end: THREE.Vector3, origin: THREE.Vector3, radius: number) => number | null,
         blocked: (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered?: boolean) => boolean): boolean {
@@ -231,9 +257,32 @@ export class ShotLedger {
             (start, end) => contact(start, end, shot.origin, radius), { kind: 'mecha', targetRevision: revision });
     }
     consumePlayerHitbox(shotId: number, pelletIndex: number, target: THREE.Vector3, yaw: number, damage: number, now: number,
-        blocked: (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered?: boolean) => boolean, identity?: HomingTargetPacket): boolean {
-        return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
-            (start, end) => segmentPlayerHitboxHitT(start, end, target, yaw, this.shots.get(shotId)?.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS), identity);
+        blocked: Parameters<ShotLedger['consume']>[6], identity?: HomingTargetPacket, history?: TargetMotionHistory): boolean {
+        const shot = this.shots.get(shotId);
+        if (!shot) return false;
+        const radius = shot.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS;
+        if (!history || shot.flightTarget) {
+            return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
+                (start, end) => segmentPlayerHitboxHitT(start, end, target, yaw, radius), identity);
+        }
+        const observation = shot.weapon === 'SNIPER' ? shot.at :
+            Math.min(now, shot.at + shot.origin.distanceTo(target) / PROJECTILE_SPEED * 1000);
+        const point = new THREE.Vector3();
+        return this.rewind(history, observation, (at, filtered) => {
+            const heading = history.sample(at, point, filtered);
+            return this.consumeIntersection(shotId, pelletIndex, damage, now,
+                (start, end, padding) => blocked(start, end, padding, at, filtered),
+                (start, end) => segmentPlayerHitboxHitT(start, end, point, heading, radius), identity);
+        });
+    }
+    private rewind(history: TargetMotionHistory, observation: number, intersects: (at: number, filtered: boolean) => boolean): boolean {
+        const oldest = history.samples[0]?.at;
+        if (oldest === undefined || oldest - observation > NETWORK_TICK_MS) return false;
+        for (let lag = 0; lag <= HOMING_HISTORY_LAG_MS; lag += HOMING_HISTORY_LAG_MS / 6) {
+            if (lag > 0 && observation - lag < oldest) break;
+            if (intersects(observation - lag, false) || intersects(observation - lag, true)) return true;
+        }
+        return false;
     }
     private consumeHomingTarget(
         shotId: number,
@@ -312,21 +361,4 @@ export class ShotLedger {
             homingTarget => homingTarget?.kind === 'peer' &&
                 homingTarget.targetPeerId === targetPeerId && homingTarget.targetLifeId === targetLifeId);
     }
-}
-
-export interface LifeState { lifeId: number; wasDead: boolean; deathReported: boolean; }
-export function acceptLifeUpdate(life: LifeState, lifeId: number, dead: boolean): boolean {
-    if (lifeId === life.lifeId) {
-        if (life.wasDead && !dead) return false;
-        life.wasDead = dead;
-        return true;
-    }
-    if (lifeId !== life.lifeId + 1 || !life.deathReported || dead) return false;
-    life.lifeId = lifeId; life.wasDead = false; life.deathReported = false;
-    return true;
-}
-export function acceptDeath(life: LifeState, lifeId: number): boolean {
-    if (life.lifeId !== lifeId || life.deathReported) return false;
-    life.wasDead = true; life.deathReported = true;
-    return true;
 }

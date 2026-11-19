@@ -65,7 +65,7 @@ export interface HomingFireContext {
     kind: 'sphere' | 'player';
     radius: number;
     aimRadius?: number;
-    canAcquire(position: THREE.Vector3, yaw: number, at: number, filtered: boolean): boolean;
+    canAcquire(position: THREE.Vector3, yaw: number, at: number, filtered: boolean, spend: (cost: number) => boolean): boolean;
 }
 
 /** Infer bounded observation delays from host-owned history and the distance

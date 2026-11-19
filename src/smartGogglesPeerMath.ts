@@ -55,7 +55,7 @@ export function someVisiblePeerMeshBounds(
 
     let matched = false;
     peerRoot.traverseVisible((object) => {
-        if (matched) return;
+        if (matched || isExcludedFromStableEnvelope(object, peerRoot)) return;
         const geometry = visibleMeshGeometry(object);
         if (geometry?.boundingBox && predicate(geometry.boundingBox, object.matrixWorld)) matched = true;
     });
@@ -112,6 +112,7 @@ export function distanceToVisiblePeerMeshes(
 
     let nearestDistance = Number.POSITIVE_INFINITY;
     peerRoot.traverseVisible((object) => {
+        if (isExcludedFromStableEnvelope(object, peerRoot)) return;
         const geometry = visibleMeshGeometry(object);
         if (!geometry?.boundingBox) return;
         nearestDistance = Math.min(

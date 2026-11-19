@@ -5,9 +5,10 @@ import { SmartGogglesHud } from '../src/smartGoggles.ts';
 import { pack, unpack } from 'peerjs-js-binarypack';
 import { parentPort } from 'node:worker_threads';
 import * as THREE from 'three';
-import { state, resetPlayerState } from '../src/state.ts';
+import { state } from '../src/state.ts';
+import { NETWORK_PROTOCOL_VERSION } from '../src/config.ts';
 import { parseNetworkPacket } from '../src/networkTypes.ts';
-import { hostGame, joinGame, startHostMatch, sendLocalState, updateRemotePeers, broadcastToAll } from '../src/multiplayer.ts';
+import { hostGame, joinGame, startHostMatch, sendLocalState, updateRemotePeers, requestMultiplayerRespawn } from '../src/multiplayer.ts';
 import { createAkimboGuns, fireProjectile, updateWeapons } from '../src/weapons.ts';
 import { updateProjectiles } from '../src/projectiles.ts';
 import { setDamageHandlers } from '../src/damage.ts';
@@ -42,12 +43,8 @@ const wire = (c: Connection) => {
         parentPort!.postMessage({ packet: unpack(encoded) });
     };
 };
-setDamageHandlers(() => ({ accepted: false, killed: false }), (damage, attackerName, attackerId) => {
-    if (!state.isPlaying || state.playerHp <= 0) return;
-    state.playerHp = Math.max(0, state.playerHp - damage);
-    state.lastDamageTime = performance.now(); state.regenTimer = 0;
-    if (state.playerHp === 0) broadcastToAll({ type: 'player_died', lifeId: state.lifeId, cause: 'player',
-        killerPeerId: attackerId!, victimName: state.username, killerName: attackerName, victimPeerId: state.peer!.id });
+setDamageHandlers(() => ({ accepted: false, killed: false }), () => {
+    throw new Error('Multiplayer damage must be reconciled from host health.');
 });
 parentPort!.on('message', async ({ id, command, args }) => {
     try {
@@ -62,13 +59,16 @@ parentPort!.on('message', async ({ id, command, args }) => {
             result = { peerId: state.peer!.id };
         } else if (command === 'arena') { state.scene = new THREE.Scene(); createAkimboGuns();
         } else if (command === 'connect') {
-            const c = new Connection(args.peerId, { admissionToken: cap }); wire(c);
+            const c = new Connection(args.peerId, { admissionToken: cap, version: NETWORK_PROTOCOL_VERSION }); wire(c);
             Peer.latest.emit('connection', c);
             await new Promise(resolve => setImmediate(resolve));
-        } else if (command === 'receive') connection.emit('data', args);
+        } else if (command === 'receive') {
+            if (args.type === 'player_died') lastDeath = args;
+            connection.emit('data', args);
+        }
         else if (command === 'start') startHostMatch();
         else if (command === 'pose') {
-            state.camera!.position.set(0, 2, args.z);
+            state.camera!.position.set(args.x ?? 0, 2, args.z);
             state.camera!.rotation.set(0, args.yaw, 0, 'YXZ');
             sendLocalState(true);
         } else if (command === 'scope') {
@@ -104,8 +104,8 @@ parentPort!.on('message', async ({ id, command, args }) => {
         } else if (command === 'pauseTime') {
             now += args.duration;
             mock.timers.tick(args.duration);
-        } else if (command === 'respawn') { resetPlayerState(); sendLocalState(true); }
-        else if (command === 'state') result = { hp: state.playerHp, lifeId: state.lifeId, isPlaying: state.isPlaying, lastDeath,
+        } else if (command === 'respawn') { requestMultiplayerRespawn(); }
+        else if (command === 'state') result = { hp: state.playerHp, lifeId: state.lifeId, isPlaying: state.isPlaying, lastDeath, position: state.camera?.position.toArray(),
             peers: Object.fromEntries(Object.entries(state.peers).map(([key, p]) => [key, { hp: p.hp, lifeId: p.lifeId,
                 visible: p.mesh.visible, position: p.mesh.position.toArray() }])) };
         parentPort!.postMessage({ id, result });

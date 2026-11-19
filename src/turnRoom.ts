@@ -1,6 +1,6 @@
-import { ROOM_PENDING_SESSION_MS } from './config.js';
+import { ROOM_PENDING_SESSION_MS, MAX_PENDING_ROOM_CONNECTIONS } from './config.js';
 import { parseJsonBody } from './boundedJson.js';
-import { isAdmissionGeneration, isCapability, isPeerId, isUsername, usernameKey } from './roomIdentity.js';
+import { isAdmissionGeneration, isCapability, isPeerId, isUsername, usernameKey, matchesCapability } from './roomIdentity.js';
 
 export interface TurnRoomStorage {
     get<T>(key: string): Promise<T | undefined>;
@@ -11,8 +11,9 @@ export interface TurnRoomStorage {
 export interface TurnRoomState { storage: TurnRoomStorage; }
 interface Session {
     ip: string; expiresAt: number; credentialIssues: number; credentialWindow: number;
-    username: string; peerId: string; admissionToken: string; admissionProof: string; admitted: boolean;
+    username: string; peerId: string; admissionToken?: string; admissionProof?: string; admitted: boolean;
     admissionGeneration: number;
+    credentialClaims?: string[];
 }
 interface RoomRecord { expiresAt: number; closeToken: string; hostPeerId: string; admissionGeneration: number; sessions: Record<string, Session>; }
 const SESSION_MS = 5 * 60_000;
@@ -22,12 +23,12 @@ function empty(): Response { return new Response(null, { status: 204, headers })
 function future(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value > Date.now(); }
 type Body = Record<string, unknown>;
 function validSession(body: Body): boolean {
-    return isCapability(body.turnSessionToken) && isCapability(body.admissionToken) && isCapability(body.admissionProof) &&
+    return isCapability(body.turnSessionToken) &&
         isUsername(body.username) && isPeerId(body.peerId) && typeof body.ip === 'string' && body.ip.length > 0 && body.ip.length <= 128;
 }
 function session(body: Body, expiresAt: number, admitted: boolean): Session {
     return { ip: body.ip as string, username: body.username as string, peerId: body.peerId as string,
-        admissionToken: body.admissionToken as string, admissionProof: body.admissionProof as string,
+        ...(admitted ? {} : { admissionToken: body.admissionToken as string, admissionProof: body.admissionProof as string }),
         expiresAt, admitted, admissionGeneration: 0, credentialIssues: 0, credentialWindow: Date.now() };
 }
 
@@ -60,7 +61,7 @@ export class TurnRoomStateMachine {
         }
         if (!record) return json({ error: 'Room is inactive.' }, 404);
         if (path === '/create-session') {
-            if (!validSession(body) || !future(body.expiresAt)) return json({ error: 'Invalid room session.' }, 400);
+            if (!validSession(body) || !isCapability(body.admissionToken) || !isCapability(body.admissionProof) || !future(body.expiresAt)) return json({ error: 'Invalid room session.' }, 400);
             const sessions = Object.values(record.sessions);
             // Guest is an allocation request; reservations are serialized with admission.
             if (body.username === 'Guest') {
@@ -78,12 +79,12 @@ export class TurnRoomStateMachine {
             return json({ expiresAt }, 201);
         }
         if (path === '/admit' || path === '/depart') {
-            if (body.closeToken !== record.closeToken || !isPeerId(body.peerId) || body.peerId === record.hostPeerId) return json({ error: 'Invalid host capability or peer.' }, 403);
+            if (!matchesCapability(record.closeToken, body.closeToken) || !isPeerId(body.peerId) || body.peerId === record.hostPeerId) return json({ error: 'Invalid host capability or peer.' }, 403);
             const entry = Object.entries(record.sessions).find(([, s]) => s.peerId === body.peerId);
             if (!entry) return json({ error: 'Room session is inactive.' }, 404);
             const [token, s] = entry;
             if (path === '/depart') { delete record.sessions[token]; await this.save(record); return empty(); }
-            if (s.admitted || !isCapability(body.admissionToken) || s.admissionToken !== body.admissionToken) return json({ error: 'Invalid or used admission ticket.' }, 403);
+            if (s.admitted || !matchesCapability(s.admissionToken, body.admissionToken)) return json({ error: 'Invalid or used admission ticket.' }, 403);
             if (record.admissionGeneration === Number.MAX_SAFE_INTEGER) return json({ error: 'Room admission limit reached.' }, 503);
             s.admitted = true;
             s.admissionGeneration = ++record.admissionGeneration;
@@ -91,25 +92,43 @@ export class TurnRoomStateMachine {
             await this.save(record);
             return json({ username: s.username, admissionProof: s.admissionProof, admissionGeneration: s.admissionGeneration });
         }
-        if (path === '/claim-credential') {
+        if (path === '/claim-credential' || path === '/refund-credential') {
             if (!isCapability(body.turnSessionToken)) return json({ error: 'Invalid room-session capability.' }, 400);
             const s = record.sessions[body.turnSessionToken];
             if (!s || s.expiresAt <= Date.now()) return json({ error: 'Room session is inactive.' }, 404);
             if (s.ip !== body.ip) return json({ error: 'Room session network mismatch.' }, 403);
-            if (Date.now() - s.credentialWindow >= SESSION_MS) { s.credentialWindow = Date.now(); s.credentialIssues = 0; }
+            if (path === '/refund-credential') {
+                const claim = isCapability(body.claimId) ? s.credentialClaims?.indexOf(body.claimId) ?? -1 : -1;
+                if (claim < 0 || Date.now() - s.credentialWindow >= SESSION_MS) return empty();
+                s.credentialClaims!.splice(claim, 1);
+                s.credentialIssues--;
+                await this.save(record);
+                return empty();
+            }
+            if (Date.now() - s.credentialWindow >= SESSION_MS) {
+                s.credentialWindow = Date.now(); s.credentialIssues = 0; s.credentialClaims = [];
+            }
             if (s.credentialIssues >= 2) return json({ error: 'Room session exhausted.' }, 429);
+            if (isCapability(body.claimId)) {
+                const claims = s.credentialClaims ??= [];
+                if (claims.includes(body.claimId)) return json({ error: 'Duplicate claim.' }, 409);
+                claims.push(body.claimId);
+            }
             s.credentialIssues++;
             await this.save(record);
             return json({ allowed: true });
         }
         if (path === '/release-session') {
             if (!isCapability(body.turnSessionToken)) return json({ error: 'Invalid room-session capability.' }, 400);
+            const target = record.sessions[body.turnSessionToken];
+            if (!target || target.admitted) return empty();
             delete record.sessions[body.turnSessionToken];
             await this.save(record);
             return empty();
         }
         if (path === '/heartbeat') {
-            if (body.closeToken !== record.closeToken || !future(body.expiresAt) || !Array.isArray(body.peerIds) || body.peerIds.length > this.maxPlayers || !body.peerIds.every(isPeerId)) return json({ error: 'Invalid room heartbeat.' }, 403);
+            if (!matchesCapability(record.closeToken, body.closeToken) || !future(body.expiresAt) || !Array.isArray(body.peerIds) ||
+                body.peerIds.length > this.maxPlayers + MAX_PENDING_ROOM_CONNECTIONS || !body.peerIds.every(isPeerId)) return json({ error: 'Invalid room heartbeat.' }, 403);
             const acknowledged = body.admissionGeneration === undefined ? 0 : body.admissionGeneration;
             if (!isAdmissionGeneration(acknowledged) || acknowledged > record.admissionGeneration) return json({ error: 'Invalid admission acknowledgement.' }, 400);
             record.expiresAt = Math.max(record.expiresAt, body.expiresAt);
@@ -126,7 +145,7 @@ export class TurnRoomStateMachine {
             return json({ expiresAt: record.expiresAt });
         }
         if (path === '/close') {
-            if (body.closeToken !== record.closeToken) return json({ error: 'Invalid close capability.' }, 403);
+            if (!matchesCapability(record.closeToken, body.closeToken)) return json({ error: 'Invalid close capability.' }, 403);
             await this.state.storage.deleteAll(); return empty();
         }
         return json({ error: 'Not found.' }, 404);

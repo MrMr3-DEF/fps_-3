@@ -3,7 +3,7 @@
   "greeting": "There you are. I've been waiting for you.",
   "modelId": "Hermes-3-Llama-3.2-3B-q4f16_1-MLC",
   "temperature": 0.4,
-  "maxReplyTokens": 4096,
+  "maxReplyTokens": 1024,
   "knowledgeFiles": [
     "lore/town.md",
     "lore/gameplay.md",

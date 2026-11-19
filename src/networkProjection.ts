@@ -2,6 +2,12 @@
  * field so an accepted packet never retains untrusted extra payload or aliases. */
 export type Projection = true | { readonly [key: string]: Projection } | readonly [Projection] | ((value: unknown) => Projection);
 
+export function isPacketRecord(value: unknown): value is Record<string, unknown> {
+    if (typeof value !== 'object' || value === null) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === null || prototype === Object.prototype;
+}
+
 export function fields(...names: string[]): Record<string, Projection> {
     return Object.fromEntries(names.map(name => [name, true]));
 }
@@ -17,7 +23,7 @@ export function projectKnown<T>(value: T, schema: Projection): T {
     if (Array.isArray(schema)) return (value as unknown[]).map(item => projectKnown(item, schema[0])) as T;
     const source = value as Record<string, unknown>, result: Record<string, unknown> = {};
     for (const key of Object.keys(schema)) {
-        if (source[key] !== undefined) {
+        if (Object.hasOwn(source, key) && source[key] !== undefined) {
             result[key] = projectKnown(source[key], (schema as Record<string, Projection>)[key]);
         }
     }

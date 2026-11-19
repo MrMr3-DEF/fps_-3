@@ -2,7 +2,7 @@
 
 ## Deployment model
 
-The Cloudflare Worker is both the static-site origin and the security control plane for multiplayer. It serves `dist/` through the `ASSETS` binding and exposes same-origin `/api` routes for Turnstile verification, room/session management, and short-lived Cloudflare TURN credentials.
+The static asset rules in `public/_headers` supply MIME sniffing, referrer, and frame protections. The Cloudflare Worker is both the static-site origin and the security control plane for multiplayer. It serves `dist/` through the `ASSETS` binding and exposes same-origin `/api` routes for Turnstile verification, room/session management, and short-lived Cloudflare TURN credentials.
 
 Two SQLite-backed Durable Objects are bound in `wrangler.toml`:
 
@@ -85,10 +85,10 @@ Unmatched `/api` routes return JSON 404 without static asset fallback. All JSON 
 | `/api/room-sessions` | `POST` | Turnstile token with `join-room` action | Reserves a room slot; returns a TURN-session capability |
 | `/api/rooms/:room` | `PATCH` | Host close capability as bearer token | Renews the room with a roster and admission-generation acknowledgement |
 | `/api/rooms/:room` | `DELETE` | Host close capability as bearer token | Closes the room and deletes all sessions |
-| `/api/room-sessions/:room` | `DELETE` | Session capability as bearer token | Releases one session slot |
+| `/api/room-sessions/:room` | `DELETE` | Session capability as bearer token | Releases an unadmitted session reservation |
 | `/api/room-admissions/:room` | `POST` | Host close capability and peer-bound admission ticket | Consumes ticket; returns reserved name, host proof and server admission generation |
 | `/api/room-admissions/:room` | `DELETE` | Host close capability and peer ID | Releases a departed peer and its name |
-| `/api/turn?room=…&session=…` | `GET` | Session capability in query string, bound to requesting IP | Returns sanitized short-lived ICE servers |
+| `/api/turn?room=…` | `GET` | Session capability as bearer token, bound to requesting IP | Returns sanitized short-lived ICE servers |
 
 Room codes use eight symbols from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`; ambiguous characters are excluded. Codes locate a room but are not authorization. The Worker creates independent 256-bit URL-safe capability tokens for closing a room and requesting TURN credentials.
 
@@ -110,11 +110,11 @@ Room codes use eight symbols from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`; ambiguous 
 2. A Turnstile widget issues a token for `join-room`.
 3. The Worker validates the token and atomically reserves a name and session if the room exists, has capacity, and has no case-insensitive match for that name. Requests include the username and client-generated peer ID.
 4. The session is bound to the requesting IP and exchanged for short-lived ICE servers.
-5. The client registers its bound ID with PeerJS and connects to the host's room-derived ID with a separate admission ticket in metadata.
-6. The host validates that ticket through the Worker. Only then does it send the admission proof and world snapshot. The client compares that proof with the independently issued proof from registration.
+5. The client registers its bound ID with PeerJS and connects to the host's room-derived ID with a separate admission ticket and protocol version in metadata.
+6. The host validates that ticket through the Worker. Only then does it send the admission proof and world snapshot. The client checks the independently issued proof and matching protocol version.
 7. The client waits for the authoritative world snapshot before enabling entry to the game.
 
-The browser releases a join session on exit and the host closes the entire room. These are best-effort network calls; short expiry and Durable Object alarms are the fallback cleanup path.
+The joining browser can release its pending reservation. The host releases admitted reservations on channel departure and closes the entire room on room exit. Heartbeats and Durable Object expiry also retire disconnected sessions.
 
 ## Lifetimes, capacity, and abuse controls
 
@@ -132,7 +132,10 @@ The browser releases a join session on exit and the host closes the entire room.
 | Join attempts per IP | 6 per 10 minutes |
 | TURN requests per IP | 30 per 10 minutes (allows a full room behind one IP to refresh) |
 | Turnstile verification timeout | 5 seconds |
-| Signalling and data-channel admission timeout | 20 seconds each |
+| Room management requests per IP | 60 per minute |
+| Pending host channel queue | Eight, separate from admitted capacity |
+| Pending host channel open timeout | 5 seconds |
+| Signalling and admission proof timeouts | 20 seconds each |
 | Browser setup request timeout | 12 seconds |
 | TURN upstream request timeout | 10 seconds |
 | Client world-snapshot timeout | 10 seconds |
@@ -176,7 +179,7 @@ and [alarm semantics](https://developers.cloudflare.com/durable-objects/api/alar
 - Room and session capabilities are high-entropy, format-checked, bound to server-side expiry, and never derived from the room code.
 - TURN claims must come from the IP that created the room session.
 - Turnstile tokens must match the intended action and exact hostname.
-- The Worker applies per-IP creation, join, and credential rate limits.
+- The Worker applies per-IP creation, join, room management, and credential rate limits. Explicit upstream TURN server errors refund the matching session claim.
 - Admission tickets are separate from TURN and close capabilities, single-use, and bound to a reserved peer ID. A host must demonstrate possession of its close capability to obtain the client-specific admission proof.
 - Names are case-insensitively unique per room and cannot be changed by gameplay packets.
 - Room reads/checks/writes and alarms are serialized after bounded body parsing.
@@ -209,11 +212,11 @@ The browser displays the code before secure registration completes. The Copy but
 
 ### TURN credentials fail
 
-Confirm the TURN key ID belongs to the account represented by the API token, the token can generate credentials, and the Cloudflare TURN endpoint returns an `iceServers` array. Inspect Worker logs for the upstream response status or invalid-data message. Each session has two issuance attempts per five-minute window; repeated diagnostics may require a fresh verified room session.
+Confirm the TURN key ID belongs to the account represented by the API token, the token can generate credentials, and the Cloudflare TURN endpoint returns an `iceServers` array. Inspect Worker logs for the upstream response status or invalid-data message. Each session has two issuance claims per five-minute window. Explicit upstream server errors refund the matching claim.
 
 ### Peers authorize but the game never opens
 
-Authorization and WebRTC establishment are separate. Check access to `0.peerjs.com`, PeerJS errors, browser WebRTC logs, ICE candidate gathering, and whether the host remains online. The client drops an unopened data channel after 20 seconds and drops a connection that never supplies a world snapshot after another 10 seconds.
+Authorization and WebRTC establishment are separate. Check access to `0.peerjs.com`, PeerJS errors, browser WebRTC logs, ICE candidate gathering, and whether the host remains online. The host drops an unopened pending channel after five seconds. The client allows 20 seconds for admission proof, then another 10 seconds for the world snapshot.
 
 ## Monitoring and emergency response
 

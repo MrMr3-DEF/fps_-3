@@ -51,7 +51,6 @@ export function setTouchMode(enabled: boolean): void {
     touchMove.x = touchMove.y = 0;
     touchMode = enabled;
 }
-export function enableTouchMode(): void { setTouchMode(true); }
 export function isInputActive(): boolean {
     return touchPlaying || Boolean(state.controls?.isLocked && state.controls !== releasedControls);
 }

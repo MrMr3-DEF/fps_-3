@@ -261,9 +261,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .menu-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .menu-actions-column { display: flex; flex-direction: column; width: 100%; }
 #btn-host-start, #pause-lobby-info, #pvp-stats { display: none; }
-#mp-name-error, #join-error-log { font-size: 14px; color: #c93649; font-weight: bold; }
-#mp-name-error { min-height: 18px; margin-bottom: 8px; }
-#mp-name-error:empty { display: none; }
+#join-error-log { font-size: 14px; color: #c93649; font-weight: bold; }
 #btn-copy-code { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 #room-code-display { font-size: 20px; font-weight: bold; letter-spacing: 2px; user-select: text; }
 #room-code-copy-label { font-size: 12px; opacity: 0.8; }
@@ -484,17 +482,6 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     border: 1px solid rgba(0, 170, 238, 0.3);
 }
 
-#hover-badge {
-    font-size: 14px;
-    color: #ffcc00;
-    background: rgba(255, 204, 0, 0.1);
-    padding: 2px 8px;
-    border-radius: 4px;
-    margin-left: 10px;
-    display: none;
-    box-shadow: 0 0 8px rgba(255, 204, 0, 0.2);
-    border: 1px solid rgba(255, 204, 0, 0.3);
-}
 
 #fps-counter {
     position: absolute;

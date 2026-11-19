@@ -1,5 +1,5 @@
 import { INFANTRY, INFANTRY_DEBRIS_TIME, INFANTRY_LIMIT, MAP_HALF_SIZE, TOWN_WALL_HP, type InfantryKind } from './config.js';
-import { fields, variant, vectorFields, type Projection } from './networkProjection.js';
+import { fields, isPacketRecord as isRecord, variant, vectorFields, type Projection } from './networkProjection.js';
 import { isPeerId } from './roomIdentity.js';
 import type { Vec3Packet } from './networkTypes.js';
 
@@ -30,7 +30,6 @@ export type InfantryEvent =
 export interface InfantryStatePacket { type: 'infantry_state'; state: InfantryState; senderPeerId?: string }
 export interface InfantryEventPacket { type: 'infantry_event'; sequence: number; event: InfantryEvent; senderPeerId?: string }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const number = (value: unknown, min: number, max: number): value is number =>
     typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number =>
@@ -38,7 +37,7 @@ const integer = (value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value 
 const isKind = (value: unknown): value is InfantryKind => value === 'base' || value === 'fast' || value === 'big';
 const isSlot = (value: unknown): boolean => integer(value, 0, INFANTRY_LIMIT - 1);
 const isPosition = (value: unknown): value is Vec3Packet => isRecord(value) &&
-    number(value.x, -MAP_HALF_SIZE - 50, MAP_HALF_SIZE + 50) && number(value.z, -MAP_HALF_SIZE - 50, MAP_HALF_SIZE + 50) && number(value.y, 0, 1000);
+    number(value.x, -MAP_HALF_SIZE - 50, MAP_HALF_SIZE + 50) && number(value.z, -MAP_HALF_SIZE - 50, MAP_HALF_SIZE + 50) && number(value.y, -20, 1000);
 
 function isPose(value: unknown): value is InfantryPose {
     if (!isRecord(value) || !isKind(value.kind) || !isSlot(value.slot) || !integer(value.revision, 1) ||

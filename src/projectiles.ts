@@ -49,6 +49,7 @@ function broadcastPlayerHit(peerId: string, damage: number, attackerName: string
 
 function retireProjectile(index: number, projectile: THREE.Object3D): void {
     retireProjectileTrail(projectile);
+    projectileData(projectile).homingTarget = undefined;
     state.scene?.remove(projectile);
     projectile.visible = false;
     state.projectilePool.push(projectile);
@@ -167,8 +168,7 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
         }
     }
 
-    const shieldT = !visualOnly
-        ? forgottenMecha?.combat.shieldContactT(_segmentStart, _segmentEnd, data.shotOrigin, PROJECTILE_RADIUS) : null;
+    const shieldT = forgottenMecha?.combat.shieldContactT(_segmentStart, _segmentEnd, data.shotOrigin, PROJECTILE_RADIUS);
     if (shieldT != null && shieldT < closestHitT) {
         closestHitT = shieldT; hitObstacle = null; hitShield = true;
     }
@@ -254,7 +254,7 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
                 projectileHit = true;
             }
         } else if (hitShield) {
-            processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'shield', shotId: data.shotId, pelletIndex: data.pelletIndex });
+            if (!visualOnly) processMechaHit(damage, { origin: data.shotOrigin, point: _impactPoint, surface: 'shield', shotId: data.shotId, pelletIndex: data.pelletIndex });
             projectileHit = true;
         } else if (hitObstacle) {
             if (obstacleData(hitObstacle).damageTarget === 'forgotten-mecha') {
@@ -296,6 +296,7 @@ export function resetProjectiles(): void {
         const projectile = state.projectiles[i];
         state.scene?.remove(projectile);
         projectile.visible = false;
+        projectileData(projectile).homingTarget = undefined;
         state.projectilePool.push(projectile);
     }
     state.projectiles.length = 0;

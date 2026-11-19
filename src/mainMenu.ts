@@ -74,7 +74,7 @@ export function setupMainMenu(): void {
         main, document.getElementById('panel-host-waiting')!, document.getElementById('panel-join-room')!,
     ] });
     const weaponScan = new WeaponMenuScan(document.getElementById('weapon-scan-layer')!, document.getElementById('weapon-specs')!);
-    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 30); camera.position.set(0, 0.25, 11.5); camera.lookAt(0, 0, 0);
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); stage.append(renderer.domElement);
@@ -294,6 +294,7 @@ export function setupMainMenu(): void {
         if (!lobbyOpen && lobbyScanActive) { lobbyScan.reset(); lobbyScanActive = false; }
         if (!weaponsOpen) weaponScan.hide();
         last = performance.now();
+        const reducedMotion = reducedMotionQuery?.matches ?? false;
         const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;
         if (w !== width || h !== height) { width = w; height = h; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
         if (weaponsOpen && weaponModel && displayedWeapon !== selectedWeapon && !transition) {
@@ -426,7 +427,8 @@ export function setupMainMenu(): void {
             scanActive = true;
         }
     };
-    window.addEventListener('beforeunload', () => {
+    window.addEventListener('pagehide', event => {
+        if (event.persisted) return;
         for (const id of lobbyModels.keys()) disposeLobbyModel(id);
         const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>();
         for (const model of [...weaponModels.values(), bean]) model.traverse(object => {

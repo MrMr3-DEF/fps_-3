@@ -50,7 +50,6 @@ export interface PeerData {
 
 export interface GameState {
     /** Last local regeneration update, independent of rendered frames. */
-    regenUpdatedAt: number;
     username: string;
     moveForward: boolean;
     moveBackward: boolean;
@@ -68,7 +67,8 @@ export interface GameState {
     score: number;
     playerHp: number;
     playerMaxHp: number;
-    lastDamageTime: number;
+    regenDelayMs: number;
+    lavaCooldownMs: number;
     isPlaying: boolean;
     matchEnded: boolean;
     pendingPlay: boolean;
@@ -151,7 +151,6 @@ export interface GameState {
 }
 
 export const state: GameState = {
-    regenUpdatedAt: performance.now(),
     username: 'Guest1',
     // Input flags consumed by the physics loop.
     moveForward: false,
@@ -172,7 +171,8 @@ export const state: GameState = {
     score: 0,
     playerHp: PLAYER_MAX_HP,
     playerMaxHp: PLAYER_MAX_HP,
-    lastDamageTime: 0,
+    regenDelayMs: 0,
+    lavaCooldownMs: 0,
     isPlaying: false,
     matchEnded: false,
     pendingPlay: false,
@@ -186,7 +186,7 @@ export const state: GameState = {
     roomCode: null,
     peer: null,
     connections: [],
-    peers: {},
+    peers: Object.create(null),
     peerIds: [],
     lobbyPlayers: [],
     playerList: [],
@@ -268,9 +268,9 @@ export function resetHeldInput(): void {
 export function resetPlayerState() {
     resetHeldInput();
     state.hookTargetCockpit = null;
-    state.regenUpdatedAt = performance.now();
     state.lifeId++;
-    state.lastDamageTime = 0;
+    state.regenDelayMs = 0;
+    state.lavaCooldownMs = 0;
     state.regenTimer = 0;
     state.playerHp = state.playerMaxHp;
     state.canJump = false;

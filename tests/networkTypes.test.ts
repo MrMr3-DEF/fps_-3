@@ -195,5 +195,19 @@ test('packet projection strips unknown payload recursively without retaining mut
     const roster = parseNetworkPacket({ type: 'lobby_roster', players: [{ peerId: 'peer-a', username: 'Pilot', bodyColor: 1, extra: true }] }) as any;
     assert.deepEqual(roster.players, [{ peerId: 'peer-a', username: 'Pilot', bodyColor: 1 }]);
     assert.deepEqual(parseNetworkPacket({ type: 'jump', extra: 'no' }), { type: 'jump' });
-    assert.deepEqual(parseNetworkPacket(Object.create(validUpdate)), validUpdate, 'validated inherited fields become owned canonical fields');
+    assert.equal(parseNetworkPacket(Object.create(validUpdate)), null);
+    assert.equal(parseNetworkPacket({ ...validUpdate, pos: Object.create(validUpdate.pos) }), null);
+});
+
+test('packet identities reject inherited object keys and melee actions require literal strings', () => {
+    for (const senderPeerId of ['__proto__', 'constructor', 'toString']) {
+        assert.equal(parseNetworkPacket({ ...validUpdate, senderPeerId }), null);
+    }
+    const command = { type: 'melee_command', lifeId: 1, sequence: 2 };
+    const event = { ...command, type: 'melee_event', senderPeerId: 'peer-a',
+        charged: true, origin: validUpdate.pos, yaw: 0, pitch: 0 };
+    for (const packet of [command, event]) {
+        assert.ok(parseNetworkPacket({ ...packet, action: 'start' }));
+        assert.equal(parseNetworkPacket({ ...packet, action: ['start'] }), null);
+    }
 });

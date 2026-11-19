@@ -46,7 +46,7 @@ export function hasLineOfSightToOrientedBox(
     localBox: THREE.Box3,
     worldMatrix: THREE.Matrix4,
     obstacleQuery: TargetObstacleQuery,
-    additionalOccluders: THREE.Object3D[] = NO_ADDITIONAL_OCCLUDERS,
+    additionalOccluders: THREE.Object3D[] | ((start: THREE.Vector3, end: THREE.Vector3, obstacleCount: number) => THREE.Object3D[] | null) = NO_ADDITIONAL_OCCLUDERS,
     ignoredTargetRoot?: THREE.Object3D,
     additionalBlocker?: (start: THREE.Vector3, end: THREE.Vector3) => boolean,
 ): boolean {
@@ -79,22 +79,22 @@ export function hasLineOfSightToOrientedBox(
             _sightSample.z,
             _occlusionCandidates,
         );
+        const extra = typeof additionalOccluders === 'function' ? additionalOccluders(origin, _sightSample, candidates.length) : additionalOccluders;
+        if (!extra) return false;
         _occlusionHits.length = 0;
         _occlusionRaycaster.intersectObjects(candidates, false, _occlusionHits);
-        if (additionalOccluders.length > 0) {
-            _occlusionRaycaster.intersectObjects(additionalOccluders, true, _occlusionHits);
-        }
-        let blocked = false;
-        for (let hitIndex = 0; hitIndex < _occlusionHits.length; hitIndex++) {
-            let hitObject: THREE.Object3D | null = _occlusionHits[hitIndex].object;
-            if (ignoredTargetRoot) {
-                while (hitObject && hitObject !== ignoredTargetRoot) hitObject = hitObject.parent;
-                if (hitObject === ignoredTargetRoot) continue;
-            }
-            blocked = true;
-            break;
-        }
-        if (!blocked && !additionalBlocker?.(origin, _sightSample)) return true;
+        if (_occlusionHits.some(hit => blocksVisibility(hit.object, ignoredTargetRoot))) continue;
+        _occlusionHits.length = 0;
+        if (extra.length > 0) _occlusionRaycaster.intersectObjects(extra, true, _occlusionHits);
+        if (!_occlusionHits.some(hit => blocksVisibility(hit.object, ignoredTargetRoot)) &&
+            !additionalBlocker?.(origin, _sightSample)) return true;
     }
     return false;
+}
+
+function blocksVisibility(object: THREE.Object3D, ignoredTargetRoot?: THREE.Object3D): boolean {
+    if (!ignoredTargetRoot) return true;
+    let ancestor: THREE.Object3D | null = object;
+    while (ancestor && ancestor !== ignoredTargetRoot) ancestor = ancestor.parent;
+    return ancestor !== ignoredTargetRoot;
 }

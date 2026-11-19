@@ -28,7 +28,7 @@ export interface InfantryPlayer {
     lifeId: number;
     position: THREE.Vector3;
     yaw: number;
-    mounted?: { revision: number; bounds: THREE.Box3 };
+    mounted?: { revision: number; bounds: THREE.Box3; closestPoint?(origin: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 };
 }
 
 interface Impact {
@@ -68,13 +68,17 @@ export function infantryWave(day: number): [number, number, number] {
         day >= 3 ? 3 + day - 3 : 0];
 }
 
+function nearestArmorPoint(mounted: NonNullable<InfantryPlayer['mounted']>, origin: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+    return mounted.closestPoint?.(origin, out) ?? mounted.bounds.clampPoint(origin, out);
+}
+
 export function nearestInfantryPlayer(origin: THREE.Vector3, players: readonly InfantryPlayer[],
     visible: (player: InfantryPlayer, point: THREE.Vector3) => boolean): InfantryPlayer | undefined {
     let best: InfantryPlayer | undefined;
     let distance = INFANTRY_RANGE ** 2;
     const point = new THREE.Vector3();
     for (const player of players) {
-        if (player.mounted) player.mounted.bounds.clampPoint(origin, point); else point.copy(player.position);
+        if (player.mounted) nearestArmorPoint(player.mounted, origin, point); else point.copy(player.position);
         const squared = origin.distanceToSquared(point);
         if (squared > distance || best && squared === distance || !visible(player, point)) continue;
         distance = squared;
@@ -308,7 +312,7 @@ export class InfantryDefense {
     }
 
     private playerPoint(player: InfantryPlayer, origin: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
-        return player.mounted ? player.mounted.bounds.clampPoint(origin, out) : closestPlayerBodyPoint(origin, player.position, player.yaw, out);
+        return player.mounted ? nearestArmorPoint(player.mounted, origin, out) : closestPlayerBodyPoint(origin, player.position, player.yaw, out);
     }
 
     private aimAt(bot: Bot, target: THREE.Vector3): void {
@@ -354,9 +358,7 @@ export class InfantryDefense {
                     bot.cooldown = stats.interval;
                     if (stats.contact === 0) this.strike(bot, players, 0);
                 } else this.setPhase(bot, 'idle');
-            } else if (player && this.move(bot, player.position, delta, true)) {
-                bot.route = undefined;
-            } else {
+            } else if (!player || !this.move(bot, player.position, delta, true)) {
                 this.followWallRoute(bot, delta);
             }
             this.advanceLocomotionClock(bot, delta);

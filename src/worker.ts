@@ -1,6 +1,6 @@
 import { parseJsonBody } from './boundedJson.js';
 import { isUsername, isPeerId, isCapability, isAdmissionGeneration } from './roomIdentity.js';
-import { MAX_PLAYERS, ROOM_CODE_LENGTH } from './config.js';
+import { MAX_PLAYERS, MAX_PENDING_ROOM_CONNECTIONS, ROOM_CODE_LENGTH } from './config.js';
 import { TurnRoomStateMachine } from './turnRoom.js';
 
 interface Env {
@@ -51,7 +51,6 @@ const EMPTY_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
 };
 const ROOM_PATTERN = new RegExp(`^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{${ROOM_CODE_LENGTH}}$`);
-const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const MAX_TURNSTILE_TOKEN_LENGTH = 2_048;
 
 // A host must actively refresh its room to keep it discoverable. Sessions are
@@ -97,7 +96,7 @@ function getBearerToken(request: Request): string | null {
     const authorization = request.headers.get('Authorization');
     if (!authorization?.startsWith('Bearer ')) return null;
     const token = authorization.slice('Bearer '.length).trim();
-    return CAPABILITY_PATTERN.test(token) ? token : null;
+    return isCapability(token) ? token : null;
 }
 
 function makeCapability(): string {
@@ -227,8 +226,6 @@ async function registerRoom(request: Request, env: Env): Promise<Response> {
     if (body.peerId !== `testfps-room-${room}`) return json({ error: 'Invalid host identity.' }, 400);
     const closeToken = makeCapability();
     const turnSessionToken = makeCapability();
-    const admissionToken = makeCapability();
-    const admissionProof = makeCapability();
     try {
         const stub = env.ACTIVE_TURN_ROOM.get(env.ACTIVE_TURN_ROOM.idFromName(room));
         const registration = await stub.fetch('https://turn-room.internal/register', {
@@ -236,7 +233,7 @@ async function registerRoom(request: Request, env: Env): Promise<Response> {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 closeToken,
-                turnSessionToken, admissionToken, admissionProof, username: body.username, peerId: body.peerId,
+                turnSessionToken, username: body.username, peerId: body.peerId,
                 ip: getClientIp(request),
                 expiresAt: Date.now() + ROOM_LIFETIME_MS,
                 sessionExpiresAt: Date.now() + TURN_SESSION_LIFETIME_MS,
@@ -248,7 +245,7 @@ async function registerRoom(request: Request, env: Env): Promise<Response> {
         if (!registration.ok) return json({ error: 'Unable to register the room. Please retry.' }, 503);
         const result = await registration.json() as { expiresAt?: unknown };
         if (typeof result.expiresAt !== 'number') return json({ error: 'Unable to register the room. Please retry.' }, 503);
-        return json({ closeToken, turnSessionToken, admissionToken, admissionProof, expiresAt: result.expiresAt }, 201);
+        return json({ closeToken, turnSessionToken, expiresAt: result.expiresAt }, 201);
     } catch {
         return json({ error: 'Unable to register the room. Please retry.' }, 503);
     }
@@ -305,10 +302,20 @@ async function createJoinSession(request: Request, env: Env): Promise<Response> 
     }
 }
 
+async function checkManagementRate(request: Request, env: Env): Promise<Response | null> {
+    const rate = await consumeRateLimit(env, 'room-management', getClientIp(request), 60, 60_000);
+    if (!rate) return json({ error: 'Room protection is temporarily unavailable. Please retry.' }, 503);
+    return rate.allowed ? null : json({ error: 'Too many room requests. Please retry later.',
+        retryAfterSeconds: rate.retryAfterSeconds }, 429);
+}
+
 async function closeRoom(request: Request, env: Env, room: string): Promise<Response> {
+    if (!isConfigured(env)) return json({ error: 'Secure multiplayer is unavailable.' }, 503);
     const token = getBearerToken(request);
     if (!token) return json({ error: 'Missing room close capability.' }, 401);
 
+    const limited = await checkManagementRate(request, env);
+    if (limited) return limited;
     try {
         const stub = env.ACTIVE_TURN_ROOM.get(env.ACTIVE_TURN_ROOM.idFromName(room));
         const response = await stub.fetch('https://turn-room.internal/close', {
@@ -329,9 +336,11 @@ async function heartbeatRoom(request: Request, env: Env, room: string): Promise<
     const token = getBearerToken(request);
     if (!token) return json({ error: 'Missing room heartbeat capability.' }, 401);
     const body = await parseJsonBody<{ peerIds?: unknown; admissionGeneration?: unknown }>(request);
-    if (!body || !Array.isArray(body.peerIds) || body.peerIds.length > MAX_PLAYERS || !body.peerIds.every(isPeerId) ||
+    if (!body || !Array.isArray(body.peerIds) || body.peerIds.length > MAX_PLAYERS + MAX_PENDING_ROOM_CONNECTIONS || !body.peerIds.every(isPeerId) ||
         !(body.admissionGeneration === undefined || isAdmissionGeneration(body.admissionGeneration))) return json({ error: 'Invalid roster.' }, 400);
 
+    const limited = await checkManagementRate(request, env);
+    if (limited) return limited;
     try {
         const stub = env.ACTIVE_TURN_ROOM.get(env.ACTIVE_TURN_ROOM.idFromName(room));
         const response = await stub.fetch('https://turn-room.internal/heartbeat', {
@@ -353,9 +362,12 @@ async function heartbeatRoom(request: Request, env: Env, room: string): Promise<
 }
 
 async function releaseJoinSession(request: Request, env: Env, room: string): Promise<Response> {
+    if (!isConfigured(env)) return json({ error: 'Secure multiplayer is unavailable.' }, 503);
     const token = getBearerToken(request);
     if (!token) return json({ error: 'Missing room-session capability.' }, 401);
 
+    const limited = await checkManagementRate(request, env);
+    if (limited) return limited;
     try {
         const stub = env.ACTIVE_TURN_ROOM.get(env.ACTIVE_TURN_ROOM.idFromName(room));
         const response = await stub.fetch('https://turn-room.internal/release-session', {
@@ -375,7 +387,7 @@ async function issueTurnCredentials(request: Request, env: Env, room: string): P
     if (!isConfigured(env)) {
         return json({ error: 'Secure multiplayer is not configured on this deployment.' }, 503);
     }
-    const turnSessionToken = requestUrlCapability(request, 'session');
+    const turnSessionToken = getBearerToken(request);
     if (!turnSessionToken) return json({ error: 'Missing or invalid room-session capability.' }, 401);
 
     const rate = await consumeRateLimit(
@@ -390,13 +402,16 @@ async function issueTurnCredentials(request: Request, env: Env, room: string): P
         return json({ error: 'Too many credential requests. Please retry later.', retryAfterSeconds: rate.retryAfterSeconds }, 429);
     }
 
+    const claimId = makeCapability();
+    let changeClaim: (action: 'claim' | 'refund') => Promise<Response>;
     try {
         const roomStub = env.ACTIVE_TURN_ROOM.get(env.ACTIVE_TURN_ROOM.idFromName(room));
-        const claim = await roomStub.fetch('https://turn-room.internal/claim-credential', {
+        changeClaim = action => roomStub.fetch(`https://turn-room.internal/${action}-credential`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ turnSessionToken, ip: getClientIp(request) }),
+            body: JSON.stringify({ turnSessionToken, ip: getClientIp(request), claimId }),
         });
+        const claim = await changeClaim('claim');
         if (claim.status === 404) return json({ error: 'This room session is not active or has expired.' }, 404);
         if (claim.status === 403) return json({ error: 'This room-session capability is not valid for this network.' }, 403);
         if (claim.status === 429) return json({ error: 'This room-session capability has no relay requests remaining.' }, 429);
@@ -419,6 +434,10 @@ async function issueTurnCredentials(request: Request, env: Env, room: string): P
             },
         );
         if (!cfResponse.ok) {
+            if (cfResponse.status >= 500) {
+                const refunded = await changeClaim('refund').catch(() => null);
+                if (!refunded?.ok) console.warn('Could not refund failed relay credential request.');
+            }
             console.error('Cloudflare TURN credential request failed:', cfResponse.status);
             return json({ error: 'Unable to issue relay credentials. Please retry.' }, 503);
         }
@@ -433,11 +452,6 @@ async function issueTurnCredentials(request: Request, env: Env, room: string): P
         console.error('Cloudflare TURN credential request threw.');
         return json({ error: 'Unable to issue relay credentials. Please retry.' }, 503);
     }
-}
-
-function requestUrlCapability(request: Request, name: string): string | null {
-    const token = new URL(request.url).searchParams.get(name);
-    return token && CAPABILITY_PATTERN.test(token) ? token : null;
 }
 
 export class TurnRateLimiter {
@@ -496,11 +510,13 @@ async function manageAdmission(request: Request, env: Env, room: string): Promis
     if (!closeToken) return json({ error: 'Missing host capability.' }, 401);
     const body = await parseJsonBody<{ peerId?: unknown; admissionToken?: unknown }>(request);
     if (!body || !isPeerId(body.peerId) || (request.method === 'POST' && !isCapability(body.admissionToken))) return json({ error: 'Invalid admission request.' }, 400);
+    const limited = await checkManagementRate(request, env);
+    if (limited) return limited;
     try {
         const stub = env.ACTIVE_TURN_ROOM.get(env.ACTIVE_TURN_ROOM.idFromName(room));
         return await stub.fetch(`https://turn-room.internal/${request.method === 'POST' ? 'admit' : 'depart'}`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...body, closeToken }),
+            body: JSON.stringify({ peerId: body.peerId, admissionToken: body.admissionToken, closeToken }),
         });
     } catch { return json({ error: 'Room admission is temporarily unavailable.' }, 503); }
 }

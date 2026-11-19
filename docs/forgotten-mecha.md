@@ -229,7 +229,7 @@ Use two clients and a late joiner when changing shared actor/transport behavior:
 
 - Compare pose, health and attacks while the host player is paused/dead.
 - Race cockpit entry; only one pilot owns controls and other views remain independent.
-- Check rockets/stomps, target-life expiry, kill credit and render-before-damage.
+- Check rockets/stomps, target-life expiry, kill credit, host health and render-timed local feedback.
 - Exercise blocked exit, remount, pilot disconnect and lethal living release.
 - Join during startup, attacks, destruction and the shared ending.
 - Leave and start again with fresh state; include relay-required connections when relevant.

@@ -7,20 +7,20 @@ import { GothGirlfriend } from '../src/gothGirlfriend.ts';
 import { rebuildEnvironmentWithSeed, updateEnvironmentVisibility, disposeWorld } from '../src/world.ts';
 import { MechaEndingScenery } from '../src/mechaEndingScenery.ts';
 import { SHARED_WORLD_GEOMETRIES, SHARED_WORLD_MATERIALS } from '../src/seededScenery.ts';
-import { LAVA_POOL_HALF_SIZE } from '../src/config.ts';
+import { LAVA_POOL_HALF_SIZE, MAP_HALF_SIZE } from '../src/config.ts';
 
 const context = new Proxy({}, { get: () => () => {} });
 Object.assign(globalThis, { window: {}, document: { getElementById: () => null, createElement: () => ({ getContext: () => context }) } });
 GothGirlfriend.prototype.load = async () => {};
-// Captured from the original complete generator before extracting its scenery.
+// Full-world fingerprints cover seeded placement and the draw order of the scenery recipes.
 // Positions are normalized to nine decimal places for ARM64/x64 portability.
 // Include post-scenery enemies: their poses prove the RNG continuation stayed intact.
 const baseline = new Map([
-    [0, '5f4a5ec9eb3cd0920ce2297c44638d8e5d487ef63b84d0e642f14da8bcb07645'],
-    [1, 'f34dc77b17c01e56d4312e3dd04d51a93ceb8f951277be96805cfcb764b02af1'],
-    [42, 'b8f48fa5741e7e02a6668cdb18d334026c64e6836d4303445bb01c43a5251faf'],
-    [91234, '1e70e734d5b61d12da384cb8c3edd3dea415da15f66d0a2b8a913a51db5e62eb'],
-    [0xffffffff, '63c34042f0e2a0689b428aac50a08c55d49a3ac402617d03d185f4c1d96fd4b2'],
+    [0, '261d0d07abadbc03345f40327b98e3b34eb6d35ff9f0a8d2a438c353f67cfc0c'],
+    [1, 'd83567e8b997e80eec5b75582546b3227d6ff8ec16fc8a6c18dd2b7891c8498f'],
+    [42, 'cd7a9943921ce494648d8c356ac297beb93fc83ca7475e5a89025fe86791b6c8'],
+    [91234, 'b133cf522ff6387eda6b72cbf758d00cc89ca21d96e903e2c58c8e94c1cb62a9'],
+    [0xffffffff, 'fc2d0930d60f8f54fa22224dfe08ce69fd0f19b9a5fe97692fcb5e6da2a83b6e'],
 ]);
 // Material identity follows physical box faces, independently of draw grouping.
 function faceMaterials(object: any): THREE.Material[] {
@@ -66,12 +66,18 @@ function plantMatrices(scene: THREE.Scene): string[] {
     }));
 }
 
-test('shared extraction preserves all complete-world baseline hashes, including texture RNG and enemy placement', () => {
+test('seeded worlds preserve their fingerprints and keep decorative footprints outside the arena', () => {
     state.isMultiplayer = true;
     try {
         for (const [seed, expected] of baseline) {
             state.scene = new THREE.Scene(); rebuildEnvironmentWithSeed(seed); updateEnvironmentVisibility(new THREE.Vector3(), 16);
-            assert.equal(fingerprint(state.scene, true), expected, `world changed for seed ${seed}`); disposeWorld();
+            assert.equal(fingerprint(state.scene, true), expected, `world changed for seed ${seed}`);
+            for (const node of state.scene.children) {
+                const radius = node instanceof THREE.Sprite ? node.scale.x / 2 :
+                    node instanceof THREE.Mesh && node.material.color?.getHex() === 0xff3b00 ? LAVA_POOL_HALF_SIZE : null;
+                if (radius !== null) assert.ok(Math.max(Math.abs(node.position.x), Math.abs(node.position.z)) >= MAP_HALF_SIZE + radius);
+            }
+            disposeWorld();
         }
     } finally { disposeWorld(); state.scene = null; state.isMultiplayer = false; }
 });

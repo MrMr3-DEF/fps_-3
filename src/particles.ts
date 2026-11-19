@@ -278,9 +278,9 @@ export function createLaserBeam(startPos: THREE.Vector3, endPos: THREE.Vector3, 
 }
 
 function releaseMeshParticle(p: Particle): void {
-    if (!p.mesh || !state.scene) return;
+    if (!p.mesh) return;
 
-    state.scene.remove(p.mesh);
+    p.mesh.removeFromParent();
     if (p.kind === 'sniper-trail') {
         releaseBasicMaterial(p.mesh.material as THREE.MeshBasicMaterial);
     } else if (p.kind === 'shockwave') {

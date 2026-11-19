@@ -525,8 +525,8 @@ export function fireProjectile(): void {
 
     const shotId = ++nextShotId;
     const spreadSeed = crypto.getRandomValues(new Uint32Array(1))[0];
-    state.rightGunContainer.position.z += stats.recoil;
     state.rightGun.getWorldPosition(_barrelPos);
+    state.rightGunContainer.position.z += stats.recoil;
     if (homingTarget && !isHomingTargetInRange(homingTarget, _barrelPos, BULLET_TRAVEL_DISTANCE)) {
         homingTarget = null;
     }
@@ -636,6 +636,7 @@ export function fireProjectile(): void {
             const data = targetData(targetGroup);
             const bodyMesh = data.bodyMesh;
             if (bodyMesh) {
+                bodyMesh.updateWorldMatrix(true, false);
                 const targetHits = _raycaster.intersectObject(bodyMesh);
                 if (targetHits.length > 0) {
                     const dist = targetHits[0].distance;
@@ -765,13 +766,11 @@ export function fireProjectile(): void {
 }
 
 export function updateWeapons(delta: number): void {
-    if (forgottenMecha?.ownsLocalPilot) return;
+    state.fireCooldown = Math.max(0, state.fireCooldown - delta);
+    if (forgottenMecha?.ownsLocalPilot) { state.minigunRamp = 0; return; }
     updateMuzzleFlash(state.leftGun, delta);
     updateMuzzleFlash(state.rightGun, delta);
 
-    if (state.fireCooldown > 0) {
-        state.fireCooldown -= delta;
-    }
 
     if (state.rightGunContainer) {
         state.rightGunContainer.position.z += (-0.5 - state.rightGunContainer.position.z) * 15 * delta;
@@ -1001,6 +1000,7 @@ const _identityQuaternion = new THREE.Quaternion();
 
 /** A life reset retains equipped inventory but discards unfinished presentation. */
 export function resetWeaponPresentation(): void {
+    minigunHomingDistanceSample = null;
     state.inspectState = 'IDLE'; state.inspectTimer = 0;
     const active = getWeaponMesh(state.activeWeaponName);
     state.rightGun = active;

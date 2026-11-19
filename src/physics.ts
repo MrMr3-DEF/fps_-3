@@ -42,7 +42,6 @@ const _negCamRight = new THREE.Vector3();
 const _obstacleCandidates: THREE.Object3D[] = [];
 
 // Cached HUD element touched by movement effects.
-let hoverBadgeEl: HTMLElement | null = null;
 
 const MAX_FALL_SPEED = JUMP_FORCE * 0.88;
 const MAP_LIMIT = (MAP_SIZE / 2) - 1;
@@ -63,7 +62,7 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     let colX = false;
     let colZ = false;
 
-    if (Math.abs(testPosX.x) > MAP_LIMIT || Math.abs(testPosX.z) > MAP_LIMIT) colX = true;
+    if (Math.abs(testPosX.x) > Math.max(MAP_LIMIT, Math.abs(actualPos.x))) colX = true;
 
     const candidates = queryObstaclesNear(actualPos.x, actualPos.z, OBSTACLE_QUERY_RADIUS, _obstacleCandidates);
     const len = candidates.length;
@@ -92,7 +91,7 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     // both axes against the old position lets a diagonal step enter a corner:
     // each axis is safe alone, but their combined destination overlaps.
     const resolvedX = colX ? actualPos.x : testPosX.x;
-    if (Math.abs(resolvedX) > MAP_LIMIT || Math.abs(testPosZ.z) > MAP_LIMIT) colZ = true;
+    if (Math.abs(testPosZ.z) > Math.max(MAP_LIMIT, Math.abs(actualPos.z))) colZ = true;
 
     for (let i = 0; i < len; i++) {
         const box = candidates[i];
@@ -134,15 +133,16 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
 export function updatePlayerPhysics(delta: number): void {
     if (!Number.isFinite(delta) || delta <= 0) return;
     let remaining = Math.min(delta, 0.05);
-    while (remaining > 1e-8) {
+    for (let i = 0; i < 64 && remaining > 1e-8; i++) {
+        if (!Number.isFinite(state.velocity.lengthSq())) state.velocity.set(0, 0, 0);
         const maxSpeed = state.velocity.length() + WALK_SPEED + BASE_GRAVITY * remaining;
         const step = Math.min(remaining, 1 / 60, 0.5 / Math.max(1, maxSpeed));
-        stepPlayerPhysics(step);
+        stepPlayerPhysics(step, i === 0);
         remaining -= step;
     }
 }
 
-function stepPlayerPhysics(delta: number): void {
+function stepPlayerPhysics(delta: number, emitEffects: boolean): void {
     if (state.controls) {
         const isPaused = !isInputActive() && state.isPlaying;
         
@@ -159,16 +159,12 @@ function stepPlayerPhysics(delta: number): void {
             const isMoving = moveForward || moveBackward || moveLeft || moveRight || analogX !== 0 || analogY !== 0;
 
             // Convert camera-relative WASD into horizontal world-space directions.
-            _camForward.set(0, 0, -1).applyQuaternion(state.camera!.quaternion);
-            _camForward.y = 0;
-            _camForward.normalize();
-
             _camRight.set(1, 0, 0).applyQuaternion(state.camera!.quaternion);
             _camRight.y = 0;
             _camRight.normalize();
+            _camForward.set(_camRight.z, 0, -_camRight.x);
 
             // Hover is a mid-air brake/thruster state; grappling gets priority.
-            const wasHovering = state.isHovering;
             if (!state.canJump && state.isShiftDown && state.hoverFuel > 0.0 && state.hookState !== 'PULLING') {
                 state.isHovering = true;
             } else {
@@ -182,19 +178,21 @@ function stepPlayerPhysics(delta: number): void {
                     state.isHovering = false;
                 }
 
-                _boosterPos.copy(playerObj.position);
-                _boosterPos.y -= 1.8;
-                spawnRocketFlame(_boosterPos, 2, false);
+                if (emitEffects) {
+                    _boosterPos.copy(playerObj.position);
+                    _boosterPos.y -= 1.8;
+                    spawnRocketFlame(_boosterPos, 2, false);
 
-                if (moveForward) {
-                    _negCamForward.copy(_camForward).negate();
-                    spawnManeuveringBeam(_boosterPos, 1, _negCamForward);
-                }
-                if (moveBackward) spawnManeuveringBeam(_boosterPos, 1, _camForward);
-                if (moveLeft)     spawnManeuveringBeam(_boosterPos, 1, _camRight);
-                if (moveRight) {
-                    _negCamRight.copy(_camRight).negate();
-                    spawnManeuveringBeam(_boosterPos, 1, _negCamRight);
+                    if (moveForward) {
+                        _negCamForward.copy(_camForward).negate();
+                        spawnManeuveringBeam(_boosterPos, 1, _negCamForward);
+                    }
+                    if (moveBackward) spawnManeuveringBeam(_boosterPos, 1, _camForward);
+                    if (moveLeft)     spawnManeuveringBeam(_boosterPos, 1, _camRight);
+                    if (moveRight) {
+                        _negCamRight.copy(_camRight).negate();
+                        spawnManeuveringBeam(_boosterPos, 1, _negCamRight);
+                    }
                 }
             } else {
                 if (state.canJump || state.hookState === 'PULLING') {
@@ -202,13 +200,6 @@ function stepPlayerPhysics(delta: number): void {
                     if (state.hoverFuel > 1.0) {
                         state.hoverFuel = 1.0;
                     }
-                }
-            }
-
-            if (state.isHovering !== wasHovering) {
-                if (!hoverBadgeEl) hoverBadgeEl = document.getElementById('hover-badge');
-                if (hoverBadgeEl) {
-                    hoverBadgeEl.style.display = state.isHovering ? 'inline-block' : 'none';
                 }
             }
 
@@ -335,7 +326,7 @@ function stepPlayerPhysics(delta: number): void {
 
             const minCameraY = currentGroundY + PLAYER_HEIGHT; 
 
-            const isGrounded = playerObj.position.y <= minCameraY && state.velocity.y <= 0;
+            const isGrounded = minCameraY <= maxCameraY && playerObj.position.y <= minCameraY && state.velocity.y <= 0;
             if (isGrounded) {
                 state.normalJumpActive = false;
                 state.velocity.y = 0;

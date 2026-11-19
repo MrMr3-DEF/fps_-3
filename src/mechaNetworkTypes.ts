@@ -1,4 +1,4 @@
-import { fields, projectKnown, variant, vectorFields as vec, type Projection } from './networkProjection.js';
+import { fields, isPacketRecord as record, projectKnown, variant, vectorFields as vec, type Projection } from './networkProjection.js';
 import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, type MechaEndingState } from './mechaEndingTimeline.js';
 import { isPeerId } from './roomIdentity.js';
 import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME,
@@ -42,14 +42,16 @@ export type MechaEvent =
     | { kind: 'blast'; position: Vec3Packet }
     | { kind: 'blocked'; peerId: string }
     | { kind: 'board_denied'; peerId: string; lifeId: number }
-    | { kind: 'hit'; peerId: string; killed: boolean; score: number; position: Vec3Packet; direction: Vec3Packet }
+    | { kind: 'hit'; peerId: string | null; killed: boolean; score: number; position: Vec3Packet; direction: Vec3Packet }
     | { kind: 'end' };
 export interface MechaEventPacket extends MechaSender { type: 'mecha_event'; sequence: number; state: MechaState; event: MechaEvent }
 export interface MechaStatePacket extends MechaSender { type: 'mecha_state'; state: MechaState }
 export interface MechaEndingReadyPacket extends MechaSender { type: 'mecha_ending_ready'; id: number; revision: number }
-export type MechaPacket = MechaEndingReadyPacket | MechaInputPacket | MechaBoardPacket | MechaHitPacket | MechaEventPacket | MechaStatePacket;
+export interface MechaDeniedPacket extends MechaSender {
+    type: 'mecha_denied'; action: 'board' | 'exit'; peerId: string; lifeId: number; sequence: number;
+}
+export type MechaPacket = MechaEndingReadyPacket | MechaInputPacket | MechaBoardPacket | MechaHitPacket | MechaEventPacket | MechaStatePacket | MechaDeniedPacket;
 
-const record = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const number = (x: unknown, min: number, max: number): x is number => typeof x === 'number' && Number.isFinite(x) && x >= min && x <= max;
 const integer = (x: unknown, max = Number.MAX_SAFE_INTEGER): x is number => number(x, 0, max) && Number.isSafeInteger(x);
 const bool = (x: unknown): x is boolean => typeof x === 'boolean';
@@ -102,15 +104,18 @@ function isEvent(e: unknown): e is MechaEvent {
     if (e.kind === 'end') return true;
     if (e.kind === 'impact') return ['step', 'stomp', 'knees', 'fists', 'punch'].includes(e.impact as string) && isMechaVector(e.position);
     if (e.kind === 'blast' || e.kind === 'shield') return isMechaVector(e.position);
+    if (e.kind === 'hit') return (e.peerId === null || isPeerId(e.peerId)) && bool(e.killed) &&
+        integer(e.score) && isMechaVector(e.position) && direction(e.direction);
     if (!isPeerId(e.peerId)) return false;
     if (e.kind === 'blocked') return true;
     if (e.kind === 'board_denied') return integer(e.lifeId);
-    if (e.kind === 'hit') return bool(e.killed) && integer(e.score) && isMechaVector(e.position) && direction(e.direction);
     if (!integer(e.lifeId)) return false;
-    if (e.kind === 'damage') return number(e.damage, 0.01, 100) && ['laser', 'stomp', 'rocket'].includes(e.attack as string) && (e.attackerPeerId === null || isPeerId(e.attackerPeerId));
+    if (e.kind === 'damage') return integer(e.damage, 100) && e.damage > 0 && ['laser', 'stomp', 'rocket'].includes(e.attack as string) && (e.attackerPeerId === null || isPeerId(e.attackerPeerId));
     return e.kind === 'release' && record(e.pose) && isMechaVector(e.pose.position) && isMechaVector(e.pose.viewPosition) && quaternion(e.pose.quaternion);
 }
 function validateMechaPacket(x: Record<string, unknown>): MechaPacket | null {
+    if (x.type === 'mecha_denied') return isPeerId(x.peerId) && integer(x.lifeId) && integer(x.sequence) &&
+        (x.action === 'board' || x.action === 'exit') ? x as unknown as MechaDeniedPacket : null;
     if (x.type === 'mecha_ending_ready') return integer(x.id) && x.id > 0 && integer(x.revision) ? x as unknown as MechaEndingReadyPacket : null;
     if (x.type === 'mecha_state') return isMechaState(x.state) ? x as unknown as MechaStatePacket : null;
     if (x.type === 'mecha_event') return integer(x.sequence) && isMechaState(x.state) && isEvent(x.event) ? x as unknown as MechaEventPacket : null;
@@ -147,9 +152,12 @@ const mechaPacketFields = {
     hit_mecha: fields('revision', 'shotId', 'pelletIndex', 'damage'),
     mecha_state: { state: mechaStateFields },
     mecha_event: { ...fields('sequence'), state: mechaStateFields, event: eventFields },
+    mecha_denied: fields('action', 'peerId', 'lifeId', 'sequence'),
 } satisfies Record<MechaPacket['type'], Projection>;
+const projectedMechaFields = Object.fromEntries(Object.entries(mechaPacketFields)
+    .map(([type, schema]) => [type, { ...fields('type', 'senderPeerId'), ...schema }])) as Record<string, Projection>;
 export function parseMechaPacket(value: Record<string, unknown>): MechaPacket | null {
     if (value.senderPeerId !== undefined && !isPeerId(value.senderPeerId)) return null;
     const packet = validateMechaPacket(value);
-    return packet && projectKnown(packet, { ...fields('type', 'senderPeerId'), ...mechaPacketFields[packet.type] });
+    return packet && projectKnown(packet, projectedMechaFields[packet.type]);
 }

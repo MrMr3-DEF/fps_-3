@@ -26,7 +26,17 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
         await call(0, 'arena'); await call(1, 'arena');
         await call(0, 'start'); await flush();
         await call(0, 'pose', { z: 10, yaw: -0.055 });
-        await call(1, 'pose', { z: -10, yaw: Math.PI - 0.055 });
+        const walkGuest = async (yaw: number) => {
+            const [guestX, , guestZ] = (await call(1, 'state')).position;
+            const steps = Math.max(1, Math.ceil(Math.hypot(guestX, guestZ + 10) / 3));
+            for (let i = 1; i <= steps; i++) {
+                const fraction = i / steps;
+                await call(1, 'pose', { x: guestX * (1 - fraction), z: guestZ * (1 - fraction) - 10 * fraction, yaw });
+                await flush();
+                await tick();
+            }
+        };
+        await walkGuest(Math.PI - 0.055);
         await flush();
         for (let i = 0; i < 15; i++) await tick();
         assert.equal((await call(0, 'state')).peers[guest.peerId].visible, true);
@@ -80,6 +90,7 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
                     await call(victim, 'respawn'); await flush();
                     assert.equal((await call(shooter, 'state')).peers[victimId].visible, true);
                     assert.equal((await call(shooter, 'state')).peers[victimId].hp, 10);
+                    if (victim === 1) await walkGuest(Math.PI);
                 }
             }
         }

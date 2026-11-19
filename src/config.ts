@@ -194,17 +194,16 @@ export interface WeaponStat {
     spread: number;
     bulletColor: number;
     /** Representative real-world bore diameter retained as weapon metadata. */
-    caliberMm: number;
     muzzleFlashSize: 'small' | 'medium' | 'large';
     pellets?: number;
 }
 
 export const WEAPON_STATS: Record<string, WeaponStat> = {
-    PISTOL: { fireRate: 0.1, damage: 1, recoil: 0.08, spread: 0.002, bulletColor: 0xff0055, caliberMm: 9, muzzleFlashSize: 'small' },
-    SHOTGUN: { fireRate: 0.6, damage: 1, recoil: 0.22, spread: 0.08, bulletColor: 0xffaa00, caliberMm: 18.5, muzzleFlashSize: 'medium', pellets: 5 },
-    AR: { fireRate: 0.15, damage: 1, recoil: 0.12, spread: 0.002, bulletColor: 0x00ff88, caliberMm: 5.56, muzzleFlashSize: 'small' },
-    SNIPER: { fireRate: 2.0, damage: 10, recoil: 0.30, spread: 0.0, bulletColor: 0xffff00, caliberMm: 12.7, muzzleFlashSize: 'large' },
-    MINIGUN: { fireRate: 0.06, damage: 1, recoil: 0.02, spread: 0.002, bulletColor: 0xff6600, caliberMm: 7.62, muzzleFlashSize: 'small' },
+    PISTOL: { fireRate: 0.1, damage: 1, recoil: 0.08, spread: 0.002, bulletColor: 0xff0055, muzzleFlashSize: 'small' },
+    SHOTGUN: { fireRate: 0.6, damage: 1, recoil: 0.22, spread: 0.08, bulletColor: 0xffaa00, muzzleFlashSize: 'medium', pellets: 5 },
+    AR: { fireRate: 0.15, damage: 1, recoil: 0.12, spread: 0.002, bulletColor: 0x00ff88, muzzleFlashSize: 'small' },
+    SNIPER: { fireRate: 2.0, damage: 10, recoil: 0.30, spread: 0.0, bulletColor: 0xffff00, muzzleFlashSize: 'large' },
+    MINIGUN: { fireRate: 0.06, damage: 1, recoil: 0.02, spread: 0.002, bulletColor: 0xff6600, muzzleFlashSize: 'small' },
 };
 
 export const LAVA_DAMAGE_TICK_MS = 500;
@@ -213,6 +212,8 @@ export const LAVA_POOL_HALF_SIZE = 12.8;
 
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
+export const MAX_PENDING_ROOM_CONNECTIONS = 2 * (MAX_PLAYERS - 1);
+export const NETWORK_PROTOCOL_VERSION = 2;
 export const ROOM_PENDING_SESSION_MS = 90_000;
 export const MAX_SHOT_PELLET_INDEX = Math.max(...Object.values(WEAPON_STATS).map(stats => stats.pellets ?? 1)) - 1;
 // Eight unambiguous characters make active room discovery infeasible by brute force

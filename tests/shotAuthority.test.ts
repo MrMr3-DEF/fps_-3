@@ -2,7 +2,7 @@ import { TargetMotionHistory } from '../src/projectileFlight.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ShotLedger, spreadDirection, acceptDeath, acceptLifeUpdate, initialWeaponState, advanceWeaponState } from '../src/shotAuthority.ts';
+import { ShotLedger, spreadDirection, initialWeaponState, advanceWeaponState } from '../src/shotAuthority.ts';
 import { segmentAabbHitT } from '../src/gameplayMath.ts';
 import { BULLET_TRAVEL_DISTANCE, PROJECTILE_SPEED, WEAPON_STATS } from '../src/config.ts';
 import type { FirePacket, WeaponName } from '../src/networkTypes.ts';
@@ -125,14 +125,17 @@ test('host obstruction receives the configured projectile radius and zero for sn
         assert.equal(radius, weapon === 'SNIPER' ? 0 : 0.07);
     }
 });
-test('death is consumed once per life and revival requires the next life',()=>{
-    const life={lifeId:3,wasDead:false,deathReported:false};
-    assert.equal(acceptLifeUpdate(life,4,false),false);
-    assert.ok(acceptDeath(life,3));assert.equal(acceptDeath(life,3),false);
-    assert.equal(acceptLifeUpdate(life,3,false),false);
-    assert.ok(acceptLifeUpdate(life,4,false));assert.equal(acceptDeath(life,3),false);
-    assert.ok(acceptDeath(life,4));
-    assert.equal(new ShotLedger().record(fire('SNIPER'),1000,true),false);
+test('retiring a life discards claims while retaining the weapon deadline', () => {
+    const ledger = new ShotLedger();
+    const packet = { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
+        barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } } as const;
+    const now = 1000;
+    assert.ok(ledger.record(packet, now, false));
+    ledger.retireLife();
+    assert.equal(ledger.remainingCooldown(now + 1), 1999);
+    assert.equal(ledger.consume(1, 0, new THREE.Vector3(0, 2, -2), 1, 10, now + 2, () => false), false);
+    assert.equal(ledger.record({ ...packet, shotId: 2 }, now + 100, false), false);
+    assert.ok(ledger.record({ ...packet, shotId: 2 }, now + 2000, false));
 });
 
 test('minigun retains barrel spin across a brief trigger release, then cools down', () => {

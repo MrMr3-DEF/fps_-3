@@ -1,8 +1,8 @@
 import { KATANA } from './config.js';
-import { katanaInput, cancelKatana, updateKatana, validateKatanaInput, applyKatanaShake, renderKatanaImpact, resetKatana } from './katana.js';
+import { katanaInput, cancelKatana, resetLocalKatana, updateKatana, validateKatanaInput, applyKatanaShake, renderKatanaImpact, resetKatana } from './katana.js';
 import { MechaEndingAuthority, type MechaEndingState } from './mechaEndingTimeline.js';
 import { MechaEndingPlayback } from './mechaEndingPlayback.js';
-import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork, selectMechaWeapon, localMechaWeapon, commitNetworkWallEnding } from './mechaNetwork.js';
+import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork, selectMechaWeapon, localMechaWeapon, previewRocketPeer, commitNetworkWallEnding } from './mechaNetwork.js';
 import { cyclePilotWeapon, type PilotWeapon } from './mechaStomp.js';
 import { deriveHudPresentation } from './hudPresentation.js';
 import { cancelWorldLoading, isWorldLoading, isWorldReveal, withWorldLoading, type WorldLoadingMode } from './worldLoading.js';
@@ -29,7 +29,7 @@ import { broadcastToAll } from './multiplayer.js';
 import * as THREE from 'three';
 import { PointerLockControls } from './pointerLockControls.js';
 import { state, resetMatchStats, resetPlayerState } from './state.js';
-import { resetPlayerAtTownSpawn } from './playerSpawn.js';
+import { resetPlayerAtTownSpawn, placePlayerAtTownSpawn } from './playerSpawn.js';
 import { updatePowerJumpOnCastleExit } from './powerJump.js';
 import {
     JUMP_FORCE,
@@ -59,10 +59,10 @@ import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmen
 import { CameraShake } from './cameraShake.js';
 import { triggerMechaImpactShake } from './mechaImpactShake.js';
 import type { MechaImpact } from './forgottenMecha.js';
-import { INFANTRY_WARNING_TIME, MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS, TOWN_WALL_HP } from './config.js';
+import { INFANTRY_WARNING_TIME, MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS, TOWN_WALL_HP, REGEN_DELAY_MS } from './config.js';
 import { setDamageHandlers, type TargetHitResult } from './damage.js';
 import {
-    sendLocalState,
+    sendLocalState, requestMultiplayerRespawn, setMultiplayerLifePresentation, presentMultiplayerHealth,
     startHostMatch,
     onMultiplayerStarted,
     onMultiplayerDisconnected,
@@ -78,7 +78,6 @@ import {
 import { applyRendererSettings, cloneSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
 import { setProjectileTrailsEnabled } from './projectileTrails.js';
 import { targetData } from './userDataTypes.js';
-import type { PlayerDiedPacket } from './networkTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
@@ -92,7 +91,7 @@ import {
 } from './gogglesFailure.js';
 import { resolveThirdPersonAimTarget, resolveThirdPersonCameraPosition, MechaCameraHandoff } from './thirdPersonCamera.js';
 import { releaseMechaPilot, type MechaPilotRelease } from './mechaPilotRelease.js';
-import { applyHitmarkerSettings, flashHitmarker } from './hitmarker.js';
+import { applyHitmarkerSettings, flashHitmarker, resetHitmarker } from './hitmarker.js';
 
 let endingPlayback: MechaEndingPlayback | null = null;
 let offlineEnding: MechaEndingAuthority | null = null;
@@ -120,6 +119,7 @@ let mountedControlsPresented = false;
 let lastMountedHp: number | null = null;
 const mechCameraDimensions = { distance: MECHA_CAMERA_DISTANCE, height: MECHA_CAMERA_HEIGHT, shoulder: MECHA_CAMERA_SHOULDER };
 const mechaCameraHandoff = new MechaCameraHandoff();
+let lastMechaVideoPhase: string | null = null;
 const reducedHeadMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 reducedHeadMotion.addEventListener('change', () => {
     atmosphere?.applySettings({ fog: userSettings.fog, motionBlur: userSettings.motionBlur && !userSettings.photosensitivityMode && !reducedHeadMotion.matches });
@@ -302,24 +302,15 @@ const getUI = <T extends HTMLElement>(id: string): T | null => {
     return (UI_cache[id] || (UI_cache[id] = document.getElementById(id))) as T | null;
 };
 const UI = {
-    get healthBar() { return getUI<HTMLElement>('health-bar'); },
-    get hoverBar() { return getUI<HTMLElement>('hover-bar'); },
-    get fpsCounter() { return getUI<HTMLElement>('fps-counter'); },
-    get reloadBar() { return getUI<HTMLElement>('reload-bar'); },
     get gogglesScope() { return getUI<HTMLElement>('goggles-scope'); },
     get gogglesTargetLayer() { return getUI<HTMLElement>('goggles-target-layer'); },
     get crosshair() { return getUI<HTMLElement>('crosshair'); },
-    get ui() { return getUI<HTMLElement>('ui'); },
-    get healthContainer() { return getUI<HTMLElement>('health-container'); },
-    get reloadContainer() { return getUI<HTMLElement>('reload-container'); },
     get hoverContainer() { return getUI<HTMLElement>('hover-container'); },
-    get pvpStats() { return getUI<HTMLElement>('pvp-stats'); },
     get score() { return getUI<HTMLElement>('score'); },
     get deaths() { return getUI<HTMLElement>('deaths'); },
     get kills() { return getUI<HTMLElement>('kills'); },
     get blocker() { return getUI<HTMLElement>('blocker'); },
     get deathOverlay() { return getUI<HTMLElement>('death-overlay'); },
-    get hoverBadge() { return getUI<HTMLElement>('hover-badge'); },
     get worldBorderOverlay() { return getUI<HTMLElement>('world-border-overlay'); },
     get sensSlider() { return getUI<HTMLInputElement>('sensitivity'); },
     get sensValue() { return getUI<HTMLElement>('sens-value'); },
@@ -389,7 +380,6 @@ const UI = {
     get pauseRoomCode() { return getUI<HTMLElement>('pause-room-code'); },
     get btnDeathRespawn() { return getUI<HTMLElement>('btn-death-respawn'); },
     get btnDeathLeave() { return getUI<HTMLElement>('btn-death-leave'); },
-    get mpNameError() { return getUI<HTMLElement>('mp-name-error'); },
     get btnCopyCode() { return getUI<HTMLButtonElement>('btn-copy-code'); },
     get hostLobbyStatus() { return getUI<HTMLElement>('host-lobby-status'); },
     get turnstileHostChallenge() { return getUI<HTMLElement>('turnstile-host-challenge'); },
@@ -613,7 +603,6 @@ function setupMenuListeners(): void {
     if (UI.btnMpBack) {
         UI.btnMpBack.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (UI.mpNameError) UI.mpNameError.innerText = '';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelMain) UI.panelMain.style.display = 'flex';
         });
@@ -622,7 +611,6 @@ function setupMenuListeners(): void {
     if (UI.btnMpHostView) {
         UI.btnMpHostView.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (UI.mpNameError) UI.mpNameError.innerText = '';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelHostWaiting) UI.panelHostWaiting.style.display = 'flex';
             void beginHosting('Guest1');
@@ -651,7 +639,6 @@ function setupMenuListeners(): void {
     if (UI.btnMpJoinView) {
         UI.btnMpJoinView.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (UI.mpNameError) UI.mpNameError.innerText = '';
             if (UI.panelMp) UI.panelMp.style.display = 'none';
             if (UI.panelJoinRoom) UI.panelJoinRoom.style.display = 'flex';
             joinRoomChallenge.cancel();
@@ -717,14 +704,13 @@ function setupMenuListeners(): void {
     if (UI.btnDeathRespawn) {
         UI.btnDeathRespawn.addEventListener('click', (e) => {
             e.stopPropagation();
-            performPlayerReset();
-
-            if (state.isThirdPersonView && state.playerMesh) {
-                state.playerMesh.visible = true;
+            if (state.isMultiplayer) {
+                requestMultiplayerRespawn();
+                // The click is the browser gesture for reacquiring input.
+                if (state.controls) beginInput();
+                return;
             }
-
-            if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
-            if (state.controls) beginInput();
+            finishLocalRespawn();
         });
     }
 
@@ -797,7 +783,7 @@ function setupInputListeners(): void {
         if (e.code === 'KeyO' && forgottenMecha?.ownsLocalPilot) code = 'KeyO';
         if (e.code === 'Tab' && state.isMultiplayer && state.isPlaying && isInputActive()) {
             e.preventDefault?.();
-            if (!gothChat?.isOpen) setPlayerListVisible(true);
+            if (!e.repeat && !gothChat?.isOpen) setPlayerListVisible(true);
             return;
         }
         // Movement state is already held between key events; repeated keydown
@@ -1200,6 +1186,7 @@ async function loadPreparedWorld(
     current: () => boolean = () => true,
     loadingMode: WorldLoadingMode = 'world',
     onPrepared?: () => void,
+    spawnSlot = 0,
 ): Promise<void> {
     const scene = state.scene;
     await withWorldLoading(async paint => {
@@ -1228,6 +1215,7 @@ async function loadPreparedWorld(
             } else commitOfflineEnding({ position, heading });
         } }, checkpoint);
         if (state.isMultiplayer) initializeNetworkMecha();
+        placePlayerAtTownSpawn(seed, 'house', spawnSlot);
         if (dayNightCycle) await prepareRenderer(dayNightCycle, checkpoint);
         if (state.renderer && atmosphere) { await atmosphere.prepare(state.renderer); await checkpoint(); }
         if (onPrepared) {
@@ -1292,9 +1280,11 @@ function performPlayerReset(resetMatch = false): void {
     atmosphere?.resetHistory();
     state.controls?.resetLook();
     resetHealthBarFlash();
+    resetHitmarker();
     clearApproachWarning();
     if (!state.isMultiplayer) { forgottenMecha?.clearPendingDamage(); forgottenMecha?.pilot.rockets.clear(); }
     resetPlayerAtTownSpawn(getWorldSeed(), resetMatch ? 'house' : 'church');
+    resetLocalKatana();
     syncMountedControls(false);
     syncThirdPersonPresentation();
     resetWeaponPresentation();
@@ -1304,16 +1294,11 @@ function performPlayerReset(resetMatch = false): void {
     resetHook();
 }
 
-function broadcastPlayerDeath(victimName: string, killerName: string, killerPeerId: string | null): void {
-    if (!state.isMultiplayer) return;
-    const packet: PlayerDiedPacket = {
-        type: 'player_died',
-        lifeId: state.lifeId, cause: killerPeerId ? 'player' : killerName === 'Forgotten Mecha' ? 'mecha' : killerName === 'Enemy' ? 'infantry' : 'lava', killerPeerId,
-        victimName: victimName,
-        killerName: killerName,
-        victimPeerId: state.peer?.id
-    };
-    broadcastToAll(packet);
+function finishLocalRespawn(): void {
+    performPlayerReset();
+    if (state.isThirdPersonView && state.playerMesh) state.playerMesh.visible = true;
+    if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
+    if (state.controls && !isInputActive()) beginInput();
 }
 
 function formatPercent(value: number): string {
@@ -1753,10 +1738,15 @@ function setupSettingsControls(): void {
 
 function init(): void {
     setDamageHandlers(processTargetHit, takePlayerDamage, processMechaDamage);
+    setMultiplayerLifePresentation(renderLocalHealthChange, packet => {
+        finishLocalRespawn();
+        state.lifeId = packet.lifeId;
+        state.fireCooldown = packet.cooldownMs / 1000;
+    });
     setMechaPresentation({ impact: mechaImpact, release: onMechaPilotReleased,
         ending: startMechaEnding,
         blocked: () => { exitWarningRemaining = 3; }, gameOver: () => triggerDeath(true),
-        damage: (damage, attacker) => takePlayerDamage(damage, attacker ? state.lobbyPlayers.find(p => p.peerId === attacker)?.username ?? 'Guest' : 'Forgotten Mecha', attacker ?? undefined),
+        damage: (_damage, _attacker, sequence) => presentMultiplayerHealth(sequence),
         hit: (killed, score, local) => { if (local) flashHitmarker(killed); if (UI.score) UI.score.innerText = String(score); },
     });
     loadUserSettings();
@@ -1830,6 +1820,7 @@ function init(): void {
     });
 
     onInputEnded(() => {
+        resetHitmarker();
         atmosphere?.resetHistory();
         if (state.isMultiplayer) releaseMechaInput();
         if (disposingGameRuntime) return;
@@ -1892,7 +1883,7 @@ function init(): void {
         resetHook();
     });
 
-    setMultiplayerWorldLoader(loadPreparedWorld);
+    setMultiplayerWorldLoader((seed, current, slot) => loadPreparedWorld(seed, current, 'world', undefined, slot));
     onMultiplayerDisconnected(({ wasHost, reason }) => {
         roomFlowGeneration++;
         hostRoomChallenge.cancel(); joinRoomChallenge.cancel();
@@ -1910,7 +1901,18 @@ function init(): void {
     });
     setupInputListeners();
     setupMainMenu();
-    window.addEventListener('beforeunload', () => disposeGameRuntime(), { once: true });
+    window.addEventListener('pagehide', event => {
+        disposeGameRuntime();
+        if (!event.persisted) gothChat?.dispose();
+    });
+    window.addEventListener('pageshow', event => {
+        if (!event.persisted) return;
+        if (UI.blocker) UI.blocker.style.display = 'flex';
+        for (const panel of [UI.panelPause, UI.panelSettings, UI.panelMp, UI.panelHostWaiting, UI.panelJoinRoom, UI.deathOverlay]) {
+            if (panel) panel.style.display = 'none';
+        }
+        if (UI.panelMain) UI.panelMain.style.display = 'flex';
+    });
 
     animate();
 }
@@ -2020,7 +2022,7 @@ function animate(): void {
         state.prevTime = time;
         return;
     }
-    if (state.isMultiplayer) flushMechaDamage();
+    if (state.isMultiplayer) { flushMechaDamage(); presentMultiplayerHealth(); }
     if (!state.isMultiplayer && state.isPlaying && state.playerHp > 0 && isInputActive() && !gothChat?.isOpen) {
         forgottenMecha?.flushRenderedDamage(state.lifeId);
         // Keep the already rendered lethal beam/contact as the death backdrop.
@@ -2087,7 +2089,7 @@ function animate(): void {
         isInputActive() && (forgottenMecha?.ownsLocalPilot ? forgottenMecha.combat.shieldActive : state.isHovering));
     updateLocalAccelerometer(delta);
 
-    if (!forgottenMecha?.ownsLocalPilot) { checkLavaDamage(); updateHealthRegen(delta); }
+    if (!state.isMultiplayer && !forgottenMecha?.ownsLocalPilot) { checkLavaDamage(delta); updateHealthRegen(delta); }
 
     updateHook(delta);
     updateRemotePeers(delta);
@@ -2293,12 +2295,16 @@ function animate(): void {
             applyKatanaShake(state.camera);
             state.camera.updateMatrixWorld(true);
             const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
+            let rocketPeer: string | undefined;
             if (pilot) {
                 if (state.playerMesh && !state.isThirdPersonView) state.playerMesh.visible = false;
                 pilot.preparePilotView(!state.isThirdPersonView);
                 pilot.muzzleAnchor.getWorldPosition(_gogglesWeaponOrigin);
                 if (pilot.mode === 'piloted') {
-                    if (pilot.targetingReady && pilot.pilotWeapon === 'rocket') pilot.pilot.rockets.select(state.camera, _gogglesWeaponOrigin, state.targets, queryObstaclesAlongSegment);
+                    if (pilot.targetingReady && pilot.pilotWeapon === 'rocket') {
+                        pilot.pilot.rockets.select(state.camera, _gogglesWeaponOrigin, state.targets, queryObstaclesAlongSegment);
+                        rocketPeer = previewRocketPeer(pilot, state.camera, _gogglesWeaponOrigin);
+                    }
                     else pilot.pilot.rockets.selected = null;
                     if (!state.isMultiplayer && isInputActive()) {
                         pilot.fireRocket(state.camera, state.targets, queryObstaclesAlongSegment);
@@ -2334,7 +2340,7 @@ function animate(): void {
                 dayNightCycle?.celestialScanTargets,
                 !pilot && state.activeWeaponName !== 'SNIPER',
                 pilot ? null : forgottenMecha,
-                pilot ? pilot.pilot.rockets.selected : undefined,
+                pilot ? rocketPeer ?? pilot.pilot.rockets.selected : undefined,
             );
             const gogglesBrickedThisFrame = updateGogglesFailureScan(
                 state.gogglesFailure,
@@ -2351,9 +2357,14 @@ function animate(): void {
             atmosphereFrame.blurAllowed = !videoReveal && isInputActive() && !gothChat?.isOpen && !userSettings.photosensitivityMode && !reducedHeadMotion.matches;
             atmosphereFrame.cameraKey = `${state.lifeId}/${state.isThirdPersonView}/${gothChat?.isOpen}/${pilot?.headView.phase ?? 'on-foot'}`;
             if (videoReveal && pilot) {
+                if (lastMechaVideoPhase !== pilot.headView.phase) pilot.headEffects.resetCapture();
+                lastMechaVideoPhase = pilot.headView.phase;
                 atmosphere?.resetHistory();
                 pilot.headEffects.render(state.renderer, state.scene, state.camera, pilot.headView.revealProgress, drawAtmosphere);
-            } else drawAtmosphere();
+            } else {
+                lastMechaVideoPhase = null;
+                drawAtmosphere();
+            }
             renderKatanaImpact(state.renderer, state.camera);
             if (state.isMultiplayer) acknowledgeMechaRender(); else forgottenMecha?.acknowledgeRendered();
         } finally {
@@ -2367,37 +2378,36 @@ function animate(): void {
     }
 }
 
-export function takePlayerDamage(damage: number, attackerName: string, attackerPeerId?: string): void {
+export function takePlayerDamage(damage: number, _attackerName: string, _attackerPeerId?: string): void {
     if (!state.isPlaying || state.matchEnded || state.playerHp <= 0) return;
     if (forgottenMecha?.ownsLocalPilot) { processMechaDamage(damage); return; }
-
+    const previousHp = state.playerHp;
     state.playerHp = Math.max(0, state.playerHp - damage);
     state.regenTimer = 0;
-    state.lastDamageTime = performance.now();
+    state.regenDelayMs = REGEN_DELAY_MS;
+    renderLocalHealthChange(previousHp, true);
+}
 
-    if (state.controls) {
-        const myPos = _lavaFeetPos.copy(state.controls.getObject().position);
-        myPos.y -= 0.5;
-        spawnParticles(myPos, 0xff3300, 10, 15, 0.2, 12.0);
+function renderLocalHealthChange(previousHp: number, feedback: boolean): void {
+    const damaged = state.playerHp < previousHp;
+    if (feedback && damaged && state.controls) {
+        const position = _lavaFeetPos.copy(state.controls.getObject().position);
+        position.y -= 0.5;
+        spawnParticles(position, 0xff3300, 10, 15, 0.2, 12.0);
     }
 
-    updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp) * 100, '#ff4757');
-
-    if (state.playerHp <= 0) {
+    updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp * 100), feedback && damaged ? '#ff4757' : null);
+    if (state.playerHp <= 0 && previousHp > 0) {
         triggerDeath();
-        
         state.deaths++;
         if (UI.deaths) UI.deaths.innerText = state.deaths.toString();
-
-        const myName = state.username;
-        const victimName = myName || 'Guest';
-        broadcastPlayerDeath(victimName, attackerName, attackerPeerId ?? null);
     }
 }
 
 export function triggerDeath(gameOver = false): void {
     if (state.matchEnded && !gameOver) return;
     resetHealthBarFlash();
+    resetHitmarker();
     clearApproachWarning();
     if (!state.isMultiplayer) {
         forgottenMecha?.clearPendingDamage(); forgottenMecha?.pilot.rockets.clear(); forgottenMecha?.transitionCamera.reset();

@@ -178,7 +178,7 @@ export class DayNightCycle {
         const mapSizeChanged = shadow.mapSize.x !== options.shadowMapSize ||
             shadow.mapSize.y !== options.shadowMapSize;
 
-        if (mapSizeChanged) {
+        if (mapSizeChanged || !options.shadows) {
             // Three.js only allocates a new render target when the old one is absent.
             shadow.map?.dispose();
             shadow.map = null;

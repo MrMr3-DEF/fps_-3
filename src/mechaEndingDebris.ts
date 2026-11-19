@@ -82,6 +82,7 @@ export async function prepareEndingDebris(stones: EndingStone[], pillars: Ending
         const ground = (body.velocity.y + Math.sqrt(body.velocity.y ** 2 + 2 * G * Math.max(0, body.position.y - body.radius))) / G;
         const groundAt = body.position.y <= body.radius && body.velocity.y <= 0 ? body.at : body.at + ground;
         if (groundAt <= until) first = { at: groundAt, body, pillar: null, normal: new THREE.Vector3(0, 1, 0) };
+        if (body.contacts >= ENDING_DEBRIS.contacts) return first;
         index.querySegment(body.position.x, body.position.z, end.x, end.z, candidates, body.radius);
         for (const pillar of candidates) {
             if (pillar.id === body.stone.sourcePillar || pillar.destroyedAt <= body.at) continue;
@@ -140,7 +141,8 @@ export async function prepareEndingDebris(stones: EndingStone[], pillars: Ending
                 body.position.addScaledVector(hit.normal, SKIN);
             }
             if (body.contacts >= ENDING_DEBRIS.contacts) {
-                body.velocity.set(0, 0, 0); body.done = true; body.stone.stopAt = hit.at;
+                // Retire pillar contacts but let gravity settle the fragment.
+                body.velocity.set(0, Math.min(0, body.velocity.y), 0);
             }
             segment(body);
             const next = nextContact(body, until); if (next) queue.push(next);
