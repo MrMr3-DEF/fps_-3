@@ -17,8 +17,10 @@ const URLS = {
     fast: new URL('../blender_assets/enemy_fast/enemy_fast.glb', import.meta.url).href,
     big: new URL('../blender_assets/enemy_big/enemy_big.glb', import.meta.url).href,
 };
-const ACTOR_CLEARANCE = 0.9;
-const WALL_STANDOFF = .95;
+// The same route grid must clear the widest footprint even when a bot turns.
+const ACTOR_CLEARANCE = Math.max(...KINDS.map(kind => Math.hypot(INFANTRY[kind].width, INFANTRY[kind].depth) / 2));
+// Leave the route just outside the footprint so the Fast swing can reach the wall.
+const WALL_STANDOFF = ACTOR_CLEARANCE + .025;
 const RIGHT_HAND = THREE.PropertyBinding.sanitizeNodeName('hand.R');
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -124,6 +126,7 @@ export class InfantryDefense {
     private readonly contact = new THREE.Vector3();
     private readonly step = new THREE.Vector3();
     private readonly aimRotation = new THREE.Quaternion();
+    private readonly swingRotation = new THREE.Quaternion();
     private readonly parentRotation = new THREE.Quaternion();
     private readonly axis = new THREE.Vector3();
     private readonly scene: THREE.Scene;
@@ -211,7 +214,7 @@ export class InfantryDefense {
         this.nextKind = (selected + 1) % KINDS.length;
         const serial = ++this.spawnSerial;
         const route = this.nav!.borderSpawn(this.seed ^ Math.imul(serial, 0x9e3779b9),
-            point => this.bots.every(other => !other.pose || Math.hypot(other.group.position.x - point.x, other.group.position.z - point.z) > 4), 12);
+            point => this.bots.every(other => !other.pose || Math.hypot(other.group.position.x - point.x, other.group.position.z - point.z) > 2 * ACTOR_CLEARANCE), 12);
         const [first, next] = route.points;
         const { index, eliminationRevision } = targetData(bot.group);
         const kind = KINDS[selected];
@@ -239,6 +242,7 @@ export class InfantryDefense {
             const asset = this.assets.get(pose.kind)!;
             const stats = INFANTRY[pose.kind];
             const model = clone(asset.scene);
+            model.scale.multiplyScalar(stats.modelScale);
             model.position.y = -stats.height / 2;
             model.traverse(node => {
                 if (node instanceof THREE.SkinnedMesh) {
@@ -253,7 +257,7 @@ export class InfantryDefense {
                 action.clampWhenFinished = !loop;
                 return action;
             };
-            const aim = pose.kind === 'base' ? model.getObjectByName('torso_yaw') : undefined;
+            const aim = pose.kind !== 'fast' ? model.getObjectByName('torso_yaw') : undefined;
             bot.visual = { model, mixer, actions: {
                 idle: makeAction('Idle', true), moving: makeAction(stats.move, true),
                 attack: makeAction(stats.attack, false), death: makeAction('Death', false),
@@ -295,14 +299,25 @@ export class InfantryDefense {
         const action = visual.actions[pose.phase];
         for (const other of Object.values(visual.actions)) if (other !== action && other.isScheduled()) other.stop();
         if (!action.isScheduled()) action.reset().play();
-        action.time = Math.min(time, action.getClip().duration);
+        const duration = action.getClip().duration;
+        action.time = Math.min(time, duration);
         if (visual.aimRest) visual.aim!.quaternion.copy(visual.aimRest);
         visual.model.rotation.y = pose.yaw;
         visual.mixer.update(0);
-        if (visual.aim?.parent) {
+        if (visual.aim?.parent && (pose.kind === 'base' || pose.phase === 'attack')) {
             visual.aim.parent.getWorldQuaternion(this.parentRotation).invert();
+            let pitch = pose.pitch;
+            if (pose.kind === 'big') {
+                // The enlarged heavy swing would pass above an on-foot player.
+                // Aim the swing through contact, then blend back into recovery.
+                const { contact, swingYaw } = INFANTRY.big;
+                const blend = Math.min(action.time / contact, (duration - action.time) / (duration - contact));
+                this.axis.copy(Y_AXIS).applyQuaternion(this.parentRotation);
+                visual.aim.quaternion.premultiply(this.swingRotation.setFromAxisAngle(this.axis, swingYaw * blend));
+                pitch *= blend;
+            }
             this.axis.copy(X_AXIS).applyAxisAngle(Y_AXIS, pose.yaw).applyQuaternion(this.parentRotation);
-            visual.aim.quaternion.premultiply(this.aimRotation.setFromAxisAngle(this.axis, -pose.pitch));
+            visual.aim.quaternion.premultiply(this.aimRotation.setFromAxisAngle(this.axis, -pitch));
         }
         bot.group.updateWorldMatrix(true, true);
     }
@@ -328,7 +343,7 @@ export class InfantryDefense {
         const start = this.sightPoint(bot);
         // Walking to the wall's approach endpoint puts the authored punch
         // inside contact range. Starting at its broader hit limit can whiff forever.
-        if (bot.pose!.kind !== 'base' && Math.hypot(start.x - bot.wall.point.x, start.z - bot.wall.point.z) > WALL_STANDOFF + .06) {
+        if (bot.pose!.kind !== 'base' && Math.hypot(start.x - bot.wall.point.x, start.z - bot.wall.point.z) > WALL_STANDOFF + .015) {
             return false;
         }
         if (start.distanceToSquared(bot.wall.point) > distance ** 2) return false;
@@ -352,6 +367,8 @@ export class InfantryDefense {
             const inReach = player ? Boolean(target && origin.distanceToSquared(target) <= stats.engage ** 2) : this.wallInReach(bot, stats.range);
             if (target && inReach) {
                 this.aimAt(bot, target);
+                // The wall spans the full swing height, so the heavy can stay upright.
+                if (!player && pose.kind === 'big') pose.pitch = 0;
                 if (bot.cooldown <= 0) {
                     this.setPhase(bot, 'attack');
                     bot.victim = player ? { id: player.id, lifeId: player.lifeId, mountedRevision: player.mounted?.revision } : undefined;
@@ -420,13 +437,14 @@ export class InfantryDefense {
         if (!target) return;
         if (pose.kind === 'base') this.aimAt(bot, target);
         this.samplePose(bot, sampleTime);
-        const firing = pose.kind === 'base';
+        const kind = pose.kind;
+        const firing = kind === 'base';
         const joint = firing ? bot.visual!.muzzle : bot.visual!.hand;
         const contact = joint!.getWorldPosition(this.contact);
         const start = firing ? contact : center;
         const wall = player ? undefined : bot.wall;
         const end = this.end.copy(target);
-        const fistRadius = pose.kind === 'fast' ? .7 : 1.05;
+        const fistRadius = firing ? 0 : INFANTRY[kind].fistRadius;
         if (wall) {
             const heading = this.step.set(Math.sin(wall.heading), 0, Math.cos(wall.heading));
             // A wall presents a whole plane to the swing. Sample the section

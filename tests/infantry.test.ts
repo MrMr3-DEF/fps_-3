@@ -107,7 +107,7 @@ test('infantry damage the wall at contact and commit the wall loss once', async 
     });
     try {
         defense.receive({ day: 3, wallHp: 5, sequence: 1, bots: [
-            pose(0, 'fast', 106, 40), pose(1, 'big', 106, -40), pose(2, 'base', 96.1, -56),
+            pose(0, 'fast', 106, 40), pose(1, 'big', 106, -40), pose(2, 'base', 99, -56),
         ] });
         for (let frame = 1; frame <= 100; frame++) defense.update(.05, frame * .05, []);
         assert.ok(strikes.includes('fast') && strikes.includes('big') && strikes.includes('base'));

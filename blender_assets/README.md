@@ -21,7 +21,9 @@ The heavy has a solid spine
 seated inside its hip block. The model root matches its directory name. The origin is on the
 ground between the feet. Forward is Blender −Y and exported model-space +Z.
 
-| Model | Height | In-place locomotion | Stationary attack |
+The game scales these rigs to the heights listed in the [town defense guide](../docs/town-defense.md).
+
+| Model | Authored height | In-place locomotion | Stationary attack |
 | --- | --- | --- | --- |
 | [enemy_base](enemy_base/) | 2.00 m | `Walk`, 28 frames per cycle | `Fire`, 6 frames. Discharge at clip start, peak recoil at Blender frame 2. |
 | [enemy_fast](enemy_fast/) | 1.85 m | `Run`, 16 frames per cycle | `LightHit`, right-hand contact at frame 5 (0.167 s). |

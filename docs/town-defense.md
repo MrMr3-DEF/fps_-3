@@ -13,11 +13,11 @@ outer wall sections. They prioritize the nearest visible living player in a
 50 m sphere. Cover blocks attacks, and robots return to their wall approach
 when they lose the player.
 
-| Robot | HP | Damage per hit | Attack |
-| --- | ---: | ---: | --- |
-| Base | 5 | 1 | Rifle with a 50 m spherical range and a three-second interval |
-| Fast | 3 | 1 | Quick melee at the LightHit contact frame |
-| Big | 10 | 3 | Heavy melee at the HeavyHit contact frame |
+| Robot | Standing height | HP | Damage per hit | Attack |
+| --- | ---: | ---: | ---: | --- |
+| Base | ≈8.57 m | 5 | 1 | Rifle with a 50 m spherical range and a three-second interval |
+| Fast | ≈6.86 m | 3 | 1 | Quick melee at the LightHit contact frame |
+| Big | 12 m | 10 | 3 | Heavy melee at the HeavyHit contact frame |
 
 The HUD shows **Defend the Town** on entering play and the day below the
 elimination counter. Aim at the central well to see the **Wall durability**
@@ -34,7 +34,8 @@ under the host while a player is paused or dead.
 ## Runtime
 
 `infantry.ts` owns robot lifetimes, animation sampling, attacks, edge routes
-and durability. `config.ts` holds gameplay values. The world owns asset
+and durability. `config.ts` holds gameplay values. The runtime scales each
+rig and hitbox to the standing height above. The world owns asset
 preparation, render culling, spatial queries, and disposal. Render culling
 affects presentation while collision, attack range, and cover use world
 geometry. The asset guide lists the [robot clips and rig cues](../blender_assets/README.md#enemy-robots).

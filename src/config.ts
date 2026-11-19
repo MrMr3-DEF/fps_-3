@@ -36,13 +36,27 @@ export const INFANTRY_LIMIT = 48;
 export const INFANTRY_WARNING_TIME = 3;
 export const INFANTRY_NETWORK_INTERVAL = 100;
 export const INFANTRY_DEBRIS_TIME = 4;
+
+const INFANTRY_SIZE_MULTIPLIER = 12 / 7;
+
+function infantrySize(height: number, authoredHeight: number, width: number, depth: number) {
+    const scaledHeight = height * INFANTRY_SIZE_MULTIPLIER;
+    const modelScale = scaledHeight / authoredHeight;
+    return { height: scaledHeight, modelScale, width: width * modelScale, depth: depth * modelScale };
+}
+
+function infantryMelee(range: number, engage: number, fistRadius: number) {
+    return { range: range * INFANTRY_SIZE_MULTIPLIER, engage: engage * INFANTRY_SIZE_MULTIPLIER,
+        fistRadius: fistRadius * INFANTRY_SIZE_MULTIPLIER };
+}
+
 export const INFANTRY = {
-    base: { hp: 5, damage: 1, height: 2, width: 0.95, depth: 0.8, speed: 6, range: INFANTRY_RANGE,
+    base: { ...infantrySize(5, 2, .95, .8), hp: 5, damage: 1, speed: 6, range: INFANTRY_RANGE,
         engage: INFANTRY_RANGE, interval: 3, move: 'Walk', attack: 'Fire', contact: 0, color: 0xd5a374 },
-    fast: { hp: 3, damage: 1, height: 1.85, width: 0.8, depth: 0.6, speed: 11, range: 1.65,
-        engage: .85, interval: 1.2, move: 'Run', attack: 'LightHit', contact: 4 / 24, color: 0xd29a6c },
-    big: { hp: 10, damage: 3, height: 3.5, width: 1.7, depth: 1.35, speed: 4.5, range: 2.5,
-        engage: 1.9, interval: 2.6, move: 'Walk', attack: 'HeavyHit', contact: 17 / 24, color: 0xb98764 },
+    fast: { ...infantrySize(4, 1.85, .8, .6), ...infantryMelee(3.57, 1.84, 1.51), hp: 3, damage: 1,
+        speed: 11, interval: 1.2, move: 'Run', attack: 'LightHit', contact: 4 / 24, color: 0xd29a6c },
+    big: { ...infantrySize(7, 3.5, 1.7, 1.35), ...infantryMelee(5, 3.8, 2.1), hp: 10, damage: 3,
+        speed: 4.5, swingYaw: -Math.PI / 5, interval: 2.6, move: 'Walk', attack: 'HeavyHit', contact: 17 / 24, color: 0xb98764 },
 } as const;
 export type InfantryKind = keyof typeof INFANTRY;
 export const MECHA_LASER_MIN_RANGE = 60;
@@ -213,7 +227,8 @@ export const LAVA_POOL_HALF_SIZE = 12.8;
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
 export const MAX_PENDING_ROOM_CONNECTIONS = 2 * (MAX_PLAYERS - 1);
-export const NETWORK_PROTOCOL_VERSION = 2;
+// Peers must share infantry dimensions for host-validated hits.
+export const NETWORK_PROTOCOL_VERSION = 4;
 export const ROOM_PENDING_SESSION_MS = 90_000;
 export const MAX_SHOT_PELLET_INDEX = Math.max(...Object.values(WEAPON_STATS).map(stats => stats.pellets ?? 1)) - 1;
 // Eight unambiguous characters make active room discovery infeasible by brute force
