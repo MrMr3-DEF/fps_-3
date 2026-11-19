@@ -1,7 +1,8 @@
 import { fields, projectKnown, variant, vectorFields as vec, type Projection } from './networkProjection.js';
 import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, type MechaEndingState } from './mechaEndingTimeline.js';
 import { isPeerId } from './roomIdentity.js';
-import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME, MAX_SHOT_PELLET_INDEX } from './config.js';
+import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME,
+    MAX_SHOT_PELLET_INDEX, TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS } from './config.js';
 import type { Vec3Packet } from './networkTypes.js';
 import type { MechaMode, MechaImpact } from './forgottenMecha.js';
 import type { MechaHeadPhase } from './mechaHeadView.js';
@@ -61,6 +62,8 @@ export function isMechaEnding(x: unknown): x is MechaEndingState {
     return record(x) && integer(x.id) && x.id > 0 && integer(x.seed, 0xffffffff) && integer(x.effectsSeed, 0xffffffff) &&
         isMechaVector(x.position) && number(x.heading, -Math.PI * 4, Math.PI * 4) &&
         Math.abs(x.heading / (Math.PI / 2) - Math.round(x.heading / (Math.PI / 2))) < 1e-8 &&
+        (x.cause === undefined || x.cause === 'wall' && number(x.position.y, 0, TOWN_WALL_HEIGHT) &&
+            number(Math.max(Math.abs(x.position.x), Math.abs(x.position.z)), TOWN_HALF_SIZE - TOWN_WALL_THICKNESS, TOWN_HALF_SIZE + TOWN_WALL_THICKNESS)) &&
         number(x.lightingElapsed, 0, 480) && number(x.elapsed, 0, MECHA_ENDING_DURATION) &&
         (x.phase === 'preparing' ? x.elapsed <= MECHA_ENDING_TIMING.fadeOut :
             x.phase === 'playing' ? x.elapsed >= MECHA_ENDING_TIMING.fadeOut : x.phase === 'complete' && x.elapsed === MECHA_ENDING_DURATION);
@@ -78,8 +81,9 @@ export function isMechaState(x: unknown): x is MechaState {
             b.slice(1, 4).every(v => number(v, -5000, 5000)) && quaternion(b.slice(4, 8)) && b.slice(8).every(v => number(v, 0, 100))) ||
         new Set(x.bones.map(b => b[0])).size !== x.bones.length || !Array.isArray(x.eye) || x.eye.length !== 7 || !x.eye.every(v => number(v, 0, 20))) return false;
     const ending = x.ending;
-    if (ending !== undefined && (!isMechaEnding(ending) || !x.matchEnded || !['punching', 'game-over'].includes(x.mode as string) ||
-        ending.heading !== x.heading || ['x', 'y', 'z'].some(k => ending.position[k as keyof Vec3Packet] !== (x.position as Vec3Packet)[k as keyof Vec3Packet]))) return false;
+    if (ending !== undefined && (!isMechaEnding(ending) || !x.matchEnded ||
+        (ending.cause !== 'wall' && (!['punching', 'game-over'].includes(x.mode as string) || ending.heading !== x.heading ||
+            ['x', 'y', 'z'].some(k => ending.position[k as keyof Vec3Packet] !== (x.position as Vec3Packet)[k as keyof Vec3Packet]))))) return false;
     const h = x.head, c = x.combat;
     if (!record(h) || !phases.includes(h.phase as string) || !bool(h.wantedOpen) ||
         !['fold', 'eyeBlend', 'blackout', 'loadingProgress', 'hudOpacity', 'revealProgress'].every(k => number(h[k], 0, 1))) return false;
@@ -125,7 +129,7 @@ export const mechaStateFields: Projection = {
     combat: { ...fields('clock', 'laserPhase', 'shieldPhase', 'manual', 'energy', 'manualBuild', 'collapse', 'build', 'eyePower',
         'orbRadius', 'beamRadius', 'beamLength'), beamOrigin: vec, beamDirection: vec, orbPosition: vec, shieldCenter: vec },
     rockets: [{ ...fields('slot'), position: vec, direction: vec }],
-    ending: { ...fields('id', 'seed', 'effectsSeed', 'heading', 'lightingElapsed', 'elapsed', 'phase'), position: vec },
+    ending: { ...fields('id', 'seed', 'effectsSeed', 'heading', 'lightingElapsed', 'elapsed', 'phase', 'cause'), position: vec },
 };
 const eventFields = variant('kind', {
     damage: fields('kind', 'peerId', 'lifeId', 'damage', 'attack', 'attackerPeerId'),

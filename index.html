@@ -29,6 +29,7 @@
     </div>
     <button type="button" id="npc-interaction" hidden aria-label="Talk to goth girlfriend"></button>
     <div id="mecha-approach-warning" role="status" aria-live="polite" aria-atomic="true" hidden>Something’s approaching...</div>
+    <div id="defend-town-warning" role="status" aria-live="polite" aria-atomic="true" hidden>Defend the Town</div>
     <div id="mecha-exit-warning" role="status" aria-live="polite" hidden>Exit blocked. Move the Mecha and try again.</div>
     <div id="mecha-head-screen" hidden aria-hidden="true">
         <div id="mecha-head-loading" hidden role="status" aria-live="polite">
@@ -297,7 +298,7 @@
 
     <div id="game-over-overlay" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
         <strong class="death-title" id="game-over-title">GAME OVER</strong>
-        <p>Forgotten Mecha reached the castle.</p>
+        <p id="game-over-reason">Forgotten Mecha reached the castle.</p>
         <div class="menu-actions-column">
             <button class="menu-btn secondary" id="btn-game-over-leave">Back to Main Menu</button>
         </div>
@@ -334,6 +335,7 @@
 
     <div id="ui">
         <div>Targets Eliminated: <span id="score">0</span></div>
+        <div>Day <span id="defense-day">1</span></div>
         <div id="pvp-stats">
             Kills: <span id="kills">0</span> &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
         </div>
@@ -343,6 +345,10 @@
         </div>
     </div>
     <div id="fps-counter">FPS: 0</div>
+    <div id="wall-durability" hidden>
+        <label for="wall-durability-bar">Wall durability</label>
+        <progress id="wall-durability-bar" max="500" value="500"></progress>
+    </div>
 
     <div id="locator-bar" role="img" aria-label="Player and mecha directions">
         <div id="locator-markers"></div>

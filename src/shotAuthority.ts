@@ -3,9 +3,9 @@ import { BULLET_TRAVEL_DISTANCE, WEAPON_STATS, PROJECTILE_SPEED, PROJECTILE_LIFE
 import { segmentSphereHitT } from './gameplayMath.js';
 import { segmentPlayerHitboxHitT, closestPlayerBodyPoint } from './playerHitbox.js';
 import type { FirePacket, HomingTargetPacket, UpdatePacket, WeaponName, FirearmName } from './networkTypes.js';
-import { PROJECTILE_GUIDANCE_STEP, HOMING_HISTORY_SAMPLES, HOMING_VERIFICATION_STEPS_PER_SECOND, HOMING_HIT_TOLERANCE, FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS } from './config.js';
+import { PROJECTILE_GUIDANCE_STEP, HOMING_HISTORY_SAMPLES, HOMING_VERIFICATION_STEPS_PER_SECOND, HOMING_HIT_TOLERANCE, HOMING_HISTORY_LAG_MS, FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS } from './config.js';
 import { canContinueHoming, isWithinHomingAimEnvelope } from './projectileHoming.js';
-import { stepProjectileFlight, homingReplayCandidates, type HomingFireContext, type HomingFlightTarget } from './projectileFlight.js';
+import { stepProjectileFlight, homingReplayCandidates, type HomingFireContext, type HomingFlightTarget, type TargetMotionHistory } from './projectileFlight.js';
 
 const PROJECTILE_MUZZLE_OFFSET = 0.1;
 const PROJECTILE_NETWORK_GRACE_MS = 100;
@@ -197,6 +197,29 @@ export class ShotLedger {
         blocked: (start: THREE.Vector3, end: THREE.Vector3, radius: number, at?: number, filtered?: boolean) => boolean, identity?: HomingTargetPacket): boolean {
         return this.consumeIntersection(shotId, pelletIndex, damage, now, blocked,
             (start, end) => segmentSphereHitT(start, end, target, radius + (this.shots.get(shotId)?.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)), identity);
+    }
+    consumeMovingNpc(shotId: number, pelletIndex: number, history: TargetMotionHistory, radius: number, damage: number,
+        now: number, blocked: Parameters<ShotLedger['consume']>[6], identity: HomingTargetPacket): boolean {
+        const shot = this.shots.get(shotId);
+        if (!shot) return false;
+        const target = new THREE.Vector3();
+        // Clients draw interpolated poses. Rewind only within the host's bounded
+        // observation history, and resolve cover and pellet consumption normally.
+        if (shot.flightTarget) {
+            history.sample(now, target);
+            return this.consume(shotId, pelletIndex, target, radius, damage, now, blocked, identity);
+        }
+        const observation = shot.weapon === 'SNIPER' ? shot.at : now;
+        const oldest = history.samples[0].at;
+        if (oldest - observation > NETWORK_TICK_MS) return false;
+        for (let lag = 0; lag <= HOMING_HISTORY_LAG_MS; lag += HOMING_HISTORY_LAG_MS / 6) {
+            if (lag > 0 && observation - lag < oldest) break;
+            for (const filtered of [false, true]) {
+                history.sample(observation - lag, target, filtered);
+                if (this.consume(shotId, pelletIndex, target, radius, damage, now, blocked, identity)) return true;
+            }
+        }
+        return false;
     }
     consumeMechaHit(shotId: number, pelletIndex: number, revision: number, damage: number, now: number,
         contact: (start: THREE.Vector3, end: THREE.Vector3, origin: THREE.Vector3, radius: number) => number | null,

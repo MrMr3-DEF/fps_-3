@@ -698,9 +698,11 @@ export function fireProjectile(): void {
                 broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
                 sniperFireBroadcast = true;
                 if (!state.isHost) {
+                    const targetInfo = targetData(hitTargetGroup as THREE.Group);
                     const packet: HitTargetPacket = {
                         type: 'hit_target', shotId, pelletIndex: 0,
                         targetIndex: hitTargetIndex,
+                        ...(targetInfo.infantry ? { targetRevision: targetInfo.eliminationRevision } : {}),
                         damage: stats.damage
                     };
                     broadcastToAll(packet);

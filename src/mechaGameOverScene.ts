@@ -10,7 +10,7 @@ import { avoidEndingPillars, sampleEndingShake, type EndingCameraAdjustment } fr
 import { DayNightCycle } from './dayNightCycle.js';
 import { CameraShake } from './cameraShake.js';
 
-import { MECHA_ENDING_TIMING, sampleMechaEnding, type MechaEndingFrame } from './mechaEndingTimeline.js';
+import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, sampleMechaEnding, type MechaEndingFrame } from './mechaEndingTimeline.js';
 export { MECHA_ENDING_TIMING, sampleMechaEnding } from './mechaEndingTimeline.js';
 export type { MechaEndingFrame, MechaEndingPhase } from './mechaEndingTimeline.js';
 
@@ -41,6 +41,7 @@ export interface MechaGameOverOptions {
     seededScenery?: boolean;
     /** Supplied by the committed actor; the standalone preview measures its reach. */
     position?: THREE.Vector3;
+    cause?: 'wall';
 }
 
 interface FragmentBatch { mesh: THREE.InstancedMesh; pieces: EndingStone[] }
@@ -144,9 +145,9 @@ export class MechaGameOverScene {
     private readonly options: MechaGameOverOptions;
     private readonly forward: THREE.Vector3;
     private readonly tangent: THREE.Vector3;
-    private readonly mixer: THREE.AnimationMixer;
-    private readonly action: THREE.AnimationAction;
-    private readonly model: THREE.Group;
+    private readonly mixer?: THREE.AnimationMixer;
+    private readonly action?: THREE.AnimationAction;
+    private readonly model?: THREE.Group;
     private readonly cycle: DayNightCycle;
     private readonly fragmentBatches: FragmentBatch[] = [];
     private readonly fires: Puff[] = [];
@@ -190,44 +191,52 @@ export class MechaGameOverScene {
     /** Asset-only preparation. No castle, fragments, particles or blast lights
      * exist here; the normal match keeps its original batched world. */
     static async prepare(options: MechaGameOverOptions, asset?: GLTF): Promise<MechaGameOverScene> {
-        return new MechaGameOverScene(options, asset ?? await new GLTFLoader().loadAsync(modelUrl));
+        return new MechaGameOverScene(options, options.cause === 'wall' ? undefined : asset ?? await new GLTFLoader().loadAsync(modelUrl));
     }
 
-    private constructor(options: MechaGameOverOptions, asset: GLTF) {
+    private constructor(options: MechaGameOverOptions, asset?: GLTF) {
         this.options = { ...options };
         this.gentle = Boolean(options.photosensitivity || options.reducedMotion);
         this.forward = new THREE.Vector3(Math.sin(options.heading), 0, Math.cos(options.heading));
         this.tangent = new THREE.Vector3(this.forward.z, 0, -this.forward.x);
         this.scene.fog = new THREE.Fog(0xd0dbf0, 550, 1800);
-        this.scene.add(this.robot);
-        this.model = asset.scene;
-        this.robot.add(this.model);
-        this.model.updateMatrixWorld(true);
-        const bounds = new THREE.Box3().setFromObject(this.model, true);
-        this.model.scale.multiplyScalar(MECHA_HEIGHT / (bounds.max.y - bounds.min.y));
-        this.model.updateMatrixWorld(true);
-        bounds.setFromObject(this.model, true);
-        this.model.position.y -= bounds.min.y;
-        this.model.traverse(node => {
-            if (node instanceof THREE.SkinnedMesh) { node.frustumCulled = false; node.castShadow = node.receiveShadow = true; }
-        });
-        this.mixer = new THREE.AnimationMixer(this.model);
-        const clip = asset.animations.find(value => value.name === 'HeavyPunch');
-        if (!clip) throw new Error('Ironmaw is missing HeavyPunch');
-        this.punchDuration = clip.duration;
-        this.duration = this.punchStart + clip.duration + MECHA_ENDING_TIMING.aftermath;
-        this.action = this.mixer.clipAction(clip);
-        this.action.setLoop(THREE.LoopOnce, 1); this.action.clampWhenFinished = true;
-        this.pose(MECHA_ENDING_TIMING.impact);
-        const fist = this.model.getObjectByName('M_Forearm_R');
-        if (!fist) throw new Error('Ironmaw is missing the punching fist');
-        bounds.setFromObject(fist, true);
-        this.contact.set((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, bounds.max.z);
-        const reach = bounds.max.z;
-        this.robot.rotation.y = options.heading;
-        this.robot.position.copy(options.position ?? this.forward.clone().multiplyScalar(-TOWN_HALF_SIZE - TOWN_WALL_THICKNESS / 2 - reach)
-            .addScaledVector(this.tangent, options.wallOffset));
-        this.contact.applyAxisAngle(UP, options.heading).add(this.robot.position);
+        if (asset) {
+            this.scene.add(this.robot);
+            this.model = asset.scene;
+            this.robot.add(this.model);
+            this.model.updateMatrixWorld(true);
+            const bounds = new THREE.Box3().setFromObject(this.model, true);
+            this.model.scale.multiplyScalar(MECHA_HEIGHT / (bounds.max.y - bounds.min.y));
+            this.model.updateMatrixWorld(true);
+            bounds.setFromObject(this.model, true);
+            this.model.position.y -= bounds.min.y;
+            this.model.traverse(node => {
+                if (node instanceof THREE.SkinnedMesh) { node.frustumCulled = false; node.castShadow = node.receiveShadow = true; }
+            });
+            this.mixer = new THREE.AnimationMixer(this.model);
+            const clip = asset.animations.find(value => value.name === 'HeavyPunch');
+            if (!clip) throw new Error('Ironmaw is missing HeavyPunch');
+            this.punchDuration = clip.duration;
+            this.action = this.mixer.clipAction(clip);
+            this.action.setLoop(THREE.LoopOnce, 1); this.action.clampWhenFinished = true;
+            this.pose(MECHA_ENDING_TIMING.impact);
+            const fist = this.model.getObjectByName('M_Forearm_R');
+            if (!fist) throw new Error('Ironmaw is missing the punching fist');
+            bounds.setFromObject(fist, true);
+            this.contact.set((bounds.min.x + bounds.max.x) / 2, (bounds.min.y + bounds.max.y) / 2, bounds.max.z);
+            const reach = bounds.max.z;
+            this.robot.rotation.y = options.heading;
+            this.robot.position.copy(options.position ?? this.forward.clone().multiplyScalar(-TOWN_HALF_SIZE - TOWN_WALL_THICKNESS / 2 - reach)
+                .addScaledVector(this.tangent, options.wallOffset));
+            this.contact.applyAxisAngle(UP, options.heading).add(this.robot.position);
+        } else {
+            if (!options.position) throw new Error('Wall collapse needs an impact point');
+            this.punchDuration = MECHA_ENDING_DURATION - this.punchStart - MECHA_ENDING_TIMING.aftermath;
+            this.contact.copy(options.position);
+            // The empty anchor serves the same camera obstruction checks as the original subject.
+            this.robot.position.copy(this.contact).addScaledVector(this.forward, -8);
+        }
+        this.duration = this.punchStart + this.punchDuration + MECHA_ENDING_TIMING.aftermath;
         this.pose(0); this.frameCamera();
         this.coverScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.coverMaterial));
         this.cycle = new DayNightCycle(this.scene, { shadows: true, shadowMapSize: 1024 });
@@ -278,6 +287,7 @@ export class MechaGameOverScene {
     }
 
     private pose(time: number): void {
+        if (!this.action || !this.mixer || !this.model) return;
         // LoopOnce pauses at completion; reset before every absolute seek.
         this.action.reset().play(); this.action.time = time; this.mixer.update(0);
         this.robot.updateMatrixWorld(true);
@@ -285,20 +295,22 @@ export class MechaGameOverScene {
     }
 
     private async prepareRenderer(renderer: THREE.WebGLRenderer): Promise<void> {
-        const generator = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment(renderer);
-        try { this.environment = generator.fromScene(room, .04); }
-        finally { room.dispose(); generator.dispose(); }
-        const texture = this.environment.texture;
-        this.model.traverse(node => {
-            if (!(node instanceof THREE.Mesh)) return;
-            for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
-                if (material instanceof THREE.MeshStandardMaterial) {
-                    material.envMap = texture;
-                    material.envMapIntensity = this.options.lightingElapsed >= 300 ? .12 : .6;
-                    material.needsUpdate = true;
+        if (this.model) {
+            const generator = new THREE.PMREMGenerator(renderer), room = new RoomEnvironment(renderer);
+            try { this.environment = generator.fromScene(room, .04); }
+            finally { room.dispose(); generator.dispose(); }
+            const texture = this.environment.texture;
+            this.model.traverse(node => {
+                if (!(node instanceof THREE.Mesh)) return;
+                for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+                    if (material instanceof THREE.MeshStandardMaterial) {
+                        material.envMap = texture;
+                        material.envMapIntensity = this.options.lightingElapsed >= 300 ? .12 : .6;
+                        material.needsUpdate = true;
+                    }
                 }
-            }
-        });
+            });
+        }
         // Warm the real effect variants privately while the public timeline is
         // held at black. Pending callers can never seek into the punch early.
         const held = this.frame;
@@ -320,7 +332,7 @@ export class MechaGameOverScene {
             const p = this.contact.clone().addScaledVector(this.tangent, side * 48); p.y = y;
             this.framingPoints.push(p);
         }
-        for (const side of [-1, 1]) for (const y of [0, MECHA_HEIGHT + 3]) {
+        if (this.model) for (const side of [-1, 1]) for (const y of [0, MECHA_HEIGHT + 3]) {
             const p = this.robot.position.clone().addScaledVector(this.tangent, side * 15).addScaledVector(this.forward, -8); p.y = y;
             this.framingPoints.push(p);
         }
@@ -586,7 +598,7 @@ export class MechaGameOverScene {
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true; this.activated = false;
-        this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.model);
+        if (this.model && this.mixer) { this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.model); }
         this.cycle.dispose();
         const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>();
         const textures = new Set<THREE.Texture>(), skeletons = new Set<THREE.Skeleton>();

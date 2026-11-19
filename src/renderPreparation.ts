@@ -5,7 +5,7 @@ import { createKatanaSlash } from './katanaSlash.js';
 import * as THREE from 'three';
 import { state } from './state.js';
 import { prepareParticleResources } from './particles.js';
-import { forgottenMecha, gothGirlfriend, prepareWorldInstanceBuffers, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns } from './world.js';
+import { forgottenMecha, gothGirlfriend, infantry, prepareWorldInstanceBuffers, updateEnvironmentVisibility, updateLavaLights, updateTownLanterns } from './world.js';
 import type { DayNightCycle } from './dayNightCycle.js';
 import { userSettings } from './settings.js';
 
@@ -18,7 +18,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     const target = new THREE.WebGLRenderTarget(32, 32);
     const effects = prepareParticleResources();
     const projectile = state.projectilePool[0];
-    const representatives: THREE.Object3D[] = [...effects];
+    const representatives: THREE.Object3D[] = [...effects, ...(infantry?.warmModels ?? [])];
     const sword = state.katanaMesh;
     const katanaEffects = state.katanaMesh ? new KatanaEffects() : null;
     const slash = state.katanaMesh ? createKatanaSlash() : null;

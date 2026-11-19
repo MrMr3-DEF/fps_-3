@@ -2,7 +2,7 @@ import { KATANA } from './config.js';
 import { katanaInput, cancelKatana, updateKatana, validateKatanaInput, applyKatanaShake, renderKatanaImpact, resetKatana } from './katana.js';
 import { MechaEndingAuthority, type MechaEndingState } from './mechaEndingTimeline.js';
 import { MechaEndingPlayback } from './mechaEndingPlayback.js';
-import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork, selectMechaWeapon, localMechaWeapon } from './mechaNetwork.js';
+import { multiplayerMechaEvents, initializeNetworkMecha, updateMechaNetwork, submitMechaInput, queueMechaLook, requestMechaAction, releaseMechaInput, setMechaPresentation, flushMechaDamage, acknowledgeMechaRender, resetMechaNetwork, markMechaEndingReady, updateMechaEndingNetwork, selectMechaWeapon, localMechaWeapon, commitNetworkWallEnding } from './mechaNetwork.js';
 import { cyclePilotWeapon, type PilotWeapon } from './mechaStomp.js';
 import { deriveHudPresentation } from './hudPresentation.js';
 import { cancelWorldLoading, isWorldLoading, isWorldReveal, withWorldLoading, type WorldLoadingMode } from './worldLoading.js';
@@ -55,11 +55,11 @@ import { applyHudPresentation, setFpsText, updateAccelerometer, updateHealthBar,
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook } from './grapple.js';
 import { createAkimboGuns, fireProjectile, updateWeapons, createPlayerMesh, setThirdPerson, syncThirdPersonPresentation, cancelInspect, resetWeaponPresentation, updatePlayerAvatarPose, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns } from './world.js';
+import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, infantry, prepareInfantry, rebuildInfantryHash, isLookingAtTownWell } from './world.js';
 import { CameraShake } from './cameraShake.js';
 import { triggerMechaImpactShake } from './mechaImpactShake.js';
 import type { MechaImpact } from './forgottenMecha.js';
-import { MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS } from './config.js';
+import { INFANTRY_WARNING_TIME, MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS, TOWN_WALL_HP } from './config.js';
 import { setDamageHandlers, type TargetHitResult } from './damage.js';
 import {
     sendLocalState,
@@ -73,7 +73,7 @@ import {
     hostGame,
     joinGame,
     broadcastTargetKill,
-    updateRemotePeers
+    updateRemotePeers, infantryAttack, infantryPlayers, publishInfantryKill, publishInfantryState
 } from './multiplayer.js';
 import { applyRendererSettings, cloneSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
 import { setProjectileTrailsEnabled } from './projectileTrails.js';
@@ -126,33 +126,43 @@ reducedHeadMotion.addEventListener('change', () => {
 });
 let approachWarningRemaining = 0;
 let exitWarningRemaining = 0;
+let defenseWarningRemaining = 0, defenseWarningShown = false;
 
 function clearApproachWarning(): void {
     approachWarningRemaining = 0;
     exitWarningRemaining = 0;
+    defenseWarningRemaining = 0;
     const exitWarning = document.getElementById('mecha-exit-warning');
     if (exitWarning) exitWarning.hidden = true;
     const warning = document.getElementById('mecha-approach-warning');
     if (warning) warning.hidden = true;
+    const defenseWarning = document.getElementById('defend-town-warning');
+    if (defenseWarning) defenseWarning.hidden = true;
 }
 
 function updateApproachWarning(delta: number, active: boolean): void {
     const exitWarning = document.getElementById('mecha-exit-warning');
     if (exitWarning) exitWarning.hidden = !active || exitWarningRemaining <= 0;
     if (active) exitWarningRemaining = Math.max(0, exitWarningRemaining - delta);
+    if (active && infantry && !defenseWarningShown) {
+        defenseWarningShown = true;
+        defenseWarningRemaining = INFANTRY_WARNING_TIME;
+    }
+    const defending = defenseWarningRemaining > 0;
     const warning = document.getElementById('mecha-approach-warning');
-    const visible = active && approachWarningRemaining > 0;
-    if (warning) {
-        warning.hidden = !visible;
-        if (visible) {
-            const elapsed = MECHA_APPROACH_WARNING_TIME - approachWarningRemaining;
-            warning.style.opacity = userSettings.photosensitivityMode || reducedHeadMotion.matches
-                ? '1' : String(0.85 + 0.15 * Math.cos(elapsed * Math.PI * 2));
-        }
+    const defenseWarning = document.getElementById('defend-town-warning');
+    if (warning) warning.hidden = !active || defending || approachWarningRemaining <= 0;
+    if (defenseWarning) defenseWarning.hidden = !active || !defending;
+    const visible = defending ? defenseWarning : warning;
+    if (visible && !visible.hidden) {
+        const elapsed = defending ? INFANTRY_WARNING_TIME - defenseWarningRemaining : MECHA_APPROACH_WARNING_TIME - approachWarningRemaining;
+        visible.style.opacity = userSettings.photosensitivityMode || reducedHeadMotion.matches
+            ? '1' : String(0.85 + 0.15 * Math.cos(elapsed * Math.PI * 2));
     }
     // Both lifetime and pulse use active gameplay time: pausing hides the
     // message without consuming it or letting an independent animation run.
-    if (active) approachWarningRemaining = Math.max(0, approachWarningRemaining - delta);
+    if (active && defending) defenseWarningRemaining = Math.max(0, defenseWarningRemaining - delta);
+    else if (active) approachWarningRemaining = Math.max(0, approachWarningRemaining - delta);
 }
 
 function clearMechaHeadPresentation(): void {
@@ -1082,6 +1092,7 @@ function currentHudPresentation() {
 function syncGameHud(): void {
     const presentation = currentHudPresentation();
     applyHudPresentation(presentation, state.powerJumpEnabled);
+    if (!presentation.locator) updateWallHud(false);
     if (!presentation.accelerometer || !motionHudInitialized) updateLocalAccelerometer(0);
     updateSpeedlines(state.velocity.length(), presentation.speedlines);
     updateWorldBorderOverlay(presentation.border);
@@ -1094,6 +1105,16 @@ function syncGameHud(): void {
     if (presentation.hardware) syncMechaHeadPresentation(); else clearMechaHeadPresentation();
 }
 
+function updateWallHud(visible: boolean): void {
+    const status = getUI<HTMLElement>('wall-durability');
+    if (!status) return;
+    status.hidden = !visible || !infantry;
+    if (!status.hidden) {
+        const progress = getUI<HTMLProgressElement>('wall-durability-bar');
+        if (progress) { progress.max = TOWN_WALL_HP; progress.value = infantry!.wallHp; }
+    }
+}
+
 function hideGameHud(): void { syncGameHud(); }
 
 function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
@@ -1101,6 +1122,9 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
     disposingGameRuntime = true;
     try {
         endingPlayback?.dispose(); endingPlayback = null; offlineEnding = null;
+        defenseWarningShown = false;
+        const gameOverReason = getUI<HTMLElement>('game-over-reason');
+        if (gameOverReason) gameOverReason.textContent = 'Forgotten Mecha reached the castle.';
         endingCover?.remove(); endingCover = null; document.body.classList.remove('mecha-ending');
         mobileControlsEditor.cancel();
         clearApproachWarning();
@@ -1193,10 +1217,16 @@ async function loadPreparedWorld(
             laserPlayer: damage => takePlayerDamage(damage, 'Forgotten Mecha'),
             rocketPlayer: damage => takePlayerDamage(damage, 'Forgotten Mecha'),
             gameOver: () => triggerDeath(true),
-            wallPunchStarted: commitOfflineMechaEnding,
+            wallPunchStarted: () => commitOfflineEnding(),
             pilotReleased: pose => { if (state.scene === scene) onMechaPilotReleased(pose); },
             exitBlocked: () => { if (state.scene === scene) exitWarningRemaining = 3; },
         }, checkpoint);
+        await prepareInfantry({ attack: infantryAttack, wallLost: (position, heading) => {
+            if (state.isMultiplayer) {
+                publishInfantryState(true);
+                commitNetworkWallEnding(position, heading);
+            } else commitOfflineEnding({ position, heading });
+        } }, checkpoint);
         if (state.isMultiplayer) initializeNetworkMecha();
         if (dayNightCycle) await prepareRenderer(dayNightCycle, checkpoint);
         if (state.renderer && atmosphere) { await atmosphere.prepare(state.renderer); await checkpoint(); }
@@ -1278,7 +1308,7 @@ function broadcastPlayerDeath(victimName: string, killerName: string, killerPeer
     if (!state.isMultiplayer) return;
     const packet: PlayerDiedPacket = {
         type: 'player_died',
-        lifeId: state.lifeId, cause: killerPeerId ? 'player' : killerName === 'Forgotten Mecha' ? 'mecha' : 'lava', killerPeerId,
+        lifeId: state.lifeId, cause: killerPeerId ? 'player' : killerName === 'Forgotten Mecha' ? 'mecha' : killerName === 'Enemy' ? 'infantry' : 'lava', killerPeerId,
         victimName: victimName,
         killerName: killerName,
         victimPeerId: state.peer?.id
@@ -1903,6 +1933,8 @@ function startMechaEnding(scene: MechaEndingState): void {
     }
     const gameOver = document.getElementById('game-over-overlay');
     if (gameOver) gameOver.style.display = 'none';
+    const reason = getUI<HTMLElement>('game-over-reason');
+    if (reason) reason.textContent = scene.cause === 'wall' ? 'The town walls fell.' : 'Forgotten Mecha reached the castle.';
     endingCover = document.createElement('div'); endingCover.id = 'mecha-ending-cover';
     endingCover.setAttribute('aria-hidden', 'true'); document.body.append(endingCover);
     syncGameHud();
@@ -1911,7 +1943,7 @@ function startMechaEnding(scene: MechaEndingState): void {
             const { MechaGameOverScene } = await import('./mechaGameOverScene.js');
             return MechaGameOverScene.prepare({ seed: committed.seed, effectsSeed: committed.effectsSeed,
                 position: new THREE.Vector3(committed.position.x, committed.position.y, committed.position.z),
-                heading: committed.heading, wallOffset: 0, lightingElapsed: committed.lightingElapsed,
+                heading: committed.heading, wallOffset: 0, lightingElapsed: committed.lightingElapsed, cause: committed.cause,
                 particleAmount: userSettings.particleAmount, photosensitivity: userSettings.photosensitivityMode,
                 reducedMotion: reducedHeadMotion.matches, seededScenery: true });
         },
@@ -1924,13 +1956,14 @@ function startMechaEnding(scene: MechaEndingState): void {
         failed: error => console.error('Unable to prepare the mecha ending', error),
     });
 }
-function commitOfflineMechaEnding(): void {
+function commitOfflineEnding(wall?: { position: THREE.Vector3; heading: number }): void {
     const actor = forgottenMecha;
     if (!actor || state.matchEnded) return;
     const seed = getWorldSeed();
+    const position = wall?.position ?? actor.group.position;
     offlineEnding = new MechaEndingAuthority({ id: 1, seed, effectsSeed: (seed ^ 0x6d2b79f5) >>> 0,
-        position: { x: actor.group.position.x, y: actor.group.position.y, z: actor.group.position.z },
-        heading: actor.group.rotation.y, lightingElapsed: ((state.dayNightElapsedSeconds % 480) + 480) % 480 }, performance.now());
+        position: { x: position.x, y: position.y, z: position.z }, ...(wall ? { cause: 'wall' } : {}),
+        heading: wall?.heading ?? actor.group.rotation.y, lightingElapsed: ((state.dayNightElapsedSeconds % 480) + 480) % 480 }, performance.now());
     startMechaEnding(offlineEnding.snapshot(performance.now()));
 }
 
@@ -2058,6 +2091,18 @@ function animate(): void {
 
     updateHook(delta);
     updateRemotePeers(delta);
+
+    if (infantry && state.isPlaying) {
+        if (!state.isMultiplayer || state.isHost) {
+            infantry.update(delta, state.dayNightElapsedSeconds, infantryPlayers());
+            publishInfantryState();
+        } else infantry.advanceReplica(delta);
+        rebuildInfantryHash();
+        const counter = getUI<HTMLElement>('defense-day');
+        const day = String(Math.max(1, infantry.day));
+        if (counter && counter.textContent !== day) counter.textContent = day;
+    }
+    if (state.matchEnded) { state.prevTime = time; return; }
 
     const attackerName = state.username;
     updateProjectiles(delta, attackerName);
@@ -2263,6 +2308,7 @@ function animate(): void {
                 mountedFireRequested = false;
             }
             const gogglesPlayerPosition = logicalCameraPos;
+            updateWallHud(currentHudPresentation().locator && isLookingAtTownWell(state.camera));
             _gogglesWeaponOrigin.copy(gogglesPlayerPosition);
             if (pilot) pilot.muzzleAnchor.getWorldPosition(_gogglesWeaponOrigin); else state.rightGun?.getWorldPosition(_gogglesWeaponOrigin);
             // Begin the scan about halfway through the scope's settle time. The
@@ -2396,6 +2442,18 @@ export function processTargetHit(targetIndex: number, damage: number, attackerPe
     const target = state.targets[targetIndex];
     if (!target || targetData(target).hp <= 0) return { accepted: false, killed: false };
     const data = targetData(target);
+    if (data.infantry) {
+        if (!infantry || state.matchEnded || state.isMultiplayer && !state.isHost) return { accepted: false, killed: false };
+        const revision = data.eliminationRevision;
+        const result = infantry.damage(targetIndex, damage);
+        if (result.accepted && (!state.isMultiplayer || !attackerPeerId || attackerPeerId === state.peer?.id)) flashHitmarker(result.killed);
+        if (result.killed) {
+            state.score++;
+            syncHudCounters();
+            publishInfantryKill(targetIndex, revision, attackerPeerId);
+        }
+        return result;
+    }
     const killed = data.hp - damage <= 0;
     if (!state.isMultiplayer || !attackerPeerId || attackerPeerId === state.peer?.id) {
         flashHitmarker(killed);

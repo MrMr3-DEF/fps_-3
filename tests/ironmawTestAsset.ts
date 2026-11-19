@@ -3,8 +3,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /** Keep the actual skin and baked clips; remove only browser image decoding
  * from Node geometry tests. Browser review loads the untouched production GLB. */
-export async function loadIronmawTestAsset() {
-    const original = await readFile(new URL('../blender_assets/ironmaw/ironmaw_siege_robot.glb', import.meta.url));
+export const loadIronmawTestAsset = () => loadSkinnedTestAsset(new URL('../blender_assets/ironmaw/ironmaw_siege_robot.glb', import.meta.url));
+
+export async function loadSkinnedTestAsset(url: URL) {
+    const original = await readFile(url);
     const length = original.readUInt32LE(12);
     const json = JSON.parse(original.subarray(20, 20 + length).toString());
     json.images = []; json.textures = []; json.materials = [];

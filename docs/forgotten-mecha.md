@@ -24,6 +24,8 @@ Shared gameplay values live in `src/config.ts`.
   awards one shared NPC score; ordinary play continues without robot respawn.
 - Wall arrival commits room-wide loss before the first HeavyPunch tick and
   makes the actor invulnerable. The shared ending owns the terminal presentation.
+  Infantry can also trigger the shared castle collapse by depleting
+  [wall durability](town-defense.md), with the wall strike as the camera focus.
 
 Singleplayer displays **Something’s approaching...** once per match after loading.
 Pause freezes its countdown; respawn does not replay it. Accessibility modes use

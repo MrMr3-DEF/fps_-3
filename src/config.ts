@@ -30,6 +30,21 @@ export const MECHA_HEIGHT = 28;
 export const MECHA_HP = 50;
 export const MECHA_DETECTION_RANGE = 130;
 export const MECHA_APPROACH_WARNING_TIME = 3;
+export const TOWN_WALL_HP = 500;
+export const INFANTRY_RANGE = 50;
+export const INFANTRY_LIMIT = 48;
+export const INFANTRY_WARNING_TIME = 3;
+export const INFANTRY_NETWORK_INTERVAL = 100;
+export const INFANTRY_DEBRIS_TIME = 4;
+export const INFANTRY = {
+    base: { hp: 5, damage: 1, height: 2, width: 0.95, depth: 0.8, speed: 6, range: INFANTRY_RANGE,
+        engage: INFANTRY_RANGE, interval: 3, move: 'Walk', attack: 'Fire', contact: 0, color: 0xd5a374 },
+    fast: { hp: 3, damage: 1, height: 1.85, width: 0.8, depth: 0.6, speed: 11, range: 1.65,
+        engage: .85, interval: 1.2, move: 'Run', attack: 'LightHit', contact: 4 / 24, color: 0xd29a6c },
+    big: { hp: 10, damage: 3, height: 3.5, width: 1.7, depth: 1.35, speed: 4.5, range: 2.5,
+        engage: 1.9, interval: 2.6, move: 'Walk', attack: 'HeavyHit', contact: 17 / 24, color: 0xb98764 },
+} as const;
+export type InfantryKind = keyof typeof INFANTRY;
 export const MECHA_LASER_MIN_RANGE = 60;
 export const MECHA_ENEMY_ROCKET_DAMAGE = 9;
 export const MECHA_ENEMY_ROCKET_TURN_SPEED = 3;

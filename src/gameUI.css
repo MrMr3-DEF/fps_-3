@@ -741,8 +741,10 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 /* The boot hardware sits over the opaque video cover, while ordinary HUD and
    border warnings remain behind it. Pause/death panels retain their priority. */
 #goggles-scope.mecha-head-display { z-index: 10; }
-#mecha-approach-warning { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 24px; pointer-events: none; color: #fff; font: 500 clamp(20px, 3vw, 32px) var(--ui-font); text-align: center; text-shadow: 0 1px 8px #0006; }
-#mecha-approach-warning[hidden] { display: none; }
+#mecha-approach-warning, #defend-town-warning { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 24px; pointer-events: none; color: #fff; font: 500 clamp(20px, 3vw, 32px) var(--ui-font); text-align: center; text-shadow: 0 1px 8px #0006; }
+#mecha-approach-warning[hidden], #defend-town-warning[hidden] { display: none; }
+#wall-durability { position: fixed; z-index: 8; top: calc(50% + 40px); left: 50%; transform: translateX(-50%); width: 150px; pointer-events: none; text-align: center; color: #fff; font: 500 13px/1.4 var(--ui-font); text-shadow: 0 1px 3px #000; }
+#wall-durability-bar { display: block; width: 100%; height: 8px; margin-top: 4px; accent-color: #2ed573; }
 #mecha-exit-warning { position: fixed; left: 50%; top: 60%; transform: translateX(-50%); z-index: 8; max-width: calc(100vw - 32px); padding: 12px; color: #fff; background: #182d40e6; font: 500 16px/1.5 var(--ui-font); text-align: center; pointer-events: none; }
 #mecha-exit-warning[hidden] { display: none; }
 #mecha-head-screen { position: fixed; inset: 0; z-index: 9; background: #000; pointer-events: none; display: grid; place-items: center; }

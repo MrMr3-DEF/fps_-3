@@ -41,7 +41,7 @@ export class MechaEndingPlayback {
     }
     receive(next: MechaEndingState, now: number): void {
         const previous = this.latest;
-        if (this.disposed || next.id !== previous.id || next.seed !== previous.seed || next.effectsSeed !== previous.effectsSeed ||
+        if (this.disposed || next.id !== previous.id || next.seed !== previous.seed || next.effectsSeed !== previous.effectsSeed || next.cause !== previous.cause ||
             next.heading !== previous.heading || next.lightingElapsed !== previous.lightingElapsed ||
             ['x', 'y', 'z'].some(k => next.position[k as keyof typeof next.position] !== previous.position[k as keyof typeof previous.position])) return;
         const rank = { preparing: 0, playing: 1, complete: 2 };

@@ -1,4 +1,6 @@
 import type { PlayerHitPacket } from './networkTypes.js';
+import type { InfantryPlayer } from './infantry.js';
+import type { InfantryEvent, InfantryEventPacket } from './infantryNetworkTypes.js';
 import { acceptMeleeCommand, invalidateMeleePeer, forgetMeleePeer, receiveMeleeEvent, receiveMeleeHit, localMeleePlayer, resetKatana } from './katana.js';
 import { buildKatana } from './katanaModel.js';
 import { setMeleeNetworkPort } from './weaponNetworkPort.js';
@@ -21,7 +23,7 @@ import { state, resetPlayerState, resetMatchStats, type DataConnectionLike, type
 import { placePlayerAtTownSpawn } from './playerSpawn.js';
 import { disposeParticles, spawnParticles, createLaserBeam, spawnRocketFlame, spawnManeuveringBeam, createShockwave } from './particles.js';
 import {
-    forgottenMecha,
+    forgottenMecha, infantry, rebuildInfantryHash,
     generateWorldSeed,
     getWorldSeed,
     queryObstaclesAlongSegment,
@@ -49,6 +51,7 @@ import {
     NETWORK_MOVEMENT_SPEED,
     NETWORK_MOVEMENT_BURST,
     GRAPPLE_BLUE,
+    ENEMY_COUNT, INFANTRY, INFANTRY_NETWORK_INTERVAL, type InfantryKind,
 } from './config.js';
 import { setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
 import { triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
@@ -457,6 +460,7 @@ function buildTargetState(targetIndex: number): TargetState | null {
     const target = state.targets[targetIndex];
     if (!target) return null;
     const data = targetData(target);
+    if (data.infantry) return null;
     return {
         targetIndex,
         position: { x: target.position.x, y: target.position.y, z: target.position.z },
@@ -476,6 +480,7 @@ function applyTargetState(targetState: TargetState): boolean {
     const target = state.targets[targetState.targetIndex];
     if (!target) return false;
     const data = targetData(target);
+    if (data.infantry) return false;
     if (targetState.hp <= 0 || target.position.x !== targetState.position.x ||
         target.position.y !== targetState.position.y || target.position.z !== targetState.position.z) {
         cancelHookForTarget(target);
@@ -520,7 +525,8 @@ function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): vo
         score: state.score,
         dayNightElapsedSeconds: state.dayNightElapsedSeconds,
         targets,
-        ...(mecha ? { mecha } : {})
+        ...(mecha ? { mecha } : {}),
+        ...(infantry ? { infantry: infantry.snapshot() } : {}),
     };
     try {
         conn.send(packet);
@@ -555,6 +561,7 @@ export function setMultiplayerWorldLoader(loader: typeof multiplayerWorldLoader)
 function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void {
     if (!prepared) rebuildEnvironmentWithSeed(packet.seed);
     if (forgottenMecha?.networked && !packet.mecha) throw new Error('Multiplayer requires the same client build. Reload both players.');
+    if (infantry && !packet.infantry) throw new Error('Multiplayer requires the same client build. Reload both players.');
     state.dayNightElapsedSeconds = packet.dayNightElapsedSeconds;
     state.dayNightSyncPending = true;
     state.dayNightSyncImmediate = true;
@@ -563,6 +570,10 @@ function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void
         applyTargetState(target);
     }
     rebuildTargetHash();
+    if (packet.infantry) {
+        infantry?.receive(packet.infantry);
+        rebuildInfantryHash();
+    }
     setScore(packet.score);
     clientWorldSynchronized = true;
     clearWorldSyncTimeout();
@@ -597,6 +608,7 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function resetLocalMatch(): void {
     resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null; mechaDamageByVictim.clear();
+    infantryDamageByVictim.clear(); lastInfantryPublish = -Infinity;
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     state.playerList = [];
     setPlayerListVisible(false);
@@ -800,6 +812,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     const hadSession = state.isMultiplayer || peerInstance !== null;
     disconnecting = true;
     resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null; mechaDamageByVictim.clear();
+    infantryDamageByVictim.clear(); lastInfantryPublish = -Infinity;
     if (healthInterval) clearInterval(healthInterval);
     healthInterval = null;
     const roomToRelease = state.roomCode;
@@ -1038,6 +1051,7 @@ function setupConnection(conn: DataConnectionLike, generation: number): void {
         admittedNames.delete(conn.peer);
         spawnHouseSlots.delete(conn.peer);
         lastDamageByVictim.delete(conn.peer);
+        infantryDamageByVictim.delete(conn.peer);
         removePeer(conn.peer);
         if (state.isHost) {
             if (admitted) {
@@ -1333,10 +1347,12 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         const target = state.targets[packet.targetIndex];
         if (!target) return null;
         const targetInfo = targetData(target);
+        if (targetInfo.infantry && (targetInfo.hp <= 0 || packet.targetRevision !== targetInfo.eliminationRevision)) return null;
         const targetRadius = TARGET_HIT_RANGE_MULTIPLIER * (targetInfo.scale || 1.0);
         const targetRevision = targetInfo.eliminationRevision ?? 0;
-        targetMotion(packet.targetIndex, now);
-        const blocker = guidedPathBlocker(fromPeerId, { kind: 'npc', targetIndex: packet.targetIndex, targetRevision });
+        const history = targetMotion(packet.targetIndex, now)!;
+        const identity = { kind: 'npc', targetIndex: packet.targetIndex, targetRevision } as const;
+        const blocker = guidedPathBlocker(fromPeerId, identity);
         if (!runtime.shots.consumeHomingNpc(
             packet.shotId,
             packet.pelletIndex,
@@ -1347,7 +1363,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             packet.damage,
             now,
             blocker,
-        ) && !runtime.shots.consume(
+        ) && !(targetInfo.infantry ? runtime.shots.consumeMovingNpc(packet.shotId, packet.pelletIndex, history,
+            targetRadius, packet.damage, now, blocker, identity) : runtime.shots.consume(
             packet.shotId,
             packet.pelletIndex,
             target.position,
@@ -1355,8 +1372,8 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             packet.damage,
             now,
             blocker,
-            { kind: 'npc', targetIndex: packet.targetIndex, targetRevision },
-        )) return null;
+            identity,
+        ))) return null;
         return { ...packet, senderPeerId: fromPeerId };
     }
 
@@ -1394,10 +1411,14 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     }
 
     if (packet.type === 'player_died') {
-        let killerName = packet.cause === 'mecha' ? 'Forgotten Mecha' : 'Lava';
+        let killerName = packet.cause === 'mecha' ? 'Forgotten Mecha' : packet.cause === 'infantry' ? 'Enemy' : 'Lava';
         if (packet.cause === 'mecha') {
             const hit = mechaDamageByVictim.get(fromPeerId);
             if (!hit || hit.lifeId !== packet.lifeId || hit.attacker !== null || now - hit.at > 10000) return null;
+        }
+        if (packet.cause === 'infantry') {
+            const hit = infantryDamageByVictim.get(fromPeerId);
+            if (!hit || hit.lifeId !== packet.lifeId || now - hit.at > 10000) return null;
         }
         let killerPeerId: string | null = null;
         if (packet.cause === 'player') {
@@ -1411,6 +1432,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         if (!acceptDeath(runtime, packet.lifeId)) return null;
         runtime.shots.reset();
         lastDamageByVictim.delete(fromPeerId);
+        infantryDamageByVictim.delete(fromPeerId);
         return { ...packet, senderPeerId: fromPeerId, victimPeerId: fromPeerId,
             victimName: runtime.username, killerName, killerPeerId };
     }
@@ -1559,6 +1581,16 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         }
         if (msg.type === 'target_state') {
             if (applyTargetState(msg)) rebuildTargetHash();
+            return;
+        }
+        if (msg.type === 'infantry_state') {
+            if (clientWorldSynchronized && state.isPlaying && !state.matchEnded) infantry?.receive(msg.state);
+            return;
+        }
+        if (msg.type === 'infantry_event') {
+            if (clientWorldSynchronized && state.isPlaying && !state.matchEnded && infantry?.acceptSequence(msg.sequence)) {
+                applyInfantryEvent(msg.event);
+            }
             return;
         }
         if (msg.type === 'update' &&
@@ -1754,7 +1786,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
     } else if (msg.type === 'kill_target') {
         // Host broadcast: all clients apply the same target respawn and score.
         const target = state.targets[msg.targetIndex];
-        if (target) {
+        if (target && !targetData(target).infantry) {
             cancelHookForTarget(target);
             const data = targetData(target);
             data.eliminationRevision = (data.eliminationRevision ?? 0) + 1;
@@ -1872,7 +1904,10 @@ export function sendLocalState(force = false): void {
         }
         syncHostTargetStates();
         if (state.peer) peerMotion(state.peer.id, now);
-        for (const index of npcMotion.keys()) targetMotion(index, now);
+        for (const index of npcMotion.keys()) if (index < ENEMY_COUNT) targetMotion(index, now);
+        for (let index = ENEMY_COUNT; index < state.targets.length; index++) {
+            if (targetData(state.targets[index]).hp > 0) targetMotion(index, now);
+        }
     }
 
     const playerObj = state.controls.getObject();
@@ -2167,6 +2202,91 @@ function createPeerBean(username: string): PeerData {
 let hostMechaShots = new ShotLedger();
 let mechaMotion: { actor: NonNullable<typeof forgottenMecha>; revision: number; history: TargetMotionHistory } | null = null;
 const mechaDamageByVictim = new Map<string, { lifeId: number; attacker: string | null; at: number }>();
+const infantryDamageByVictim = new Map<string, { lifeId: number; at: number }>();
+let lastInfantryPublish = -Infinity;
+
+export function publishInfantryState(force = false): void {
+    if (!infantry || !state.isMultiplayer || !state.isHost || !state.connections.length) return;
+    const now = performance.now();
+    if (!force && now - lastInfantryPublish < INFANTRY_NETWORK_INTERVAL) return;
+    lastInfantryPublish = now;
+    broadcastToAll({ type: 'infantry_state', state: infantry.snapshot() });
+}
+
+function publishInfantryEvent(event: InfantryEvent): void {
+    if (!infantry || !state.isMultiplayer || !state.isHost) return;
+    const packet: InfantryEventPacket = { type: 'infantry_event', sequence: infantry.nextSequence(), event };
+    broadcastToAll(packet);
+}
+
+export function publishInfantryKill(index: number, revision: number, killer?: string): void {
+    publishInfantryEvent({ kind: 'kill', slot: index - ENEMY_COUNT, revision, score: state.score,
+        killer: killer ?? state.peer?.id ?? null });
+}
+
+function applyInfantryEvent(event: InfantryEvent): void {
+    if (event.kind === 'kill') {
+        infantry?.acceptKill(event);
+        setScore(event.score);
+        if (event.killer === state.peer?.id) flashHitmarker(true);
+        return;
+    }
+    const { start, end, victim } = event;
+    if (event.robot === 'base') createLaserBeam(new THREE.Vector3(start.x, start.y, start.z), new THREE.Vector3(end.x, end.y, end.z), 0xfac377);
+    if (victim && victim.peerId === state.peer?.id && victim.lifeId === state.lifeId && state.playerHp > 0 && !forgottenMecha?.ownsLocalPilot) {
+        takePlayerDamage(INFANTRY[event.robot].damage, 'Enemy');
+        sendLocalState(true);
+    }
+}
+
+export function infantryAttack(kind: InfantryKind, start: THREE.Vector3, end: THREE.Vector3, victim?: InfantryPlayer): void {
+    const point = (position: THREE.Vector3) => ({ x: position.x, y: position.y, z: position.z });
+    let remoteVictim: { peerId: string; lifeId: number } | undefined;
+    if (victim?.mounted) {
+        const actor = forgottenMecha;
+        if (actor?.mode === 'piloted' && actor.revision === victim.mounted.revision) {
+            const contact = actor.weaponContact(start, end, start, .05);
+            if (contact?.surface === 'shield') {
+                if (state.isMultiplayer) announceMechaShield(contact.point);
+                else actor.combat.shieldImpact(contact.point);
+            } else if (contact) {
+                if (state.isMultiplayer) actor.damage(INFANTRY[kind].damage, { origin: start, point: contact.point, surface: 'body' });
+                else processMechaHit(INFANTRY[kind].damage, { origin: start, point: contact.point, surface: 'body' });
+            }
+        }
+    } else if (victim) {
+        if (!state.isMultiplayer || victim.id === state.peer?.id) {
+            if (state.lifeId === victim.lifeId) takePlayerDamage(INFANTRY[kind].damage, 'Enemy');
+        } else {
+            infantryDamageByVictim.set(victim.id, { lifeId: victim.lifeId, at: performance.now() });
+            lastDamageByVictim.delete(victim.id);
+            remoteVictim = { peerId: victim.id, lifeId: victim.lifeId };
+        }
+    }
+    const event: InfantryEvent = { kind: 'attack', robot: kind, start: point(start), end: point(end),
+        ...(remoteVictim ? { victim: remoteVictim } : {}) };
+    applyInfantryEvent(event);
+    publishInfantryEvent(event);
+}
+
+export function infantryPlayers(): InfantryPlayer[] {
+    const actor = forgottenMecha;
+    const mounted = actor?.mode === 'piloted' ? {
+        revision: actor.revision, bounds: new THREE.Box3().setFromObject(actor.hitbox),
+    } : undefined;
+    const local = state.controls?.getObject();
+    const players = state.isMultiplayer ? mechaPlayers() : local ? [
+        { peerId: 'local', lifeId: state.lifeId, position: local.position.clone(), yaw: local.rotation.y, alive: state.playerHp > 0 },
+    ] : [];
+    return players.flatMap(player => {
+        if (!player.peerId || !player.alive) return [];
+        const piloting = actor?.ownsPilot && (state.isMultiplayer ? actor.pilotPeerId === player.peerId : actor.ownsLocalPilot);
+        if (piloting && !mounted) return [];
+        const position = piloting ? actor!.group.position.clone() : player.position.add(new THREE.Vector3(0, -PLAYER_BODY_CAMERA_OFFSET, 0));
+        return [{ id: player.peerId, lifeId: player.lifeId ?? 0, position, yaw: player.yaw ?? 0, ...(piloting && mounted ? { mounted } : {}) }];
+    });
+}
+
 function mechaPlayers() {
     return state.lobbyPlayers.flatMap(entry => {
         if (entry.peerId === state.peer?.id) {

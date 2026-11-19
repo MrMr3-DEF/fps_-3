@@ -8,6 +8,7 @@ export const MECHA_ENDING_TIMING = {
 export const MECHA_ENDING_DURATION = .45 + .6 + .5 + 85 / 24 + 3;
 export interface MechaEndingState {
     id: number; seed: number; effectsSeed: number; position: Vec3Packet; heading: number; lightingElapsed: number;
+    cause?: 'wall';
     phase: 'preparing' | 'playing' | 'complete'; elapsed: number;
 }
 export type MechaEndingPhase = 'preparing' | 'fade-out' | 'fade-in' | 'establish' | 'punch' | 'aftermath' | 'game-over';

@@ -18,14 +18,15 @@ export class MechaNavigation {
     private readonly solidBoxes: NavigationBox[];
     private readonly radius: number;
 
-    constructor(obstacles: readonly NavigationBox[], lava: readonly NavigationBox[], radius: number, punchReach: number, halfSize = MAP_HALF_SIZE) {
+    constructor(obstacles: readonly NavigationBox[], lava: readonly NavigationBox[], radius: number, punchReach: number,
+        halfSize = MAP_HALF_SIZE, actorHeight = MECHA_HEIGHT) {
         this.limit = Math.floor((halfSize - radius - 4) / this.cellSize) * this.cellSize;
         this.size = Math.round(this.limit * 2 / this.cellSize) + 1;
         this.blocked = new Uint8Array(this.size * this.size);
         this.next = new Int32Array(this.blocked.length).fill(-1);
         this.radius = radius;
-        this.boxes = [...obstacles, ...lava].filter(box => box.bottom < MECHA_HEIGHT && box.top > 0);
-        this.solidBoxes = obstacles.filter(box => box.bottom < MECHA_HEIGHT && box.top > 0);
+        this.boxes = [...obstacles, ...lava].filter(box => box.bottom < actorHeight && box.top > 0);
+        this.solidBoxes = obstacles.filter(box => box.bottom < actorHeight && box.top > 0);
         const clearance = radius;
         for (const box of this.boxes) {
             const minX = Math.max(0, Math.ceil((box.x - box.halfW - clearance + this.limit) / this.cellSize));
@@ -103,7 +104,7 @@ export class MechaNavigation {
         }
         return true;
     }
-    routeFrom(start: NavigationPoint): MechaRoute | null {
+    routeFrom(start: NavigationPoint, maxShortcutCells = Infinity): MechaRoute | null {
         let index = this.index(start.x, start.z);
         if (index < 0 || this.next[index] < 0) return null;
         const raw = [this.point(index)];
@@ -113,7 +114,7 @@ export class MechaNavigation {
         let anchor = 0;
         while (anchor < raw.length - 1) {
             let end = anchor + 1;
-            while (end + 1 < raw.length && this.segmentClear(raw[anchor], raw[end + 1])) end++;
+            while (end + 1 < raw.length && end + 1 - anchor <= maxShortcutCells && this.segmentClear(raw[anchor], raw[end + 1])) end++;
             points.push(raw[end]);
             anchor = end;
         }
@@ -122,7 +123,7 @@ export class MechaNavigation {
             z: Math.abs(Math.cos(heading)) > 0.5 ? -Math.cos(heading) * this.punchDistance : goal.z });
         return { points, heading };
     }
-    borderSpawn(seed: number): MechaRoute {
+    borderSpawn(seed: number, available: (point: NavigationPoint) => boolean = () => true, maxShortcutCells = Infinity): MechaRoute {
         // A separate seed stream never consumes procedural-world randomness.
         let random = seed >>> 0;
         const border: NavigationPoint[] = [];
@@ -135,7 +136,11 @@ export class MechaNavigation {
             const j = random % (i + 1);
             [border[i], border[j]] = [border[j], border[i]];
         }
-        for (const point of border) { const route = this.routeFrom(point); if (route) return route; }
+        for (const point of border) {
+            if (!available(point)) continue;
+            const route = this.routeFrom(point, maxShortcutCells);
+            if (route) return route;
+        }
         throw new Error('No reachable border spawn for Forgotten Mecha');
     }
 }

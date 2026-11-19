@@ -12,6 +12,7 @@ export interface TargetUserData {
     bodyMesh: THREE.Mesh;
     healthBarFg: THREE.Mesh;
     healthBarGroup: THREE.Group;
+    infantry?: true;
 }
 
 export interface ObstacleUserData {

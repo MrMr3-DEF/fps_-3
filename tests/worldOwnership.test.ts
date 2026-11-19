@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { state } from '../src/state.ts';
-import { createEnvironment, rebuildEnvironmentWithSeed, disposeWorld, gothGirlfriend, updateEnvironmentVisibility, queryObstaclesAlongSegment } from '../src/world.ts';
+import { createEnvironment, rebuildEnvironmentWithSeed, disposeWorld, gothGirlfriend, updateEnvironmentVisibility, queryObstaclesAlongSegment, isLookingAtTownWell } from '../src/world.ts';
 import { GothGirlfriend } from '../src/gothGirlfriend.ts';
 
 const context = new Proxy({}, { get: () => () => {} });
@@ -49,4 +49,24 @@ test('fresh builder rejects an existing world and disposal still owns its roots 
         assert.equal(state.targets.length, 0); assert.equal(state.obstacles.length, 0);
         assert.equal(scene.children.length, 0);
     } finally { disposeWorld(); state.isMultiplayer = false; }
+});
+
+test('the wall durability cue requires a clear center-view ray to the current well', () => {
+    state.scene = new THREE.Scene();
+    try {
+        rebuildEnvironmentWithSeed(42);
+        const camera = new THREE.PerspectiveCamera();
+        camera.position.set(0, 2, 10);
+        camera.lookAt(0, .8, 1.75);
+        assert.equal(isLookingAtTownWell(camera), true);
+        camera.lookAt(0, 2, 20);
+        assert.equal(isLookingAtTownWell(camera), false);
+        camera.position.set(110, 2, 40);
+        camera.lookAt(0, .8, 1.75);
+        assert.equal(isLookingAtTownWell(camera), false);
+        disposeWorld();
+        camera.position.set(0, 2, 10);
+        camera.lookAt(0, .8, 1.75);
+        assert.equal(isLookingAtTownWell(camera), false);
+    } finally { disposeWorld(); state.scene = null; }
 });

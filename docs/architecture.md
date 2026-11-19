@@ -63,6 +63,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `config.ts` | Shared gameplay constants, world counts, network limits, weapon statistics |
 | `state.ts` | Mutable client runtime state and reset helpers |
 | `world.ts` | Deterministic staged/synchronous arena construction, render chunks, spatial indexes, targets, town/lava lighting, world disposal |
+| `infantry.ts`, `infantryNetworkTypes.ts` | Match-owned infantry, wall durability, dawn waves, animated contacts, and bounded room replication |
 | `seededScenery.ts` | Shared grass/pillar/lava/vegetation recipes and original RNG order, with explicit rendering/collision ownership ports |
 | `worldLoading.ts` | Loading-overlay paint, stage checkpoints, and cancellation generation |
 | `renderPreparation.ts` | Offscreen WebGL resource upload and day/night shader preparation before play |

@@ -43,9 +43,6 @@ const _steeredDirection = new THREE.Vector3();
 const _homingTargetPosition = new THREE.Vector3();
 const _frameTargetPosition = new THREE.Vector3(), _previousTargetPosition = new THREE.Vector3();
 
-function broadcastHitTarget(targetIndex: number, damage: number, shotId: number, pelletIndex: number): void {
-    broadcastToAll({ type: 'hit_target', targetIndex, damage, shotId, pelletIndex } satisfies HitTargetPacket);
-}
 function broadcastPlayerHit(peerId: string, damage: number, attackerName: string, shotId: number, pelletIndex: number): void {
     broadcastToAll({ type: 'player_hit', targetPeerId: peerId, targetLifeId: state.peers[peerId]?.lifeId ?? 0, damage, attackerName, shotId, pelletIndex } satisfies PlayerHitPacket);
 }
@@ -236,7 +233,9 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
             const targetInfo = targetData(hitTarget);
             if (state.isMultiplayer) {
                 if (!state.isHost) {
-                    broadcastHitTarget(targetInfo.index, damage, data.shotId!, data.pelletIndex!);
+                    broadcastToAll({ type: 'hit_target', targetIndex: targetInfo.index, damage, shotId: data.shotId!, pelletIndex: data.pelletIndex!,
+                        ...(targetInfo.infantry ? { targetRevision: targetInfo.eliminationRevision } : {}),
+                    } satisfies HitTargetPacket);
                 } else {
                     processTargetHit(targetInfo.index, damage);
                 }

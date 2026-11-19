@@ -2,6 +2,8 @@ import { fields, projectKnown, variant, vectorFields as vec, type Projection } f
 import { parseMechaPacket, isMechaState, mechaStateFields, type MechaPacket, type MechaState } from './mechaNetworkTypes.js';
 import { isUsername, isPeerId } from './roomIdentity.js';
 import { MAX_PLAYERS, PLAYER_MAX_HP, MAX_SHOT_PELLET_INDEX } from './config.js';
+import { infantryEventFields, infantryStateFields, isInfantryEvent, isInfantrySequence, isInfantryState,
+    type InfantryEventPacket, type InfantryState, type InfantryStatePacket } from './infantryNetworkTypes.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
 export type FirearmName = 'PISTOL' | 'SHOTGUN' | 'AR' | 'SNIPER' | 'MINIGUN';
 export type WeaponName = FirearmName | 'KATANA';
@@ -87,6 +89,7 @@ export interface HitTargetPacket {
     pelletIndex: number;
     senderPeerId?: string;
     targetIndex: number;
+    targetRevision?: number;
     damage: number;
 }
 
@@ -117,7 +120,7 @@ export interface PlayerHitPacket {
 export interface PlayerDiedPacket {
     type: 'player_died';
     lifeId: number;
-    cause: 'player' | 'lava' | 'mecha';
+    cause: 'player' | 'lava' | 'mecha' | 'infantry';
     killerPeerId: string | null;
     senderPeerId?: string;
     victimName: string;
@@ -157,6 +160,7 @@ export interface WorldSnapshotPacket {
     dayNightElapsedSeconds: number;
     targets: TargetState[];
     mecha?: MechaState;
+    infantry?: InfantryState;
 }
 
 export interface PeerLeftPacket { type: 'peer_left'; peerId: string; senderPeerId?: string; }
@@ -172,6 +176,7 @@ export interface PlayerListPacket { type: 'player_list'; players: PlayerListEntr
 export type NetworkPacket =
     | MeleeCommand | MeleeEvent | MeleeHitEvent
     | MechaPacket
+    | InfantryStatePacket | InfantryEventPacket
     | { type: 'start_game'; senderPeerId?: string }
     | PeerLeftPacket
     | LobbyRosterPacket
@@ -323,6 +328,7 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
 
         case 'hit_target':
             return isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, MAX_SHOT_PELLET_INDEX) && isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
+                (value.targetRevision === undefined || isInteger(value.targetRevision, 1, Number.MAX_SAFE_INTEGER)) &&
                 isFiniteNumber(value.damage, 0.01, 100) ? value as unknown as HitTargetPacket : null;
 
         case 'kill_target':
@@ -339,7 +345,7 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
 
         case 'player_died':
             return isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) &&
-                (((value.cause === 'lava' || value.cause === 'mecha') && value.killerPeerId === null) || (value.cause === 'player' && isPeerId(value.killerPeerId))) && isUsername(value.victimName) &&
+                (((value.cause === 'lava' || value.cause === 'mecha' || value.cause === 'infantry') && value.killerPeerId === null) || (value.cause === 'player' && isPeerId(value.killerPeerId))) && isUsername(value.victimName) &&
                 (value.killerName === 'Lava' || value.killerName === 'Forgotten Mecha' || isUsername(value.killerName)) &&
                 (value.victimPeerId === undefined || isPeerId(value.victimPeerId))
                 ? value as unknown as PlayerDiedPacket : null;
@@ -374,12 +380,19 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
         case 'target_state':
             return isTargetState(value) ? value as unknown as TargetStatePacket : null;
 
+        case 'infantry_state':
+            return isInfantryState(value.state) ? value as unknown as InfantryStatePacket : null;
+
+        case 'infantry_event':
+            return isInfantrySequence(value.sequence, 1) && isInfantryEvent(value.event) ? value as unknown as InfantryEventPacket : null;
+
         case 'world_snapshot':
             if (typeof value.gameStarted !== 'boolean' || !isUsername(value.username) || !isInteger(value.seed, 0, 0xffffffff) || !isInteger(value.score, 0, Number.MAX_SAFE_INTEGER) ||
                 !isInteger(value.spawnHouseSlot, 1, MAX_PLAYERS - 1) ||
                 !isFiniteNumber(value.dayNightElapsedSeconds, 0, MAX_DAY_NIGHT_ELAPSED_SECONDS) ||
                 !Array.isArray(value.targets) || value.targets.length > MAX_TARGETS_IN_SNAPSHOT ||
-                !value.targets.every(isTargetState) || !(value.mecha === undefined || isMechaState(value.mecha))) return null;
+                !value.targets.every(isTargetState) || !(value.mecha === undefined || isMechaState(value.mecha)) ||
+                !(value.infantry === undefined || isInfantryState(value.infantry))) return null;
             return value as unknown as WorldSnapshotPacket;
 
         default:
@@ -401,15 +414,17 @@ const packetFields = {
             mecha: fields('kind', 'targetRevision'), npc: fields('kind', 'targetIndex', 'targetRevision'),
             peer: fields('kind', 'targetPeerId', 'targetLifeId'),
         }) },
-    hit_target: fields('shotId', 'pelletIndex', 'targetIndex', 'damage'),
+    hit_target: fields('shotId', 'pelletIndex', 'targetIndex', 'targetRevision', 'damage'),
     kill_target: { ...fields('targetIndex', 'score', 'scale', 'hp', 'color', 'killerPeerId'), newPosition: vec },
     player_hit: fields('shotId', 'pelletIndex', 'targetPeerId', 'targetLifeId', 'damage', 'attackerName'),
     player_died: fields('lifeId', 'cause', 'killerPeerId', 'victimName', 'killerName', 'victimPeerId'),
     start_game: {}, jump: {}, peer_left: fields('peerId'), lobby_color: fields('bodyColor'),
     lobby_roster: { players: [playerFields] }, player_list: { players: [{ ...playerFields, ...fields('kills', 'deaths') }] },
     target_state: targetFields,
+    infantry_state: { state: infantryStateFields },
+    infantry_event: { ...fields('sequence'), event: infantryEventFields },
     world_snapshot: { ...fields('gameStarted', 'username', 'seed', 'spawnHouseSlot', 'score', 'dayNightElapsedSeconds'),
-        targets: [targetFields], mecha: mechaStateFields },
+        targets: [targetFields], mecha: mechaStateFields, infantry: infantryStateFields },
 } satisfies Record<Exclude<NetworkPacket['type'], MechaPacket['type']>, Projection>;
 
 export function parseNetworkPacket(value: unknown): NetworkPacket | null {

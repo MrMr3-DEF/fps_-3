@@ -14,6 +14,8 @@ import {
     RENDER_CHUNK_SIZE,
     MAX_RENDER_DISTANCE_CHUNKS
 } from './config.js';
+import { InfantryDefense, type InfantryEnvironment } from './infantry.js';
+import { segmentAabbHitT, segmentGroundHitT } from './gameplayMath.js';
 import { SpatialHash } from './spatialHash.js';
 import { createLavaGlowTexture, getLavaDarknessStrength, LAVA_GLOW_SIZE } from './lavaGlow.js';
 import { obstacleData, targetData } from './userDataTypes.js';
@@ -25,10 +27,24 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 const obstacleHash = new SpatialHash<THREE.Object3D>(32);
 const lavaHash = new SpatialHash<THREE.Object3D>(32);
 const targetHash = new SpatialHash<THREE.Group>(48);
+const infantryHash = new SpatialHash<THREE.Group>(24);
+const infantryCandidates: THREE.Group[] = [];
 export let gothGirlfriend: GothGirlfriend | null = null;
 export let forgottenMecha: ForgottenMecha | null = null;
+export let infantry: InfantryDefense | null = null;
 /** Changes only at a real world replacement/disposal boundary. */
 export let worldGeneration = 0;
+
+export async function prepareInfantry(events: Pick<InfantryEnvironment, 'attack' | 'wallLost'>, checkpoint: () => Promise<void>): Promise<void> {
+    if (!state.scene) return;
+    const defense = new InfantryDefense(state.scene, state.targets, worldSeed,
+        state.obstacles.filter(object => obstacleData(object).damageTarget !== 'forgotten-mecha'), state.lavaPools,
+        { ...events, trace: traceInfantryCover, visible: position => activeRenderChunks.has(getRenderChunkKey(position.x, position.z)) },
+        !state.isMultiplayer || state.isHost);
+    infantry = defense;
+    await defense.load();
+    await checkpoint();
+}
 
 /** Asset preparation is awaited by match startup; cancellation disposes even
  * a model that finishes downloading after its match has already been replaced. */
@@ -51,6 +67,11 @@ const activeRenderChunks = new Set<string>();
 let grappleFloor: THREE.Object3D | null = null;
 let townLanternFlames: THREE.InstancedMesh | null = null;
 let townLanternGlassMaterial: THREE.MeshStandardMaterial | null = null;
+const wellBounds = new THREE.Box3();
+const wellRay = new THREE.Ray();
+const wellRayEnd = new THREE.Vector3();
+const traceMin = new THREE.Vector3(), traceMax = new THREE.Vector3();
+const traceObstacles: THREE.Object3D[] = [];
 
 interface TownLanternLight {
     light: THREE.PointLight;
@@ -555,7 +576,9 @@ export function queryLavaPoolsNear(x: number, z: number, radius: number, out?: T
 }
 
 export function queryTargetsNear(x: number, z: number, radius: number, out?: THREE.Group[]): THREE.Group[] {
-    return targetHash.query(x, z, radius, out);
+    const results = targetHash.query(x, z, radius, out);
+    for (const bot of infantryHash.query(x, z, radius, infantryCandidates)) if (targetData(bot).hp > 0) results.push(bot);
+    return results;
 }
 
 export function queryObstaclesAlongSegment(
@@ -583,7 +606,45 @@ export function queryTargetsAlongSegment(
     out?: THREE.Group[],
     padding = 0
 ): THREE.Group[] {
-    return targetHash.querySegment(startX, startZ, endX, endZ, out, padding);
+    const results = targetHash.querySegment(startX, startZ, endX, endZ, out, padding);
+    for (const bot of infantryHash.querySegment(startX, startZ, endX, endZ, infantryCandidates, padding)) {
+        if (targetData(bot).hp > 0) results.push(bot);
+    }
+    return results;
+}
+
+function traceInfantryCover(start: THREE.Vector3, end: THREE.Vector3, ignoreMecha = false) {
+    let closest = segmentGroundHitT(start, end, 0) ?? Infinity;
+    if (!ignoreMecha) closest = Math.min(closest, forgottenMecha?.combat.shieldContactT(start, end, start, 0) ?? Infinity);
+    let obstacle: THREE.Object3D | undefined;
+    for (const candidate of queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, traceObstacles)) {
+        const data = obstacleData(candidate);
+        if (ignoreMecha && data.damageTarget === 'forgotten-mecha') continue;
+        const { x, y, z } = candidate.position;
+        const height = data.halfH || data.height / 2;
+        traceMin.set(x - data.halfW, y - height, z - data.halfD);
+        traceMax.set(x + data.halfW, y + height, z + data.halfD);
+        const hit = segmentAabbHitT(start, end, traceMin, traceMax);
+        if (hit !== null && hit < closest) { closest = hit; obstacle = candidate; }
+    }
+    return closest === Infinity ? null : { position: start.clone().lerp(end, closest), obstacle };
+}
+
+export function isLookingAtTownWell(camera: THREE.Camera): boolean {
+    if (wellBounds.isEmpty()) return false;
+    camera.getWorldPosition(wellRay.origin);
+    camera.getWorldDirection(wellRay.direction);
+    if (!wellRay.intersectBox(wellBounds, wellRayEnd)) return false;
+    wellRayEnd.addScaledVector(wellRay.direction, 10);
+    return traceInfantryCover(wellRay.origin, wellRayEnd)?.obstacle?.name === 'town-well';
+}
+
+export function rebuildInfantryHash(): void {
+    infantryHash.clear();
+    for (let index = ENEMY_COUNT; index < state.targets.length; index++) {
+        const bot = state.targets[index], data = targetData(bot);
+        if (data.hp > 0) infantryHash.insert(bot.position.x, bot.position.z, TARGET_HIT_RANGE_MULTIPLIER * data.scale, bot);
+    }
 }
 
 /**
@@ -608,6 +669,7 @@ export function rebuildTargetHash(): void {
     targetHash.clear();
     for (let i = 0; i < state.targets.length; i++) {
         const target = state.targets[i];
+        if (targetData(target).infantry) continue;
         refreshChunkedRenderObject(target);
         const radius = TARGET_HIT_RANGE_MULTIPLIER * (targetData(target).scale || 1.0);
         targetHash.insert(target.position.x, target.position.z, radius, target);
@@ -800,6 +862,10 @@ function createTown(): void {
             addWorldObject(collider);
             state.obstacles.push(collider);
             obstacleHash.insert(part.x, part.z, Math.max(part.width, part.depth) / 2, collider);
+            if (part.kind === 'well') {
+                wellBounds.expandByPoint(traceMin.copy(collider.position).addScaledVector(collider.scale, -.5));
+                wellBounds.expandByPoint(traceMax.copy(collider.position).addScaledVector(collider.scale, .5));
+            }
         }
         if (ground) mesh.instanceMatrix.needsUpdate = true;
     }
@@ -861,6 +927,10 @@ export async function createEnvironmentAsync(seed: number, checkpoint: () => Pro
 
 export function disposeWorld(): void {
     worldGeneration++; sceneryBuilder.reset();
+    infantry?.dispose();
+    infantry = null;
+    infantryHash.clear();
+    wellBounds.makeEmpty();
     forgottenMecha?.dispose();
     forgottenMecha = null;
     gothGirlfriend?.dispose();
@@ -944,6 +1014,7 @@ export function updateTargets(delta: number): void {
         const target = state.targets[i];
         if (!target.visible) continue;
         const data = targetData(target);
+        if (data.infantry) continue;
         data.bodyMesh.rotation.x += 1.0 * delta;
         data.bodyMesh.rotation.y += 1.5 * delta;
         if (state.camera) {

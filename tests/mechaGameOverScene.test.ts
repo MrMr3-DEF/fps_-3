@@ -11,6 +11,22 @@ const meshes = (scene: MechaGameOverScene) => scene.scene.children.filter(node =
 const matrix = (scene: MechaGameOverScene) => meshes(scene).flatMap(mesh => [...mesh.instanceMatrix.array]);
 const near = (a: number, b: number, epsilon = 1e-6) => assert.ok(Math.abs(a - b) < epsilon, `${a} != ${b}`);
 
+test('wall loss plays the shared collapse and reaches Game Over without loading Ironmaw', async () => {
+    const impact = new THREE.Vector3(95, 2, 40);
+    const scene = await MechaGameOverScene.prepare({ ...defaults, heading: -Math.PI / 2, cause: 'wall', position: impact });
+    try {
+        assert.equal(scene.robot.parent, null);
+        assert.deepEqual(scene.contact.toArray(), impact.toArray());
+        await scene.begin(undefined, async () => {});
+        scene.seek(scene.impactTime - .01);
+        const intact = matrix(scene);
+        assert.ok(intact.length > 0);
+        assert.equal(scene.seek(scene.impactTime + .65).gameOver, false);
+        assert.notDeepEqual(matrix(scene), intact);
+        assert.equal(scene.seek(scene.duration).gameOver, true);
+    } finally { scene.dispose(); }
+});
+
 test('Game Over waits for punch and aftermath, and seeks clamp invalid clocks', async () => {
     const scene = await prepare();
     try {

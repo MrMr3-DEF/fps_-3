@@ -67,17 +67,21 @@ function endingSnapshot(snapshot: MechaState): MechaState {
     if (endingAuthority) snapshot.ending = endingAuthority.snapshot(performance.now());
     return snapshot;
 }
-function commitEnding(): void {
+function commitEnding(wall?: { position: THREE.Vector3; heading: number }): void {
     const actor = activeActor;
     if (!state.isHost || state.matchEnded || !actor) return;
     state.matchEnded = true;
     actor.clearPendingDamage(); actor.pilot.rockets.clear(); pendingDamage.length = 0; input = null;
     const seed = getWorldSeed();
     endingAuthority = new MechaEndingAuthority({ id: ++endingId, seed, effectsSeed: (seed ^ 0x6d2b79f5) >>> 0,
-        position: vector(actor.group.position), heading: actor.group.rotation.y,
+        position: vector(wall?.position ?? actor.group.position), heading: wall?.heading ?? actor.group.rotation.y,
+        ...(wall ? { cause: 'wall' } : {}),
         lightingElapsed: ((state.dayNightElapsedSeconds % 480) + 480) % 480 }, performance.now(),
         port?.endingPeers?.() ?? port?.players().flatMap(p => p.peerId && p.peerId !== state.peer?.id ? [p.peerId] : []) ?? []);
     publish(true);
+}
+export function commitNetworkWallEnding(position: THREE.Vector3, heading: number): void {
+    commitEnding({ position, heading });
 }
 export function markMechaEndingReady(id: number): void {
     if (!activeActor || id !== (endingAuthority?.snapshot(performance.now()).id ?? replica?.ending?.id)) return;

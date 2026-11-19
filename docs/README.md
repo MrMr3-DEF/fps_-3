@@ -23,6 +23,7 @@ Guides describe current behavior; requested work belongs in the explicit
 | [Desktop pointer input](pointer-input.md) | Aim sampling, sensitivity, zoom and pointer-lock behavior |
 | [Mobile controls](mobile-controls.md) | Touch actions, layout editing, input lifecycle and device checks |
 | [Katana](katana.md) | Melee controls, effects, damage geometry and authority |
+| [Town defense](town-defense.md) | Infantry waves, wall durability, attacks and the shared collapse |
 | [Forgotten Mecha](forgotten-mecha.md) | Combat, mounting, piloting, shared ending and module ownership |
 | [Blender assets](../blender_assets/README.md) | Source assets, exports and authoring guides |
 | [NPC character files](../public/npc/goth/README.md) | Local chat configuration, character behavior and knowledge |

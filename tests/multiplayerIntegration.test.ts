@@ -7,7 +7,7 @@ import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed, rebuildTargetHash } from '../src/world.ts';
 import { state } from '../src/state.ts';
 import { setMultiplayerWorldLoader, onMultiplayerDisconnected, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, broadcastTargetKill, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
-import { BULLET_TRAVEL_DISTANCE, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED } from '../src/config.ts';
+import { BULLET_TRAVEL_DISTANCE, ENEMY_COUNT, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED, WEAPON_STATS } from '../src/config.ts';
 import { Peer, Connection } from './fakePeer.ts';
 import worker, { TurnRateLimiter } from '../src/worker.ts';
 import { TurnRoomStateMachine } from '../src/turnRoom.ts';
@@ -163,6 +163,35 @@ test('the real host path canonicalizes shotgun pellets and rejects unfinished we
         shooter.emit('data', { ...packet, activeWeapon: 'PISTOL' }); shooter.emit('data', pistol);
         assert.equal(viewer.sent.filter(p => p.type === 'fire').length, 2);
     } finally { disconnectMultiplayer(); state.scene = null; }
+});
+
+test('admitted peers cannot author infantry state or hit another revision of a reused bot slot', async () => {
+    backend(); state.scene = null;
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const admission = await registerTurnSession('ABCDEFGH', 'join-room', 'Pilot', 'peer-a');
+        const shooter = new Connection('peer-a', { admissionToken: admission.admissionToken });
+        Peer.latest.emit('connection', shooter);
+        await tick(); await tick();
+        assert.equal(startHostMatch(), true);
+        assert.ok(authorizeClientPacket(shooter.peer, update('Pilot')));
+        const fabricated = parseNetworkPacket({ type: 'infantry_state', state: { sequence: 30, day: 8, wallHp: 0, bots: [] } })!;
+        assert.equal(authorizeClientPacket(shooter.peer, fabricated), null);
+        const bot = new THREE.Group();
+        bot.position.set(0, 2, -10);
+        bot.userData = { index: ENEMY_COUNT, infantry: true, hp: 5, scale: 1, eliminationRevision: 2 };
+        state.targets[ENEMY_COUNT] = bot;
+        assert.ok(authorizeClientPacket(shooter.peer, { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
+            barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: 0, z: -1 } }));
+        const hit = { type: 'hit_target', shotId: 1, pelletIndex: 0, targetIndex: ENEMY_COUNT, damage: WEAPON_STATS.SNIPER.damage } as const;
+        assert.equal(authorizeClientPacket(shooter.peer, hit), null);
+        assert.equal(authorizeClientPacket(shooter.peer, { ...hit, targetRevision: 1 }), null);
+        assert.ok(authorizeClientPacket(shooter.peer, { ...hit, targetRevision: 2 }));
+        assert.equal(authorizeClientPacket(shooter.peer, { ...hit, targetRevision: 2 }), null);
+    } finally {
+        state.targets = [];
+        disconnectMultiplayer();
+    }
 });
 
 test('Worker-backed host admission, fixed names, host kill credit, departure and stale events',async()=>{
