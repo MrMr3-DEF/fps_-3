@@ -56,7 +56,7 @@ test('scoped bullets capture the scan target and one-third-distance threshold, w
         flashPeerMesh: () => {},
     });
     state.isMultiplayer = true;
-    state.activeWeaponName = 'SNIPER';
+    state.activeWeaponName = 'SNIPER'; state.weaponHandling.reset('SNIPER');
     state.rightGun = state.sniperMesh;
     fireProjectile();
     assert.equal(transmittedHomingTarget, undefined);
@@ -92,7 +92,7 @@ test('a full-speed minigun refreshes its homing distance once per ten bullets', 
     setProjectileHomingTarget({
         kind: 'npc', object: target, targetIndex: 0, targetRevision: 1,
     });
-    state.activeWeaponName = 'MINIGUN';
+    state.activeWeaponName = 'MINIGUN'; state.weaponHandling.reset('MINIGUN');
     state.rightGun = state.minigunMesh;
     state.minigunRamp = MINIGUN_RAMP_TIME;
     state.scene.updateMatrixWorld(true);

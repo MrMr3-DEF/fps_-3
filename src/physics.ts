@@ -1,7 +1,6 @@
 import { isInputActive, touchMove } from './inputSession.js';
 import * as THREE from 'three';
 import { state } from './state.js';
-import { spawnRocketFlame, spawnManeuveringBeam } from './particles.js';
 import { resetHook } from './grapple.js';
 import { queryObstaclesNear } from './world.js';
 import { obstacleData } from './userDataTypes.js';
@@ -36,12 +35,7 @@ const _camRight = new THREE.Vector3();
 const _moveDir = new THREE.Vector3();
 const _tempPos = new THREE.Vector3();
 const _tempZ   = new THREE.Vector3();
-const _boosterPos = new THREE.Vector3();
-const _negCamForward = new THREE.Vector3();
-const _negCamRight = new THREE.Vector3();
 const _obstacleCandidates: THREE.Object3D[] = [];
-
-// Cached HUD element touched by movement effects.
 
 const MAX_FALL_SPEED = JUMP_FORCE * 0.88;
 const MAP_LIMIT = (MAP_SIZE / 2) - 1;
@@ -137,12 +131,12 @@ export function updatePlayerPhysics(delta: number): void {
         if (!Number.isFinite(state.velocity.lengthSq())) state.velocity.set(0, 0, 0);
         const maxSpeed = state.velocity.length() + WALK_SPEED + BASE_GRAVITY * remaining;
         const step = Math.min(remaining, 1 / 60, 0.5 / Math.max(1, maxSpeed));
-        stepPlayerPhysics(step, i === 0);
+        stepPlayerPhysics(step);
         remaining -= step;
     }
 }
 
-function stepPlayerPhysics(delta: number, emitEffects: boolean): void {
+function stepPlayerPhysics(delta: number): void {
     if (state.controls) {
         const isPaused = !isInputActive() && state.isPlaying;
         
@@ -178,22 +172,6 @@ function stepPlayerPhysics(delta: number, emitEffects: boolean): void {
                     state.isHovering = false;
                 }
 
-                if (emitEffects) {
-                    _boosterPos.copy(playerObj.position);
-                    _boosterPos.y -= 1.8;
-                    spawnRocketFlame(_boosterPos, 2, false);
-
-                    if (moveForward) {
-                        _negCamForward.copy(_camForward).negate();
-                        spawnManeuveringBeam(_boosterPos, 1, _negCamForward);
-                    }
-                    if (moveBackward) spawnManeuveringBeam(_boosterPos, 1, _camForward);
-                    if (moveLeft)     spawnManeuveringBeam(_boosterPos, 1, _camRight);
-                    if (moveRight) {
-                        _negCamRight.copy(_camRight).negate();
-                        spawnManeuveringBeam(_boosterPos, 1, _negCamRight);
-                    }
-                }
             } else {
                 if (state.canJump || state.hookState === 'PULLING') {
                     state.hoverFuel += delta / HOVER_RECHARGE_RATE;

@@ -55,7 +55,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | --- | --- |
 | `main.ts` | Composition root, renderer and UI lifecycle, input, frame loop, local health/death, regeneration, world-border warning |
 | `lavaDamage.ts`, `playerLife.ts` | Shared floor-level lava contact, offline simulation clocks and host-owned multiplayer lives |
-| `mainMenu.ts`, `appearance.ts` | Menu preview, weapon display, and persisted suit color |
+| `mainMenu.ts`, `appearance.ts`, `playerAppearance.ts` | Cyborg and weapon previews, persisted suit glow, and live appearance updates |
 | `inputSession.ts`, `mobileControls.ts` | Shared input activation, selected keyboard/touch mode switching on all devices, touch capture, movement, and action controls |
 | `mobileControlLayout.ts`, `mobileControlsView.ts`, `mobileControlsEditor.ts` | Validated touch layout, shared control geometry/markup, and inactive blank sky layout editor |
 | `settingsMenu.ts`, `controlSettings.ts` | Settings UI, keybind translation, and crosshair configuration |
@@ -72,9 +72,10 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `town.ts` | Seeded central-town plots, walls, gateways, building shells, interiors, and wilderness exclusion |
 | `physics.ts` | Local movement, gravity, hover fuel, ground/ceiling detection, and obstacle collision |
 | `playerSpawn.ts`, `powerJump.ts` | House/church placement and per-life castle-exit power-jump unlock |
-| `grapple.ts` | Hook ray acquisition, firing/pulling/release state, hook mesh updates |
+| `grapple.ts` | Hook launch after the holster draw, ray acquisition, pull, release and cable endpoints |
 | `thirdPersonCamera.ts`, `conversationCamera.ts` | Collision-aware shoulder view and eased character-conversation pose |
-| `weapons.ts` | Weapon/avatar mesh builders, firing, hitscan/projectile creation, recoil, switching, inspecting, ADS and third-person presentation |
+| `weapons.ts`, `weaponHandling.ts` | Firing, per-life magazines, reloads, support-hand timing, weapon switching and logical shot origins |
+| `cyborgAvatar.ts`, `playerAvatar.ts` | Animated cyborg and held props, first-person hands, locomotion, weapon actions and visual muzzle sockets |
 | `projectiles.ts` | Projectile pooling, delayed goggles homing, swept collision, local target/player hits, projectile retirement |
 | `projectileHoming.ts`, `projectileFlight.ts` | Target identity/range, finite steering, fixed guidance steps and bounded host motion history |
 | `targetVisibility.ts` | Shared sampled-body visibility for goggles and host acquisition |
@@ -186,12 +187,12 @@ The render-distance slider is a chunk radius from 1 to 16, with 4 as the default
 
 ## Gameplay flow
 
-The local player supports walking, jumping, air hover with rechargeable fuel, grapple movement, five weapons, aim-down-sights, inspection, and a presentation-only third-person view. Normal jumps peak at 2.7 m; Power Jump is unchanged. Core values live in `config.ts`; avoid duplicating weapon or movement numbers elsewhere.
+The cyborg runs in four phase-matched directions, jumps, hovers on four thrusters and grapples. Five rechargeable firearms and the katana use the same equipped weapon and action clock in first person and third person. The logical camera owns aiming and shot direction. Normal jumps peak at 2.7 m. Shared movement and weapon values live in `config.ts`. On-foot goggles hide the local weapon rig and give floating cubes square, rotation-independent scan brackets. Infantry keep their upright frames. The first-person firearm pass frames the fitted hands and weapons against the camera with bounded sway. The katana and its blade trail share the world pose. Reloads keep the glove and drawer together in view. The renderer restores the world pose before simulation resumes. World collision and multiplayer use the physical barrel socket. Local tracers and beams start at the visible barrel.
 
 Each match prepares one [Forgotten Mecha](forgotten-mecha.md) before
 renderer preparation. It navigates from a reachable random border point toward an
 outer castle wall, stops to track visible nearby players, and can stomp grounded
-players or beans touching its animated legs at impact. Initial defeat aligns the
+players or airborne players touching its animated legs at impact. Initial defeat aligns the
 torso to the legs at 90 degrees/s, then Death holds its solid final pose. Wall arrival
 commits an invulnerable loss before the punch advances. A separate terminal frame
 branch freezes gameplay and plays the shared ending, then opens Game Over after
@@ -217,7 +218,7 @@ seconds of shield downtime and the existing half-second rebuild.
 Robot-owned combat clocks and GPU effects survive respawn. Offline pause or
 player death freezes them; multiplayer keeps the shared actor running. Piloted movement uses height-aware part sweeps and sliding independently of enemy navigation. Mounted zero HP immediately releases the living pilot and plays FinalDeath from its breakup cue, retaining third person with a short camera-boom handoff. See the behavior document for exact phase and cancellation rules.
 
-Projectile weapons reuse a preallocated pool. Every weapon has the sniper's 700-meter travel distance; simulated projectiles track muzzle-inclusive distance and clamp their final swept segment to that exact limit. When enabled in Graphics settings, each bullet also owns a pooled additive tracer that records its recent world-space path and fades briefly after impact, making direction changes visible without affecting collision. Guided projectiles use fixed 1/120-second steps, interpolate their target observations between render frames, cap angular turn speed and move along the midpoint of the old and new headings. Cubic tracer samples preserve the visible arc. Every guidance step owns one swept collision query; straight projectiles retain their single frame sweep. Collision checks sweep each projectile's previous-to-next segment against nearby obstacle AABBs, targets, and peer hit volumes. When a scoped shot is fired after the visual homing lock has completed, the selected NPC or opponent and its current life/revision are captured for the shot. The bullet flies straight until it has covered one-third of the target distance measured at fire time, then applies strong but finite steering toward the target's current position. At full minigun speed, one initial-distance sample is shared by each batch of ten bullets and a target change forces an immediate new sample; every other firing state samples each shot. The sampled threshold travels with multiplayer fire packets so all peers render the same delayed turn. Steering does not bypass obstacles or range, does not guarantee a hit, and never applies to the hitscan sniper, the sun, the moon, or the girlfriend. Each player hit volume is one solid yaw-oriented cuboid whose width, height and depth exactly match the complete bean body's maximum bounds, including the visor and booster but excluding weapons and name tags. The cuboid's empty corner space is hittable. Simulated bullets expand it by their actual 0.07-unit radius; sniper rays use the unexpanded bounds. The sniper uses a hitscan ray with the same range. Target damage is applied locally in offline play and only by the host in multiplayer. A killed target respawns with authoritative position, class, health, scale, color, and score.
+Projectile weapons reuse a preallocated pool. Every weapon has the sniper's 700-meter travel distance; simulated projectiles track muzzle-inclusive distance and clamp their final swept segment to that exact limit. When enabled in Graphics settings, each bullet also owns a pooled additive tracer that records its recent world-space path and fades briefly after impact, making direction changes visible without affecting collision. Guided projectiles use fixed 1/120-second steps, interpolate their target observations between render frames, cap angular turn speed and move along the midpoint of the old and new headings. Cubic tracer samples preserve the visible arc. Every guidance step owns one swept collision query; straight projectiles retain their single frame sweep. Collision checks sweep each projectile's previous-to-next segment against nearby obstacle AABBs, targets, and peer hit volumes. When a scoped shot is fired after the visual homing lock has completed, the selected NPC or opponent and its current life/revision are captured for the shot. The bullet flies straight until it has covered one-third of the target distance measured at fire time, then applies strong but finite steering toward the target's current position. At full minigun speed, one initial-distance sample is shared by each batch of ten bullets and a target change forces an immediate new sample; every other firing state samples each shot. The sampled threshold travels with multiplayer fire packets so all peers render the same delayed turn. Steering does not bypass obstacles or range, does not guarantee a hit, and never applies to the hitscan sniper, the sun, the moon, or the girlfriend. Each player hit volume is one solid yaw-oriented cuboid with fixed dimensions from `playerHitbox.ts`. Animated limbs, held weapons and name tags are presentation geometry. The cuboid's empty corner space is hittable. Simulated bullets expand it by their actual 0.07-unit radius; sniper rays use the unexpanded bounds. The sniper uses a hitscan ray with the same range. Target damage is applied locally in offline play and only by the host in multiplayer. A killed target respawns with authoritative position, class, health, scale, color, and score.
 
 Goggles overlays reuse two DOM/CSS animation templates: the four-corner scan and the info overview (leader, identifier and panel). Each HUD prebuilds six overlay instances and selects eligible targets before binding views, so crowded gameplay does not create discarded DOM every frame. Retiring overlays share that six-view budget; completed exits, range rejection and reset return views to the owning pool. Explicitly unrestricted previews can grow their pool. Target-specific text, classes and acquisition clocks reset on reuse, while unchanged geometry writes are skipped. Character, lobby and weapon previews share the templates; letter-by-letter text remains driven by the existing typing clocks.
 
@@ -235,14 +236,17 @@ Player damage records the last damage time for regeneration and kill attribution
 | Left mouse | Fire |
 | Right mouse | Aim down sights |
 | Hold `C` | Aim down sights; temporarily use first person while third-person mode is active |
-| `R` | Toggle grappling hook |
-| `E` or mouse wheel | Cycle weapons |
+| `R` | Draw and launch the grappling hook, cancel a draw or release a tether |
+| `E` | Reload an on-foot firearm (stow the idle launcher first), or cycle the selected Mecha weapon while piloting |
+| Mouse wheel | Cycle weapons |
 | `1`–`5` | Select pistol, shotgun, AR, sniper, or minigun |
 | `V` | Equip katana; hold primary attack to charge, release to swing |
 | `X` | Inspect the active weapon |
-| `P` | Toggle third-person presentation |
-| Hold `Tab` in multiplayer | Show the host-ordered player list with suit-colored pixel faces and kills/deaths |
+| `P` | Toggle third person. On foot, the camera sits 3.35 units behind the player and over the right shoulder |
+| Hold `Tab` in multiplayer | Show the host-ordered player list with cyborg portraits with suit-colored accents and kills/deaths |
 | `Escape` | Toggle pause; offline simulation stops completely, while multiplayer continues. Resume waits for pointer lock. If the browser requires a fresh gesture after Esc, click Resume. |
+
+The [firearm guide](firearms.md) lists magazine capacities, reload times and grapple handoffs.
 
 The composition root derives HUD visibility from `hudPresentation.ts` on input,
 conversation and terminal transitions, before loading/paused frame returns, and
@@ -279,9 +283,9 @@ client A <----> host <----> client B
 
 Clients do not connect directly to each other. The host parses and authorizes client packets, applies authoritative target changes, and relays approved presentation/gameplay messages to the other clients. The maximum room size is five sessions including the host. Names are fixed for the session and unique within the lobby regardless of capitalization. Departure releases the name; new unadmitted reservations expire after 90 seconds. The host broadcasts `peer_left` so every client removes the departed avatar.
 
-The host owns an ordered `lobby_roster`: host first, then admitted connections in admission order. Clients submit their validated 24-bit suit color in admission metadata and can update it with `lobby_color` in the lobby. The host republishes the roster after admissions, departures, and color reports. Clients queue it while preparing their world and accept it only from the expected host. The menu renders the host at center and successive guests alternating left/right and receding by row. Lobby previews reuse the animated peer scan for every other player, with a typed name and no stats panel or homing lock. Each room size has explicit callout preferences; placement avoids other names and the left menu once, then retains its corner and leader length until membership or viewport changes. Reused spawn-house slots do not alter admission order. Starting play hides the previews but retains host admission order for the held-Tab list; disconnecting clears both.
+The host owns an ordered `lobby_roster`: host first, then admitted connections in admission order. Players choose their own suit color from the Character scan on the main menu. Clients submit their validated 24-bit color in admission metadata. The host accepts `lobby_color` updates only for the reporting client. The host republishes the roster after admissions, departures, and color reports. Clients queue it while preparing their world and accept it only from the expected host. Live roster colors update stationary and moving avatars. A damage flash restores the latest chosen color. The menu renders the host at center and successive guests alternating left/right and receding by row. Lobby previews reuse the animated peer scan for every other player, with a typed name and no stats panel or homing lock. Each room size has explicit callout preferences; placement avoids other names and the left menu once, then retains its corner and leader length until membership or viewport changes. Reused spawn-house slots do not alter admission order. Starting play hides the previews but retains host admission order for the held-Tab list; disconnecting clears both.
 
-During play, the host publishes a bounded `player_list` snapshot in admission order. It includes each admitted name and suit color with kills/deaths counted only from accepted `player_died` events. The host sends it on match start, admission, departure, color change, and confirmed death, so late joiners receive current scores after their world snapshot. Clients accept it only from their expected host. `src/playerList.ts` renders a pixelated front view of the bean and the held-Tab overlay; input release, window blur, pause, death, and disconnection hide it.
+During play, the host publishes a bounded `player_list` snapshot in admission order. It includes each admitted name and suit color with kills/deaths counted only from accepted `player_died` events. The host sends it on match start, admission, departure, color change, and confirmed death, so late joiners receive current scores after their world snapshot. Clients accept it only from their expected host. `src/playerList.ts` renders a portrait from the cyborg GLB with each player’s color on its glow accents and the held-Tab overlay; input release, window blur, pause, death, and disconnection hide it.
 
 When a client's data channel opens, the host validates its single-use, peer-bound admission ticket through the Worker using the host capability. The Worker atomically reserves usernames case-insensitively and returns a proof known independently to the client; the client rejects snapshots before that proof. The metadata and proof reply carry the shared gameplay protocol version. After admission, the host sends a `world_snapshot` containing the seed, ordered roster, a validated client house slot (1–4), score, and every target state. The client prepares the seeded environment, applies the snapshot, and places the player in the assigned house before entering play. Other host packets arriving during preparation are queued and replayed after snapshot application; the queue is bounded and stale-session callbacks are ignored. Duplicate snapshots are ignored so they cannot relocate an existing player. Afterwards the host sends `target_state` packets for changed targets and `kill_target` packets for respawns and score changes. Synchronized clients apply both while waiting in the lobby as well as while playing.
 
@@ -292,14 +296,16 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 | Packet | Origin | Host behavior |
 | --- | --- | --- |
 | `update` | Any player | Bounds position, charges cumulative travel against a capped receipt-time budget, validates life and weapon-switch phases, relays |
-| `fire` | Any live player | Checks the previous shot's cooldown deadline, completed weapon switch, minigun ramp and barrel proximity; records a unique shot ID and deterministic pellet directions; canonicalizes pellet count |
+| `fire` | Any live player | Checks the life, available round, support hand, cooldown, switch, minigun ramp and barrel proximity; records a unique shot ID and deterministic pellet directions; canonicalizes pellet count |
+| `handling_command` | Shooter client | Requests reload, grapple or support-hand transitions for the equipped weapon and current life |
+| `handling_state` | Host only | Publishes accepted magazines, hand phases and timers; acknowledges predicted commands and shots |
 | `hit_target` | Shooter client | Requires a matching recent shot, exact weapon damage, target intersection, clear path, and burst allowance; host applies damage |
 | `player_hit` | Shooter client | Applies fire/path checks and bounded pose rewind, rejects self-hits, and commits accepted damage to the victim life |
 | `player_health`, `player_died` | Host only | Synchronizes health and confirms one death per life with the lethal source and attacker |
 | `respawn_request` | Dead player | Requests one replacement for the currently dead life |
 | `player_respawn` | Host only | Grants a new life at the seeded church spawn with the accepted weapon and remaining cooldown |
 | `peer_left` | Host only | Removes departed avatars and hook visuals on every client |
-| `lobby_color` | Admitted client before play | Updates only that client's suit color and republishes the host-owned roster |
+| `lobby_color` | Admitted client in the lobby or match | Updates only that client's suit color and republishes the host-owned roster |
 | `lobby_roster` | Host only | Synchronizes the ordered room roster, including names and suit colors |
 | `player_list` | Host only | Synchronizes the ordered active-match names, suit colors and confirmed kills/deaths |
 | `mecha_input`, `mecha_board` | Admitted live player | Checks sequence, life, revision, cockpit arrival and exclusive ownership; applies host simulation inputs |
@@ -311,7 +317,7 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 | `target_state` | Host only | Replicates target health and other incremental state |
 | `kill_target` | Host only | Replicates target respawn and score |
 
-Every received value first passes `parseNetworkPacket()`. It rejects unknown packet types, malformed structures, invalid usernames/weapons, non-finite or excessive coordinates, invalid directions, and oversized target snapshots. Accepted packets are reconstructed from known own fields, including nested snapshots and vectors. Peer IDs exclude inherited object keys. Gameplay updates use the host-stored lobby color; only lobby customization changes it. Do not handle a newly introduced packet before adding strict parsing for it.
+Every received value first passes `parseNetworkPacket()`. It rejects unknown packet types, malformed structures, invalid usernames/weapons, non-finite or excessive coordinates, invalid directions, and oversized target snapshots. Accepted packets are reconstructed from known own fields, including nested snapshots and vectors. Peer IDs exclude inherited object keys. Gameplay updates use the host-stored roster color. Each admitted player can change their own color through the appearance controls. Do not handle a newly introduced packet before adding strict parsing for it.
 
 Movement allowance replenishes at `NETWORK_MOVEMENT_SPEED`, derived from enemy
 grapple pull, walking and jump values, and is capped by `NETWORK_MOVEMENT_BURST`.
@@ -333,6 +339,12 @@ The composition root publishes each phase change immediately rather than
 waiting for the movement throttle. A newly begun withdrawal starts its clock
 at zero; elapsed time from before the switch intent cannot shorten it.
 
+The host tracks weapon handoffs independently of the cable. Handling snapshots
+include the fitted handoff weapon, outgoing light weapon, hand progress, pending launch and active
+tether. This lets a new observer distinguish a drawn launcher from a shot in
+flight. Returning a launcher to its holster can overlap the equip animation.
+A queued heavy shot also waits for the support grip and the firing cooldown.
+
 Hit reports reference a shot ID and pellet index. Each pellet can cause one
 accepted hit with shared spread, exact damage, range and obstruction checks.
 Homing fire requires the captured NPC revision/opponent life and its steering
@@ -340,7 +352,7 @@ threshold. Acquisition checks the host aim envelope and sampled body visibility,
 including partially exposed silhouettes. The threshold must match recent
 host-owned raw/filtered motion history; only a full-speed Minigun may reuse its
 accepted sample for a ten-shot batch. The host replays the same 120 Hz guidance,
-including the 0.1-unit muzzle offset, finite turns, floor/obstacle and intervening
+starting at the barrel opening, including finite turns, floor/obstacle and intervening
 body contacts. Incidental hits use that curve too; they cannot fall back to an
 unsteered ray. Old target lives cannot authorize damage to replacements.
 Acquisition retains exact body-box reachability. During flight, both simulations
@@ -388,7 +400,7 @@ while the authoritative life changes at contact.
   this order and clear pending hits across life/reset/disposal boundaries.
 - The fitted visible pilot, grapple seat and optical views have separate anchors.
   Voluntary shutdown reverses the goggles video/HUD and Mount under actor-owned presentation clocks and
-  releases a living bean into a mountable wreck; lethal destruction remains FinalDeath.
+  releases a living pilot beside a mountable wreck; lethal destruction remains FinalDeath.
 - Entry/exit capture the saved perspective and lock P/View plus temporary scope
   overrides until completion. Third-person swivels overlap existing animation
   clocks; external camera motion never delays control ownership. Apply and restore
@@ -431,7 +443,7 @@ The host advances one actor after match start independently of local input and
 player death. Clients interpolate host bone poses and effects without running
 actor simulation. `ownsPilot` means the shared seat is occupied;
 `ownsLocalPilot` gates local cameras, input, HUD, weapons, physics and damage
-routing. Ordinary avatar interpolation cannot move a seated remote bean.
+routing. Ordinary avatar interpolation cannot move a seated remote pilot.
 
 The coordinator gets accepted player poses from multiplayer's runtime, in lobby
 admission order. Acquisition retains one eligible target; physical attacks test
@@ -439,7 +451,7 @@ all affected lives. Rocket targeting reconstructs the actual pilot perspective
 and queries physical targets independently of the host's render chunks. The
 existing local damage and weapon-network ports remain the integration seams.
 
-Pilot `rocket | stomp` selection is separate from the bean weapon. Stomps retain
+Pilot `rocket | stomp` selection is separate from the on-foot weapon. Stomps retain
 `piloted` ownership while a substate owns exact frame-39 contact and full-clip
 recovery. The actor shares enemy/pilot timing and contact execution, keeps
 locomotion/foot planting out of stomps, and defers exit until committed attacks

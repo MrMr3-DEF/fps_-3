@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import {
-    ENEMY_COUNT, INFANTRY, INFANTRY_DEBRIS_TIME, INFANTRY_LIMIT, INFANTRY_RANGE, LAVA_POOL_HALF_SIZE,
+    ENEMY_COUNT, INFANTRY, INFANTRY_AIM_ANGLE, INFANTRY_STEERING_ANGLE, INFANTRY_TURN_ANGLE, INFANTRY_DEBRIS_TIME, INFANTRY_LIMIT, INFANTRY_RANGE, LAVA_POOL_HALF_SIZE,
     MAP_HALF_SIZE, NETWORK_POSITION_RESPONSE, TOWN_WALL_HP, type InfantryKind,
 } from './config.js';
 import { MechaNavigation, type MechaRoute, type NavigationPoint } from './mechaNavigation.js';
@@ -47,7 +47,7 @@ export interface InfantryEnvironment {
 interface BotVisual {
     model: THREE.Object3D;
     mixer: THREE.AnimationMixer;
-    actions: Record<InfantryPhase, THREE.AnimationAction>;
+    actions: Record<Exclude<InfantryPhase, 'turn'> | 'turnLeft' | 'turnRight', THREE.AnimationAction>;
     hand: THREE.Object3D | undefined;
     muzzle: THREE.Object3D | undefined;
     aim: THREE.Object3D | undefined;
@@ -63,6 +63,21 @@ interface Bot {
     cooldown: number;
     victim?: Pick<InfantryPlayer, 'id' | 'lifeId'> & { mountedRevision?: number };
     wall?: { point: THREE.Vector3; heading: number };
+}
+
+function poseAction(visual: BotVisual, pose: InfantryPose): THREE.AnimationAction {
+    if (pose.phase === 'turn') return visual.actions[pose.turnAngle! > 0 ? 'turnLeft' : 'turnRight'];
+    return visual.actions[pose.phase];
+}
+
+function facingAt(pose: InfantryPose, time: number, duration: number): number {
+    if (pose.phase !== 'turn') return pose.yaw;
+    const t = Math.min(time / duration, 1);
+    return pose.yaw - pose.turnAngle! * (1 - t * t * (3 - 2 * t));
+}
+
+function wrapYaw(angle: number): number {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 export function infantryWave(day: number): [number, number, number] {
@@ -178,7 +193,7 @@ export class InfantryDefense {
         KINDS.forEach((kind, index) => this.assets.set(kind, loaded[index]));
         for (const [kind, asset] of this.assets) {
             const stats = INFANTRY[kind];
-            for (const name of ['Idle', stats.move, stats.attack, 'Death']) {
+            for (const name of ['Idle', stats.move, stats.attack, 'TurnLeft', 'TurnRight', 'Death']) {
                 if (!asset.animations.some(clip => clip.name === name)) throw new Error(`Infantry ${kind} is missing ${name}`);
             }
             if (!asset.scene.getObjectByName(kind === 'base' ? 'muzzle' : RIGHT_HAND)) throw new Error(`Infantry ${kind} is missing its attack joint`);
@@ -260,6 +275,7 @@ export class InfantryDefense {
             const aim = pose.kind !== 'fast' ? model.getObjectByName('torso_yaw') : undefined;
             bot.visual = { model, mixer, actions: {
                 idle: makeAction('Idle', true), moving: makeAction(stats.move, true),
+                turnLeft: makeAction('TurnLeft', false), turnRight: makeAction('TurnRight', false),
                 attack: makeAction(stats.attack, false), death: makeAction('Death', false),
             }, hand: model.getObjectByName(RIGHT_HAND), muzzle: model.getObjectByName('muzzle'), aim, aimRest: aim?.quaternion.clone() };
             bot.group.add(model);
@@ -280,7 +296,14 @@ export class InfantryDefense {
 
     private setPhase(bot: Bot, phase: InfantryPhase): void {
         const pose = bot.pose!;
-        if (phase !== pose.phase) { pose.phase = phase; pose.time = 0; }
+        if (phase === pose.phase) return;
+        if (pose.phase === 'turn') {
+            // An interrupted step (including death) keeps the facing reached so far.
+            pose.yaw = wrapYaw(facingAt(pose, pose.time, poseAction(bot.visual!, pose).getClip().duration));
+            delete pose.turnAngle;
+        }
+        pose.phase = phase;
+        pose.time = 0;
     }
 
     private present(bot: Bot): void {
@@ -296,13 +319,14 @@ export class InfantryDefense {
     private samplePose(bot: Bot, time: number): void {
         const { pose, visual } = bot;
         if (!pose || !visual) return;
-        const action = visual.actions[pose.phase];
+        const action = poseAction(visual, pose);
         for (const other of Object.values(visual.actions)) if (other !== action && other.isScheduled()) other.stop();
         if (!action.isScheduled()) action.reset().play();
         const duration = action.getClip().duration;
         action.time = Math.min(time, duration);
+        if (pose.phase === 'turn') action.setEffectiveWeight(Math.abs(pose.turnAngle!) / INFANTRY_TURN_ANGLE);
         if (visual.aimRest) visual.aim!.quaternion.copy(visual.aimRest);
-        visual.model.rotation.y = pose.yaw;
+        visual.model.rotation.y = facingAt(pose, time, duration);
         visual.mixer.update(0);
         if (visual.aim?.parent && (pose.kind === 'base' || pose.phase === 'attack')) {
             visual.aim.parent.getWorldQuaternion(this.parentRotation).invert();
@@ -330,6 +354,18 @@ export class InfantryDefense {
         return player.mounted ? nearestArmorPoint(player.mounted, origin, out) : closestPlayerBodyPoint(origin, player.position, player.yaw, out);
     }
 
+    private beginTurn(bot: Bot, heading: number, threshold: number): boolean {
+        const pose = bot.pose!;
+        const difference = wrapYaw(heading - pose.yaw);
+        if (Math.abs(difference) <= threshold) return false;
+        const angle = THREE.MathUtils.clamp(difference, -INFANTRY_TURN_ANGLE, INFANTRY_TURN_ANGLE);
+        this.setPhase(bot, 'turn');
+        pose.turnAngle = angle;
+        pose.yaw = wrapYaw(pose.yaw + angle);
+        pose.pitch = 0;
+        return true;
+    }
+
     private aimAt(bot: Bot, target: THREE.Vector3): void {
         const origin = this.sightPoint(bot);
         const dx = target.x - origin.x, dz = target.z - origin.z;
@@ -355,7 +391,10 @@ export class InfantryDefense {
     private updateBot(bot: Bot, delta: number, players: readonly InfantryPlayer[]): void {
         const pose = bot.pose!, stats = INFANTRY[pose.kind];
         bot.cooldown = Math.max(0, bot.cooldown - delta);
-        if (pose.phase === 'attack') {
+        if (pose.phase === 'turn') {
+            pose.time += delta;
+            if (pose.time >= poseAction(bot.visual!, pose).getClip().duration) this.setPhase(bot, 'idle');
+        } else if (pose.phase === 'attack') {
             const previous = pose.time;
             pose.time += delta;
             if (previous < stats.contact && pose.time >= stats.contact) this.strike(bot, players, stats.contact);
@@ -364,12 +403,25 @@ export class InfantryDefense {
             const origin = this.sightPoint(bot);
             const player = nearestInfantryPlayer(origin, players, (candidate, point) => !this.environment.trace(origin, point, Boolean(candidate.mounted)));
             const target = player ? this.playerPoint(player, origin, this.target) : bot.wall?.point;
-            const inReach = player ? Boolean(target && origin.distanceToSquared(target) <= stats.engage ** 2) : this.wallInReach(bot, stats.range);
+            // The heavy's punch originates below its sightline. Short targets can
+            // be within arm's reach even when their crown is outside its eye sphere.
+            const reachOrigin = pose.kind === 'big' ? this.step.copy(origin).setY(stats.height * INFANTRY.big.reachHeight) : origin;
+            const inReach = player ? Boolean(target && reachOrigin.distanceToSquared(target) <= stats.engage ** 2) : this.wallInReach(bot, stats.range);
             if (target && inReach) {
-                this.aimAt(bot, target);
-                // The wall spans the full swing height, so the heavy can stay upright.
-                if (!player && pose.kind === 'big') pose.pitch = 0;
+                const dx = target.x - origin.x, dz = target.z - origin.z;
+                if (Math.hypot(dx, dz) > 1e-6 && this.beginTurn(bot, Math.atan2(dx, dz), INFANTRY_AIM_ANGLE)) {
+                    this.present(bot);
+                    return;
+                }
                 if (bot.cooldown <= 0) {
+                    this.aimAt(bot, target);
+                    if (pose.kind === 'big') {
+                        // At contact the fist is above its torso pivot. Aim that
+                        // authored arc down onto a player; the wall spans its full height.
+                        const { swingPivotHeight, swingElevation } = INFANTRY.big;
+                        pose.pitch = player ? Math.max(-Math.PI / 2,
+                            Math.atan2(target.y - stats.height * swingPivotHeight, Math.hypot(dx, dz)) - swingElevation) : 0;
+                    }
                     this.setPhase(bot, 'attack');
                     bot.victim = player ? { id: player.id, lifeId: player.lifeId, mountedRevision: player.mounted?.revision } : undefined;
                     bot.cooldown = stats.interval;
@@ -396,7 +448,12 @@ export class InfantryDefense {
             // A chase may end between cells next to a blocked rounded cell.
             for (const [dx, dz] of [[0, 0], [4, 0], [-4, 0], [0, 4], [0, -4], [4, 4], [4, -4], [-4, 4], [-4, -4]]) {
                 const route = this.nav!.routeFrom({ x: position.x + dx, z: position.z + dz }, 12);
-                if (route && this.nav!.segmentClear(position, route.points[0])) { this.setRoute(bot, route); break; }
+                if (route && this.nav!.segmentClear(position, route.points[0])) {
+                    this.setRoute(bot, route);
+                    // Rejoin the forward segment without turning back to the snapped grid center.
+                    if (this.nav!.segmentClear(position, route.points[1])) bot.waypoint = 1;
+                    break;
+                }
             }
         }
         const route = bot.route;
@@ -419,8 +476,10 @@ export class InfantryDefense {
         const advance = Math.min(1, INFANTRY[bot.pose!.kind].speed * delta / length);
         const next = this.step.set(position.x + dx * advance, position.y, position.z + dz * advance);
         if (check && !this.nav!.segmentClear(position, next)) return false;
+        const heading = Math.atan2(dx, dz);
+        if (this.beginTurn(bot, heading, INFANTRY_STEERING_ANGLE)) return true;
         this.setPhase(bot, 'moving');
-        bot.pose!.yaw = Math.atan2(dx, dz);
+        bot.pose!.yaw = heading;
         bot.pose!.pitch = 0;
         position.copy(next);
         bot.pose!.position = { x: position.x, y: 0, z: position.z };
@@ -523,7 +582,7 @@ export class InfantryDefense {
             const response = pose.phase === 'death' ? 1 : 1 - Math.exp(-NETWORK_POSITION_RESPONSE * delta);
             position.x = THREE.MathUtils.lerp(position.x, pose.position.x, response);
             position.z = THREE.MathUtils.lerp(position.z, pose.position.z, response);
-            const duration = bot.visual.actions[pose.phase].getClip().duration;
+            const duration = poseAction(bot.visual, pose).getClip().duration;
             pose.time = pose.phase === 'moving' || pose.phase === 'idle' ? (pose.time + delta) % duration : Math.min(pose.time + delta, duration);
             this.present(bot);
         }

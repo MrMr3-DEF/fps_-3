@@ -25,6 +25,8 @@
 .touch-input #weapon-indicator { right: max(20px, env(safe-area-inset-right)); bottom: var(--weapon-indicator-touch-bottom, calc(max(20px, env(safe-area-inset-bottom)) + 158px)); }
 @media (orientation: portrait) {
     .touch-input #rotate-device { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; background: #0a1524; color: #e1edf8; font: 18px var(--ui-font); padding: 24px; touch-action: none; }
+    /* Portrait menus remain interactive. The simulation still requires landscape. */
+    .touch-input:has(#blocker:not([style*="display: none"])) #rotate-device { display: none; }
     #rotate-device span { font-size: 80px; color: #66caff; margin-bottom: 20px; }
     #rotate-device p { font-size: 14px; color: #adc0d2; }
 }

@@ -10,12 +10,12 @@ export interface MechaPilotRelease {
 const rotation = new THREE.Euler(0, 0, 0, 'YXZ');
 
 /** Release is not a respawn: HP, life identity, equipment and fuel survive.
- * Capture precedes the breakup pose, which otherwise moves the seated bean
+ * Capture precedes the breakup pose, which otherwise moves the seated pilot
  * with a flying chest fragment before it can be detached. */
 export function releaseMechaPilot(pose: MechaPilotRelease): void {
     if (state.playerMesh && state.scene) {
         state.scene.add(state.playerMesh);
-        state.playerMesh.position.copy(pose.position); state.playerMesh.scale.setScalar(1.5);
+        state.playerMesh.position.copy(pose.position);
         rotation.setFromQuaternion(pose.quaternion);
         state.playerMesh.rotation.set(0, rotation.y, 0);
         state.playerMesh.visible = state.isThirdPerson;

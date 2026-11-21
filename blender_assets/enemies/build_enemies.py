@@ -400,7 +400,55 @@ class Robot:
                 self.rotate('forearm.R',f,-.27*abs(angle))
                 self.rotate('chassis',f,twist*.34,twist*.13,twist)
                 self.rotate('upper_arm.L',f,-angle*.18)
+        for direction in (1,-1):
+            self.turn(direction)
         self.death()
+
+    def turn(self, direction):
+        self.start('TurnLeft' if direction==1 else 'TurnRight')
+        frames=10 if self.fast else 20 if self.big else 14
+        angle=direction*math.radians(60)
+        # Key these actions from frame zero so exported footwork and runtime
+        # heading interpolation start on the same sample.
+        def smooth(x):
+            return x*x*(3-2*x)
+
+        for i in range(frames+1):
+            t=i/frames
+            yaw=angle*smooth(t)
+            # Transfer weight toward the planted side before each foot rises.
+            sway=-direction*(.023 if self.big else .016)*math.sin(TAU*t)
+            drop=-.018*math.sin(math.pi*t)**2
+            pelvis=self.pose['pelvis']
+            pelvis.location=V((sway,0,drop))*self.h
+            pelvis.keyframe_insert(data_path='location',frame=i,group='pelvis')
+            for side,sign in [('L',-1),('R',1)]:
+                step=min(1,max(0,2*t-(0 if sign==direction else 1)))
+                twist=angle*smooth(step)-yaw
+                hip=self.bones['thigh.'+side][0]
+                knee=self.bones['shin.'+side][0]
+                ankle=self.bones['foot.'+side][0]
+                target=Quaternion((0,0,1),twist) @ ankle
+                target.z+=(.055 if self.fast else .042)*math.sin(math.pi*step)**2
+                leg=target-hip-V((sway,0,drop))
+                # Solve sideways tilt first, then the knee in its forward plane.
+                # Counter-rotate the sole to hold both its position and facing.
+                roll=math.atan2(-leg.x,-leg.z)
+                a,b=(hip-knee).length,(knee-ankle).length
+                length=leg.length
+                down=math.hypot(leg.x,leg.z)
+                bend=math.acos(max(-1,min(1,(length**2+a*a-b*b)/(2*length*a))))
+                upper=math.atan2(leg.y,down)-bend
+                lower=math.atan2(leg.y-a*math.sin(upper),down-a*math.cos(upper))
+                upper-=math.atan2(knee.y-hip.y,hip.z-knee.z)
+                lower-=math.atan2(ankle.y-knee.y,knee.z-ankle.z)
+                tilt=Quaternion((0,1,0),roll)
+                thigh=tilt @ Quaternion((1,0,0),upper)
+                shin=Quaternion((1,0,0),lower-upper)
+                foot=(thigh @ shin).inverted() @ Quaternion((0,0,1),twist)
+                for name,rotation in [('thigh',thigh),('shin',shin),('foot',foot)]:
+                    self.rotate(name+'.'+side,i,*rotation.to_euler())
+
 
     def death(self):
         self.start('Death')

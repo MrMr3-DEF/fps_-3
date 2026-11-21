@@ -60,6 +60,28 @@ function record(layer: HudElement, targetKey: string): HudElement {
     return result;
 }
 
+test('floating cube brackets remain square in landscape and portrait', () => {
+    const layer = new HudElement();
+    const hud = new SmartGogglesHud(layer as any);
+    const view = camera(), target = enemy();
+    try {
+        for (const [width, height] of [[1280,720],[720,1280]]) {
+            layer.clientWidth = width; layer.clientHeight = height;
+            view.aspect = width / height;
+            view.updateProjectionMatrix();
+            for (const angle of [0, .6]) {
+                target.rotation.set(angle, angle, 0);
+                hud.update(view, view.position, view.position, [target], {}, true, 1000);
+                const corners = record(layer,'npc:0').children.filter(e => e.classList.contains('goggles-target-corner'));
+                const coords = (axis: 'left'|'top') => corners.map(c => parseFloat((c.style as CSSStyleDeclaration)[axis]));
+                const xs = coords('left'), ys = coords('top');
+                const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+                assert.ok(w > 0 && Math.abs(w - h) < .2);
+            }
+        }
+    } finally { hud.reset(); }
+});
+
 test('goggles panel and leader use the full readout width before typing starts', () => {
     const layer = new HudElement();
     const hud = new SmartGogglesHud(layer as any);

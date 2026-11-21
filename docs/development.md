@@ -163,7 +163,7 @@ Feature-specific procedures live in [Mecha](forgotten-mecha.md),
 
 ## Generated HUD icons
 
-Regenerate static weapon/rocket silhouettes after model changes:
+The firearm and katana icons use side projections of the fitted player GLBs. Regenerate the static silhouettes after model changes.
 
 ```bash
 node --experimental-strip-types --import ./tests/register.mjs scripts/generate-weapon-icons.mjs
@@ -173,6 +173,8 @@ Include `src/weaponIndicatorIcons.ts` with the build. The stomp source is
 `src/mechaStompIcon.svg`; drafts in `tests/fixtures/stomp-icons/` are produced by
 `scripts/generate-stomp-icon-previews.mjs`. Gameplay uses cached SVGs without
 loading a model or allocating an icon renderer.
+
+The player list uses a portrait and accent mask rendered from the cyborg GLB. Regenerate both in Blender with `blender -b -P scripts/generate-cyborg-portrait.py`.
 
 ## CI contract
 

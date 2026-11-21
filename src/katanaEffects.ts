@@ -33,15 +33,21 @@ export class KatanaEffects {
         const count = 24;
         const previousSample = trail.sample;
         while (trail.sample <= count && KATANA.windup + trail.sample / count * KATANA.chargedSlash <= Math.min(elapsed, cutEnd) + 1e-9) {
-            sampleKatanaPose(this.samplePose, KATANA.windup + trail.sample / count * KATANA.chargedSlash, true);
-            this.samplePose.updateMatrix();
-            const matrix = new THREE.Matrix4().multiplyMatrices(root.matrixWorld, this.samplePose.matrix);
-            const points = [new THREE.Vector3(0, .165, 0), new THREE.Vector3(.18, 1.30, 0)].map(p => p.applyMatrix4(matrix));
+            let points: THREE.Vector3[];
+            if (root.userData.avatar) {
+                points = root.userData.avatar.bladePoints(KATANA.windup + trail.sample / count * KATANA.chargedSlash);
+            } else {
+                sampleKatanaPose(this.samplePose, KATANA.windup + trail.sample / count * KATANA.chargedSlash, true);
+                this.samplePose.updateMatrix();
+                const matrix = new THREE.Matrix4().multiplyMatrices(root.matrixWorld, this.samplePose.matrix);
+                points = [new THREE.Vector3(0, .165, 0), new THREE.Vector3(.18, 1.30, 0)].map(p => p.applyMatrix4(matrix));
+            }
             if (trail.previous) for (const point of [trail.previous[0], trail.previous[1], points[1], trail.previous[0], points[1], points[0]]) { const offset = trail.vertexCount++ * 3; trail.positions[offset] = point.x; trail.positions[offset + 1] = point.y; trail.positions[offset + 2] = point.z; }
             trail.previous = points;
             trail.sample++;
         }
         if (trail.sample !== previousSample) {
+            root.userData.avatar?.restorePose();
             trail.mesh.geometry.getAttribute('position').needsUpdate = true;
             trail.mesh.geometry.setDrawRange(0, trail.vertexCount);
         }

@@ -12,10 +12,16 @@ import { forgottenMecha } from './world.js';
 import { userSettings } from './settings.js';
 import { isInputActive } from './inputSession.js';
 import { cancelInspect } from './weapons.js';
+import { resetHook } from './hookLifecycle.js';
 import { flashHitmarker } from './hitmarker.js';
 import type { MeleeCommand, MeleeEvent, MeleeHitEvent } from './networkTypes.js';
 let time = 0, sequence = 0, held = false;
 const local = new KatanaClock();
+const cancelledPoseAt = new WeakMap<KatanaClock, number>();
+function cancelPose(clock: KatanaClock): void {
+    if (clock.started !== null) cancelledPoseAt.set(clock, time);
+    clock.cancel();
+}
 const effects = new KatanaEffects();
 interface Attack {
     clock: KatanaClock;
@@ -40,10 +46,26 @@ const waves: Array<{
     forward: THREE.Vector3;
 }> = [];
 const playerBox = new THREE.Box3(new THREE.Vector3(PLAYER_HITBOX_MIN.x, PLAYER_HITBOX_MIN.y, PLAYER_HITBOX_MIN.z), new THREE.Vector3(PLAYER_HITBOX_MAX.x, PLAYER_HITBOX_MAX.y, PLAYER_HITBOX_MAX.z));
-const halfHeight = (PLAYER_HITBOX_MAX.y - PLAYER_HITBOX_MIN.y) / 2;
+// The slash's authored contact height is independent of the target silhouette.
+const halfHeight = 1.65;
 const rotation = (yaw: number, pitch: number) => new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
 const poseOf = (p: MeleePlayer): KatanaPose => ({ origin: p.position.clone().add(new THREE.Vector3(0, -PLAYER_BODY_CAMERA_OFFSET, 0)), rotation: rotation(p.yaw, p.pitch) });
 const id = () => state.peer?.id ?? 'local';
+export function getKatanaAction(peerId?: string): {action:string; time:number} | undefined {
+    const clock = peerId && peerId !== id() ? visuals.get(peerId)?.clock : local;
+    if (!clock) return undefined;
+    if (clock.cancelled) {
+        const elapsed = time - (cancelledPoseAt.get(clock) ?? -Infinity);
+        return elapsed >= 0 && elapsed < .16 ? { action: 'Cancel', time: elapsed } : undefined;
+    }
+    if (clock.started !== null) {
+        const elapsed = time - clock.started;
+        return elapsed >= KATANA.charge ? {action:'ChargedHold',time:elapsed-KATANA.charge} : {action:'Charge',time:elapsed};
+    }
+    if (clock.released !== null && time-clock.released < KATANA.duration)
+        return {action:clock.charged?'ChargedSwing':'Swing',time:time-clock.released};
+    return undefined;
+}
 export function localMeleePlayer(): MeleePlayer {
     const e = new THREE.Euler().setFromQuaternion(state.camera?.quaternion ?? new THREE.Quaternion(), 'YXZ');
     return { id: id(), lifeId: state.lifeId, alive: state.playerHp > 0 && !forgottenMecha?.ownsLocalPilot, ready: state.activeWeaponName === 'KATANA' && state.desiredWeaponName === 'KATANA' && state.switchState === 'IDLE' && !forgottenMecha?.ownsLocalPilot,
@@ -59,7 +81,7 @@ function command(action: MeleeCommand['action']): void {
 export function cancelKatana(): void {
     if (local.started !== null || !local.cancelled && local.damageActive(time))
         command('cancel');
-    local.cancel();
+    cancelPose(local);
     effects.cancel(id(), true);
     held = false;
 }
@@ -75,6 +97,7 @@ export function katanaInput(down: boolean): void {
     if (down) {
         if (state.fireCooldown > 0 || !local.begin(time))
             return;
+        resetHook();
         cancelInspect();
         command('start');
     }
@@ -153,7 +176,7 @@ export function receiveMeleeEvent(event: MeleeEvent): void {
         visual.clock.begin(time);
     }
     if (event.action === 'cancel') {
-        visual.clock.cancel();
+        cancelPose(visual.clock);
         effects.cancel(event.senderPeerId, event.senderPeerId === id());
     }
     if (event.action === 'release') {
@@ -333,6 +356,7 @@ export function applyKatanaShake(camera: THREE.Camera): void {
 }
 export function resetLocalKatana(): void {
     local.reset();
+    cancelledPoseAt.delete(local);
     held = false;
     forgetMeleePeer(id());
 }
@@ -341,6 +365,7 @@ export function resetKatana(): void {
     time = 0;
     effects.reset();
     local.reset();
+    cancelledPoseAt.delete(local);
     held = false;
     authorities.clear();
     visuals.clear();

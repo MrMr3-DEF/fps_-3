@@ -4,10 +4,11 @@ import * as THREE from 'three';
 import { MechaMovement } from '../src/mechaMovement.ts';
 import { MechaPilot } from '../src/mechaPilot.ts';
 import { ForgottenMecha, type MechaPlayer } from '../src/forgottenMecha.ts';
+import { loadCyborgTestAssets } from './cyborgTestAsset.ts';
 import { loadIronmawTestAsset } from './ironmawTestAsset.ts';
 import { releaseMechaPilot, type MechaPilotRelease } from '../src/mechaPilotRelease.ts';
 import { MechaCameraHandoff, resolveThirdPersonCameraPosition } from '../src/thirdPersonCamera.ts';
-import { syncThirdPersonPresentation } from '../src/weapons.ts';
+import { createAkimboGuns, createPlayerMesh, prepareLocalPlayerAvatar, disposePlayerVisuals, syncThirdPersonPresentation } from '../src/weapons.ts';
 import { state } from '../src/state.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { playerTouchesWorldBox, PLAYER_BODY_CAMERA_OFFSET } from '../src/playerHitbox.ts';
@@ -135,25 +136,27 @@ test('oriented leg contact rejects height gaps and space between legs', () => {
     assert.equal(playerTouchesWorldBox(new THREE.Vector3(0, 2, 0), 0, min, max, 0.1), false);
 });
 
-test('release preserves health, life, fuel and third person, restores bean/weapon parenting and normal falling', async () => {
-    const original = { ...state }, oldVelocity = state.velocity.clone(); const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(), bean = new THREE.Group();
+test('release preserves health, life, fuel and third person, restores the fitted avatar and normal falling', async () => {
+    const original = { ...state }, oldVelocity = state.velocity.clone(); const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera();
+    await loadCyborgTestAssets();
     const actor = await robot(undefined, pose => releaseMechaPilot(pose));
     try {
-        state.scene = scene; state.camera = camera; state.playerMesh = bean; state.controls = { getObject: () => camera, isLocked: true } as typeof state.controls;
+        state.scene = scene; state.camera = camera; state.controls = { getObject: () => camera, isLocked: true } as typeof state.controls;
         state.obstacles = []; state.playerHp = 7; state.lifeId = 12; state.hoverFuel = 0.42; state.isPlaying = true;
         state.isThirdPerson = true; state.isThirdPersonView = false; state.deaths = 3; state.activeWeaponName = 'SNIPER';
-        state.leftGun = new THREE.Group(); state.rightGunContainer = new THREE.Group(); camera.add(state.leftGun, state.rightGunContainer);
-        await board(actor); actor.pilotAnchor.add(bean); bean.scale.setScalar(actor.pilotScale);
+        createAkimboGuns(); createPlayerMesh(); prepareLocalPlayerAvatar();
+        const bean = state.playerMesh!;
+        await board(actor); actor.pilotAnchor.add(bean);
         const seat = actor.pilotAnchor.getWorldPosition(new THREE.Vector3()); state.keyCActive = state.rightClickActive = state.isMouseDown = true;
         state.isShiftDown = true; actor.requestRocket(); actor.damage(50); syncThirdPersonPresentation();
-        assert.equal(actor.ownsPilot, false); assert.equal(bean.parent, scene); assert.equal(bean.scale.x, 1.5);
+        assert.equal(actor.ownsPilot, false); assert.equal(bean.parent, scene); assert.equal(bean.scale.x, 1);
         assert.deepEqual(bean.position.toArray(), seat.toArray()); assert.equal(camera.position.y, seat.y + PLAYER_BODY_CAMERA_OFFSET);
         assert.equal(state.playerHp, 7); assert.equal(state.lifeId, 12); assert.equal(state.hoverFuel, 0.42); assert.equal(state.deaths, 3); assert.equal(state.activeWeaponName, 'SNIPER');
-        assert.equal(state.isThirdPersonView, true); assert.equal(state.leftGun.parent, bean); assert.equal(state.rightGunContainer.parent, bean);
+        assert.equal(state.isThirdPersonView, true); assert.equal(state.leftGun!.parent, camera); assert.equal(state.rightGunContainer!.parent, camera);
         assert.equal(state.isScoped, false); assert.equal(state.isMouseDown, false); assert.equal(state.isShiftDown, false);
         const height = camera.position.y; updatePlayerPhysics(0.05); assert.ok(camera.position.y < height); assert.equal(state.playerHp, 7);
         advance(actor, 4); assert.equal(actor.mode, 'destroyed'); assert.equal(state.isThirdPersonView, true);
-    } finally { actor.dispose(); Object.assign(state, original); state.velocity.copy(oldVelocity); }
+    } finally { disposePlayerVisuals(); actor.dispose(); Object.assign(state, original); state.velocity.copy(oldVelocity); }
 });
 
 test('third-person release starts at the old eye boom, follows falling, pauses and ends collision-safe at normal size', () => {
@@ -162,9 +165,11 @@ test('third-person release starts at the old eye boom, follows falling, pauses a
     const previous = resolveThirdPersonCameraPosition(eye, quaternion, [], new THREE.Vector3(), { distance: 45, height: 10, shoulder: 8 });
     handoff.begin(eye, beanEye, quaternion); const initial = resolveThirdPersonCameraPosition(beanEye, quaternion, [], new THREE.Vector3(), handoff.dimensions);
     assert.ok(previous.distanceTo(initial) < 1e-8); const dims = { ...handoff.dimensions }; handoff.update(0); assert.deepEqual(handoff.dimensions, dims);
-    beanEye.y -= 2; handoff.update(0.15); assert.ok(handoff.dimensions.distance > 5.5 && handoff.dimensions.distance < 45);
+    const onFoot = new MechaCameraHandoff().dimensions;
+    beanEye.y -= 2; handoff.update(0.15); assert.ok(handoff.dimensions.distance > onFoot.distance && handoff.dimensions.distance < dims.distance);
     const wall = new THREE.Object3D(); wall.position.set(0, 18, -2); Object.assign(wall.userData, { height: 40, halfH: 20, halfW: 30, halfD: 0.5 });
     const collision = resolveThirdPersonCameraPosition(beanEye, quaternion, [wall], new THREE.Vector3(), handoff.dimensions); assert.ok(collision.z > wall.position.z + 0.5);
-    handoff.update(0.15); assert.equal(handoff.active, false); assert.deepEqual(handoff.dimensions, { distance: 5.5, height: 1.2, shoulder: 1.5 });
+    handoff.update(0.15); assert.equal(handoff.active, false); assert.ok(resolveThirdPersonCameraPosition(beanEye, quaternion, [], new THREE.Vector3(), handoff.dimensions)
+        .distanceTo(resolveThirdPersonCameraPosition(beanEye, quaternion, [], new THREE.Vector3())) < 1e-10);
     handoff.begin(eye, beanEye, quaternion); handoff.reset(); assert.equal(handoff.active, false);
 });

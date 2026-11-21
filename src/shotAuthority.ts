@@ -8,7 +8,6 @@ import { PacketRate } from './packetRate.js';
 import { canContinueHoming, isWithinHomingAimEnvelope } from './projectileHoming.js';
 import { stepProjectileFlight, homingReplayCandidates, type HomingFireContext, type HomingFlightTarget, type TargetMotionHistory } from './projectileFlight.js';
 
-const PROJECTILE_MUZZLE_OFFSET = 0.1;
 const PROJECTILE_NETWORK_GRACE_MS = 100;
 const PROJECTILE_LEDGER_GRACE_MS = 250;
 
@@ -193,12 +192,6 @@ export class ShotLedger {
             : Math.min(BULLET_TRAVEL_DISTANCE, PROJECTILE_SPEED * ((now - shot.at + PROJECTILE_NETWORK_GRACE_MS) / 1000));
         const direction = shot.directions[pelletIndex];
         const start = shot.origin.clone();
-        if (shot.weapon !== 'SNIPER') {
-            // Simulated projectiles are born just ahead of the weapon. Begin host
-            // collision/occlusion checks at that same point while preserving the
-            // shared endpoint measured from the barrel.
-            start.addScaledVector(direction, Math.min(PROJECTILE_MUZZLE_OFFSET, range));
-        }
         const end = shot.origin.clone().addScaledVector(direction, range);
         const hit = intersect(start, end);
         if (hit === null || blocked(start, start.clone().lerp(end, hit), shot.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)) return false;
@@ -317,8 +310,8 @@ export class ShotLedger {
         const position = new THREE.Vector3(), end = new THREE.Vector3(), direction = new THREE.Vector3(), nextDirection = new THREE.Vector3(), point = new THREE.Vector3(), contact = new THREE.Vector3();
         for (const candidate of flight.candidates) {
             if (flight.history.samples[0].at > Math.max(flight.historyFloorAt, shot.at - candidate.lagMs) + PROJECTILE_GUIDANCE_STEP * 1000) continue;
-            direction.copy(shot.directions[pelletIndex]); position.copy(shot.origin).addScaledVector(direction, PROJECTILE_MUZZLE_OFFSET);
-            let traveled = PROJECTILE_MUZZLE_OFFSET, guided = true;
+            direction.copy(shot.directions[pelletIndex]); position.copy(shot.origin);
+            let traveled = 0, guided = true;
             for (let tick = 0; tick < ticks && traveled < BULLET_TRAVEL_DISTANCE; tick++) {
                 if (!this.spendVerification(now, 1)) return false;
                 const yaw = flight.history.sample(shot.at + (tick + 1) * PROJECTILE_GUIDANCE_STEP * 1000 - candidate.lagMs, point, candidate.filtered);

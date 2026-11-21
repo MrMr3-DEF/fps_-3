@@ -211,3 +211,25 @@ test('packet identities reject inherited object keys and melee actions require l
         assert.equal(parseNetworkPacket({ ...packet, action: ['start'] }), null);
     }
 });
+
+test('weapon handoff packets bound magazine counts, phase deadlines and deferred actions', () => {
+    const rounds = {PISTOL:15, SHOTGUN:12, AR:37, SNIPER:8, MINIGUN:100};
+    const handling = {rounds, hand:'returning', handWeapon:'AR', outgoingLight:'SHOTGUN', handAge:.07, handRemaining:.13,
+        reloadWeapon:null, reloadRemaining:0, pendingFire:'AR', queuedReload:null, launchPending:false, lastHeavyAge:null};
+    const state = {type:'handling_state', peerId:'pilot', lifeId:2, revision:123, commandAck:4, shotAck:42, tetherActive:false, handling};
+    const valid = parseNetworkPacket(state);
+    assert.ok(valid?.type === 'handling_state');
+    rounds.AR = 36;
+    assert.equal(valid.handling.rounds.AR, 37, 'the accepted state owns a bounded copy of the input');
+    for (const invalid of [{rounds:{...rounds,MINIGUN:101}}, {rounds:{...rounds,PISTOL:-1}}, {hand:'ready'},
+        {outgoingLight:'SNIPER'}, {outgoingLight:'SHOTGUN',handWeapon:'PISTOL'}, {handRemaining:Infinity}, {pendingFire:null,reloadWeapon:'PISTOL',reloadRemaining:.5},
+        {launchPending:true}, {queuedReload:'AR'}, {pendingFire:'SHOTGUN'}, {hand:'drawn',handRemaining:.1}, {rounds:[]}, {lastHeavyAge:42}]) {
+        assert.equal(parseNetworkPacket({...state, handling:{...handling,...invalid}}),null);
+    }
+    const command = {type:'handling_command', action:'grapple', weapon:'AR', lifeId:2, sequence:1};
+    assert.ok(parseNetworkPacket(command));
+    for (const change of [{action:'launch'}, {sequence:0}, {lifeId:-1}, {weapon:'RIFLE'}])
+        assert.equal(parseNetworkPacket({...command,...change}), null);
+    for (const change of [{inspectTime:Infinity},{switchTime:-.3},{movingHook:'false'},{grounded:3}])
+        assert.equal(parseNetworkPacket({...validUpdate,...change}), null);
+});

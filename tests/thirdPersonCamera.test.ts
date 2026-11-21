@@ -6,8 +6,12 @@ import {
     resolveThirdPersonCameraPosition,
     shouldUseThirdPersonView,
 } from '../src/thirdPersonCamera.ts';
+import { CyborgAvatar } from '../src/cyborgAvatar.ts';
+import { CYBORG_SCALE } from '../src/playerAvatar.ts';
+import { loadCyborgTestAssets } from './cyborgTestAsset.ts';
+import { DEFAULT_FOV, PLAYER_HEIGHT } from '../src/config.ts';
 import { state } from '../src/state.ts';
-import { setThirdPerson, syncThirdPersonPresentation } from '../src/weapons.ts';
+import { createAkimboGuns, createPlayerMesh, prepareLocalPlayerAvatar, disposePlayerVisuals, setThirdPerson, syncThirdPersonPresentation } from '../src/weapons.ts';
 
 test('third-person mode uses a shoulder camera until C is held', () => {
     assert.equal(shouldUseThirdPersonView(false, false), false);
@@ -15,20 +19,37 @@ test('third-person mode uses a shoulder camera until C is held', () => {
     assert.equal(shouldUseThirdPersonView(true, true), false);
 });
 
-test('third-person camera frames the avatar over the right shoulder', () => {
-    const resolved = resolveThirdPersonCameraPosition(
-        new THREE.Vector3(0, 2, 0),
-        new THREE.Quaternion(),
-        [],
-        new THREE.Vector3(),
-    );
+test('third-person camera frames the running avatar over the right shoulder', async () => {
+    const eye = new THREE.Vector3(0, PLAYER_HEIGHT, 0), forward = new THREE.Quaternion();
+    const camera = new THREE.PerspectiveCamera(DEFAULT_FOV, 16 / 9);
+    resolveThirdPersonCameraPosition(eye, forward, [], camera.position);
+    const target = resolveThirdPersonAimTarget(eye, forward, new THREE.Vector3());
+    camera.lookAt(target);
+    camera.updateMatrixWorld(true);
 
-    assert.deepEqual(resolved.toArray(), [1.5, 3.2, 5.5]);
-    assert.deepEqual(resolveThirdPersonAimTarget(
-        new THREE.Vector3(0, 2, 0),
-        new THREE.Quaternion(),
-        new THREE.Vector3(),
-    ).toArray(), [0, 2, -25]);
+    const visor = eye.clone().project(camera), feet = new THREE.Vector3().project(camera);
+    assert.ok(visor.x < 0 && visor.x > -1, 'avatar leaves the crosshair clear');
+    assert.ok(feet.y > -1 && visor.y < 1, 'head and feet fit when looking level');
+    assert.ok((visor.y - feet.y) / 2 > .38, 'on-foot avatar occupies a substantial part of the view');
+    assert.ok(target.z < 0 && target.y === eye.y && target.x === eye.x);
+
+    await loadCyborgTestAssets();
+    const avatar = new CyborgAvatar(0xffffff);
+    avatar.root.scale.setScalar(CYBORG_SCALE);
+    avatar.root.rotation.y = Math.PI;
+    const ankles = ['footL', 'footR'].map(name => avatar.root.getObjectByName(name)!);
+    const point = new THREE.Vector3();
+    try {
+        for (const direction of ['Forward', 'Backward', 'Left', 'Right']) {
+            for (let frame = 0; frame < 60; frame += 3) {
+                avatar.pose({body:'Run.' + direction, bodyTime:frame/120, weapon:'AR'});
+                for (const ankle of ankles) {
+                    assert.ok(ankle.getWorldPosition(point).project(camera).y > -.92,
+                        'the trailing ankle leaves room for the boot at the bottom of the view');
+                }
+            }
+        }
+    } finally { avatar.dispose(); }
 });
 
 test('third-person camera boom stays level at the vertical pitch limits', () => {
@@ -40,8 +61,9 @@ test('third-person camera boom stays level at the vertical pitch limits', () => 
         new THREE.Vector3(),
     );
 
-    assert.ok(Math.abs(resolved.y - 3.2) < 1e-12);
-    assert.ok(Math.abs(Math.hypot(resolved.x, resolved.z) - Math.hypot(1.5, 5.5)) < 1e-12);
+    const level = resolveThirdPersonCameraPosition(new THREE.Vector3(0, 2, 0),
+        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2), [], new THREE.Vector3());
+    assert.ok(resolved.distanceTo(level) < 1e-10);
 });
 
 test('third-person camera pulls in before a wall instead of clipping through it', () => {
@@ -65,43 +87,36 @@ test('third-person camera pulls in before a wall instead of clipping through it'
     assert.ok(resolved.z > 0, 'camera still moves toward its shoulder position');
 });
 
-test('holding C swaps the avatar weapons into first person and restores the saved mode', () => {
-    const camera = new THREE.PerspectiveCamera();
-    const player = new THREE.Group();
-    const leftGun = new THREE.Group();
-    const rightGun = new THREE.Group();
-
-    state.camera = camera;
-    state.playerMesh = player;
-    state.leftGun = leftGun;
-    state.rightGunContainer = rightGun;
+test('holding C switches between the fitted arms and full suit while logical firing anchors stay put', async () => {
+    await loadCyborgTestAssets();
+    state.camera = new THREE.PerspectiveCamera();
+    state.scene = new THREE.Scene();
     state.playerHp = 10;
     state.keyCActive = false;
-
-    setThirdPerson(true);
-    assert.equal(state.isThirdPerson, true);
-    assert.equal(state.isThirdPersonView, true);
-    assert.equal(player.visible, true);
-    assert.equal(leftGun.parent, player);
-    assert.equal(rightGun.parent, player);
-
-    state.keyCActive = true;
-    syncThirdPersonPresentation();
-    assert.equal(state.isThirdPerson, true, 'C does not discard the saved camera mode');
-    assert.equal(state.isThirdPersonView, false);
-    assert.equal(player.visible, false);
-    assert.equal(leftGun.parent, camera);
-    assert.equal(rightGun.parent, camera);
-
-    state.keyCActive = false;
-    syncThirdPersonPresentation();
-    assert.equal(state.isThirdPersonView, true);
-    assert.equal(leftGun.parent, player);
-    assert.equal(rightGun.parent, player);
-
-    setThirdPerson(false);
-    state.camera = null;
-    state.playerMesh = null;
-    state.leftGun = null;
-    state.rightGunContainer = null;
+    createAkimboGuns(); createPlayerMesh(); prepareLocalPlayerAvatar();
+    try {
+        const shell = state.playerMesh!;
+        let visor: THREE.SkinnedMesh | undefined;
+        shell.traverse(node => {
+            if (node instanceof THREE.SkinnedMesh && node.material.name === 'Visor_Smoked_Glass') visor = node;
+        });
+        assert.ok(visor);
+        const left = state.leftGun!, right = state.rightGunContainer!;
+        const fixed = right.getWorldPosition(new THREE.Vector3());
+        setThirdPerson(true);
+        assert.equal(visor!.visible, true);
+        state.keyCActive = true;
+        syncThirdPersonPresentation();
+        assert.equal(state.isThirdPerson, true);
+        assert.equal(state.isThirdPersonView, false);
+        assert.equal(shell.visible, true);
+        assert.equal(visor!.visible, false);
+        state.keyCActive = false;
+        syncThirdPersonPresentation();
+        assert.equal(state.isThirdPersonView, true);
+        assert.equal(visor!.visible, true);
+        assert.equal(left.parent, state.camera);
+        assert.equal(right.parent, state.camera);
+        assert.ok(right.getWorldPosition(new THREE.Vector3()).equals(fixed));
+    } finally { disposePlayerVisuals(); setThirdPerson(false); state.scene = null; state.camera = null; }
 });

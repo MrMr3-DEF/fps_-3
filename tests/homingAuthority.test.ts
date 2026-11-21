@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { state } from '../src/state.ts';
+import { resetPlayerState, state } from '../src/state.ts';
 import { ShotLedger } from '../src/shotAuthority.ts';
 import { TargetMotionHistory, homingReplayCandidates } from '../src/projectileFlight.ts';
-import { PROJECTILE_GUIDANCE_STEP, HOMING_HISTORY_SAMPLES, HOMING_REPLAY_CANDIDATES, HOMING_VERIFICATION_STEPS_PER_SECOND, MINIGUN_RAMP_TIME, WEAPON_STATS } from '../src/config.ts';
+import { PROJECTILE_GUIDANCE_STEP, HOMING_HISTORY_SAMPLES, HOMING_REPLAY_CANDIDATES, HOMING_VERIFICATION_STEPS_PER_SECOND, MINIGUN_RAMP_TIME } from '../src/config.ts';
 import { createAkimboGuns, disposePlayerVisuals, fireProjectile } from '../src/weapons.ts';
 import { setProjectileHomingTarget, resolveProjectileHomingTarget, isHomingTargetInRange } from '../src/projectileHoming.ts';
 import { resetProjectiles, updateProjectiles } from '../src/projectiles.ts';
@@ -30,10 +30,12 @@ test('real client weapon flights remain host-verifiable at fixed and variable fr
         for (const weapon of ['PISTOL', 'AR', 'SHOTGUN', 'MINIGUN'] as WeaponName[]) {
             for (const frames of [[1 / 240], [1 / 60], [0.006, 0.023, 0.014, 0.041]]) {
                 for (const [distance, speed, lag = 0, edge = 0] of [[9, 0], [120, 0], [240, 35], [240, 35, 60], [400, 150], [620, 0], [700, 5, 0, 1]]) {
+                    state.activeWeaponName = weapon;
+                    resetPlayerState();
                     state.scene = new THREE.Scene(); state.camera = new THREE.PerspectiveCamera();
                     state.camera.position.copy(v()); state.camera.lookAt(v(0, 3, -100));
                     Object.assign(state, { isScoped: true, isMultiplayer: true, isHost: false, projectiles: [], projectilePool: [], peers: {}, peerIds: [], obstacles: [] });
-                    createAkimboGuns(); state.activeWeaponName = weapon;
+                    createAkimboGuns();
                     state.rightGun = ({ PISTOL: state.pistolMesh, AR: state.arMesh, SHOTGUN: state.shotgunMesh, MINIGUN: state.minigunMesh } as any)[weapon];
                     state.minigunRamp = MINIGUN_RAMP_TIME;
                     const target = new THREE.Group(), body = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2));
@@ -41,7 +43,7 @@ test('real client weapon flights remain host-verifiable at fixed and variable fr
                     if (edge) {
                         state.scene.updateMatrixWorld(true);
                         const barrel = state.rightGun!.getWorldPosition(new THREE.Vector3());
-                        target.position.z = barrel.z + WEAPON_STATS[weapon].recoil - (700 + Math.sqrt(3) - 0.02);
+                        target.position.z = barrel.z - (700 + Math.sqrt(3) - 0.02);
                         body.quaternion.setFromUnitVectors(v(1, 1, 1).normalize(), v(0, 0, 1));
                     }
                     target.userData = { index: 0, hp: 100, scale: 1, eliminationRevision: 0, bodyMesh: body };
@@ -54,6 +56,7 @@ test('real client weapon flights remain host-verifiable at fixed and variable fr
                     }, broadcastToAll: claim => { if (claim.type === 'hit_target') claims.push(claim); }, flashPeerMesh: () => {} });
                     setProjectileHomingTarget({ kind: 'npc', object: target, targetIndex: 0, targetRevision: 0 });
                     state.scene.updateMatrixWorld(true); fireProjectile();
+                    assert.ok(packet, `the ${weapon} flight fixture must emit a shot`);
                     assert.ok(ledger.record(packet, 1000, false, authority), `${weapon} acquisition at ${distance}`);
                     const count = state.projectiles.length;
                     let elapsed = 0, frame = 0;

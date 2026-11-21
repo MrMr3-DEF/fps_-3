@@ -1,36 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { buildBeanModel } from '../src/weapons.ts';
+import { attachPlayerAvatar } from '../src/playerAvatar.ts';
+import { loadCyborgTestAssets, armorBounds } from './cyborgTestAsset.ts';
 import {
     PLAYER_HITBOX_MAX,
     PLAYER_HITBOX_MIN,
     segmentPlayerHitboxHitT,
 } from '../src/playerHitbox.ts';
 
-test('player hitbox tightly encloses the complete scaled bean model', () => {
-    const bean = buildBeanModel(0x123456, 0xabcdef);
-    bean.scale.setScalar(1.5);
-    bean.updateMatrixWorld(true);
-    const bounds = new THREE.Box3().setFromObject(bean);
-
-    assert.ok(bounds.min.distanceTo(new THREE.Vector3(
-        PLAYER_HITBOX_MIN.x,
-        PLAYER_HITBOX_MIN.y,
-        PLAYER_HITBOX_MIN.z,
-    )) < 0.002);
-    assert.ok(bounds.max.distanceTo(new THREE.Vector3(
-        PLAYER_HITBOX_MAX.x,
-        PLAYER_HITBOX_MAX.y,
-        PLAYER_HITBOX_MAX.z,
-    )) < 0.002);
+test('standing cyborg armor fits the gameplay hitbox at its visor-calibrated scale', async () => {
+    await loadCyborgTestAssets();
+    const shell = new THREE.Group(), avatar = attachPlayerAvatar(shell, 0x123456)!;
+    avatar.rig.pose({body:'Idle.Armed', bodyTime:0, weapon:'AR', action:'Ready'});
+    const bounds = armorBounds(shell);
+    const combat = new THREE.Box3(new THREE.Vector3(PLAYER_HITBOX_MIN.x, PLAYER_HITBOX_MIN.y, PLAYER_HITBOX_MIN.z),
+        new THREE.Vector3(PLAYER_HITBOX_MAX.x, PLAYER_HITBOX_MAX.y, PLAYER_HITBOX_MAX.z));
+    assert.ok(combat.clone().expandByScalar(.012).containsBox(bounds), 'combat box encloses armed suit');
+    assert.ok(combat.max.y - bounds.max.y < .12 && bounds.min.y - combat.min.y < .06, 'sole and crown match');
+    avatar.dispose();
 });
 
-test('player hitbox covers the bean from booster to head without extra side room', () => {
+test('player hitbox covers the cyborg from sole to crown without extra side room', () => {
     const position = new THREE.Vector3(0, 0, -10);
     assert.notEqual(segmentPlayerHitboxHitT(
-        new THREE.Vector3(0, 1.6, 0),
-        new THREE.Vector3(0, 1.6, -20),
+        new THREE.Vector3(0, 0.53, 0),
+        new THREE.Vector3(0, 0.53, -20),
         position,
         0,
     ), null, 'upper head is hittable');
@@ -39,10 +34,10 @@ test('player hitbox covers the bean from booster to head without extra side room
         new THREE.Vector3(0, -1.6, -20),
         position,
         0,
-    ), null, 'booster is hittable');
+    ), null, 'boots are hittable');
     assert.equal(segmentPlayerHitboxHitT(
-        new THREE.Vector3(0.901, 0, 0),
-        new THREE.Vector3(0.901, 0, -20),
+        new THREE.Vector3(0.551, 0, 0),
+        new THREE.Vector3(0.551, 0, -20),
         position,
         0,
     ), null, 'a shot immediately outside the side misses');
@@ -50,17 +45,17 @@ test('player hitbox covers the bean from booster to head without extra side room
 
 test('empty space in the bounding cuboid corners is part of the hitbox', () => {
     const position = new THREE.Vector3(0, 0, -10);
-    // At this height the rounded head is much narrower than the full body
+    // At this height the helmet is much narrower than the full body
     // width. A mesh-shaped collider would miss; the requested cuboid hits.
     assert.notEqual(segmentPlayerHitboxHitT(
-        new THREE.Vector3(0.85, 1.6, 0),
-        new THREE.Vector3(0.85, 1.6, -20),
+        new THREE.Vector3(0.53, 0.53, 0),
+        new THREE.Vector3(0.53, 0.53, -20),
         position,
         0,
     ), null);
 });
 
-test('player hitbox rotates with the bean', () => {
+test('player hitbox rotates with the cyborg', () => {
     const position = new THREE.Vector3(3, 2, -8);
     const yaw = Math.PI / 2;
     assert.notEqual(segmentPlayerHitboxHitT(
@@ -70,8 +65,8 @@ test('player hitbox rotates with the bean', () => {
         yaw,
     ), null);
     assert.equal(segmentPlayerHitboxHitT(
-        new THREE.Vector3(0, 3.651, -8),
-        new THREE.Vector3(6, 3.651, -8),
+        new THREE.Vector3(0, 2.561, -8),
+        new THREE.Vector3(6, 2.561, -8),
         position,
         yaw,
     ), null);

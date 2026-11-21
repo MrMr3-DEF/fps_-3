@@ -24,7 +24,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
     try {
         target = new THREE.WebGLRenderTarget(32, 32);
         representatives.push(...prepareParticleResources(), ...(infantry?.warmModels ?? []));
-        if (sword) {
+        if (sword?.userData.lightning) {
             katanaEffects = new KatanaEffects();
             slash = createKatanaSlash();
             updateKatanaLightning(sword.userData.lightning, KATANA.charge, 0, false);
@@ -43,7 +43,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
         };
         // Hidden weapon/effect geometry otherwise waits until the first switch/shot
         // to reach WebGL. Draw it only into the tiny offscreen preparation target.
-        for (const object of [...representatives, state.leftGun, state.pistolMesh, state.shotgunMesh,
+        for (const object of [...representatives, state.playerMesh, state.leftGun, state.pistolMesh, state.shotgunMesh,
             state.arMesh, state.sniperMesh, state.minigunMesh, state.katanaMesh, forgottenMecha?.combat.effects.group, forgottenMecha?.pilot.rockets.group,
             gothGirlfriend?.group]) object?.traverse(warmObject);
         const textures = new Set<THREE.Texture>();
@@ -98,7 +98,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
             object.frustumCulled = original.frustumCulled;
         }
         for (const object of representatives) scene.remove(object);
-        if (sword) updateKatanaLightning(sword.userData.lightning, 0, 0, false);
+        if (sword?.userData.lightning) updateKatanaLightning(sword.userData.lightning, 0, 0, false);
         // Cancellation may already have disposed/replaced the arena.
         if (state.scene === scene) {
             cycle.synchronizeElapsedSeconds(elapsed, true);

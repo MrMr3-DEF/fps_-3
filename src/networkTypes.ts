@@ -1,6 +1,7 @@
 import { fields, isPacketRecord as isRecord, projectKnown, variant, vectorFields as vec, type Projection } from './networkProjection.js';
 import { parseMechaPacket, isMechaState, mechaStateFields, type MechaPacket, type MechaState } from './mechaNetworkTypes.js';
 import { isUsername, isPeerId } from './roomIdentity.js';
+import { isHandlingSnapshot, handlingFields, type HandlingCommand, type HandlingStatePacket } from './handlingNetworkTypes.js';
 import { MAX_PLAYERS, PLAYER_MAX_HP, MAX_SHOT_PELLET_INDEX } from './config.js';
 import { infantryEventFields, infantryStateFields, isInfantryEvent, isInfantrySequence, isInfantryState,
     type InfantryEventPacket, type InfantryState, type InfantryStatePacket } from './infantryNetworkTypes.js';
@@ -55,6 +56,11 @@ export interface UpdatePacket {
     hookPos: Vec3Packet | null;
     isHovering: boolean;
     hoverKeys: HoverKeysPacket | null;
+    grounded?: boolean;
+    movingHook?: boolean;
+    scoped?: boolean;
+    inspectTime?: number;
+    switchTime?: number;
     hp: number;
     maxHp: number;
     /** Present only on host-originated updates. */
@@ -63,6 +69,7 @@ export interface UpdatePacket {
 
 export interface FirePacket {
     type: 'fire';
+    lifeId?: number;
     shotId: number;
     senderPeerId?: string;
     weapon: FirearmName;
@@ -156,6 +163,8 @@ export interface PlayerRespawnPacket {
 
 export interface JumpPacket {
     type: 'jump';
+    lifeId?: number;
+    powered?: boolean;
     senderPeerId?: string;
 }
 
@@ -201,6 +210,7 @@ export interface PlayerListEntry extends LobbyPlayer { kills: number; deaths: nu
 export interface PlayerListPacket { type: 'player_list'; players: PlayerListEntry[]; senderPeerId?: string; }
 
 export type NetworkPacket =
+    | HandlingCommand | HandlingStatePacket
     | MeleeCommand | MeleeEvent | MeleeHitEvent
     | MechaPacket
     | InfantryStatePacket | InfantryEventPacket
@@ -299,6 +309,17 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
     if (!isRecord(value) || !Object.hasOwn(value, 'type') || typeof value.type !== 'string' || !isSender(value.senderPeerId)) return null;
 
     switch (value.type) {
+        case 'handling_command':
+            return isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.sequence, 1, Number.MAX_SAFE_INTEGER)
+                && isWeaponName(value.weapon) && ['reload','grapple','release','raise','cancel'].some(action => action === value.action)
+                ? value as unknown as HandlingCommand : null;
+        case 'handling_state':
+            return isPeerId(value.peerId) && isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER)
+                && isInteger(value.revision, 1, Number.MAX_SAFE_INTEGER) && isInteger(value.commandAck, 0, Number.MAX_SAFE_INTEGER)
+                && isInteger(value.shotAck, -1, Number.MAX_SAFE_INTEGER) && typeof value.tetherActive === 'boolean' && isHandlingSnapshot(value.handling)
+                && (!value.tetherActive || value.handling.hand === 'drawn' && !value.handling.launchPending)
+                && (value.rejected === undefined || typeof value.rejected === 'boolean')
+                ? value as unknown as HandlingStatePacket : null;
         case 'melee_hit': {
             if (Object.keys(value).some(key => !['type', 'senderPeerId', 'sequence', 'lifeId', 'target', 'contact', 'execution'].includes(key)) ||
                 !isPeerId(value.senderPeerId) || !isInteger(value.sequence, 0, Number.MAX_SAFE_INTEGER) ||
@@ -334,6 +355,11 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
                 typeof value.isMouseDown !== 'boolean' ||
                 typeof value.isDead !== 'boolean' || !isHookState(value.hookState) ||
                 typeof value.isHovering !== 'boolean' ||
+                !(value.grounded === undefined || typeof value.grounded === 'boolean') ||
+                !(value.movingHook === undefined || typeof value.movingHook === 'boolean') ||
+                !(value.scoped === undefined || typeof value.scoped === 'boolean') ||
+                !(value.inspectTime === undefined || isFiniteNumber(value.inspectTime, 0, 3.801)) ||
+                !(value.switchTime === undefined || isFiniteNumber(value.switchTime, 0, .151)) ||
                 !(value.hookPos === null || isVec3(value.hookPos)) ||
                 !(value.hoverKeys === null || isHoverKeys(value.hoverKeys)) ||
                 !(value.dayNightElapsedSeconds === undefined || isFiniteNumber(
@@ -345,6 +371,7 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
             return value as unknown as UpdatePacket;
 
         case 'fire': {
+            if (value.lifeId !== undefined && !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER)) return null;
             if (!isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) || (!isWeaponName(value.weapon) || value.weapon === 'KATANA') || !isVec3(value.barrelPos) || !isVec3(value.dir) ||
                 !(value.hitPoint === undefined || isVec3(value.hitPoint)) ||
                 !isInteger(value.spreadSeed, 0, 0xffffffff) ||
@@ -417,7 +444,9 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
             return value as unknown as PlayerListPacket;
 
         case 'jump':
-            return value as unknown as JumpPacket;
+            return (value.powered === undefined || typeof value.powered === 'boolean') &&
+                (value.lifeId === undefined || isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER))
+                ? value as unknown as JumpPacket : null;
 
         case 'target_state':
             return isTargetState(value) ? value as unknown as TargetStatePacket : null;
@@ -446,13 +475,16 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
 const targetFields = { ...fields('targetIndex', 'maxHp', 'hp', 'scale', 'color'), position: vec };
 const playerFields = fields('peerId', 'username', 'bodyColor');
 const packetFields = {
+    handling_command: fields('action','weapon','sequence','lifeId'),
+    handling_state: { ...fields('peerId','lifeId','revision','commandAck','shotAck','rejected','tetherActive'), handling: handlingFields },
     melee_command: fields('action', 'sequence', 'lifeId'),
     melee_event: { ...fields('action', 'sequence', 'lifeId', 'charged', 'yaw', 'pitch'), origin: vec },
     melee_hit: { ...fields('sequence', 'lifeId', 'target', 'execution'), contact: vec },
     update: { ...fields('bodyColor', 'lifeId', 'username', 'yaw', 'pitch', 'activeWeapon', 'switchState', 'nextWeapon',
-        'isMouseDown', 'isDead', 'hookState', 'isHovering', 'hp', 'maxHp', 'dayNightElapsedSeconds'),
+        'isMouseDown', 'isDead', 'hookState', 'isHovering', 'hp', 'maxHp', 'dayNightElapsedSeconds',
+        'grounded','movingHook','scoped','inspectTime','switchTime'),
         pos: vec, hookPos: vec, hoverKeys: fields('w', 's', 'a', 'd') },
-    fire: { ...fields('shotId', 'weapon', 'spreadSeed', 'pelletCount', 'homingStartDistance'), barrelPos: vec, dir: vec, hitPoint: vec,
+    fire: { ...fields('shotId', 'lifeId', 'weapon', 'spreadSeed', 'pelletCount', 'homingStartDistance'), barrelPos: vec, dir: vec, hitPoint: vec,
         homingTarget: variant('kind', {
             mecha: fields('kind', 'targetRevision'), npc: fields('kind', 'targetIndex', 'targetRevision'),
             peer: fields('kind', 'targetPeerId', 'targetLifeId'),
@@ -464,7 +496,7 @@ const packetFields = {
     player_health: fields('peerId', 'lifeId', 'hp', 'mechaSequence'),
     respawn_request: fields('lifeId'),
     player_respawn: { ...fields('peerId', 'lifeId', 'yaw', 'weapon', 'cooldownMs'), pos: vec },
-    start_game: {}, jump: {}, peer_left: fields('peerId'), lobby_color: fields('bodyColor'),
+    start_game: {}, jump: fields('lifeId', 'powered'), peer_left: fields('peerId'), lobby_color: fields('bodyColor'),
     lobby_roster: { players: [playerFields] }, player_list: { players: [{ ...playerFields, ...fields('kills', 'deaths') }] },
     target_state: targetFields,
     infantry_state: { state: infantryStateFields },

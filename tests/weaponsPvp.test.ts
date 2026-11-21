@@ -14,7 +14,7 @@ test('sniper ignores dead bodies and decorations, and hits the live body with it
     state.isMultiplayer = true;
     state.username = 'Guest1';
     createAkimboGuns();
-    state.activeWeaponName = 'SNIPER';
+    state.activeWeaponName = 'SNIPER'; state.weaponHandling.reset('SNIPER');
     state.rightGun = state.sniperMesh;
     state.scene.updateMatrixWorld(true);
     const packets: NetworkPacket[] = [];
@@ -52,7 +52,7 @@ test('sniper ignores dead bodies and decorations, and hits the live body with it
 test('sniper ends at the floor and cannot hit a body below it', () => {
     state.scene = new THREE.Scene(); state.camera = new THREE.PerspectiveCamera(); state.camera.position.set(0, 5, 0);
     state.camera.lookAt(0, 0, 0); state.isMultiplayer = true; createAkimboGuns();
-    state.activeWeaponName = 'SNIPER'; state.rightGun = state.sniperMesh;
+    state.activeWeaponName = 'SNIPER'; state.weaponHandling.reset('SNIPER'); state.rightGun = state.sniperMesh;
     const mesh = new THREE.Group(); mesh.position.set(0, -5, 0);
     state.peers = { below: { mesh, hp: 10, lifeId: 1 } as any }; state.peerIds = ['below'];
     state.scene.updateMatrixWorld(true);

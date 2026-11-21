@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Euler, PerspectiveCamera } from 'three';
 import { state } from '../src/state.js';
+import { WeaponHandling } from '../src/weaponHandling.js';
+import { requestReload } from '../src/weapons.js';
 import { setupMobileControls } from '../src/mobileControls.js';
 import { beginInput, endInput, isInputActive, setTouchMode, touchMove } from '../src/inputSession.js';
 import { cloneSettings, DEFAULT_USER_SETTINGS, userSettings } from '../src/settings.js';
@@ -65,7 +67,8 @@ class TouchButton extends TouchElement { type = ''; constructor() { super('butto
 
 for (const coarsePointer of [true, false]) test(`two touch owners can move and fire/aim together with a ${coarsePointer ? 'coarse' : 'fine'} primary pointer; cancellation, mode changes and blur release fire`, async () => {
     const previousSettings = cloneSettings(userSettings);
-    const previousState = { controls: state.controls, camera: state.camera, baseSensitivity: state.baseSensitivity, isScoped: state.isScoped };
+    const previousState = { controls: state.controls, camera: state.camera, baseSensitivity: state.baseSensitivity, isScoped: state.isScoped,
+        weaponHandling: state.weaponHandling, weaponTime: state.weaponTime };
     const body = new TouchElement('body');
     const win = new EventTarget();
     const doc = Object.assign(new EventTarget(), { body, hidden: false, fullscreenElement: null,
@@ -85,11 +88,35 @@ for (const coarsePointer of [true, false]) test(`two touch owners can move and f
         state.baseSensitivity = 1;
         state.isScoped = false;
         let pilotWeapon: PilotWeapon = 'rocket';
-        const sync = setupMobileControls({ keyDown(code) { if (code === 'KeyE') pilotWeapon = cyclePilotWeapon(pilotWeapon); }, keyUp() {}, fire: held => fires.push(held) });
+        const presses: string[] = [];
+        state.weaponTime = 0;
+        state.weaponHandling = new WeaponHandling();
+        state.weaponHandling.spendShot('PISTOL', 0);
+        state.weaponHandling.pressGrapple('PISTOL', 0);
+        const sync = setupMobileControls({ keyDown(code) {
+            presses.push(code);
+            if (code === 'KeyE') requestReload();
+            if (code === 'TouchWeapon') pilotWeapon = cyclePilotWeapon(pilotWeapon);
+        }, keyUp() {}, fire: held => fires.push(held) });
         beginInput();
         await Promise.resolve();
         const layer = body.children.find(child => child.id === 'mobile-controls')!;
         const weapon = layer.querySelector('[data-control="weapon"]')!;
+        const reload = layer.querySelector('[data-control="reload"]')!;
+        reload.pointer('pointerdown', 39, 0, 0);
+        state.weaponHandling.pressGrapple('PISTOL', .05);
+        state.weaponTime = 1;
+        state.weaponHandling.advance(state.weaponTime);
+        reload.pointer('pointermove', 39, 0, 0);
+        assert.equal(state.weaponHandling.reload, null, 'holding Reload through a cancelled grapple cannot start a recharge');
+        reload.pointer('pointerup', 39, 0, 0);
+        reload.pointer('pointerdown', 39, 0, 0); reload.pointer('pointerup', 39, 0, 0);
+        assert.deepEqual(presses, ['KeyE', 'KeyE']);
+        assert.equal(state.weaponHandling.queuedReload, 'PISTOL', 'the fresh press stows the idle launcher');
+        state.weaponTime = state.weaponHandling.handEnds;
+        state.weaponHandling.advance(state.weaponTime);
+        assert.equal(state.weaponHandling.snapshot(state.weaponTime).reloadWeapon, 'PISTOL');
+        assert.equal(pilotWeapon, 'rocket');
         weapon.pointer('pointerdown', 40, 0, 0); assert.equal(pilotWeapon, 'stomp');
         weapon.pointer('pointerdown', 41, 0, 0); assert.equal(pilotWeapon, 'stomp', 'another finger cannot cycle a held Weapon button');
         weapon.pointer('pointerup', 40, 0, 0); weapon.pointer('pointerdown', 41, 0, 0);

@@ -3,7 +3,8 @@ export const MAX_TOUCH_SCALE = 2.5;
 
 export const TOUCH_CONTROLS = [
     { id: 'stick', label: 'Movement', width: 106, height: 106 },
-    { id: 'weapon', label: 'Weapon', width: 54, height: 54, key: 'KeyE' },
+    { id: 'weapon', label: 'Weapon', width: 54, height: 54, key: 'TouchWeapon' },
+    { id: 'reload', label: 'Reload', width: 54, height: 54, key: 'KeyE' },
     { id: 'inspect', label: 'Inspect', width: 54, height: 54, key: 'KeyX' },
     { id: 'view', label: 'View', width: 54, height: 54, key: 'KeyP' },
     { id: 'pause', label: 'Ⅱ', width: 54, height: 54 },
@@ -68,9 +69,9 @@ export function getTouchControlRect(id: TouchControlId, layout: TouchLayout, bou
         x = bounds.width / 2 - 80 - width / 2;
         y = bounds.height - Math.max(10, bounds.bottom) - height / 2;
     } else {
-        const utilityIndex = ['weapon', 'inspect', 'view', 'pause'].indexOf(id);
+        const utilityIndex = ['reload', 'weapon', 'inspect', 'view', 'pause'].indexOf(id);
         if (utilityIndex >= 0) {
-            x = bounds.width - Math.max(16, bounds.right) - 246 + utilityIndex * 64 + width / 2;
+            x = bounds.width - Math.max(16, bounds.right) - 310 + utilityIndex * 64 + width / 2;
             y = Math.max(12, bounds.top) + height / 2;
         } else {
             const column = ['grapple', 'hover', 'aim'].indexOf(id);

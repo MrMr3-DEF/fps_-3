@@ -1,15 +1,17 @@
-import { buildKatana } from './katanaModel.js';
-import { KATANA } from './config.js';
+import { isLight, reloadingBatteryStage } from './weaponHandling.js';
+import { createPreviewProp, CyborgAvatar, cyborgAssetsReady, loadCyborgAssets } from './cyborgAvatar.js';
+import { CYBORG_SCALE } from './playerAvatar.js';
+import { setPeerScanBounds } from './smartGogglesPeerMath.js';
+import { FIREARM_MAGAZINES, GRAPPLE_DRAW_TIME, HEAVY_HANDOFF_TIME, HOOK_MAX_RANGE, HOOK_SPEED, KATANA } from './config.js';
 import * as THREE from 'three';
-import { buildBeanModel, setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, isSharedGeometry, SHARED_BODY_MAT } from './weapons.js';
-import { characterColor, saveCharacterColor } from './appearance.js';
+import { characterColor } from './appearance.js';
+import { changePlayerSuitColor } from './playerAppearance.js';
 import { state } from './state.js';
 import { WEAPON_STATS, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, PROJECTILE_SPEED } from './config.js';
 import { SmartGogglesHud } from './smartGoggles.js';
 import { createWeaponScanGeometry, fitWeaponPreviewDistance, getVisibleWeaponBounds, WeaponMenuScan, type WeaponScanGeometry } from './weaponMenuScan.js';
 import { lobbyPreviewPosition, lobbyScanPlayers } from './lobbyLineup.js';
 
-const WEAPON_PREVIEW_FIT_RADIUS = 1.45;
 const WEAPON_SCAN_EXIT_MS = 180;
 const WEAPON_SLIDE_MS = 520;
 const WEAPON_RETURN_DELAY_MS = 850;
@@ -28,36 +30,60 @@ export function setupMainMenu(): void {
     const arsenal = document.getElementById('panel-weapons')!;
     weaponsButton.onclick = () => { main.style.display = 'none'; arsenal.style.display = 'flex'; };
     arsenal.querySelector<HTMLButtonElement>('[data-menu-back]')!.onclick = () => { arsenal.style.display = 'none'; main.style.display = 'flex'; };
-    const labels: Record<string, string> = { PISTOL: 'Pistol', SHOTGUN: 'Shotgun', AR: 'Assault rifle', SNIPER: 'Sniper', MINIGUN: 'Minigun', KATANA: 'Katana' };
+    const labels: Record<string, string> = { PISTOL: 'Pistol', SHOTGUN: 'Shotgun', AR: 'Assault rifle', SNIPER: 'Sniper', MINIGUN: 'Minigun', KATANA: 'Katana', GRAPPLE: 'Grapple' };
     const tabs = arsenal.querySelector('.weapon-tabs')!;
-    const weaponOrder = [...Object.keys(WEAPON_STATS), 'KATANA'];
+    const weaponOrder = [...Object.keys(WEAPON_STATS), 'KATANA', 'GRAPPLE'];
     let selectedWeapon = 'PISTOL';
+    let view: 'held' | 'closeup' = 'held';
+    let reloadAt: number | undefined;
+    const heldButton = document.getElementById('weapon-held') as HTMLButtonElement;
+    const closeButton = document.getElementById('weapon-closeup') as HTMLButtonElement;
+    const replayButton = document.getElementById('weapon-reload') as HTMLButtonElement;
+    const compactSpecs = document.getElementById('weapon-compact-specs')!;
     const setWeaponSpecs = (name: string) => {
+        let facts: (string | number)[][];
         if (name === 'KATANA') {
-            const panel = document.getElementById('weapon-specs')!;
-            panel.setAttribute('aria-label', 'Katana specifications');
-            panel.replaceChildren(...[['Damage', `${KATANA.damage} / ${KATANA.chargedDamage} charged`], ['Radius', `${KATANA.radius} / ${KATANA.chargedRadius} m`], ['Arc', '180°'], ['Charge', `${KATANA.charge}s`], ['Swing', `${KATANA.duration}s`], ['Attack', 'Hold, then release'], ['Equip', 'V (rebindable)']].map(([key,value]) => {
-                const fact=document.createElement('span'); fact.className='goggles-target-fact'; fact.textContent=`${key}: ${value}`; return fact;
-            })); return;
+            facts = [['Damage', `${KATANA.damage} / ${KATANA.chargedDamage} charged`], ['Radius', `${KATANA.radius} / ${KATANA.chargedRadius} m`],
+                ['Arc', '180°'], ['Charge', `${KATANA.charge}s`], ['Swing', `${KATANA.duration}s`], ['Attack', 'Hold, then release']];
+        } else if (name === 'GRAPPLE') {
+            facts = [['Hand','Left'], ['Range', `${HOOK_MAX_RANGE} m`], ['Hook speed', `${HOOK_SPEED} m/s`],
+                ['Draw', `${GRAPPLE_DRAW_TIME} s`], ['After heavy fire', `${HEAVY_HANDOFF_TIME} s`], ['Action', 'Launch / release']];
+        } else {
+            const stats = WEAPON_STATS[name as keyof typeof WEAPON_STATS];
+            const magazine = FIREARM_MAGAZINES[name as keyof typeof FIREARM_MAGAZINES];
+            const rpm = name === 'MINIGUN' ? `${MINIGUN_MIN_RPM}–${MINIGUN_MAX_RPM}` : (60 / stats.fireRate).toFixed(0);
+            facts = [['Damage / pellet', stats.damage], ['Pellets / shot', stats.pellets ?? 1],
+                ['Max damage / shot', stats.damage * (stats.pellets ?? 1)], ['RPM', rpm], ['Magazine', magazine.capacity],
+                ['Reload', magazine.reloadSeconds + ' s'], ['Speed', name === 'SNIPER' ? 'Hitscan' : `${PROJECTILE_SPEED} m/s`],
+                ['Base spread', `${(Math.atan(stats.spread) * 180 / Math.PI).toFixed(2)}°`], ['Recoil', stats.recoil.toFixed(2)]];
+            if (name === 'MINIGUN') facts.push(['Spin-up delay', `${MINIGUN_SHOOT_DELAY}s`], ['Full ramp', `${MINIGUN_RAMP_TIME}s`]);
+            else facts.push(['Shot cooldown', `${stats.fireRate}s`]);
         }
-        const stats = WEAPON_STATS[name as keyof typeof WEAPON_STATS];
-        const rpm = name === 'MINIGUN' ? `${MINIGUN_MIN_RPM}–${MINIGUN_MAX_RPM}` : (60 / stats.fireRate).toFixed(0);
-        const specs = [['Damage / pellet', stats.damage], ['Pellets / shot', stats.pellets ?? 1], ['Max damage / shot', stats.damage * (stats.pellets ?? 1)], ['RPM', rpm], ['Speed', name === 'SNIPER' ? 'Hitscan' : `${PROJECTILE_SPEED} m/s`], ['Base spread', `${(Math.atan(stats.spread) * 180 / Math.PI).toFixed(2)}°`], ['Recoil', stats.recoil.toFixed(2)]];
-        if (name === 'MINIGUN') specs.push(['Spin-up delay', `${MINIGUN_SHOOT_DELAY}s`], ['Full ramp', `${MINIGUN_RAMP_TIME}s`]);
-        else specs.push(['Shot cooldown', `${stats.fireRate}s`]);
-        const specsPanel = document.getElementById('weapon-specs')!;
-        specsPanel.setAttribute('aria-label', `${labels[name]} specifications`);
-        specsPanel.replaceChildren(...specs.map(([key, value]) => {
+        const panel = document.getElementById('weapon-specs')!;
+        panel.setAttribute('aria-label', `${labels[name]} specifications`);
+        const nodes = facts.map(([key,value]) => {
             const fact = document.createElement('span');
-            fact.className = 'goggles-target-fact';
-            fact.textContent = `${key}: ${value}`;
-            return fact;
-        }));
+            fact.className = 'goggles-target-fact'; fact.textContent = `${key}: ${value}`; return fact;
+        });
+        compactSpecs.replaceChildren(...nodes.map(n => n.cloneNode(true)));
+        panel.replaceChildren(...nodes);
     };
+    function chooseView(next: 'held' | 'closeup') {
+        view = next;
+        heldButton.setAttribute('aria-pressed',String(next === 'held'));
+        closeButton.setAttribute('aria-pressed',String(next === 'closeup'));
+        stopDrag();
+        updateMenuPreview();
+    }
+    heldButton.onclick = () => chooseView('held');
+    closeButton.onclick = () => chooseView('closeup');
+    replayButton.onclick = () => { reloadAt = performance.now(); };
     for (const name of weaponOrder) {
         const button = document.createElement('button'); button.className = 'menu-btn secondary'; button.textContent = labels[name]; tabs.append(button);
         button.onclick = () => {
             selectedWeapon = name;
+            reloadAt = undefined; replayButton.hidden = name === 'KATANA';
+            setWeaponSpecs(name);
             for (const tab of tabs.querySelectorAll('button')) tab.setAttribute('aria-pressed', String(tab === button));
         };
     }
@@ -80,49 +106,43 @@ export function setupMainMenu(): void {
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); stage.append(renderer.domElement);
     scene.add(new THREE.HemisphereLight(0xd9f3ff, 0x455670, 3));
     const light = new THREE.DirectionalLight(0xffffff, 4); light.position.set(-3, 4, 5); scene.add(light);
-    const bean = buildBeanModel(Number.parseInt(characterColor.slice(1), 16), 0x00ffcc); bean.rotation.y = Math.PI; scene.add(bean);
-    // A fixed pool of glowing boxes echoes the in-match rocket particles. The
-    // flame is a sibling so its animation cannot resize the peer scan box.
-    const flameGeometry = new THREE.BoxGeometry(0.15, 0.15, 0.15);
-    const flameMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
-    const flame = new THREE.Group();
-    const flameCount = 24;
-    const flameParticles = new THREE.InstancedMesh(flameGeometry, flameMaterial, flameCount);
-    const flameMatrix = new THREE.Matrix4();
-    flameParticles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    flameParticles.frustumCulled = false;
-    for (let i = 0; i < flameCount; i++) flameParticles.setColorAt(i, new THREE.Color(i % 3 === 0 ? 0xffeb70 : i % 2 === 0 ? 0xffb01d : 0xff6e00));
-    flame.add(flameParticles);
-    scene.add(flame);
-    const lobbyModels = new Map<string, { model: THREE.Group; booster: THREE.Group; particles: THREE.InstancedMesh; color: number }>();
+    const previewRoot = new THREE.Group();
+    scene.add(previewRoot);
+    // Keep the frame on the armored silhouette as the boots and back ducts fire.
+    const previewBounds = new THREE.Box3(new THREE.Vector3(-.57,-1.02,-.35), new THREE.Vector3(.57,1.14,.42));
+    setPeerScanBounds(previewRoot, previewBounds);
+    const previewPeer = { menu: { username: 'Character', mesh: previewRoot, hp: 10, maxHp: 10 } };
+    let avatar: CyborgAvatar | undefined;
+    let disposed = false;
+    const retry = document.createElement('button');
+    retry.className = 'menu-btn secondary preview-retry'; retry.textContent = 'Retry character preview'; retry.hidden = true;
+    stage.append(retry);
+    function loadPreview(): void {
+        retry.hidden = true;
+        void loadCyborgAssets().then(() => { if (!disposed) updateMenuPreview(); }).catch(() => {
+            if (!disposed) retry.hidden = false;
+        });
+    }
+    retry.onclick = loadPreview;
+    loadPreview();
+    function createPreviewAvatar(wrapper: THREE.Group, color: number): CyborgAvatar {
+        const rig = new CyborgAvatar(color);
+        rig.root.scale.setScalar(CYBORG_SCALE);
+        rig.root.position.y = -1.02;
+        wrapper.add(rig.root);
+        return rig;
+    }
+    const lobbyModels = new Map<string, { model: THREE.Group; rig: CyborgAvatar; color: number }>();
     const disposeLobbyModel = (id: string) => {
         const item = lobbyModels.get(id);
         if (!item) return;
-        scene.remove(item.model, item.booster);
-        // Instance/color buffers belong to this guest; flame geometry/material
-        // stay shared with the creator preview and the remaining lobby guests.
-        item.particles.dispose();
-        const geometries = new Set<THREE.BufferGeometry>();
-        const materials = new Set<THREE.Material>();
-        item.model.traverse(object => {
-            if (!(object instanceof THREE.Mesh || object instanceof THREE.Line)) return;
-            if (!isSharedGeometry(object.geometry)) geometries.add(object.geometry);
-            for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-                if (material !== SHARED_BODY_MAT) materials.add(material);
-            }
-        });
-        geometries.forEach(geometry => geometry.dispose());
-        materials.forEach(material => material.dispose());
+        item.rig.dispose(); item.model.removeFromParent();
         lobbyModels.delete(id);
     };
-    const previewPeer = { menu: { username: 'Character', mesh: bean, hp: 10, maxHp: 10 } };
     stage.tabIndex = 0;
     const weaponModels = new Map<string, THREE.Group>();
+    const propPreviews = new Map<string, ReturnType<typeof createPreviewProp>>();
     const weaponGeometries = new Map<string, WeaponScanGeometry>();
-    const factories: Record<string, () => THREE.Group> = {
-        PISTOL: () => buildGun(WEAPON_STATS.PISTOL.bulletColor),
-        SHOTGUN: buildShotgun, AR: buildAR, SNIPER: buildSniper, MINIGUN: buildMinigun, KATANA: buildKatana,
-    };
     const baseWeaponRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, -Math.PI / 3, 0));
     const returnFromRotation = new THREE.Quaternion();
     let displayedWeapon: string | null = null;
@@ -143,19 +163,21 @@ export function setupMainMenu(): void {
     let lastMotionFrame = 0;
     const rotation = new THREE.Quaternion();
     const yawAxis = new THREE.Vector3(0, 1, 0), pitchAxis = new THREE.Vector3(1, 0, 0);
+    let heldYaw = .62, heldPitch = 0;
     let drag: { id: number; x: number; y: number } | null = null;
     const isWeaponsOpen = () => arsenal.style.display === 'flex' && blocker.style.display !== 'none';
     const getWeaponModel = (name: string): THREE.Group => {
         let weapon = weaponModels.get(name);
         if (weapon) return weapon;
-        const model = factories[name]();
-        const bounds = getVisibleWeaponBounds(model);
-        const center = bounds.getCenter(new THREE.Vector3());
-        const rawDiagonal = bounds.getSize(new THREE.Vector3()).length();
-        // Compress the raw size range so small guns remain readable while
-        // each weapon retains its own visible size and scan envelope.
-        const scale = 2.4 / Math.pow(rawDiagonal, 0.75);
-        model.position.copy(center).multiplyScalar(-scale); model.scale.setScalar(scale);
+        const prop = createPreviewProp(name);
+        const model = prop.model;
+        propPreviews.set(name, prop);
+        // The socket adapter is designed for an actor's wrist. Restore an upright
+        // standalone viewing frame while retaining the same physical asset scale.
+        model.rotation.x = -Math.PI / 2;
+        model.scale.setScalar(CYBORG_SCALE);
+        const center = getVisibleWeaponBounds(model).getCenter(new THREE.Vector3());
+        model.position.copy(center).negate();
         weaponGeometries.set(name, createWeaponScanGeometry(model));
         weapon = new THREE.Group(); weapon.add(model);
         weapon.quaternion.copy(baseWeaponRotation);
@@ -174,13 +196,18 @@ export function setupMainMenu(): void {
         if (pointerId !== undefined && stage.hasPointerCapture(pointerId)) stage.releasePointerCapture(pointerId);
     };
     stage.addEventListener('pointerdown', e => {
-        if (!isWeaponsOpen() || !weaponModel || transition || drag || e.button !== 0) return;
+        if (e.target === retry || !isWeaponsOpen() || transition || drag || e.button !== 0) return;
         e.preventDefault(); stage.setPointerCapture(e.pointerId);
         motion = 'manual'; lastInteractionAt = performance.now();
         drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; stage.classList.add('dragging');
     });
     const rotateWeapon = (x: number, y: number) => {
-        if (!weaponModel || transition) return;
+        if (transition) return;
+        if (view === 'held') {
+            heldYaw += x; heldPitch = THREE.MathUtils.clamp(heldPitch+y, -.55, .55);
+            return;
+        }
+        if (!weaponModel) return;
         motion = 'manual'; lastInteractionAt = performance.now();
         weaponModel.quaternion.premultiply(rotation.setFromAxisAngle(yawAxis, x));
         weaponModel.quaternion.premultiply(rotation.setFromAxisAngle(pitchAxis, y));
@@ -202,11 +229,8 @@ export function setupMainMenu(): void {
     const colorInput = customization.querySelector<HTMLInputElement>('input')!;
     const swatches = customization.querySelector('.color-options')!;
     const pickerTile = customization.querySelector<HTMLElement>('.color-picker-tile')!;
-    const setColor = (color: string) => {
-        if (state.isPlaying) { colorInput.value = characterColor; return; }
-        saveCharacterColor(color); colorInput.value = characterColor;
-        const hex = Number.parseInt(characterColor.slice(1), 16); setBeanColor(bean, hex);
-        if (state.playerMesh) setBeanColor(state.playerMesh, hex);
+    const showColor = () => {
+        colorInput.value = characterColor;
         let presetSelected = false;
         for (const button of swatches.querySelectorAll('button')) {
             const selected = button.dataset.color === characterColor;
@@ -215,11 +239,26 @@ export function setupMainMenu(): void {
         }
         pickerTile.classList.toggle('is-selected', !presetSelected);
     };
+    const setColor = (color: string) => {
+        if (!state.isPlaying) changePlayerSuitColor(color);
+        showColor();
+    };
     for (const [label, color] of [['Cobalt', '#3b5998'], ['Coral', '#df5b64'], ['Mint', '#45b99a'], ['Gold', '#e4ad45'], ['Lilac', '#987bd1']]) {
         const button = document.createElement('button'); button.style.background = color; button.dataset.color = color; button.setAttribute('aria-label', `${label} suit`); button.onclick = () => setColor(color); swatches.append(button);
     }
-    colorInput.addEventListener('input', () => setColor(colorInput.value)); setColor(characterColor);
+    colorInput.addEventListener('input', () => setColor(colorInput.value)); showColor();
     let width = 0, height = 0, last = 0, scanActive = false, lobbyScanActive = false;
+    const panels = ['settings','pause','weapons','host-waiting','join-room','mp','main'].map(key =>
+        document.getElementById('panel-'+key)!);
+    let activePanel: HTMLElement | null = null;
+    const settingsSlot = document.createElement('div');
+    settingsSlot.className = 'settings-character-preview';
+    let layoutDirty = true;
+    const resize = new ResizeObserver(() => { layoutDirty = true; });
+    for (const panel of panels) resize.observe(panel);
+    resize.observe(stage);
+    let navBounds = {right:0,top:0};
+    let frame = {left:0,top:0,right:0,bottom:0};
     let previewVisible = true;
     renderPreview = () => {
         const visible = blocker.style.display !== 'none' && !document.hidden;
@@ -236,52 +275,72 @@ export function setupMainMenu(): void {
         }
         previewVisible = true;
         if (performance.now() - last < 33) return;
-        const weaponsOpen = isWeaponsOpen();
+        const panel = panels.find(item => item.style.display === 'flex') ?? main;
+        const settingsOpen = panel.id === 'panel-settings';
+        if (activePanel !== panel) {
+            activePanel = panel; layoutDirty = true;
+            stopDrag(); reloadAt = undefined;
+            const sidebar = settingsOpen ? panel.querySelector<HTMLElement>('.settings-sidebar') : null;
+            if (sidebar) {
+                sidebar.prepend(settingsSlot);
+                settingsSlot.append(stage);
+            } else if (stage.parentElement !== preview) preview.append(stage);
+            blocker.dataset.previewPanel = panel.id;
+        }
+        customization.disabled = state.isPlaying;
+        if (colorInput.value.toLowerCase() !== characterColor.toLowerCase()) showColor();
+        const weaponsOpen = panel === arsenal;
+        const closeOpen = weaponsOpen && view === 'closeup';
+        if (!cyborgAssetsReady()) {
+            if (weaponsOpen) setWeaponSpecs(selectedWeapon);
+            last = performance.now();
+            return;
+        }
+        if (!avatar) avatar = createPreviewAvatar(previewRoot, Number.parseInt(characterColor.slice(1), 16));
         const lobbyOpen = !state.isPlaying && state.lobbyPlayers.length > 0 &&
             (document.getElementById('panel-host-waiting')!.style.display === 'flex' ||
                 document.getElementById('panel-join-room')!.style.display === 'flex');
         const lobbyGuests = lobbyOpen ? state.lobbyPlayers.slice(1) : [];
+        const ownColor = Number.parseInt(characterColor.slice(1),16);
+        // Only this viewer's suit uses the pending picker color. Every other
+        // person, including a guest's view of the host, follows the host roster.
+        const lineupColor = (player: {peerId:string; bodyColor:number}) =>
+            player.peerId === state.peer?.id ? ownColor : player.bodyColor;
         const wantedIds = new Set(lobbyGuests.map(player => player.peerId));
         for (const id of lobbyModels.keys()) if (!wantedIds.has(id)) disposeLobbyModel(id);
         for (const player of lobbyGuests) {
+            const color = lineupColor(player);
             let item = lobbyModels.get(player.peerId);
             if (!item) {
-                const model = buildBeanModel(player.bodyColor, 0x00ffcc);
-                model.rotation.y = Math.PI;
-                const booster = new THREE.Group();
-                const particles = new THREE.InstancedMesh(flameGeometry, flameMaterial, flameCount);
-                particles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-                particles.frustumCulled = false;
-                for (let i = 0; i < flameCount; i++) particles.setColorAt(i,
-                    new THREE.Color(i % 3 === 0 ? 0xffeb70 : i % 2 === 0 ? 0xffb01d : 0xff6e00));
-                booster.add(particles);
-                scene.add(model, booster);
-                item = { model, booster, particles, color: player.bodyColor };
+                const model = new THREE.Group();
+                const rig = createPreviewAvatar(model, color);
+                scene.add(model); setPeerScanBounds(model, previewBounds);
+                item = { model, rig, color };
                 lobbyModels.set(player.peerId, item);
             }
-            if (item.color !== player.bodyColor) {
-                setBeanColor(item.model, player.bodyColor);
-                item.color = player.bodyColor;
+            if (item.color !== color) {
+                item.rig.setColor(color);
+                item.color = color;
             }
         }
-        const centerColor = lobbyOpen ? state.lobbyPlayers[0].bodyColor : Number.parseInt(characterColor.slice(1), 16);
-        if (bean.userData.previewColor !== centerColor) {
-            setBeanColor(bean, centerColor);
-            bean.userData.previewColor = centerColor;
+        const centerColor = lobbyOpen ? lineupColor(state.lobbyPlayers[0]) : ownColor;
+        if (previewRoot.userData.previewColor !== centerColor) {
+            avatar.setColor(centerColor);
+            previewRoot.userData.previewColor = centerColor;
         }
-        customization.disabled = state.isPlaying;
+
         stage.classList.toggle('weapon-stage', weaponsOpen);
         if (!weaponsOpen) stopDrag();
-        bean.visible = !weaponsOpen;
-        flame.visible = !weaponsOpen;
-        if (!weaponsOpen && (displayedWeapon || transition)) {
+        previewRoot.visible = !closeOpen;
+        stage.tabIndex = weaponsOpen ? 0 : -1;
+        if (!closeOpen && (displayedWeapon || transition)) {
             // Closing the panel may interrupt a slide. Remove both participants
             // so reopening starts with one centered model and a fresh scan.
             if (transition?.incoming) { transition.incoming.position.y = 0; scene.remove(transition.incoming); }
             if (weaponModel) { weaponModel.position.y = 0; scene.remove(weaponModel); }
             transition = null; displayedWeapon = null; weaponModel = null;
         }
-        if (weaponsOpen && !displayedWeapon) {
+        if (closeOpen && !displayedWeapon) {
             weaponModel = getWeaponModel(selectedWeapon);
             resetWeaponMotion(weaponModel);
             scene.add(weaponModel); displayedWeapon = selectedWeapon;
@@ -292,12 +351,33 @@ export function setupMainMenu(): void {
         const shouldScan = !state.isPlaying && !weaponsOpen && main.style.display !== 'none';
         if (!shouldScan && scanActive) { scan.reset(); scanActive = false; }
         if (!lobbyOpen && lobbyScanActive) { lobbyScan.reset(); lobbyScanActive = false; }
-        if (!weaponsOpen) weaponScan.hide();
+        if (!weaponsOpen || view === 'held') weaponScan.hide();
         last = performance.now();
         const reducedMotion = reducedMotionQuery?.matches ?? false;
         const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;
-        if (w !== width || h !== height) { width = w; height = h; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
-        if (weaponsOpen && weaponModel && displayedWeapon !== selectedWeapon && !transition) {
+        if (w !== width || h !== height) {
+            width = w; height = h; renderer.setSize(w,h,false); layoutDirty = true;
+        }
+        if (layoutDirty) {
+            // Reserve the controls' actual footprint. World size stays fixed as
+            // this camera reframes a phone, a desktop lineup or the settings tile.
+            const bounds = panel.getBoundingClientRect();
+            const titleBottom = document.getElementById('title')!.getBoundingClientRect().bottom;
+            navBounds = {right:bounds.right,top:bounds.top};
+            if (settingsOpen) frame = {left:2,top:2,right:w-2,bottom:h-2};
+            else if (w < 700 && w/h < .9) {
+                frame = {left:12,top:Math.max(14,titleBottom+5),right:w-12,bottom:Math.max(titleBottom+45,bounds.top-12)};
+            } else {
+                frame = {left:Math.min(w*.62,bounds.right+18),top:Math.max(18,titleBottom+14),right:w-18,bottom:h-28};
+            }
+            // The Character scan grows to the upper right. Its native tile and
+            // five presets need room beyond the silhouette on compact menus.
+            if (shouldScan && frame.right - frame.left < 640) {
+                frame.right -= Math.min(162, (frame.right - frame.left) * .48);
+            }
+            layoutDirty = false;
+        }
+        if (closeOpen && weaponModel && displayedWeapon !== selectedWeapon && !transition) {
             stopDrag();
             if (reducedMotion) {
                 scene.remove(weaponModel);
@@ -338,17 +418,32 @@ export function setupMainMenu(): void {
             setWeaponSpecs(displayedWeapon!);
         }
         const weaponGeometry = weaponsOpen && displayedWeapon ? weaponGeometries.get(displayedWeapon) : undefined;
-        const distanceFor = (name: string) => fitWeaponPreviewDistance(
-            Math.max(WEAPON_PREVIEW_FIT_RADIUS, weaponGeometries.get(name)!.radius), w, h, camera.fov);
+        const focal = h/(2*Math.tan(THREE.MathUtils.degToRad(camera.fov/2)));
+        const halfW = Math.max(20,(frame.right-frame.left)*.5);
+        const halfH = Math.max(20,(frame.bottom-frame.top)*.5);
+        const centeredX = (frame.left+frame.right)*.5, centeredY = (frame.top+frame.bottom)*.5;
+        const distanceFor = (name: string) => {
+            const radius = weaponGeometries.get(name)!.radius;
+            const pixels = Math.max(18,Math.min(halfW*.80,halfH*.67));
+            return fitWeaponPreviewDistance(radius, focal, pixels);
+        };
         const slideEase = slideProgress * slideProgress * (3 - 2 * slideProgress);
-        camera.position.z = slide && slideProgress < 1
-            ? THREE.MathUtils.lerp(distanceFor(slide.from), distanceFor(slide.to!), slideEase)
-            : weaponGeometry
-                ? distanceFor(displayedWeapon!)
-            : Math.max(11.5, 1.35 / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect));
-        // The gun center projects to three quarters of the screen width.
-        camera.position.x = weaponGeometry ? -camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect * 0.5 : 0;
-        camera.lookAt(camera.position.x, 0, 0);
+        let distance: number;
+        if (closeOpen && displayedWeapon) distance = slide && slideProgress < 1 ?
+            THREE.MathUtils.lerp(distanceFor(slide.from),distanceFor(slide.to!),slideEase) : distanceFor(displayedWeapon);
+        else {
+            const weapon = weaponsOpen ? selectedWeapon : state.isPlaying ? state.activeWeaponName : 'PISTOL';
+            const reach = weaponsOpen && weapon === 'SNIPER' ? 2 : weaponsOpen && weapon === 'KATANA' ? 1.3 : .94;
+            const availableWidth = halfW * .88, availableHeight = halfH * (settingsOpen ? .95 : .90);
+            distance = Math.max(1.34*focal/availableHeight+.18, reach*focal/availableWidth+.36);
+            if (lobbyOpen) for (let i=1;i<state.lobbyPlayers.length;i++) {
+                const pos = lobbyPreviewPosition(i,w/h);
+                distance = Math.max(distance,(Math.abs(pos.x)+.62)*focal/availableWidth+pos.z+.35);
+            }
+        }
+        camera.position.set(0,0,distance);
+        camera.lookAt(0,0,0);
+        camera.setViewOffset(w,h,w/2-centeredX,h/2-centeredY,w,h);
         if (slide && slideProgress < 1) {
             const travel = Math.max(distanceFor(slide.from), distanceFor(slide.to!)) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
                 + Math.max(weaponGeometries.get(slide.from)!.radius, weaponGeometries.get(slide.to!)!.radius) + 0.5;
@@ -378,37 +473,58 @@ export function setupMainMenu(): void {
                 weaponModel.quaternion.copy(baseWeaponRotation).premultiply(rotation.setFromAxisAngle(yawAxis, idleYaw));
             }
         } else lastMotionFrame = 0;
-        bean.position.y = reducedMotion ? 0 : Math.sin(last / 1400) * 0.13;
-        flame.position.y = bean.position.y;
-        for (let i = 0; i < flameCount; i++) {
-            const phase = reducedMotion ? i / flameCount : (last * 0.0018 + i / flameCount) % 1;
-            const size = 0.65 + (1 - phase) * 0.7;
-            flameMatrix.makeScale(size, size, size);
-            flameMatrix.setPosition(Math.sin(i * 13.7) * (0.04 + phase * 0.18), -1.16 - phase * 0.96, Math.cos(i * 5.9) * 0.08);
-            flameParticles.setMatrixAt(i, flameMatrix);
+        const avatarTime = reducedMotion ? 0 : last / 1000;
+        const isGrapple = selectedWeapon === 'GRAPPLE';
+        const duration = FIREARM_MAGAZINES[selectedWeapon as keyof typeof FIREARM_MAGAZINES]?.reloadSeconds ?? 236/120;
+        const held = weaponsOpen && view === 'held';
+        const handoff = held && isLight(selectedWeapon) ? GRAPPLE_DRAW_TIME : 0;
+        const elapsed = reloadAt === undefined || !weaponsOpen ? undefined : (last - reloadAt) / 1000;
+        let progress: number | undefined;
+        let grappleTime = avatarTime;
+        let grapple: string | undefined;
+        if (elapsed !== undefined) {
+            const suffix = selectedWeapon === 'SHOTGUN' ? 'Shotgun' : 'Pistol';
+            if (elapsed < handoff) {
+                grapple = 'Grapple.Return.' + suffix;
+                grappleTime = .52 * elapsed / handoff;
+            } else if (elapsed < handoff + duration) {
+                progress = (elapsed - handoff) / duration;
+            } else if (elapsed < handoff * 2 + duration) {
+                grapple = 'Grapple.Draw.' + suffix;
+                grappleTime = .52 * (elapsed - handoff - duration) / handoff;
+            } else reloadAt = undefined;
         }
-        flameParticles.instanceMatrix.needsUpdate = true;
-        for (let index = 0; index < lobbyGuests.length; index++) {
-            const player = lobbyGuests[index];
-            const item = lobbyModels.get(player.peerId)!;
-            const position = lobbyPreviewPosition(index + 1, camera.aspect);
-            const hover = reducedMotion ? 0 : Math.sin(last / 1400 + (index + 1) * 0.7) * 0.13;
-            item.model.position.set(position.x, hover, position.z);
-            item.booster.position.copy(item.model.position);
-            for (let i = 0; i < flameCount; i++) {
-                const phase = reducedMotion ? i / flameCount : (last * 0.0018 + i / flameCount) % 1;
-                const size = 0.65 + (1 - phase) * 0.7;
-                flameMatrix.makeScale(size, size, size);
-                flameMatrix.setPosition(Math.sin(i * 13.7) * (0.04 + phase * 0.18), -1.16 - phase * 0.96, Math.cos(i * 5.9) * 0.08);
-                item.particles.setMatrixAt(i, flameMatrix);
+        const charge = progress === undefined ? 4 : reloadingBatteryStage(0, progress);
+        if (closeOpen && displayedWeapon === selectedWeapon) propPreviews.get(selectedWeapon)?.sampleReload(progress,charge);
+        if (!closeOpen) {
+            const weapon = weaponsOpen ? (isGrapple ? 'PISTOL' : selectedWeapon) : state.isPlaying ? state.activeWeaponName : 'PISTOL';
+            avatar.setPrimaryVisible(!(held && isGrapple));
+            if (held && isGrapple) {
+                grapple = progress === undefined ? 'Grapple.Held' : 'Grapple.Reload';
+                grappleTime = progress === undefined ? avatarTime : progress * 236/120;
+            } else if (!grapple && progress === undefined &&
+                (state.isPlaying && !weaponsOpen ? state.weaponHandling.hand === 'drawn' : isLight(weapon))) {
+                grapple = 'Grapple.Held';
             }
-            item.particles.instanceMatrix.needsUpdate = true;
+            avatar.pose({body:held || settingsOpen || state.isPlaying ? 'Idle.Armed' : 'Hover.Hold',
+                bodyTime:avatarTime,weapon,action:progress !== undefined && !isGrapple ? 'Reload' : 'Ready',
+                reloadProgress:progress, chargeStage:charge, reducedMotion, grapple, grappleTime,
+                grappleChargeStage:isGrapple ? charge : undefined});
+            previewRoot.rotation.set(held ? heldPitch : 0,held ? heldYaw : -.28,0);
+            previewRoot.position.y = held || settingsOpen || state.isPlaying || reducedMotion ? 0 : Math.sin(avatarTime * .9) * .065;
+        }
+        for (let index = 0; index < lobbyGuests.length; index++) {
+            const item = lobbyModels.get(lobbyGuests[index].peerId)!;
+            const position = lobbyPreviewPosition(index + 1, camera.aspect);
+            const t = reducedMotion ? 0 : avatarTime + index + 1;
+            item.model.position.set(position.x, reducedMotion ? 0 : Math.sin(t * .9) * .065, position.z);
+            item.rig.pose({body:'Hover.Hold', bodyTime:t, weapon:'PISTOL', grapple:'Grapple.Held', reducedMotion});
         }
         renderer.render(scene, camera);
         if (lobbyOpen) {
             const lobbyTargets: Record<string, { username: string; mesh: THREE.Group; hp: number; maxHp: number; lobbyOrder: number }> = {};
             for (const player of lobbyScanPlayers(state.lobbyPlayers, state.peer?.id ?? '')) {
-                const mesh = player.peerId === state.lobbyPlayers[0].peerId ? bean : lobbyModels.get(player.peerId)?.model;
+                const mesh = player.peerId === state.lobbyPlayers[0].peerId ? previewRoot : lobbyModels.get(player.peerId)?.model;
                 if (mesh) lobbyTargets[player.peerId] = { username: player.username, mesh, hp: 10, maxHp: 10,
                     lobbyOrder: state.lobbyPlayers.indexOf(player) };
             }
@@ -416,34 +532,25 @@ export function setupMainMenu(): void {
             lobbyScan.update(camera, camera.position, camera.position, [], lobbyTargets, true, last, null, [], false);
             lobbyScanActive = true;
         }
-        if (weaponsOpen && weaponModel && weaponGeometry && !transition && displayedWeapon === selectedWeapon) {
-            const navBounds = arsenal.getBoundingClientRect();
+        if (closeOpen && weaponModel && weaponGeometry && !transition && displayedWeapon === selectedWeapon && w >= 1000 && h >= 580) {
             weaponScan.update(labels[displayedWeapon!], weaponGeometry, camera, w, h, navBounds.right, navBounds.top, last);
         }
+        else if (weaponsOpen) weaponScan.hide();
         if (shouldScan) {
-            // Reuse the live peer detector and its moving brackets and leader.
-            // Its menu-only readout hosts the interactive color controls.
             scan.update(camera, camera.position, camera.position, [], previewPeer, true, last, null, [], false);
             scanActive = true;
         }
     };
     window.addEventListener('pagehide', event => {
         if (event.persisted) return;
+        disposed = true; renderPreview = undefined;
         for (const id of lobbyModels.keys()) disposeLobbyModel(id);
-        const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>();
-        for (const model of [...weaponModels.values(), bean]) model.traverse(object => {
-            if (!(object instanceof THREE.Mesh || object instanceof THREE.Line)) return;
-            if (!isSharedGeometry(object.geometry)) geometries.add(object.geometry);
-            for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-                if (material !== SHARED_BODY_MAT) materials.add(material);
-            }
-        });
-        geometries.forEach(geometry => geometry.dispose()); materials.forEach(material => material.dispose());
-        flameParticles.dispose();
-        flameGeometry.dispose(); flameMaterial.dispose();
+        avatar?.dispose();
+        for (const prop of propPreviews.values()) prop.dispose();
+        resize.disconnect();
         weaponScan.hide();
         scan.reset();
         lobbyScan.reset();
         renderer.dispose();
-    }, { once: true });
+    });
 }

@@ -2,14 +2,23 @@ import type { TargetHitResult } from './damage.js';
 import type * as THREE from 'three';
 import type { HomingTargetPacket, NetworkPacket } from './networkTypes.js';
 import type { PeerData } from './state.js';
+import type { WeaponIntent } from './handlingNetworkTypes.js';
+import type { WeaponName } from './networkTypes.js';
 
 export interface WeaponNetworkPort {
+    sendSwitchStart?(): void;
+    sendWeaponIntent?(action: WeaponIntent, weapon: WeaponName): void;
     broadcastLocalFire(barrelPos: THREE.Vector3, direction: THREE.Vector3, hitPoint: THREE.Vector3 | null, shotId: number, spreadSeed: number, homingTarget?: HomingTargetPacket, homingStartDistance?: number): void;
     broadcastToAll(packet: NetworkPacket): void;
     flashPeerMesh(peerData: PeerData, color?: number, durationMs?: number): void;
 }
 
 let activePort: WeaponNetworkPort | null = null;
+export function sendSwitchStart(): void { activePort?.sendSwitchStart?.(); }
+
+export function sendWeaponIntent(action: WeaponIntent, weapon: WeaponName): void {
+    activePort?.sendWeaponIntent?.(action, weapon);
+}
 
 export function setWeaponNetworkPort(port: WeaponNetworkPort): void {
     activePort = port;

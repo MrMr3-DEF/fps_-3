@@ -59,6 +59,8 @@ test('the wall durability cue requires a clear center-view ray to the current we
         camera.position.set(0, 2, 10);
         camera.lookAt(0, .8, 1.75);
         assert.equal(isLookingAtTownWell(camera), true);
+        camera.lookAt(0, 2, 0);
+        assert.equal(isLookingAtTownWell(camera), true, 'aim through the opening below the roof');
         camera.lookAt(0, 2, 20);
         assert.equal(isLookingAtTownWell(camera), false);
         camera.position.set(110, 2, 40);

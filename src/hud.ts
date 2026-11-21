@@ -89,9 +89,22 @@ export function updateHoverBar(fuelRatio: number, active: boolean): void {
     }
 }
 
+let emptyAmmoPulse: Animation | undefined;
+
+export function pulseEmptyAmmoBar(): void {
+    emptyAmmoPulse?.cancel();
+    emptyAmmoPulse = getUI('reload-container')?.animate([
+        {}, { backgroundColor: '#e53935', offset: 0.5 }, {},
+    ], { duration: 850, easing: 'ease-in-out' });
+}
+
 export function updateReloadBar(progress: number): void {
     const reloadBar = getUI<HTMLElement>('reload-bar');
     if (!reloadBar) return;
+    if (progress > 0 && emptyAmmoPulse) {
+        emptyAmmoPulse.cancel();
+        emptyAmmoPulse = undefined;
+    }
     if (progress !== lastReloadProgress) {
         reloadBar.style.width = `${progress * 100}%`;
         lastReloadProgress = progress;

@@ -13,8 +13,8 @@ visible crosshair. The frame loop publishes the resampled camera direction after
 FOV easing and immediately before goggles acquisition and drawing. Actions earlier
 in that frame and between frames use the previously published camera and its
 homing lock. There is no separate smoothed render orientation: weapons, sniper
-rays, grappling and goggles share the published aim. Third-person grappling keeps
-its existing rendered center ray. Mounted input still routes through `lookInput.ts`
+rays, grappling and goggles share the published aim. The grapple samples this aim
+when its draw finishes. Third person uses the rendered center ray at launch. Mounted input routes through `lookInput.ts`
 to the pilot controller; touch input retains its own input path.
 
 Sensitivity remains linear in movement units (`0.002 × sensitivity` radians at

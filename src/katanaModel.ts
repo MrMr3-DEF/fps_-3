@@ -69,8 +69,8 @@ export function sampleKatanaPose(sword: THREE.Object3D, swing: number | null, ch
 
 export function updateKatanaModel(root: THREE.Object3D, charge: number, swing: number | null, charged: boolean, time: number, gentle: boolean, fullChargeAge = Math.max(0, charge - KATANA.charge) + (swing ?? 0)): void {
     const sword = root.userData.sword as THREE.Group;
-    if (!sword) return;
-    sampleKatanaPose(sword, swing, charged);
+    if (!sword && !root.userData.fittedBlade) return;
+    if (!root.userData.fittedBlade) sampleKatanaPose(sword, swing, charged);
     const activeSwing = swing !== null && swing >= 0 && swing < KATANA.duration;
     const retainedCharge = activeSwing && charged;
     const returnStart = KATANA.windup + KATANA.chargedSlash + KATANA.chargedHold;
@@ -81,7 +81,7 @@ export function updateKatanaModel(root: THREE.Object3D, charge: number, swing: n
     // Fade the whole charged area together; do not retract the charge front on release.
     for (const child of lightning.children) (child as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.opacity *= fade;
     const progress = THREE.MathUtils.clamp(effectCharge / KATANA.charge, 0, 1);
-    const material = (root.userData.blade as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    const material = (root.userData.fittedBlade ?? (root.userData.blade as THREE.Mesh).material) as THREE.MeshStandardMaterial;
     material.emissive.setHex(0xffffff);
     // Black metal contributes no reflected light while charged, keeping brightness below clipping.
     material.color.setHex(progress >= 1 ? 0 : 0x080a0e);

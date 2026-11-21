@@ -66,7 +66,13 @@
             </div>
 
             <div id="panel-weapons" class="menu-panel">
+                <div class="weapon-view-controls" role="group" aria-label="Weapon preview">
+                    <button type="button" class="menu-btn secondary" id="weapon-held" aria-pressed="true">Held view</button>
+                    <button type="button" class="menu-btn secondary" id="weapon-closeup" aria-pressed="false">Close-up</button>
+                </div>
                 <div class="weapon-tabs" aria-label="Choose a weapon"></div>
+                <button type="button" id="weapon-reload" class="menu-btn secondary">Replay reload</button>
+                <details id="weapon-details"><summary>Specifications</summary><div id="weapon-compact-specs"></div></details>
                 <button class="menu-btn secondary" data-menu-back>Back</button>
             </div>
 
@@ -337,9 +343,6 @@
         <div>Day <span id="defense-day">1</span></div>
         <div id="pvp-stats">
             Kills: <span id="kills">0</span> &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
-        </div>
-        <div class="hud-badges">
-            <span id="hook-badge">HOOK ACTIVE</span>
         </div>
     </div>
     <div id="fps-counter">FPS: 0</div>

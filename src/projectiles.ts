@@ -90,8 +90,7 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
     const peerIdsLen = peerIds.length;
     const data = projectileData(proj);
 
-    // Treat the muzzle offset as part of the shot's range and cap the final
-    // swept segment. An age-only limit can overshoot by a full render frame.
+    // Cap the final sweep by distance; an age-only limit can overshoot by a frame.
     data.distanceTraveled = Number.isFinite(data.distanceTraveled)
         ? Math.max(0, data.distanceTraveled)
         : 0;
@@ -107,7 +106,9 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
     const visualOnly = data.visualOnly === true;
     const damage = data.damage ?? fallbackDamage;
 
-    _segmentStart.copy(proj.position);
+    // The first displayed sample follows the rendered hand (including observer
+    // interpolation). All flight and collision starts at the physical shot socket.
+    _segmentStart.copy(data.distanceTraveled === 0 && data.shotOrigin ? data.shotOrigin : proj.position);
     data.shotOrigin ??= _segmentStart.clone();
     _currentDirection.set(data.dx, data.dy, data.dz).normalize();
     let homingPosition = data.homingTarget ? guidancePoint ?? resolveProjectileHomingTarget(

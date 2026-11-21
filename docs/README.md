@@ -23,6 +23,7 @@ Guides describe current behavior; requested work belongs in the explicit
 | [Desktop pointer input](pointer-input.md) | Aim sampling, sensitivity, zoom and pointer-lock behavior |
 | [Mobile controls](mobile-controls.md) | Touch actions, layout editing, input lifecycle and device checks |
 | [Katana](katana.md) | Melee controls, effects, damage geometry and authority |
+| [Firearms and grappling](firearms.md) | Magazine capacities, manual reloads, handoffs and airborne firing |
 | [Town defense](town-defense.md) | Infantry waves, wall durability, attacks and the shared collapse |
 | [Forgotten Mecha](forgotten-mecha.md) | Combat, mounting, piloting, shared ending and module ownership |
 | [Blender assets](../blender_assets/README.md) | Source assets, exports and authoring guides |

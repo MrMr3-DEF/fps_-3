@@ -91,7 +91,7 @@ test('host authority applies the sniper range to every weapon',()=>{
         assert.equal(ledgerFor(weapon).consume(1,0,beyond,0,WEAPON_STATS[weapon].damage,boundaryArrivalAt,()=>false),false,`${weapon} beyond`);
     }
 });
-test('host authority starts simulated shots at the projectile muzzle offset',()=>{
+test('host verifies every pellet from the barrel aperture, including near-cover collisions',()=>{
     const origin=new THREE.Vector3(0,2,0);
     for(const weapon of ['PISTOL','SHOTGUN','AR','MINIGUN'] as WeaponName[]){
         const ledger=new ShotLedger();
@@ -104,7 +104,7 @@ test('host authority starts simulated shots at the projectile muzzle offset',()=
             validationStart=start.clone();return false;
         }));
         assert.ok(validationStart);
-        assert.ok(Math.abs(validationStart.distanceTo(origin)-0.1)<1e-9,`${weapon} start`);
+        assert.ok(validationStart.distanceToSquared(origin) === 0,`${weapon} start`);
     }
 
     const sniper=new ShotLedger();assert.ok(sniper.record(fire('SNIPER'),1000,false));

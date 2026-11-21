@@ -20,8 +20,7 @@ import { MECHA_ENEMY_ROCKET_DAMAGE, MECHA_ENEMY_ROCKET_TURN_SPEED, MECHA_ENEMY_R
 import { MechaMovement } from './mechaMovement.js';
 import { MECHA_MOVEMENT_MARGIN, MECHA_DEFEAT_YAW_SPEED, MECHA_DEFEAT_ALIGNMENT, MECHA_FINAL_BREAKUP_TIME } from './config.js';
 import type { MechaState } from './mechaNetworkTypes.js';
-import { segmentPlayerBeamHitT } from './playerHitbox.js';
-import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_BOUNDING_RADIUS, playerTouchesWorldBox } from './playerHitbox.js';
+import { PILOT_LENS_OFFSET, PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_BOUNDING_RADIUS, playerTouchesWorldBox, segmentPlayerBeamHitT } from './playerHitbox.js';
 import type { MechaPilotRelease } from './mechaPilotRelease.js';
 
 export type MechaMode = 'walking' | 'tracking' | 'rocketing' | 'stomping' | 'punching' | 'aligning' | 'dying' | 'dead' | 'game-over' | 'boarding' | 'startup' | 'piloted' | 'shutting-down' | 'destroying' | 'destroyed';
@@ -66,7 +65,6 @@ export class ForgottenMecha {
     readonly transitionCamera = new MechaTransitionCamera();
     readonly seatAnchor = new THREE.Group();
     readonly pilotAnchor = new THREE.Group();
-    readonly pilotScale = 2;
     readonly rocketPlayer: RocketPlayer = { position: new THREE.Vector3(), yaw: 0, lifeId: 0, alive: false, velocity: new THREE.Vector3() };
     networked = false;
     localPeerId: string | null = null;
@@ -325,7 +323,7 @@ export class ForgottenMecha {
         this.interiorAnchor.position.copy(chest.worldToLocal(this.target)); this.interiorAnchor.quaternion.copy(frame); this.interiorAnchor.scale.setScalar(1 / scale); chest.add(this.interiorAnchor);
         // Fit the visible occupant independently of the grapple seat and optics.
         // The visor faces +Z; its head center shares the neutral lens height.
-        this.viewAnchor.getWorldPosition(this.target); this.target.set(this.group.position.x, this.target.y - 0.5 * this.pilotScale, this.group.position.z + 5);
+        this.viewAnchor.getWorldPosition(this.target); this.target.set(this.group.position.x, this.target.y - PILOT_LENS_OFFSET, this.group.position.z + 5);
         this.pilotAnchor.position.copy(chest.worldToLocal(this.target));
         this.pilotAnchor.quaternion.copy(frame); this.pilotAnchor.scale.setScalar(1 / scale); chest.add(this.pilotAnchor);
         const slide = this.bones.get('CTRL_RocketSlide_R')!;
@@ -472,6 +470,17 @@ export class ForgottenMecha {
     get pilotVisible(): boolean { return this.ownsPilot; }
     get hudOpacity(): number { return this.headView.hudOpacity; }
     get boardProgress(): number { return this.mode === 'boarding' ? Math.min(1, this.elapsed / MECHA_BOARD_TIME) : 1; }
+    get pilotAvatarPhase(): 'Board' | 'Seated' | 'Exit' {
+        if (this.mode === 'boarding') return 'Board';
+        return this.pilotAvatarProgress > 0 && this.mode === 'shutting-down' ? 'Exit' : 'Seated';
+    }
+    get pilotAvatarProgress(): number {
+        if (this.mode === 'boarding') return this.boardProgress;
+        // The seated pilot stands only as the reversed Mount reaches the open cabin.
+        if (this.mode === 'shutting-down' && this.shutdownReverse && this.action)
+            return THREE.MathUtils.clamp(1 - this.action.time / .66, 0, 1);
+        return 0;
+    }
     get helmetClosed(): boolean { return !this.headView.wantedOpen && this.headView.fold <= 1e-9; }
     get helmetProgress(): number { return this.headView.fold; }
     get targetingReady(): boolean { return this.mode === 'piloted' && this.headView.targetingReady; }

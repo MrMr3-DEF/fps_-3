@@ -22,7 +22,7 @@ test('sniper and curved bullets hit the shield before the body; inside shots dam
     try {
         await prepareForgottenMecha({ impact() {}, stompPlayer() {}, gameOver() {} }, async () => {});
         const actor = forgottenMecha!;
-        createAkimboGuns(); state.activeWeaponName = 'SNIPER'; state.rightGun = state.sniperMesh;
+        createAkimboGuns(); state.activeWeaponName = 'SNIPER'; state.weaponHandling.reset('SNIPER'); state.rightGun = state.sniperMesh;
         setDamageHandlers(() => ({ accepted: false, killed: false }), () => {}, (damage, hit) => {
             if (hit) hits.push({ ...hit, origin: { ...hit.origin }, point: { ...hit.point }, direction: hit.direction && { ...hit.direction } });
             const result = actor.damage(damage, hit);

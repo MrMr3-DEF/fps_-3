@@ -47,15 +47,9 @@ export function createWeaponScanGeometry(model: THREE.Object3D): WeaponScanGeome
     return { radius: Math.sqrt(radiusSq) };
 }
 
-/**
- * Fit the gun's rotation-invariant bounding sphere inside the right half.
- * The extra quarter-width term accounts for perspective at the off-axis
- * position used to center the gun at 75% of the viewport width.
- */
-export function fitWeaponPreviewDistance(radius: number, width: number, height: number, fovDegrees: number): number {
-    const focalPixels = height / (2 * Math.tan(THREE.MathUtils.degToRad(fovDegrees / 2)));
-    const usableHalfSize = Math.max(32, Math.min(width * 0.19, height * 0.32) - SCAN_PADDING);
-    return Math.max(3, radius + radius * (focalPixels + width / 4) / usableHalfSize);
+/** Distance from a centered camera to a sphere with the given apparent radius. */
+export function fitWeaponPreviewDistance(radius: number, focalPixels: number, pixelRadius: number): number {
+    return radius * Math.hypot(1, focalPixels / pixelRadius);
 }
 
 export interface WeaponScreenBounds {

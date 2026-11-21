@@ -1,3 +1,8 @@
+import { updateProjectiles } from '../src/projectiles.ts';
+import { characterColor } from '../src/appearance.ts';
+import { getPlayerAvatar } from '../src/playerAvatar.ts';
+import { loadCyborgTestAssets } from './cyborgTestAsset.ts';
+import { changePlayerSuitColor } from '../src/playerAppearance.ts';
 import { setDamageHandlers } from '../src/damage.ts';
 import { getMeleeNetworkPort } from '../src/weaponNetworkPort.ts';
 import test from 'node:test';
@@ -7,7 +12,7 @@ import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed, rebuildTargetHash } from '../src/world.ts';
 import { state } from '../src/state.ts';
 import { setMultiplayerWorldLoader, onMultiplayerDisconnected, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, broadcastTargetKill, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
-import { BULLET_TRAVEL_DISTANCE, ENEMY_COUNT, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED, WEAPON_STATS, NETWORK_PROTOCOL_VERSION, MAX_PENDING_ROOM_CONNECTIONS } from '../src/config.ts';
+import { PROJECTILE_SPEED, GRAPPLE_DRAW_TIME, HEAVY_HANDOFF_TIME, BULLET_TRAVEL_DISTANCE, ENEMY_COUNT, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED, WEAPON_STATS, NETWORK_PROTOCOL_VERSION, MAX_PENDING_ROOM_CONNECTIONS } from '../src/config.ts';
 import { Peer, Connection as FakeConnection } from './fakePeer.ts';
 
 class Connection extends FakeConnection {
@@ -21,7 +26,7 @@ import { TurnRoomStateMachine } from '../src/turnRoom.ts';
 import { registerTurnSession } from '../src/turnSecurity.ts';
 import type { UpdatePacket, WeaponName } from '../src/networkTypes.ts';
 import { parseNetworkPacket } from '../src/networkTypes.ts';
-import { SHARED_BODY_MAT } from '../src/weapons.ts';
+import { SHARED_PROJECTILE_GEO } from '../src/weapons.ts';
 
 (globalThis as any).document={getElementById:()=>null,createElement:()=>({getContext:()=>null})};
 class Storage {
@@ -59,7 +64,7 @@ function stagePeer(connection: Connection, packet: UpdatePacket): void {
     const spawn = getTownSpawn(snapshot.seed, 'house', snapshot.spawnHouseSlot);
     const steps = Math.ceil(Math.hypot(packet.pos.x - spawn.x, packet.pos.y - 2, packet.pos.z - spawn.z) / (NETWORK_MOVEMENT_BURST / 2));
     const now = performance.now(), previous = Object.getOwnPropertyDescriptor(performance, 'now');
-    let clock = now - steps * 200 - 320;
+    let clock = now - steps * 200 - HEAVY_HANDOFF_TIME * 1000 - 20;
     Object.defineProperty(performance, 'now', { configurable: true, value: () => clock });
     const send = (pos: UpdatePacket['pos'], activeWeapon: WeaponName, switchState: UpdatePacket['switchState'], nextWeapon: WeaponName | null) => {
         assert.ok(authorizeClientPacket(connection.peer, { ...packet, pos, activeWeapon, switchState, nextWeapon }));
@@ -75,7 +80,7 @@ function stagePeer(connection: Connection, packet: UpdatePacket): void {
             send(packet.pos, 'PISTOL', 'WITHDRAWING', packet.activeWeapon);
             clock += 160;
             send(packet.pos, packet.activeWeapon, 'BRINGING_IN', packet.activeWeapon);
-            clock += 160;
+            clock += HEAVY_HANDOFF_TIME * 1000 - 140;
         }
         send(packet.pos, packet.activeWeapon, 'IDLE', null);
     } finally {
@@ -203,7 +208,7 @@ test('the real host path canonicalizes shotgun pellets and rejects unfinished we
         shooter.emit('data', pistol);
         assert.equal(viewer.sent.filter(p => p.type === 'fire').length, 1, 'bring-in cannot fire');
         now += 150;
-        shooter.emit('data', { ...packet, activeWeapon: 'PISTOL' }); shooter.emit('data', pistol);
+        shooter.emit('data', { ...packet, activeWeapon: 'PISTOL' }); shooter.emit('data', { ...pistol, shotId: 3 });
         assert.equal(viewer.sent.filter(p => p.type === 'fire').length, 2);
     } finally { disconnectMultiplayer(); state.scene = null; }
 });
@@ -375,11 +380,14 @@ test('client rejects host without proof and applies kills while waiting to play'
         conn.emit('data',{type:'start_game'});
         assert.equal(state.lifeId,life,'duplicate start never respawns');
         conn.emit('data',update('Host'));
+        conn.emit('data', { ...roster, players: [{ ...roster.players[0], bodyColor: 0x62dfac }, roster.players[1]] });
+        assert.equal(state.peers[conn.peer].mesh.userData.bodyColor, 0x62dfac, 'a stationary host recolors on receipt of the roster');
         conn.emit('data',{type:'player_died',lifeId:0,cause:'lava',killerPeerId:null,victimName:'Host',killerName:'Lava',victimPeerId:conn.peer});
         conn.emit('data',update('Host'));
         assert.equal(state.peers[conn.peer].mesh.visible,false,'queued living updates cannot resurrect a dead avatar');
         conn.emit('data',update('Host',1));
         assert.equal(state.peers[conn.peer].mesh.visible,true);
+        assert.equal(state.peers[conn.peer].mesh.userData.bodyColor, 0x62dfac, 'respawn retains the current suit');
         conn.emit('data',{type:'player_hit',targetLifeId:0,shotId:3,pelletIndex:0,targetPeerId:conn.peer,damage:10,attackerName:'Guest2'});
         assert.equal(state.peers[conn.peer].hp,PLAYER_MAX_HP,'late damage cannot harm a new life');
     }finally{disconnectMultiplayer();}
@@ -477,10 +485,16 @@ test('host canonical sniper presentation stops on the floor', async () => {
         Peer.latest.emit('connection', floor);
         await tick(); await tick();
         stagePeer(floor, update('Pilot'));
-        const fire = authorizeClientPacket('floor-peer', { type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1,
-            barrelPos: { x: 0, y: 2, z: 0 }, dir: { x: 0, y: -1, z: 0 }, hitPoint: { x: 0, y: -500, z: 0 } });
-        assert.equal(fire?.type, 'fire');
-        if (fire?.type === 'fire') assert.deepEqual(fire.hitPoint, { x: 0, y: 0, z: 0 });
+        const shoot = (x: number, y: number, z: number) => authorizeClientPacket('floor-peer', {
+            type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1, barrelPos: { x, y, z },
+            dir: { x: 0, y: -1, z: 0 }, hitPoint: { x, y: -500, z },
+        });
+        assert.equal(shoot(0, 2, -4), null, 'a distant claimed barrel is rejected');
+        assert.equal(shoot(2.5, 2, 0), null, 'the sniper cannot move its forward reach sideways');
+        assert.equal(shoot(0, -.01, 0), null, 'a claimed barrel across the floor is rejected');
+        const fire = shoot(.2, 1.8, -2.55);
+        assert.equal(fire?.type, 'fire', 'the fitted sniper extends past the old two-metre limit');
+        if (fire?.type === 'fire') assert.deepEqual(fire.hitPoint, { x: .2, y: 0, z: -2.55 });
     } finally { disconnectMultiplayer(); }
 });
 
@@ -515,7 +529,7 @@ test('the real host checks homing acquisition, intervening bodies and captured r
         const peerTicket = await registerTurnSession('ABCDEFGH', 'join-room', 'Cover', 'cover-peer');
         const peerCover = new Connection('cover-peer', { admissionToken: peerTicket.admissionToken });
         Peer.latest.emit('connection', peerCover); await tick(); await tick();
-        const pose = { ...update('Cover'), pos: { x: 0.4, y: 3.35, z: -60 } };
+        const pose = { ...update('Cover'), pos: { x: 0.75, y: 3.35, z: -60 } };
         stagePeer(peerCover, pose);
         now += 200;
         assert.ok(authorizeClientPacket('cover-peer', pose));
@@ -545,16 +559,16 @@ test('departing avatars dispose each owned resource once even after the scene re
         const peer = state.peers['owned-peer'], root = peer.mesh;
         const geometry = new THREE.BoxGeometry(), texture = new THREE.Texture();
         const material = new THREE.MeshBasicMaterial({ map: texture }), spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-        root.add(new THREE.Mesh(geometry, [material, material]), new THREE.Mesh(geometry, material), new THREE.Sprite(spriteMaterial));
+        root.add(new THREE.Mesh(geometry, [material, material]), new THREE.Mesh(geometry, material), new THREE.Mesh(SHARED_PROJECTILE_GEO, material), new THREE.Sprite(spriteMaterial));
         const counts = [0, 0, 0, 0];
         [geometry, texture, material, spriteMaterial].forEach((resource, index) => resource.addEventListener('dispose', () => counts[index]++));
         let sharedDisposals = 0; const sharedListener = () => sharedDisposals++;
-        SHARED_BODY_MAT.addEventListener('dispose', sharedListener);
+        SHARED_PROJECTILE_GEO.addEventListener('dispose', sharedListener);
         try {
             state.scene = null; connection.close(); connection.emit('close');
             assert.deepEqual(counts, [1, 1, 1, 1]); assert.equal(sharedDisposals, 0);
             assert.equal(root.parent, null); assert.equal(state.peers['owned-peer'], undefined);
-        } finally { SHARED_BODY_MAT.removeEventListener('dispose', sharedListener); }
+        } finally { SHARED_PROJECTILE_GEO.removeEventListener('dispose', sharedListener); }
     } finally { disconnectMultiplayer(); state.scene = null; }
 });
 
@@ -808,7 +822,8 @@ test('actual router rejects guest ending authority, accepts admitted readiness a
 });
 
 
-test('live client colors are frozen and extra fields never reach viewers', async () => {
+test('the room owns suit colors across movement, live changes and late admission', async () => {
+    const originalColor = characterColor;
     backend(); state.scene = null;
     try {
         await hostGame('Host', 'ABCDEFGH', 'create-room'); const host = Peer.latest;
@@ -827,7 +842,29 @@ test('live client colors are frozen and extra fields never reach viewers', async
         assert.equal(relayed.bodyColor, color); assert.equal(relayed.extra, undefined); assert.equal(relayed.pos.extra, undefined);
         assert.equal(state.playerList.find(p => p.peerId === 'Alpha')!.bodyColor, color);
         assert.equal(b.sent.filter(p => p.type === 'player_list').length, lists);
-    } finally { disconnectMultiplayer(); state.scene = null; }
+
+        a.emit('data', {type:'lobby_color', bodyColor:0x00aabb, senderPeerId:'Bravo'});
+        assert.equal(state.peers.Alpha.mesh.userData.bodyColor, 0x00aabb);
+        // An update can arrive while a peer still has a shell and is waiting for its rig.
+        await loadCyborgTestAssets();
+        updateRemotePeers(1/60);
+        const accent = getPlayerAvatar(state.peers.Alpha.mesh)!.rig.damageMaterials.find(m => m.name === 'Suit_Primary')!;
+        assert.equal(accent.emissive.getHex(), 0x00aabb);
+        assert.equal(b.sent.filter(p => p.type === 'player_list').at(-1).players[1].bodyColor, 0x00aabb);
+        a.emit('data', {type:'lobby_color', bodyColor:0x10ee88});
+        assert.equal(accent.emissive.getHex(), 0x10ee88, 'the loaded peer rig updates before another movement packet');
+        changePlayerSuitColor('#d86e23');
+        await new Promise(resolve => setTimeout(resolve, 125));
+        const latest = b.sent.filter(p => p.type === 'lobby_roster').at(-1).players;
+        assert.deepEqual(latest.map(p => p.bodyColor), [0xd86e23, 0x10ee88, color]);
+
+        const ticket = await registerTurnSession('ABCDEFGH','join-room','Charlie','Charlie');
+        const late = new Connection('Charlie', {admissionToken:ticket.admissionToken});
+        host.emit('connection', late); await tick(); await tick();
+        const snapshot = late.sent.find(p => p.type === 'world_snapshot');
+        assert.equal(snapshot.gameStarted, true);
+        assert.deepEqual(snapshot.players.slice(0, 3), latest);
+    } finally { disconnectMultiplayer(); changePlayerSuitColor(originalColor); state.scene = null; }
 });
 
 test('failed admission delivery releases the server reservation even without a close event', async () => {
@@ -888,4 +925,154 @@ test('fatal melee sends only kill feedback; nonfatal melee confirms and synchron
         assert.deepEqual(connection.sent.map(p => p.type), ['kill_target']);
         assert.equal(connection.sent[0].killerPeerId, 'peer-a');
     } finally { disconnectMultiplayer(); state.targets = []; }
+});
+
+test('host enforces grapple ownership, single-use fire attempts and timed magazines across late admission', async t => {
+    backend();
+    state.scene = null; state.camera = null; state.controls = null;
+    let now = 3000;
+    t.mock.method(performance, 'now', () => now);
+    const admit = async (id: string, name: string) => {
+        const ticket = await registerTurnSession('ABCDEFGH', 'join-room', name, id);
+        const c = new Connection(id, { admissionToken:ticket.admissionToken });
+        Peer.latest.emit('connection',c); await tick(); await tick();
+        return c;
+    };
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const c = await admit('shooter-peer','Shooter');
+        state.scene = new THREE.Scene();
+        startHostMatch();
+        const pose = {...update('Shooter'),activeWeapon:'AR' as const,isMouseDown:true};
+        stagePeer(c,pose); c.emit('data',pose);
+        const receipt = () => c.sent.filter(p=>p.type === 'handling_state' && p.peerId === c.peer).at(-1);
+        let sequence = 0;
+        const intent = (action: string) => c.emit('data',{type:'handling_command',weapon:'AR',lifeId:0,sequence:++sequence,action});
+        const shot = (shotId:number, lifeId=0) => c.emit('data',{type:'fire',weapon:'AR',shotId,lifeId,spreadSeed:42,
+            barrelPos:pose.pos,dir:{x:0,y:0,z:-1}});
+        shot(1);
+        assert.equal(receipt().handling.rounds.AR,39);
+        intent('grapple');
+        assert.equal(receipt().handling.hand,'drawing');
+        assert.ok(Math.abs(receipt().handling.handRemaining-HEAVY_HANDOFF_TIME)<1e-6);
+        intent('reload');
+        assert.equal(receipt().rejected, true);
+        assert.equal(receipt().handling.hand, 'drawing');
+        const pulling = {...pose,hookState:'PULLING' as const,hookPos:{x:0,y:2,z:-3}};
+        const firing = {...pulling,hookState:'FIRING' as const};
+        await loadCyborgTestAssets();
+        now += GRAPPLE_DRAW_TIME * 1000;
+        const early = authorizeClientPacket(c.peer,pulling);
+        assert.ok(early?.type === 'update' && early.hookState === 'IDLE');
+        c.emit('data', firing);
+        updateRemotePeers(1/60);
+        const remote = state.peers[c.peer];
+        const flash = remote.leftGun.userData.muzzleFlashEffect;
+        assert.ok(!remote.hookLine?.visible && flash.frames.every((ring:THREE.Mesh) => !ring.visible));
+        now += (HEAVY_HANDOFF_TIME - GRAPPLE_DRAW_TIME) * 1000 + 1;
+        c.emit('data', firing);
+        updateRemotePeers(1/60);
+        assert.ok(remote.hookLine?.visible && flash.frames.some((ring:THREE.Mesh) => ring.visible));
+        const muzzle = getPlayerAvatar(remote.mesh)!.rig.grappleMuzzle.getWorldPosition(new THREE.Vector3());
+        const midpoint = muzzle.lerp(new THREE.Vector3(0,2,-3), .5);
+        assert.ok(remote.hookLine.position.distanceTo(midpoint) < .001, 'remote cable starts at the fitted muzzle');
+        const ready = authorizeClientPacket(c.peer,pulling);
+        assert.ok(ready?.type === 'update' && ready.hookState === 'PULLING');
+        intent('reload');
+        assert.equal(receipt().rejected, true);
+        assert.equal(receipt().handling.hand, 'drawn');
+        assert.equal(receipt().handling.reloadWeapon, null);
+        const stillPulling = authorizeClientPacket(c.peer, pulling);
+        assert.ok(stillPulling?.type === 'update' && stillPulling.hookState === 'PULLING');
+        now += 350;
+        intent('release');
+        assert.equal(receipt().handling.hand, 'drawn', 'release cuts the cable while keeping the launcher ready');
+        const forged = authorizeClientPacket(c.peer, pulling);
+        assert.ok(forged?.type === 'update' && forged.hookState === 'IDLE');
+        const heldObserver = await admit('held-observer','Held');
+        const held = heldObserver.sent.find(p => p.type === 'handling_state' && p.peerId === c.peer);
+        assert.equal(held.handling.hand, 'drawn');
+        assert.equal(held.tetherActive, false);
+        intent('grapple');
+        const repeat = authorizeClientPacket(c.peer, firing);
+        assert.ok(repeat?.type === 'update' && repeat.hookState === 'FIRING', 'one new press reuses the already held launcher');
+        intent('raise');
+        assert.equal(receipt().rejected,true,'holding the trigger from before the draw cannot take the hand back');
+        c.emit('data',{...pose,isMouseDown:false}); c.emit('data',pose);
+        intent('raise');
+        assert.equal(receipt().handling.pendingFire,'AR');
+        intent('reload');
+        assert.equal(receipt().rejected, true);
+        assert.equal(receipt().handling.pendingFire, 'AR');
+        const rejectedReload = sequence;
+        shot(2);
+        assert.equal(receipt().rejected,true);
+        assert.equal(receipt().handling.rounds.AR,39);
+        now += HEAVY_HANDOFF_TIME * 1000 + 1;
+        shot(2);
+        assert.equal(receipt().handling.rounds.AR,39,'a rejected request cannot be retried after stow');
+        shot(3);
+        assert.equal(receipt().handling.rounds.AR,38);
+        const previousReceipt = receipt();
+        c.emit('data',{type:'handling_command',weapon:'AR',lifeId:0,sequence:rejectedReload,action:'reload'});
+        assert.equal(receipt(), previousReceipt, 'a rejected input cannot be replayed after the hand is free');
+        intent('reload');
+        assert.equal(receipt().handling.reloadWeapon,'AR');
+        now += 500;
+        const late = await admit('observer-peer','Observer');
+        const observed=late.sent.find(p=>p.type==='handling_state' && p.peerId===c.peer);
+        assert.equal(observed.handling.rounds.AR,38);
+        assert.ok(Math.abs(observed.handling.reloadRemaining-2)<1e-6);
+        assert.ok(late.sent.some(p=>p.type==='update' && p.senderPeerId===c.peer),'join includes the last authoritative pose');
+        shot(4);
+        assert.equal(receipt().rejected,true);
+        now += 2100;
+        const observerTip = getPlayerAvatar(remote.mesh)!.rig.muzzleFor('AR').getWorldPosition(new THREE.Vector3());
+        shot(5);
+        const replica = state.projectiles.at(-1)!;
+        assert.ok(replica.position.distanceTo(observerTip) < 1e-6, 'the remote muzzle and its first visible bullet sample coincide');
+        const acceptedOrigin = new THREE.Vector3().copy(pose.pos);
+        const heading = new THREE.Vector3(replica.userData.dx, replica.userData.dy, replica.userData.dz);
+        updateProjectiles(.005, 'Host');
+        assert.ok(replica.position.distanceTo(acceptedOrigin.addScaledVector(heading, PROJECTILE_SPEED * .005)) < 1e-6,
+            'interpolation of the shooter never moves the accepted flight path');
+        assert.equal(receipt().handling.rounds.AR,39,'manual reload fills on its host deadline');
+        const last=receipt();
+        shot(6,1);
+        assert.equal(receipt(),last,'a different life cannot spend a round');
+
+        now += 1000;
+        const use = (weapon: WeaponName, action: string) => c.emit('data', {
+            type:'handling_command', weapon, lifeId:0, sequence:++sequence, action
+        });
+        const swap = (activeWeapon: WeaponName, nextWeapon: WeaponName | null, switchState: UpdatePacket['switchState'], down = false) =>
+            c.emit('data', {...pose, activeWeapon, nextWeapon, switchState, isMouseDown:down});
+        swap('AR', 'SHOTGUN', 'WITHDRAWING');
+        use('SHOTGUN', 'grapple');
+        assert.equal(receipt().handling.handWeapon, 'AR', 'the draw starts at the outgoing foregrip');
+        assert.equal(receipt().handling.launchPending, true);
+        use('SHOTGUN', 'release');
+        assert.equal(receipt().handling.launchPending, false);
+        now += 160; swap('SHOTGUN', 'SHOTGUN', 'BRINGING_IN');
+        now += 250; swap('SHOTGUN', null, 'IDLE');
+        const noLaunch = authorizeClientPacket(c.peer, {...pulling,activeWeapon:'SHOTGUN'});
+        assert.ok(noLaunch?.type === 'update' && noLaunch.hookState === 'IDLE', 'auto-equip cannot launch');
+        use('SHOTGUN', 'grapple');
+        const heldPull = authorizeClientPacket(c.peer, {...pulling,activeWeapon:'SHOTGUN'});
+        assert.ok(heldPull?.type === 'update' && heldPull.hookState === 'PULLING');
+        const lightSwitch = authorizeClientPacket(c.peer, {...pulling,activeWeapon:'SHOTGUN',nextWeapon:'PISTOL',switchState:'WITHDRAWING'});
+        assert.ok(lightSwitch?.type === 'update' && lightSwitch.hookState === 'PULLING');
+        now += 160; swap('PISTOL', 'PISTOL', 'BRINGING_IN');
+        now += 160; swap('PISTOL', null, 'IDLE');
+        swap('PISTOL', 'AR', 'WITHDRAWING', true);
+        use('AR', 'raise');
+        assert.equal(receipt().handling.pendingFire, 'AR');
+        now += 160; swap('AR', 'AR', 'BRINGING_IN');
+        now += 160; swap('AR', null, 'IDLE');
+        shot(7);
+        assert.equal(receipt().rejected, true, 'the support hand has further to go than the weapon switch');
+        now += 220; shot(8);
+        assert.equal(receipt().handling.rounds.AR, 38);
+        assert.equal(receipt().handling.pendingFire, null);
+    } finally { disconnectMultiplayer(); state.scene=null; }
 });

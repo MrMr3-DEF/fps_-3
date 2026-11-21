@@ -1,3 +1,4 @@
+import { toggleAtDrawEnd } from './grappleInput.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -6,7 +7,7 @@ import { TOWN_HALF_SIZE, TOWN_GATE_WIDTH, TOWN_GATE_HEIGHT, TOWN_WALL_HEIGHT, CH
 import { state } from '../src/state.ts';
 import { resetPlayerAtTownSpawn } from '../src/playerSpawn.ts';
 import { createEnvironmentAsync, rebuildEnvironmentWithSeed, disposeWorld, getWorldSeed, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, queryObstaclesAlongSegment, queryGrappleSurfacesAlongSegment, respawnTarget, rebuildTargetHash } from '../src/world.ts';
-import { toggleGrapplingHook, resetHook } from '../src/grapple.ts';
+import { resetHook } from '../src/grapple.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
@@ -92,11 +93,11 @@ test('magnetic grapples test the chosen enemy path and use the supplied shoulder
     const aim = new THREE.Ray(new THREE.Vector3(0, 2, 80), new THREE.Vector3(0, 0, 1));
     try {
         state.camera!.position.set(3, 2, 76); state.hookState = 'IDLE';
-        toggleGrapplingHook(aim);
+        toggleAtDrawEnd(aim);
         assert.equal(state.hookTargetEnemy, null, 'the center ray clears the gate but the assisted enemy path hits its wall');
         resetHook();
         enemy.position.set(0, 2, 105); rebuildTargetHash();
-        toggleGrapplingHook(aim);
+        toggleAtDrawEnd(aim);
         assert.equal(state.hookTargetEnemy, enemy, 'the clear path is measured from the same shoulder-ray origin');
     } finally { resetHook(); state.leftGun = null; state.hookMesh = null; disposeWorld(); }
 });

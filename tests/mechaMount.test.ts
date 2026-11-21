@@ -6,7 +6,8 @@ import { loadIronmawTestAsset } from './ironmawTestAsset.ts';
 import { MechaPilot } from '../src/mechaPilot.ts';
 import { MechaCombat } from '../src/mechaCombat.ts';
 import { applyLookInput, setLookInputHandler } from '../src/lookInput.ts';
-import { buildBeanModel } from '../src/weapons.ts';
+import { attachPlayerAvatar, CYBORG_SEATED_OFFSET } from '../src/playerAvatar.ts';
+import { loadCyborgTestAssets, armorBounds } from './cyborgTestAsset.ts';
 import { updateHook } from '../src/grapple.ts';
 import { state } from '../src/state.ts';
 import { playerTouchesWorldBox } from '../src/playerHitbox.ts';
@@ -47,13 +48,18 @@ test('boarding eases for 0.45s, plays full Mount and protected boot/reveal, and 
     actor.preparePilotView(false); assert.equal(helmet.visible, true); actor.restorePilotView(); actor.dispose();
 });
 
-test('head-aligned uniformly fitted bean remains clear of cabin and helmet through Mount', async () => {
-    const actor = await defeated(); const bean = buildBeanModel(0x55cc33, 0x00ffcc); bean.scale.setScalar(actor.pilotScale); bean.rotation.y = Math.PI; actor.pilotAnchor.add(bean);
+test('seated cyborg visor aligns to lens and armor clears cabin and helmet through Mount', async () => {
+    await loadCyborgTestAssets();
+    const actor = await defeated(), pilot = new THREE.Group(), avatar = attachPlayerAvatar(pilot, 0x55cc33)!;
+    pilot.rotation.y = Math.PI;
+    avatar.rig.root.position.y = CYBORG_SEATED_OFFSET;
+    avatar.rig.pose({body:'Pilot.Seated', bodyTime:0, weapon:'PISTOL'});
+    actor.pilotAnchor.add(pilot);
     actor.beginBoarding(actor.seatAnchor.getWorldPosition(new THREE.Vector3()), new THREE.Quaternion());
-    const pilotBox = new THREE.Box3(new THREE.Vector3(-0.6, -1.1, -0.74), new THREE.Vector3(0.6, 1.1, 0.6));
+    const pilotBox = armorBounds(pilot);
     const triangle = new THREE.Triangle(), inverse = new THREE.Matrix4();
     const verify = (label: string) => {
-        bean.updateWorldMatrix(true, true); inverse.copy(bean.matrixWorld).invert();
+        pilot.updateWorldMatrix(true, true); inverse.copy(pilot.matrixWorld).invert();
         for (const name of ['M_UpperTorso_Cavity', 'M_ChestDoor_L', 'M_ChestDoor_R', 'M_Abdomen', 'M_HelmetShell', 'M_EyeLens']) {
             const mesh = actor.group.getObjectByName(name) as THREE.SkinnedMesh; const geometry = mesh.geometry, index = geometry.index;
             for (let vertex = 0; vertex < (index?.count ?? geometry.attributes.position.count); vertex += 3) {
@@ -67,7 +73,7 @@ test('head-aligned uniformly fitted bean remains clear of cabin and helmet throu
         for (let time = 0; time < seconds - 1e-9; time += 1 / 24) { actor.update(Math.min(1 / 24, seconds - time), absent); verify(label); }
     };
     sample(8.3, 'Mount');
-    const head = new THREE.Vector3(0, 0.5, 0).applyMatrix4(bean.matrixWorld);
+    const head = armorBounds(pilot, true).getCenter(new THREE.Vector3()).applyMatrix4(pilot.matrixWorld);
     assert.ok(Math.abs(head.y - actor.viewAnchor.getWorldPosition(new THREE.Vector3()).y) < 0.1, 'head at actual lens height');
     actor.toggleHelmet(); sample(1.4, 'HeadOpen'); actor.toggleHelmet(); sample(1.4, 'HeadClose');
     actor.requestRocket(); const camera = new THREE.PerspectiveCamera();
@@ -75,7 +81,7 @@ test('head-aligned uniformly fitted bean remains clear of cabin and helmet throu
         actor.update(1 / 24, absent); actor.fireRocket(camera, [], (_sx, _sz, _ex, _ez, out) => { out.length = 0; return out; }); verify('RocketFire');
     }
     assert.equal(actor.requestExit(), true); sample(8, 'reversed Mount'); assert.equal(actor.canMount, true);
-    actor.dispose(); assert.equal(bean.parent, null, 'GLB disposal releases externally owned pilot visuals');
+    actor.dispose(); assert.equal(pilot.parent, null, 'GLB disposal releases externally owned pilot visuals'); avatar.dispose();
 });
 
 test('mounted destruction releases the living pilot at immediate breakup, then finishes independently without remounting', async () => {

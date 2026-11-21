@@ -35,7 +35,7 @@ The locator tracks the actor through cover and beyond render distance, including
 its mountable wreck. An occupied remote mecha replaces its pilot's marker; the
 local pilot never tracks their own vehicle. Final destruction removes the marker.
 The weapon panel shows the selected rocket or stomp during active piloting and
-restores the bean's equipped weapon on release.
+restores the pilot’s equipped firearm or katana on release.
 
 ## Eye laser and shield
 
@@ -100,7 +100,7 @@ through entry, shutdown and release; they are not queued.
 | Grapple action / touch Exit | Request voluntary shutdown |
 | Aim | Scoped first person; temporarily enters first person from third person |
 
-The bean's weapon identity remains separate and returns on exit. On-foot jump,
+The pilot retains their on-foot weapon and each firearm’s magazine while seated. On-foot jump,
 hover, strafe, inspection and conversation are unavailable while piloting.
 Piloted movement can cross lava; grounded foot contact costs one HP per tick
 through shields. Enemy navigation still avoids lava.
@@ -140,7 +140,7 @@ Voluntary exit closes the helmet, aligns the torso and reverses the startup
 presentation and Mount. Clearance is checked before shutdown and again at release.
 A blocked preflight leaves controls active and reports a retry message. A newly
 blocked exit restores piloting without refilling energy. A valid exit restores
-normal bean size, controls, weapon, view and gravity while preserving HP, life,
+the standing cyborg’s scale, controls, equipped weapon, camera and gravity while preserving HP, life,
 fuel and score. The zero-HP wreck remains mountable; remounting restores 50 HP
 and full shield energy.
 

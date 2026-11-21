@@ -1,14 +1,14 @@
 # Full-screen menu
 
-The main menu uses a sky background, a hovering bean preview and shared goggles
+The main menu uses a sky background, a hovering cyborg preview and shared goggles
 scans. Play, Multiplayer, Weapons and Settings occupy the lower-left column.
-Character scans expose suit colors without acquiring gameplay homing locks.
+The character’s scan callout on the main menu contains the suit color picker.
 Pause and multiplayer panels reuse the same button layout. The Host room-code
 button copies its ready code; Join uses a matching input.
 
 Offline pause freezes simulation and exposes settings; Back returns to Pause.
 Multiplayer pause keeps simulation running and offers resume/leave without
-settings. Color customization is unavailable throughout a match.
+settings. Pause previews the equipped weapon in both modes.
 
 ## Ownership and shared presentation
 
@@ -16,42 +16,38 @@ settings. Color customization is unavailable throughout a match.
 | --- | --- |
 | `index.html` | Static menu, weapon panel, scan overlays and color controls |
 | `src/mainMenu.ts` | Preview models, menu actions and visible-only rendering |
-| `src/appearance.ts` | Validated suit color and independent local-storage persistence |
+| `src/appearance.ts`, `src/playerAppearance.ts` | Validated local suit color, persistence and multiplayer publication |
 | `src/lobbyLineup.ts` | Lobby slot geometry and callout placement preferences |
 | `src/weaponMenuScan.ts` | Visible weapon bounds, camera fitting and stable scan frames |
 | `src/smartGoggles.ts`, `src/gogglesScanTemplates.ts` | Shared scans, typing and measured callout layout |
 | `src/gameUI.css`, `src/mobile.css`, `src/gothChat.css` | Main UI, touch/editor and conversation styles |
 
-Preview resources are separate from gameplay peer meshes. Disposal preserves
-shared gameplay geometry/materials. Scans reuse overlays; text measurements
+Preview actors have independent skeletons and suit materials. Menu and match views
+share the same cyborg, fitted weapons and four animated exhausts. Scans reuse overlays; text measurements
 refresh on content/font changes and stay within the viewport. Cyan screen
 brackets and the self-hosted Science Gothic font are shared across the UI.
 Keep the font's [license notice](../public/fonts/OFL-ScienceGothic.txt) with it.
 
 ## Character and lobby
 
-The character readout offers a custom picker plus Cobalt, Coral, Mint, Gold and
-Lilac presets. Selection updates the preview and local third-person model.
-Multiplayer carries validated suit color in lobby and player state.
+Before entering a match or lobby, choose Cobalt, Coral, Mint, Gold or Lilac in the Character scan readout, or open its native custom color tile. The selection updates the preview and is saved for the local player’s suit in both game modes.
+Multiplayer carries validated suit color in lobby and player state. The scoreboard
+uses the same color for the visor and chest inlay of each cyborg portrait.
+
+Regenerate the portrait and its accent mask from the character GLB with
+`blender -b -P scripts/generate-cyborg-portrait.py` from the repository root.
 
 The admitted roster places the host at center and guests alternating left/right
 in admission order. Each viewer scans other players by name without gameplay
 stats. Callouts avoid names/menu controls and retain their placement until roster
 or viewport changes. Departures remove previews; replacement peers join the end
-of admission order even when reusing a spawn slot. Starting play hides the lineup.
+of admission order even when reusing a spawn slot. Starting play hides the lineup. Menu cameras reserve the controls’ actual bounds and frame the available width or height. Portrait menus place the preview above the controls. Settings uses the same canvas in a compact sidebar tile.
 
 ## Weapons
 
-Weapon choices and Back form a lower-left stack; the model occupies the right
-half. Stats derive from `WEAPON_STATS` and shared projectile/minigun constants.
-Sniper is labeled hitscan. [Katana](katana.md) shows melee damage, radius, charge
-and swing facts instead of firearm statistics.
+Choose one of five guns, the katana or the grapple. Held view shows the fitted prop on the cyborg at gameplay scale. Close-up isolates the prop for rotation. The pistol and shotgun hold the grapple on the left. Their held reload preview stows the grapple before opening the drawer and draws it again afterward. All five guns replay their actual battery duration. The grapple can show its authored battery service motion. Preview actions leave game ammunition and controls untouched.
 
-Mouse/touch drag or focused arrow keys rotate the model; automatic spin resumes
-after input. Switching retracts the scan, slides models and types the new facts;
-rapid selection retains the latest choice. Reduced motion skips spin/sliding.
-Visible-mesh rotation envelopes keep scan rectangles stable while models turn;
-dormant muzzle effects do not affect their size. Resizing recomputes fitting.
+Drag or use the focused arrow keys to rotate either view. Close-up returns to automatic spin after input. Switching close-ups retracts the scan and slides the new prop into view. Reduced motion skips automatic rotation and transitions. Specifications include magazine capacity and recharge time for guns, melee properties for the katana, and range and draw timing for the grapple.
 
 ## Local chat download settings
 

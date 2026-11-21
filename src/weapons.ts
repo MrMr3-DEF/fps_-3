@@ -1,8 +1,12 @@
-import { buildKatana } from './katanaModel.js';
+import { attachPlayerAvatar, bindAvatarEffects, getPlayerAvatar } from './playerAvatar.js';
+import { getHolderMuzzlePosition } from './firstPersonReload.js';
+import { getKatanaAction } from './katana.js';
+import { userSettings } from './settings.js';
 import { characterColor } from './appearance.js';
 import { isInputActive } from './inputSession.js';
 import { spreadDirection } from './shotAuthority.js';
 import * as THREE from 'three';
+import { pulseEmptyAmmoBar } from './hud.js';
 import { state, type GameState } from './state.js';
 import {
     SWITCH_DURATION,
@@ -14,18 +18,21 @@ import {
     MAX_PROJECTILES,
     BULLET_TRAVEL_DISTANCE,
     PROJECTILE_RADIUS,
-    GRAPPLE_BLUE,
-    GUN_TIP_Z,
     FULL_SPEED_MINIGUN_HOMING_SAMPLE_BULLETS,
+    FIREARM_MAGAZINES,
+    KATANA,
 } from './config.js';
-import { broadcastLocalFire, broadcastToAll, flashPeerMesh } from './weaponNetworkPort.js';
+import { broadcastLocalFire, broadcastToAll, flashPeerMesh, sendWeaponIntent } from './weaponNetworkPort.js';
+import { beginWeaponSwitch, clearHookTether } from './hookLifecycle.js';
+import { isFirearm } from './weaponHandling.js';
+import type { WeaponName } from './networkTypes.js';
 import { spawnParticles, createLaserBeam } from './particles.js';
 import { processTargetHit, processMechaHit } from './damage.js';
-import { forgottenMecha, queryObstaclesAlongSegment, queryTargetsAlongSegment } from './world.js';
+import { forgottenMecha, queryObstaclesAlongSegment, queryTargetsAlongSegment, shotObstructionT } from './world.js';
 import type { HitTargetPacket, PlayerHitPacket } from './networkTypes.js';
 import { projectileData, targetData, obstacleData } from './userDataTypes.js';
 import { shouldUseThirdPersonView } from './thirdPersonCamera.js';
-import { attachGrappleMuzzleShockwave, attachMuzzleShockwave, triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
+import { triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import { flashHitmarker } from './hitmarker.js';
 import { segmentPlayerHitboxHitT, PLAYER_BODY_CAMERA_OFFSET } from './playerHitbox.js';
 import { segmentGroundHitT } from './gameplayMath.js';
@@ -39,77 +46,16 @@ import {
 } from './projectileHoming.js';
 import { beginProjectileTrail } from './projectileTrails.js';
 
-// Inspect animation anchor poses.
-const _INSPECT_BASE_POS    = new THREE.Vector3(0.32, -0.22, -0.5);
-const _INSPECT_WEAPON_POS  = new THREE.Vector3(0.12, -0.15, -0.42);
-const _INSPECT_LEFT_BASE   = new THREE.Vector3(-0.32, -0.22, -0.5);
-const _INSPECT_HOLSTER_POS = new THREE.Vector3(-0.32, -0.65, -0.45);
-
-const INSPECT_PHASE1_END   = 0.6;
-const INSPECT_PAUSE1_END   = 1.0;
-const INSPECT_PHASE2_END   = 3.2;
-const INSPECT_TOTAL        = 3.8;
-
-const SHOTGUN_BARREL_LENGTH = 0.55;
-const SHOTGUN_BARREL_CENTER_Y = 0.02;
-const SHOTGUN_BARREL_CENTER_Z = -0.3;
-const AR_BARREL_LENGTH = 0.65;
-const AR_BARREL_CENTER_Y = 0.02;
-const AR_BARREL_CENTER_Z = -0.4;
-const SNIPER_BRAKE_LENGTH = 0.14;
-const SNIPER_BRAKE_CENTER_Z = -1.4;
-const MINIGUN_Y_OFFSET = -0.06;
-const MINIGUN_Z_OFFSET = 0.08;
-const MINIGUN_BARREL_GROUP_Z = MINIGUN_Z_OFFSET - 0.09;
-const MINIGUN_BARREL_LENGTH = 0.72;
-const MINIGUN_BARREL_RADIUS = 0.07;
-
-/** Exact local-space centers of the modeled muzzle planes. */
-export const WEAPON_MUZZLE_POINTS = {
-    PISTOL: [0, 0, GUN_TIP_Z],
-    SHOTGUN: [0, SHOTGUN_BARREL_CENTER_Y, SHOTGUN_BARREL_CENTER_Z - SHOTGUN_BARREL_LENGTH / 2],
-    AR: [0, AR_BARREL_CENTER_Y, AR_BARREL_CENTER_Z - AR_BARREL_LENGTH / 2],
-    SNIPER: [0, 0, SNIPER_BRAKE_CENTER_Z - SNIPER_BRAKE_LENGTH / 2],
-    MINIGUN: [0, MINIGUN_Y_OFFSET + MINIGUN_BARREL_RADIUS, MINIGUN_BARREL_GROUP_Z - MINIGUN_BARREL_LENGTH],
-} as const;
+const INSPECT_DURATION = 3.8;
 
 export const SHARED_PROJECTILE_GEO = new THREE.SphereGeometry(PROJECTILE_RADIUS, 8, 8);
-export const SHARED_BODY_MAT = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.4 });
-const SHARED_GUN_BODY_GEO = new THREE.BoxGeometry(0.07, 0.11, Math.abs(GUN_TIP_Z) * 2);
-const SHARED_GUN_GRIP_GEO = new THREE.BoxGeometry(0.05, 0.16, 0.07);
-const SHARED_GUN_CORE_GEO = new THREE.BoxGeometry(0.03, 0.03, 0.36);
-const SHARED_BEAN_CYLINDER_GEO = new THREE.CylinderGeometry(0.6, 0.6, 1.0, 16);
-const SHARED_BEAN_SPHERE_GEO = new THREE.SphereGeometry(0.6, 16, 16);
-const SHARED_BOOSTER_CYLINDER_GEO = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 16);
-const SHARED_NOZZLE_GEO = new THREE.CylinderGeometry(0.4, 0.2, 0.2, 16);
-const SHARED_VISOR_GEO = new THREE.BoxGeometry(0.85, 0.25, 0.45);
-const SHARED_VISOR_STRIP_GEO = new THREE.BoxGeometry(0.5, 0.05, 0.012);
-const BEAN_DAMAGE_PULSE_MATERIALS = new WeakMap<THREE.Group, readonly THREE.MeshStandardMaterial[]>();
-const SHARED_GEOMETRIES = new Set<THREE.BufferGeometry>([
-    SHARED_PROJECTILE_GEO,
-    SHARED_GUN_BODY_GEO,
-    SHARED_GUN_GRIP_GEO,
-    SHARED_GUN_CORE_GEO,
-    SHARED_BEAN_CYLINDER_GEO,
-    SHARED_BEAN_SPHERE_GEO,
-    SHARED_BOOSTER_CYLINDER_GEO,
-    SHARED_NOZZLE_GEO,
-    SHARED_VISOR_GEO,
-    SHARED_VISOR_STRIP_GEO
-]);
-
-export function isSharedGeometry(geometry: THREE.BufferGeometry): boolean {
-    return SHARED_GEOMETRIES.has(geometry);
-}
-
-/** Materials belonging to the avatar itself, excluding held weapons and tags. */
-export function getBeanDamagePulseMaterials(bean: THREE.Group): readonly THREE.MeshStandardMaterial[] {
-    return BEAN_DAMAGE_PULSE_MATERIALS.get(bean) ?? [];
-}
 
 // Scratch values reused by firing, third-person alignment and hitscan checks.
 const _camEuler = new THREE.Euler();
+const _visualMuzzle = new THREE.Vector3();
 const _barrelPos = new THREE.Vector3();
+const _eyePosition = new THREE.Vector3();
+const _pelletDirection = new THREE.Vector3();
 const _camDirection = new THREE.Vector3();
 
 const _hitPoint = new THREE.Vector3();
@@ -119,8 +65,7 @@ const _raycaster = new THREE.Raycaster();
 const _targetCandidates: THREE.Group[] = [];
 const _obstacleCandidates: THREE.Object3D[] = [];
 
-// Weapon names are stored as strings in state/network packets, so these maps are
-// the single place that translates names into scene objects and switch offsets.
+// Map equipped weapon names to their event and effect handles in game state.
 const WEAPON_MESH_KEYS: Record<string, keyof GameState> = {
     PISTOL: 'pistolMesh',
     SHOTGUN: 'shotgunMesh',
@@ -135,320 +80,30 @@ function getWeaponMesh(name: string): THREE.Object3D | null {
     return key ? (state[key] as THREE.Object3D | null) : null;
 }
 
-const WEAPON_OFFSETS: Record<string, number> = {
-    PISTOL: 0.19,
-    SHOTGUN: 0.22,
-    AR: 0.26,
-    SNIPER: 0.32,
-    MINIGUN: 0.36
-};
-
-function getWeaponOffset(name: string): number {
-    return WEAPON_OFFSETS[name] ?? 0.22;
-}
-
-export const buildGun = (coreColor: number, grappleFlash = false): THREE.Group => {
-    const gunGroup = new THREE.Group();
-    const bodyMat = SHARED_BODY_MAT;
-    const body = new THREE.Mesh(SHARED_GUN_BODY_GEO, bodyMat);
-    body.castShadow = true;
-    gunGroup.add(body);
-
-    const grip = new THREE.Mesh(SHARED_GUN_GRIP_GEO, bodyMat);
-    grip.position.set(0, -0.09, 0.09);
-    grip.rotation.x = Math.PI / 6;
-    gunGroup.add(grip);
-
-    const coreMat = new THREE.MeshBasicMaterial({ color: coreColor });
-    const core = new THREE.Mesh(SHARED_GUN_CORE_GEO, coreMat);
-    core.position.set(0, 0.042, -0.04);
-    gunGroup.add(core);
-    if (grappleFlash) {
-        attachGrappleMuzzleShockwave(gunGroup, WEAPON_MUZZLE_POINTS.PISTOL, GRAPPLE_BLUE);
-    } else {
-        attachMuzzleShockwave(gunGroup, WEAPON_MUZZLE_POINTS.PISTOL, coreColor, WEAPON_STATS.PISTOL.muzzleFlashSize);
-    }
-    return gunGroup;
-};
-
-export const buildShotgun = (): THREE.Group => {
-    const shotgunGroup = new THREE.Group();
-    const bodyMat = SHARED_BODY_MAT;
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
-
-    const bodyGeo = new THREE.BoxGeometry(0.08, 0.12, 0.45);
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.castShadow = true;
-    shotgunGroup.add(body);
-
-    const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, SHOTGUN_BARREL_LENGTH, 8);
-    barrelGeo.rotateX(Math.PI / 2);
-
-    const leftBarrel = new THREE.Mesh(barrelGeo, bodyMat);
-    leftBarrel.position.set(-0.02, SHOTGUN_BARREL_CENTER_Y, SHOTGUN_BARREL_CENTER_Z);
-    leftBarrel.castShadow = true;
-    shotgunGroup.add(leftBarrel);
-
-    const rightBarrel = new THREE.Mesh(barrelGeo, bodyMat);
-    rightBarrel.position.set(0.02, SHOTGUN_BARREL_CENTER_Y, SHOTGUN_BARREL_CENTER_Z);
-    rightBarrel.castShadow = true;
-    shotgunGroup.add(rightBarrel);
-
-    const gripGeo = new THREE.BoxGeometry(0.06, 0.12, 0.22);
-    const grip = new THREE.Mesh(gripGeo, bodyMat);
-    grip.position.set(0, -0.09, 0.15);
-    grip.rotation.x = Math.PI / 6;
-    shotgunGroup.add(grip);
-
-    const pumpGeo = new THREE.BoxGeometry(0.09, 0.08, 0.25);
-    const pump = new THREE.Mesh(pumpGeo, bodyMat);
-    pump.position.set(0, -0.04, -0.15);
-    shotgunGroup.add(pump);
-
-    const coreGeo = new THREE.BoxGeometry(0.04, 0.04, 0.42);
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(0, 0.05, -0.05);
-    shotgunGroup.add(core);
-
-    attachMuzzleShockwave(shotgunGroup, WEAPON_MUZZLE_POINTS.SHOTGUN, WEAPON_STATS.SHOTGUN.bulletColor, WEAPON_STATS.SHOTGUN.muzzleFlashSize);
-
-    return shotgunGroup;
-};
-
-export const buildAR = (): THREE.Group => {
-    const arGroup = new THREE.Group();
-    const bodyMat = SHARED_BODY_MAT;
-    const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ff88 });
-
-    const bodyGeo = new THREE.BoxGeometry(0.08, 0.13, 0.52);
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.castShadow = true;
-    arGroup.add(body);
-
-    const barrelGeo = new THREE.CylinderGeometry(0.015, 0.015, AR_BARREL_LENGTH, 8);
-    barrelGeo.rotateX(Math.PI / 2);
-    const barrel = new THREE.Mesh(barrelGeo, bodyMat);
-    barrel.position.set(0, AR_BARREL_CENTER_Y, AR_BARREL_CENTER_Z);
-    barrel.castShadow = true;
-    arGroup.add(barrel);
-
-    const gripGeo = new THREE.BoxGeometry(0.05, 0.15, 0.07);
-    const grip = new THREE.Mesh(gripGeo, bodyMat);
-    grip.position.set(0, -0.1, 0.12);
-    grip.rotation.x = Math.PI / 6;
-    arGroup.add(grip);
-
-    const magGeo = new THREE.BoxGeometry(0.04, 0.18, 0.08);
-    magGeo.rotateX(-Math.PI / 12);
-    const mag = new THREE.Mesh(magGeo, bodyMat);
-    mag.position.set(0, -0.16, -0.05);
-    arGroup.add(mag);
-
-    const coreGeo = new THREE.BoxGeometry(0.04, 0.03, 0.48);
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(0, 0.052, -0.06);
-    arGroup.add(core);
-
-    attachMuzzleShockwave(arGroup, WEAPON_MUZZLE_POINTS.AR, WEAPON_STATS.AR.bulletColor, WEAPON_STATS.AR.muzzleFlashSize);
-
-    return arGroup;
-};
-
-export const buildSniper = (): THREE.Group => {
-    const sniperGroup = new THREE.Group();
-    const bodyMat = SHARED_BODY_MAT;
-    const coreMat = new THREE.MeshBasicMaterial({ color: WEAPON_STATS.SNIPER.bulletColor });
-    const scopeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.2 });
-
-    const bodyGeo = new THREE.BoxGeometry(0.07, 0.11, 0.38);
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.castShadow = true;
-    sniperGroup.add(body);
-
-    const gripGeo = new THREE.BoxGeometry(0.05, 0.16, 0.07);
-    const grip = new THREE.Mesh(gripGeo, bodyMat);
-    grip.position.set(0, -0.09, 0.09);
-    grip.rotation.x = Math.PI / 6;
-    sniperGroup.add(grip);
-
-    const coreGeo = new THREE.BoxGeometry(0.03, 0.03, 0.36);
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.set(0, 0.042, -0.04);
-    sniperGroup.add(core);
-
-    const barrelGeo = new THREE.CylinderGeometry(0.027, 0.027, 1.14, 8);
-    barrelGeo.rotateX(Math.PI / 2);
-    const barrel = new THREE.Mesh(barrelGeo, bodyMat);
-    barrel.position.set(0, 0, -0.76);
-    barrel.castShadow = true;
-    sniperGroup.add(barrel);
-
-    const brakeMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.5, metalness: 0.8 });
-    const ventMat = new THREE.MeshBasicMaterial({ color: 0x0a0a12 });
-
-    const brakeBodyGeo = new THREE.CylinderGeometry(0.038, 0.038, SNIPER_BRAKE_LENGTH, 8);
-    brakeBodyGeo.rotateX(Math.PI / 2);
-    const brakeBody = new THREE.Mesh(brakeBodyGeo, brakeMat);
-    brakeBody.position.set(0, 0, SNIPER_BRAKE_CENTER_Z);
-    brakeBody.castShadow = true;
-    sniperGroup.add(brakeBody);
-
-    const ventGeo = new THREE.BoxGeometry(0.01, 0.05, 0.025);
-    const ventL1 = new THREE.Mesh(ventGeo, ventMat);
-    ventL1.position.set(-0.036, 0, -1.365);
-    sniperGroup.add(ventL1);
-
-    const ventL2 = new THREE.Mesh(ventGeo, ventMat);
-    ventL2.position.set(-0.036, 0, -1.435);
-    sniperGroup.add(ventL2);
-
-    const ventR1 = new THREE.Mesh(ventGeo, ventMat);
-    ventR1.position.set(0.036, 0, -1.365);
-    sniperGroup.add(ventR1);
-
-    const ventR2 = new THREE.Mesh(ventGeo, ventMat);
-    ventR2.position.set(0.036, 0, -1.435);
-    sniperGroup.add(ventR2);
-
-    const stockGeo = new THREE.BoxGeometry(0.05, 0.11, 0.32);
-    const stock = new THREE.Mesh(stockGeo, bodyMat);
-    stock.position.set(0, -0.04, 0.35);
-    sniperGroup.add(stock);
-
-    const padGeo = new THREE.BoxGeometry(0.052, 0.112, 0.02);
-    const pad = new THREE.Mesh(padGeo, coreMat);
-    pad.position.set(0, -0.04, 0.51);
-    sniperGroup.add(pad);
-
-    const scopeGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 8);
-    scopeGeo.rotateX(Math.PI / 2);
-    const scope = new THREE.Mesh(scopeGeo, scopeMat);
-    scope.position.set(0, 0.09, -0.05);
-    scope.castShadow = true;
-    sniperGroup.add(scope);
-
-    const mountGeo = new THREE.BoxGeometry(0.015, 0.04, 0.03);
-    const mount1 = new THREE.Mesh(mountGeo, bodyMat);
-    mount1.position.set(0, 0.065, 0.03);
-    sniperGroup.add(mount1);
-    const mount2 = new THREE.Mesh(mountGeo, bodyMat);
-    mount2.position.set(0, 0.065, -0.13);
-    sniperGroup.add(mount2);
-
-    const lensGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.01, 8);
-    lensGeo.rotateX(Math.PI / 2);
-    const lens = new THREE.Mesh(lensGeo, coreMat);
-    lens.position.set(0, 0.09, -0.176);
-    sniperGroup.add(lens);
-
-    attachMuzzleShockwave(sniperGroup, WEAPON_MUZZLE_POINTS.SNIPER, WEAPON_STATS.SNIPER.bulletColor, WEAPON_STATS.SNIPER.muzzleFlashSize);
-
-    return sniperGroup;
-};
-
-export const buildMinigun = (): THREE.Group => {
-    const minigunGroup = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.5 });
-    const barrelMat = new THREE.MeshStandardMaterial({ color: 0x1e272e, roughness: 0.3, metalness: 0.8 });
-    const handleMat = new THREE.MeshStandardMaterial({ color: 0x2f3542, roughness: 0.7 });
-    const coreMat = new THREE.MeshBasicMaterial({ color: WEAPON_STATS.MINIGUN.bulletColor });
-
-    const cubeGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
-    const cube = new THREE.Mesh(cubeGeo, bodyMat);
-    cube.position.set(0, MINIGUN_Y_OFFSET, MINIGUN_Z_OFFSET);
-    cube.castShadow = true;
-    minigunGroup.add(cube);
-
-    const handleGroup = new THREE.Group();
-    
-    const s1Geo = new THREE.BoxGeometry(0.04, 0.12, 0.04);
-    const s1 = new THREE.Mesh(s1Geo, handleMat);
-    s1.position.set(0, MINIGUN_Y_OFFSET + 0.09, 0.07 + MINIGUN_Z_OFFSET);
-    s1.castShadow = true;
-    handleGroup.add(s1);
-
-    const gripGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.15, 8);
-    gripGeo.rotateX(Math.PI / 2);
-    const grip = new THREE.Mesh(gripGeo, handleMat);
-    grip.position.set(0, MINIGUN_Y_OFFSET + 0.15, -0.005 + MINIGUN_Z_OFFSET);
-    grip.castShadow = true;
-    handleGroup.add(grip);
-
-    minigunGroup.add(handleGroup);
-
-    // Stored separately so updateWeapons can spin the barrels without walking children.
-    const barrelsGroup = new THREE.Group();
-    barrelsGroup.position.set(0, MINIGUN_Y_OFFSET, MINIGUN_BARREL_GROUP_Z);
-    
-    const barrelLength = MINIGUN_BARREL_LENGTH;
-    const barrelGeo = new THREE.CylinderGeometry(0.02, 0.02, barrelLength, 8);
-    barrelGeo.rotateX(Math.PI / 2);
-
-    for (let i = 0; i < 6; i++) {
-        const angle = (i * Math.PI) / 3;
-        const x = Math.cos(angle) * MINIGUN_BARREL_RADIUS;
-        const y = Math.sin(angle) * MINIGUN_BARREL_RADIUS;
-        const b = new THREE.Mesh(barrelGeo, barrelMat);
-        b.position.set(x, y, -barrelLength / 2);
-        b.castShadow = true;
-        barrelsGroup.add(b);
-    }
-
-    const bracketGeo = new THREE.BoxGeometry(0.18, 0.18, 0.015);
-    const bracket = new THREE.Mesh(bracketGeo, bodyMat);
-    bracket.position.set(0, 0, -barrelLength / 2);
-    barrelsGroup.add(bracket);
-
-    const hubGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.02, 12);
-    hubGeo.rotateX(Math.PI / 2);
-    const hub = new THREE.Mesh(hubGeo, coreMat);
-    hub.position.set(0, 0, -barrelLength / 2 - 0.012);
-    barrelsGroup.add(hub);
-
-    minigunGroup.add(barrelsGroup);
-
-    minigunGroup.userData.barrels = barrelsGroup;
-    attachMuzzleShockwave(minigunGroup, WEAPON_MUZZLE_POINTS.MINIGUN, WEAPON_STATS.MINIGUN.bulletColor, WEAPON_STATS.MINIGUN.muzzleFlashSize);
-
-    return minigunGroup;
-};
-
 export function createAkimboGuns(): void {
     if (!state.camera || !state.scene) return;
 
-    state.leftGun = buildGun(GRAPPLE_BLUE, true);
-    state.leftGun.position.set(-0.32, -0.22, -0.5);
-    state.camera.add(state.leftGun);
-
+    // The logical handles own weapon events and effects. The fitted skeleton
+    // supplies the physical socket once match assets have been prepared.
+    state.leftGun = new THREE.Group();
     state.rightGunContainer = new THREE.Group();
+    state.leftGun.position.set(-0.32, -0.22, -0.5);
     state.rightGunContainer.position.set(0.32, -0.22, -0.5);
-    state.camera.add(state.rightGunContainer);
+    state.leftGun.visible = state.rightGunContainer.visible = false;
+    state.camera.add(state.leftGun, state.rightGunContainer);
 
-    state.pistolMesh = buildGun(WEAPON_STATS.PISTOL.bulletColor);
-    state.rightGunContainer.add(state.pistolMesh);
-
-    state.shotgunMesh = buildShotgun();
-    state.shotgunMesh.visible = false;
-    state.rightGunContainer.add(state.shotgunMesh);
-
-    state.arMesh = buildAR();
-    state.arMesh.visible = false;
-    state.rightGunContainer.add(state.arMesh);
-
-    state.sniperMesh = buildSniper();
-    state.sniperMesh.visible = false;
-    state.rightGunContainer.add(state.sniperMesh);
-
-    state.minigunMesh = buildMinigun();
-    state.minigunMesh.visible = false;
-    state.rightGunContainer.add(state.minigunMesh);
-
-    state.katanaMesh = buildKatana();
-    state.katanaMesh.visible = false;
-    state.rightGunContainer.add(state.katanaMesh);
-
-    state.rightGun = state.pistolMesh;
-
+    state.pistolMesh = new THREE.Group();
+    state.shotgunMesh = new THREE.Group();
+    state.arMesh = new THREE.Group();
+    state.sniperMesh = new THREE.Group();
+    state.minigunMesh = new THREE.Group();
+    state.katanaMesh = new THREE.Group();
+    for (const weapon of Object.keys(WEAPON_MESH_KEYS)) {
+        const anchor = getWeaponMesh(weapon)!;
+        anchor.visible = weapon === state.activeWeaponName;
+        state.rightGunContainer.add(anchor);
+    }
+    state.rightGun = getWeaponMesh(state.activeWeaponName);
     state.scene.add(state.camera);
 }
 
@@ -509,7 +164,21 @@ export function fireProjectile(): void {
     }
 
     const stats = WEAPON_STATS[state.activeWeaponName];
-    if (!stats) return;
+    const weapon = state.activeWeaponName;
+    if (!stats || !isFirearm(weapon) || !state.weaponHandling.canFire(weapon, state.weaponTime)) return;
+    const rig = getPlayerAvatar(state.playerMesh)?.rig;
+    if (rig) updatePlayerAvatarPose(0);
+    (rig?.muzzleFor(weapon) ?? state.rightGun).getWorldPosition(_barrelPos);
+    state.camera.getWorldPosition(_eyePosition);
+    // A long barrel can protrude past cover even though the player's eye is
+    // clear. Both shooter and host test this segment before committing a round.
+    if (shotObstructionT(_eyePosition, _barrelPos, weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS) !== null ||
+        !state.weaponHandling.spendShot(weapon, state.weaponTime)) return;
+    if (!rig || state.isScoped || state.isThirdPersonView || !getHolderMuzzlePosition(rig, weapon, _visualMuzzle)) {
+        _visualMuzzle.copy(_barrelPos);
+    }
+    state.camera.getWorldDirection(_camDirection);
+    state.rightGun.userData.onAvatarFire?.();
 
     let homingTarget: ProjectileHomingTarget | null = state.isScoped && state.activeWeaponName !== 'SNIPER'
         ? getProjectileHomingTarget()
@@ -525,8 +194,6 @@ export function fireProjectile(): void {
 
     const shotId = ++nextShotId;
     const spreadSeed = crypto.getRandomValues(new Uint32Array(1))[0];
-    state.rightGun.getWorldPosition(_barrelPos);
-    state.rightGunContainer.position.z += stats.recoil;
     if (homingTarget && !isHomingTargetInRange(homingTarget, _barrelPos, BULLET_TRAVEL_DISTANCE)) {
         homingTarget = null;
     }
@@ -554,24 +221,17 @@ export function fireProjectile(): void {
         }
         state.scene!.add(projectile);
 
-        const barrelWorldPosition = _barrelPos;
-        state.rightGun!.getWorldPosition(barrelWorldPosition);
-
-        const camDirection = _camDirection;
-        state.camera!.getWorldDirection(camDirection);
-
-        spreadDirection(camDirection, spreadSeed, pelletIndex, spreadAmt, camDirection);
-
-        projectile.position.copy(barrelWorldPosition).addScaledVector(camDirection, 0.1);
+        const direction = spreadDirection(_camDirection, spreadSeed, pelletIndex, spreadAmt, _pelletDirection);
+        projectile.position.copy(_visualMuzzle);
         const data = projectileData(projectile);
-        data.dx = camDirection.x;
-        data.dy = camDirection.y;
-        data.dz = camDirection.z;
+        data.dx = direction.x;
+        data.dy = direction.y;
+        data.dz = direction.z;
         data.age = 0;
-        data.distanceTraveled = projectile.position.distanceTo(barrelWorldPosition);
+        data.distanceTraveled = 0;
         data.visualOnly = false;
         data.damage = stats.damage;
-        (data.shotOrigin ??= new THREE.Vector3()).copy(barrelWorldPosition);
+        (data.shotOrigin ??= new THREE.Vector3()).copy(_barrelPos);
         data.shotId = shotId;
         data.pelletIndex = pelletIndex;
         data.homingTarget = homingTarget ?? undefined;
@@ -595,10 +255,7 @@ export function fireProjectile(): void {
 
     if (state.activeWeaponName === 'SNIPER') {
         const barrelWorldPosition = _barrelPos;
-        state.rightGun.getWorldPosition(barrelWorldPosition);
-
         const camDirection = _camDirection;
-        state.camera.getWorldDirection(camDirection);
 
         _raycaster.set(barrelWorldPosition, camDirection);
         _raycaster.far = BULLET_TRAVEL_DISTANCE;
@@ -657,7 +314,7 @@ export function fireProjectile(): void {
             for (let j = 0; j < peerIdsLen; j++) {
                 const peerId = peerIds[j];
                 const peerData = state.peers[peerId];
-            if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerId) continue;
+                if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerId) continue;
                 if (peerData?.mesh && peerData.hp > 0) {
                     // Use the same body hit volume as bullets; labels and guns are not hitboxes.
                     const hit = segmentPlayerHitboxHitT(
@@ -740,7 +397,7 @@ export function fireProjectile(): void {
             spawnParticles(hitPoint, 0x8c7ae6, 15, 12, 0.15, 12.0);
         }
 
-        createLaserBeam(barrelWorldPosition, hitPoint, stats.bulletColor);
+        createLaserBeam(_visualMuzzle, hitPoint, stats.bulletColor);
 
         if (state.isMultiplayer && !sniperFireBroadcast) {
             broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
@@ -757,343 +414,178 @@ export function fireProjectile(): void {
     }
 
     if (state.isMultiplayer) {
-        const barrelWorldPosition = _barrelPos;
-        state.rightGun.getWorldPosition(barrelWorldPosition);
-        const camDirection = _camDirection;
-        state.camera.getWorldDirection(camDirection);
-        broadcastLocalFire(barrelWorldPosition, camDirection, null, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
+        broadcastLocalFire(_barrelPos, _camDirection, null, shotId, spreadSeed, homingTargetPacket, homingStartDistance);
     }
 }
 
+export function weaponHudFraction(): number {
+    const weapon = state.activeWeaponName;
+    return isFirearm(weapon) ? state.weaponHandling.rounds[weapon] / FIREARM_MAGAZINES[weapon].capacity :
+        Math.max(0, Math.min(1, 1 - state.fireCooldown / KATANA.duration));
+}
+
+export function requestReload(): void {
+    const weapon = state.activeWeaponName;
+    if (!isFirearm(weapon) || !isInputActive() || state.playerHp <= 0 || state.hookState !== 'IDLE' ||
+        state.switchState !== 'IDLE' || state.desiredWeaponName !== weapon || forgottenMecha?.ownsLocalPilot ||
+        !state.weaponHandling.beginReload(weapon, state.weaponTime)) return;
+    cancelInspect();
+    if (state.isMultiplayer) sendWeaponIntent('reload', weapon);
+}
+
+let emptyTriggerReported = false;
+
+/** Automatic fire never claims the support hand from a pre-held trigger.
+ * A fresh press can queue exactly one heavy shot behind the stow/raise. */
+export function requestPrimaryFire(fresh: boolean): void {
+    if (!isInputActive() || state.playerHp <= 0 || forgottenMecha?.ownsLocalPilot) return;
+    beginWeaponSwitch();
+    const switching = state.switchState !== 'IDLE';
+    const weapon = switching ? state.nextWeaponName : state.activeWeaponName;
+    if (!weapon || !isFirearm(weapon)) return;
+    const handling = state.weaponHandling;
+    if (fresh || handling.rounds[weapon] > 0) emptyTriggerReported = false;
+    if (!switching && handling.rounds[weapon] === 0 && !emptyTriggerReported) {
+        emptyTriggerReported = true;
+        pulseEmptyAmmoBar();
+    }
+    if (fresh && handling.requestHeavyFire(weapon, state.weaponTime, switching)) {
+        cancelInspect();
+        clearHookTether();
+        if (state.isMultiplayer) sendWeaponIntent('raise', weapon);
+    }
+    if (!switching && state.fireCooldown <= 0 && handling.canFire(weapon, state.weaponTime)) {
+        cancelInspect();
+        fireProjectile();
+    }
+}
+
+export function cancelWeaponHandling(): void {
+    const h = state.weaponHandling, weapon = (state.nextWeaponName ?? state.activeWeaponName) as WeaponName;
+    if (h.hand === 'holstered' && !h.reload && !h.pendingFire && !h.queuedReload) return;
+    h.interrupt(weapon, state.weaponTime);
+    clearHookTether();
+    if (state.isMultiplayer) sendWeaponIntent('cancel', weapon);
+}
+
 export function updateWeapons(delta: number): void {
+    state.weaponTime += delta;
+    const startsSwitch = !forgottenMecha?.ownsLocalPilot && beginWeaponSwitch();
+    state.weaponHandling.advance(state.weaponTime);
     state.fireCooldown = Math.max(0, state.fireCooldown - delta);
     if (forgottenMecha?.ownsLocalPilot) { state.minigunRamp = 0; return; }
     updateMuzzleFlash(state.leftGun, delta);
     updateMuzzleFlash(state.rightGun, delta);
 
 
-    if (state.rightGunContainer) {
-        state.rightGunContainer.position.z += (-0.5 - state.rightGunContainer.position.z) * 15 * delta;
-    }
-
-    if (state.leftGun && state.inspectState === 'IDLE' && !state.isThirdPersonView) {
-        if (Math.abs(state.leftGun.position.z - (-0.5)) > 0.001) {
-            state.leftGun.position.z += (-0.5 - state.leftGun.position.z) * 15 * delta;
-        }
-    }
-
     if (state.activeWeaponName === 'MINIGUN') {
-        if (state.controls && isInputActive() && state.isMouseDown && state.switchState === 'IDLE') {
+        if (state.controls && isInputActive() && (state.isMouseDown || state.weaponHandling.pendingFire === 'MINIGUN') &&
+            state.switchState === 'IDLE' && state.weaponHandling.canFire('MINIGUN', state.weaponTime)) {
             state.minigunRamp = Math.min(MINIGUN_RAMP_TIME, state.minigunRamp + delta);
         } else {
             state.minigunRamp = Math.max(0.0, state.minigunRamp - delta * 2.0);
         }
         
-        if (state.minigunMesh && state.minigunMesh.userData.barrels) {
-            const isLocked = state.controls ? isInputActive() : false;
-            const spinSpeed = (state.minigunRamp / MINIGUN_RAMP_TIME) * 40.0 + (state.isMouseDown && isLocked && state.switchState === 'IDLE' ? 5.0 : 0.0);
-            state.minigunMesh.userData.barrels.rotation.z += spinSpeed * delta;
-        }
     } else {
         state.minigunRamp = Math.max(0.0, state.minigunRamp - delta * 2.0);
     }
 
-    // desiredWeaponName is set by input; this block starts the actual visual swap.
-    const startsSwitch = state.switchState === 'IDLE' && state.activeWeaponName !== state.desiredWeaponName;
-    if (startsSwitch) {
-        state.nextWeaponName = state.desiredWeaponName;
-        state.switchState = 'WITHDRAWING';
-        state.switchTimer = 0;
-    }
-
-    if (state.switchState !== 'IDLE' && state.pistolMesh && state.shotgunMesh && state.arMesh && state.sniperMesh && state.minigunMesh) {
-        // This frame's elapsed time preceded the newly observed switch intent.
-        // Counting it would shorten withdrawal, especially after a long frame,
-        // before the host can receive the first phase update.
-        if (!startsSwitch) state.switchTimer += delta;
-        const t = Math.min(1.0, state.switchTimer / SWITCH_DURATION);
-
-        const currentMesh = getWeaponMesh(state.activeWeaponName);
-        const nextMesh    = getWeaponMesh(state.nextWeaponName!);
-        const d           = getWeaponOffset(state.activeWeaponName);
-
-        if (state.switchState === 'WITHDRAWING' && currentMesh && nextMesh) {
-            const theta = t * (Math.PI / 1.7);
-            currentMesh.rotation.x = theta;
-            currentMesh.position.y = -d * Math.sin(Math.abs(theta));
-            currentMesh.position.z = d * (Math.cos(theta) - 1);
-
-            if (t >= 1.0) {
-                currentMesh.visible = false;
-                currentMesh.rotation.set(0, 0, 0);
-                currentMesh.position.set(0, 0, 0);
-
-                state.activeWeaponName = state.nextWeaponName!;
-                state.rightGun = nextMesh;
-
-                const nextD = getWeaponOffset(state.activeWeaponName);
-                const startTheta = -Math.PI / 1.7;
-
-                nextMesh.visible = true;
-                nextMesh.rotation.x = startTheta;
-                nextMesh.position.y = -nextD * Math.sin(Math.abs(startTheta));
-                nextMesh.position.z = nextD * (Math.cos(startTheta) - 1);
-
-                state.switchState = 'BRINGING_IN';
-                state.switchTimer = 0;
-            }
-        } else if (state.switchState === 'BRINGING_IN' && nextMesh) {
-            const theta = -Math.PI / 1.7 * (1.0 - t);
-            nextMesh.rotation.x = theta;
-            nextMesh.position.y = -d * Math.sin(Math.abs(theta));
-            nextMesh.position.z = d * (Math.cos(theta) - 1);
-
-            if (t >= 1.0) {
-                nextMesh.rotation.set(0, 0, 0);
-                nextMesh.position.set(0, 0, 0);
-                state.switchState = 'IDLE';
-            }
-        }
-    }
-
-    if (state.playerMesh && state.controls && state.camera) {
-        _camEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
-
-        if (state.isThirdPersonView) {
-            if (state.leftGun) state.leftGun.rotation.x = _camEuler.x;
-            if (state.rightGunContainer) state.rightGunContainer.rotation.x = _camEuler.x;
-        } else {
-            if (state.leftGun) state.leftGun.rotation.set(0, 0, 0);
-            if (state.rightGunContainer) state.rightGunContainer.rotation.set(0, 0, 0);
-        }
-    }
-
-    // Inspect animation is first-person only; third-person uses the player model.
-    if (state.inspectState === 'INSPECTING') {
-        state.inspectTimer += delta;
-        if (state.inspectTimer >= INSPECT_TOTAL) {
-            state.inspectState = 'IDLE';
-            state.inspectTimer = 0.0;
-            if (state.rightGunContainer && !state.isThirdPersonView) {
-                state.rightGunContainer.position.set(0.32, -0.22, -0.5);
-                state.rightGunContainer.rotation.set(0, 0, 0);
-            }
-            if (state.leftGun && !state.isThirdPersonView) {
-                state.leftGun.position.set(-0.32, -0.22, -0.5);
-                state.leftGun.rotation.set(0, 0, 0);
-            }
-        } else if (!state.isThirdPersonView) {
-            const t = state.inspectTimer;
-            const basePos       = _INSPECT_BASE_POS;
-            const inspectPos    = _INSPECT_WEAPON_POS;
-            const baseLeftPos   = _INSPECT_LEFT_BASE;
-            const holsterLeftPos = _INSPECT_HOLSTER_POS;
-            
-            const targetRotX = 0;
-            const targetRotY = 83 * Math.PI / 180;
-            const targetRotZ = 0;
-            const targetLeftRotX = Math.PI / 2;
-
-            if (t < INSPECT_PHASE1_END) {
-                const r = t / INSPECT_PHASE1_END;
-                const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
-                
-                if (state.rightGunContainer) {
-                    state.rightGunContainer.position.lerpVectors(basePos, inspectPos, ease);
-                    state.rightGunContainer.rotation.set(
-                        targetRotX * ease,
-                        targetRotY * ease,
-                        targetRotZ * ease
-                    );
-                }
-
-                if (state.leftGun) {
-                    state.leftGun.position.lerpVectors(baseLeftPos, holsterLeftPos, ease);
-                    state.leftGun.rotation.set(targetLeftRotX * ease, 0, 0);
-                }
-            } else if (t < INSPECT_PAUSE1_END) {
-                if (state.rightGunContainer) {
-                    state.rightGunContainer.position.copy(inspectPos);
-                    state.rightGunContainer.rotation.set(targetRotX, targetRotY, targetRotZ);
-                }
-                if (state.leftGun) {
-                    state.leftGun.position.copy(holsterLeftPos);
-                    state.leftGun.rotation.set(targetLeftRotX, 0, 0);
-                }
-            } else if (t < INSPECT_PHASE2_END) {
-                if (state.rightGunContainer) {
-                    state.rightGunContainer.position.copy(inspectPos);
-                }
-                if (state.leftGun) {
-                    state.leftGun.position.copy(holsterLeftPos);
-                    state.leftGun.rotation.set(targetLeftRotX, 0, 0);
-                }
-                
-                const time = t - 1.0; 
-                const maxRoll = Math.PI / 2.2;
-                let rollZ = 0;
-
-                if (time < 0.4) {
-                    const r = time / 0.4;
-                    const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
-                    rollZ = ease * maxRoll;
-                } else if (time < 0.8) {
-                    rollZ = maxRoll;
-                } else if (time < 1.4) {
-                    const r = (time - 0.8) / 0.6;
-                    const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
-                    rollZ = maxRoll - ease * (2 * maxRoll);
-                } else if (time < 1.8) {
-                    rollZ = -maxRoll;
-                } else {
-                    const r = (time - 1.8) / 0.4;
-                    const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
-                    rollZ = -maxRoll + ease * maxRoll;
-                }
-
-                if (state.rightGunContainer) {
-                    state.rightGunContainer.rotation.set(targetRotX, targetRotY, rollZ);
+    if (!startsSwitch && state.switchState !== 'IDLE') {
+        // The frame that first observes a switch preceded the intent. Only
+        // subsequent frames advance the two host-verifiable transition clocks.
+        state.switchTimer += delta;
+        if (state.switchTimer >= SWITCH_DURATION) {
+            if (state.switchState === 'WITHDRAWING') {
+                const next = state.nextWeaponName;
+                const anchor = next ? getWeaponMesh(next) : null;
+                if (next && anchor) {
+                    if (state.rightGun) state.rightGun.visible = false;
+                    state.activeWeaponName = next;
+                    state.rightGun = anchor;
+                    anchor.visible = true;
+                    state.switchState = 'BRINGING_IN';
+                    state.switchTimer = 0;
                 }
             } else {
-                const r = (t - INSPECT_PHASE2_END) / (INSPECT_TOTAL - INSPECT_PHASE2_END);
-                const ease = 0.5 - 0.5 * Math.cos(r * Math.PI);
-
-                if (state.rightGunContainer) {
-                    state.rightGunContainer.position.lerpVectors(inspectPos, basePos, ease);
-                    state.rightGunContainer.rotation.set(
-                        targetRotX * (1.0 - ease),
-                        targetRotY * (1.0 - ease),
-                        targetRotZ * (1.0 - ease)
-                    );
-                }
-
-                if (state.leftGun) {
-                    state.leftGun.position.lerpVectors(holsterLeftPos, baseLeftPos, ease);
-                    state.leftGun.rotation.set(targetLeftRotX * (1.0 - ease), 0, 0);
-                }
+                state.nextWeaponName = null;
+                state.switchState = 'IDLE';
+                state.switchTimer = 0;
             }
         }
+    }
+
+    if (state.inspectState === 'INSPECTING') {
+        state.inspectTimer += delta;
+        if (state.inspectTimer >= INSPECT_DURATION) cancelInspect();
     }
 }
 
 export function cancelInspect(): void {
-    if (state.inspectState === 'INSPECTING') {
-        state.inspectState = 'IDLE';
-        state.inspectTimer = 0.0;
-        resetViewModelPose();
-    }
+    state.inspectState = 'IDLE';
+    state.inspectTimer = 0;
 }
-
-function resetViewModelPose(): void {
-    const third = state.isThirdPersonView;
-    _camEuler.setFromQuaternion(state.camera?.quaternion ?? _identityQuaternion, 'YXZ');
-    if (state.leftGun) {
-        state.leftGun.position.set(third ? -0.7 : -0.32, third ? 0 : -0.22, -0.5);
-        state.leftGun.rotation.set(third ? _camEuler.x : 0, 0, 0);
-    }
-    if (state.rightGunContainer) {
-        state.rightGunContainer.position.set(third ? 0.7 : 0.32, third ? 0 : -0.22, -0.5);
-        state.rightGunContainer.rotation.set(third ? _camEuler.x : 0, 0, 0);
-    }
-}
-const _identityQuaternion = new THREE.Quaternion();
 
 /** A life reset retains equipped inventory but discards unfinished presentation. */
 export function resetWeaponPresentation(): void {
+    emptyTriggerReported = false;
     minigunHomingDistanceSample = null;
-    state.inspectState = 'IDLE'; state.inspectTimer = 0;
-    const active = getWeaponMesh(state.activeWeaponName);
-    state.rightGun = active;
-    for (const mesh of [state.pistolMesh, state.shotgunMesh, state.arMesh, state.sniperMesh, state.minigunMesh, state.katanaMesh]) {
-        if (!mesh) continue;
-        mesh.visible = mesh === active; mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0);
+    cancelInspect();
+    state.rightGun = getWeaponMesh(state.activeWeaponName);
+    for (const weapon of Object.keys(WEAPON_MESH_KEYS)) {
+        const anchor = getWeaponMesh(weapon);
+        if (anchor) anchor.visible = anchor === state.rightGun;
     }
-    resetViewModelPose();
 }
 
 /** Copy the accepted player pose after physics and hook translation, before
  * shoulder-camera placement. Weapon simulation/firing retains its earlier order. */
-export function updatePlayerAvatarPose(): void {
-    if (forgottenMecha?.ownsLocalPilot || !state.playerMesh || !state.controls || !state.camera) return;
-    state.playerMesh.position.copy(state.controls.getObject().position); state.playerMesh.position.y -= PLAYER_BODY_CAMERA_OFFSET;
-    _camEuler.setFromQuaternion(state.camera.quaternion, 'YXZ'); state.playerMesh.rotation.y = _camEuler.y;
-}
-
-// Shared player avatar factory for the local third-person mesh and remote peers.
-export function buildBeanModel(bodyColor: number, visorStripColor: number): THREE.Group {
-    const playerGroup = new THREE.Group();
-
-    const bodyMat = new THREE.MeshStandardMaterial({
-        color: bodyColor,
-        roughness: 0.3,
-        metalness: 0.2
+export function updatePlayerAvatarPose(delta = 0): void {
+    const shell = state.playerMesh;
+    if (!shell || !state.controls || !state.camera) return;
+    const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
+    _camEuler.setFromQuaternion(state.camera.quaternion, 'YXZ');
+    if (!pilot) {
+        shell.position.copy(state.controls.getObject().position);
+        shell.position.y -= PLAYER_BODY_CAMERA_OFFSET;
+        shell.rotation.y = _camEuler.y;
+    }
+    const avatar = getPlayerAvatar(shell);
+    if (!avatar) return;
+    const weapon = state.activeWeaponName;
+    const { hand, handStarted, handEnds, reload } = state.weaponHandling;
+    const now = state.weaponTime;
+    avatar.update(delta, {
+        weapon, grounded: state.canJump, velocity: state.velocity, yaw: _camEuler.y, pitch: _camEuler.x,
+        hover: state.isHovering, hook: state.hookState, hookMoving: state.hookIsEnemy, scoped: state.isScoped,
+        lifeId: state.lifeId, alive: state.playerHp > 0,
+        inspectTime: state.inspectState === 'INSPECTING' ? state.inspectTimer : undefined,
+        switchState: state.switchState, switchTime: state.switchTimer, minigunRamp: state.minigunRamp,
+        pilot: pilot?.pilotAvatarPhase, pilotProgress: pilot?.pilotAvatarProgress,
+        katana: weapon === 'KATANA' ? getKatanaAction() : undefined, gentle: userSettings.photosensitivityMode,
+        handling: {
+            hand, handWeapon:state.weaponHandling.handWeapon, outgoingLight:state.weaponHandling.outgoingLight,
+            handProgress: handEnds > handStarted ? (now - handStarted) / (handEnds - handStarted) : 1,
+            reloadProgress: reload?.weapon === weapon ? (now - reload.started) / (reload.ends - reload.started) : undefined,
+            chargeStage: isFirearm(weapon) ? state.weaponHandling.chargeStage(weapon, now) : 4,
+        },
     });
-
-    const cylinder = new THREE.Mesh(SHARED_BEAN_CYLINDER_GEO, bodyMat);
-    cylinder.castShadow = true;
-    cylinder.receiveShadow = true;
-    playerGroup.add(cylinder);
-
-    const topSphere = new THREE.Mesh(SHARED_BEAN_SPHERE_GEO, bodyMat);
-    topSphere.position.y = 0.5;
-    topSphere.castShadow = true;
-    topSphere.receiveShadow = true;
-    playerGroup.add(topSphere);
-
-    const boosterMat = new THREE.MeshStandardMaterial({
-        color: 0xc0c0c0,
-        roughness: 0.15,
-        metalness: 0.85
-    });
-
-    const boosterCylinder = new THREE.Mesh(SHARED_BOOSTER_CYLINDER_GEO, boosterMat);
-    boosterCylinder.position.y = -0.7;
-    boosterCylinder.castShadow = true;
-    boosterCylinder.receiveShadow = true;
-    playerGroup.add(boosterCylinder);
-
-    const nozzle = new THREE.Mesh(SHARED_NOZZLE_GEO, boosterMat);
-    nozzle.position.y = -1.0;
-    nozzle.castShadow = true;
-    nozzle.receiveShadow = true;
-    playerGroup.add(nozzle);
-
-    const visorMat = new THREE.MeshStandardMaterial({
-        color: 0x1e272e,
-        roughness: 0.1,
-        metalness: 0.9
-    });
-    const visor = new THREE.Mesh(SHARED_VISOR_GEO, visorMat);
-    // Keep the front face (-0.725) clear of the head radius (0.6).
-    visor.position.set(0, 0.5, -0.5);
-    visor.castShadow = true;
-    visor.receiveShadow = true;
-    playerGroup.add(visor);
-
-    const visorStripMat = new THREE.MeshBasicMaterial({ color: visorStripColor });
-    const visorStrip = new THREE.Mesh(SHARED_VISOR_STRIP_GEO, visorStripMat);
-    // Thin front-mounted lens, separated from the frame to avoid depth overlap.
-    visorStrip.position.set(0, 0.5, -0.732);
-    playerGroup.add(visorStrip);
-
-    // These materials are unique to this bean but shared by some of its body
-    // meshes. Keeping one material-level list prevents per-mesh restore races.
-    BEAN_DAMAGE_PULSE_MATERIALS.set(playerGroup, [bodyMat, boosterMat, visorMat]);
-
-    return playerGroup;
-}
-
-export function setBeanColor(bean: THREE.Group, color: number): void {
-    const material = getBeanDamagePulseMaterials(bean)[0];
-    material?.color.setHex(color);
 }
 
 export function createPlayerMesh(): void {
     if (!state.scene) return;
-    state.playerMesh = buildBeanModel(Number.parseInt(characterColor.slice(1), 16), 0x00ffcc);
-    state.playerMesh.scale.set(1.5, 1.5, 1.5);
+    state.playerMesh = new THREE.Group();
     state.playerMesh.visible = false;
     state.scene.add(state.playerMesh);
+}
+
+export function prepareLocalPlayerAvatar(): void {
+    if (!state.playerMesh || !state.leftGun || !state.rightGunContainer) return;
+    const avatar = attachPlayerAvatar(state.playerMesh, Number.parseInt(characterColor.slice(1), 16));
+    if (!avatar) return;
+    const weapons = Object.fromEntries(Object.keys(WEAPON_MESH_KEYS).map(name => [name, getWeaponMesh(name)!]));
+    bindAvatarEffects(avatar, state.leftGun, weapons);
+    syncThirdPersonPresentation();
+    updatePlayerAvatarPose();
 }
 
 export function disposePlayerVisuals(): void {
@@ -1105,12 +597,12 @@ export function disposePlayerVisuals(): void {
         obj.parent?.remove(obj);
         obj.traverse((child: any) => {
             if (!child.isMesh && !child.isLine) return;
-            if (child.geometry && !isSharedGeometry(child.geometry)) {
+            if (child.geometry && child.geometry !== SHARED_PROJECTILE_GEO) {
                 child.geometry.dispose();
             }
             const materials = Array.isArray(child.material) ? child.material : [child.material];
             materials.forEach((mat: THREE.Material | undefined) => {
-                if (!mat || mat === SHARED_BODY_MAT || disposedMaterials.has(mat)) return;
+                if (!mat || disposedMaterials.has(mat)) return;
                 disposedMaterials.add(mat);
                 (mat as any).map?.dispose?.();
                 mat.dispose();
@@ -1118,6 +610,7 @@ export function disposePlayerVisuals(): void {
         });
     };
 
+    getPlayerAvatar(state.playerMesh)?.dispose();
     disposeObject(state.leftGun);
     disposeObject(state.rightGunContainer);
     disposeObject(state.playerMesh);
@@ -1134,43 +627,21 @@ export function disposePlayerVisuals(): void {
     state.playerMesh = null;
 }
 
-// First-person attaches guns to the camera; third-person reparents the same
-// objects onto the avatar so weapon state stays shared.
+/** Switching camera modes changes the visible suit geometry. Both shot
+ * anchors remain in the logical camera's frame throughout the match. */
 export function syncThirdPersonPresentation(): void {
     const transition = forgottenMecha?.localTransition;
+    const avatar = getPlayerAvatar(state.playerMesh);
     if (forgottenMecha?.ownsLocalPilot) {
         state.isThirdPersonView = transition?.locked ? transition.thirdPerson : state.isThirdPerson && !state.keyCActive && !state.rightClickActive;
-        if (state.leftGun) state.leftGun.visible = false;
-        if (state.rightGunContainer) state.rightGunContainer.visible = false;
+        avatar?.rig.setFirstPerson(false);
         return;
     }
     const enabled = transition?.locked ? transition.thirdPerson : shouldUseThirdPersonView(state.isThirdPerson, state.keyCActive);
-    const viewChanged = enabled !== state.isThirdPersonView;
-    // A mounted session hides these containers. Release/respawn restores their
-    // presentation rather than leaving an otherwise functional invisible gun.
-    if (state.leftGun) state.leftGun.visible = state.playerHp > 0;
-    if (state.rightGunContainer) state.rightGunContainer.visible = state.playerHp > 0;
+    if (enabled !== state.isThirdPersonView) cancelInspect();
     state.isThirdPersonView = enabled;
-    if (enabled) {
-        if (state.playerMesh) state.playerMesh.visible = state.playerHp > 0;
-        if (state.playerMesh && state.leftGun && state.rightGunContainer) {
-            state.playerMesh.add(state.leftGun);
-            state.playerMesh.add(state.rightGunContainer);
-
-            state.leftGun.position.set(-0.7, 0.0, -0.5);
-            state.rightGunContainer.position.set(0.7, 0.0, -0.5);
-        }
-    } else {
-        if (state.playerMesh) state.playerMesh.visible = false;
-        if (state.camera && state.leftGun && state.rightGunContainer) {
-            state.camera.add(state.leftGun);
-            state.camera.add(state.rightGunContainer);
-
-            state.leftGun.position.set(-0.32, -0.22, -0.5);
-            state.rightGunContainer.position.set(0.32, -0.22, -0.5);
-        }
-    }
-    if (viewChanged) { cancelInspect(); resetViewModelPose(); }
+    if (state.playerMesh) state.playerMesh.visible = enabled || state.playerHp > 0;
+    avatar?.rig.setFirstPerson(!enabled);
 }
 
 export function setThirdPerson(enabled: boolean): void {

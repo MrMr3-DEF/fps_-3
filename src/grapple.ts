@@ -1,5 +1,8 @@
 import { requestMechaBoard, rememberMechaApproach } from './mechaNetwork.js';
-import { resetHook, setHookBadgeVisible } from './hookLifecycle.js';
+import { beginWeaponSwitch, resetHook } from './hookLifecycle.js';
+import { isLight } from './weaponHandling.js';
+import { sendWeaponIntent } from './weaponNetworkPort.js';
+import type { WeaponName } from './networkTypes.js';
 export { resetHook } from './hookLifecycle.js';
 import * as THREE from 'three';
 import { state } from './state.js';
@@ -41,26 +44,31 @@ export const GUN_TIP_OFFSET = new THREE.Vector3(0, 0, GUN_TIP_Z);
 
 // Fire from screen center. Enemy targets get a small aim-assist radius; surfaces
 // use exact ray hits so pillars and floor still feel precise.
-export function toggleGrapplingHook(aimRay?: THREE.Ray): void {
+export function toggleGrapplingHook(): void {
     if (forgottenMecha?.ownsLocalPilot) return;
     if (!state.scene || !state.camera || !state.leftGun || !state.controls) return;
+    if (state.playerHp <= 0) return;
+    beginWeaponSwitch();
+    const weapon = (state.nextWeaponName ?? state.activeWeaponName) as WeaponName;
+    if (state.switchState !== 'IDLE' && !isLight(weapon)) return;
+    if (state.hookState !== 'IDLE' || state.weaponHandling.launchPending) { resetHook(); return; }
+    if (!state.weaponHandling.pressGrapple(weapon, state.weaponTime)) return;
+    if (state.isMultiplayer) sendWeaponIntent('grapple', weapon);
+}
 
+function launchGrapplingHook(aimRay?: THREE.Ray, prepareLaunchPose?: () => void): void {
+    if (!state.scene || !state.camera || !state.leftGun || !state.controls) return;
     if (state.hookState === 'IDLE') {
         if (state.isMultiplayer) rememberMechaApproach();
         state.hookState = 'FIRING';
         state.hookIsEnemy = false;
         state.hookTargetEnemy = null;
         state.hookTargetSurface = null;
+        // Simulation normally precedes posing. Sample the raised glove now so
+        // the projectile, flash and the rendered cable share one physical outlet.
+        prepareLaunchPose?.();
+        grappleMuzzlePosition(state.leftGun, state.hookPosition);
         triggerMuzzleFlash(state.leftGun);
-
-        if (state.leftGun && !state.isThirdPersonView) {
-            state.leftGun.position.z += 0.15;
-        }
-
-        state.leftGun.updateWorldMatrix(true, false);
-        const barrelWorldPosition = _gunTip.copy(GUN_TIP_OFFSET);
-        state.leftGun.localToWorld(barrelWorldPosition);
-        state.hookPosition.copy(barrelWorldPosition);
 
         if (aimRay) _raycaster.ray.copy(aimRay);
         else _raycaster.setFromCamera(_centerScreen, state.camera);
@@ -152,7 +160,20 @@ export function toggleGrapplingHook(aimRay?: THREE.Ray): void {
     }
 }
 
-export function updateHook(delta: number): void {
+function grappleMuzzlePosition(gun: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 {
+    const muzzle: THREE.Object3D | undefined = gun.userData.grappleMuzzle;
+    return muzzle ? muzzle.getWorldPosition(out) : gun.localToWorld(out.copy(GUN_TIP_OFFSET));
+}
+
+export function updateHook(delta: number, aimRay?: THREE.Ray, prepareLaunchPose?: () => void): void {
+    // Sample the currently visible aim at the handoff, even if the player
+    // turned between pressing grapple and the muzzle clearing the holster.
+    let flightDelta = delta;
+    if (state.weaponHandling.takeLaunch(state.weaponTime) && state.hookState === 'IDLE') {
+        launchGrapplingHook(aimRay, prepareLaunchPose);
+        // Only the part of this frame after release belongs to the hook.
+        flightDelta = Math.min(delta, Math.max(0, state.weaponTime - state.weaponHandling.handStarted));
+    }
     if (state.hookTargetCockpit && (!state.hookTargetCockpit.canMount || state.hookTargetCockpit.disposed)) { resetHook(); return; }
     if (state.hookTargetSurface) {
         const surface = state.hookTargetSurface;
@@ -167,7 +188,7 @@ export function updateHook(delta: number): void {
         if (state.hookState === 'FIRING') {
             _dirToTarget.subVectors(state.hookTarget, state.hookPosition);
             const distanceToTarget = _dirToTarget.length();
-            const travelDistance = HOOK_SPEED * delta;
+            const travelDistance = HOOK_SPEED * flightDelta;
 
             // Snap when this frame would cross the target. Checking only the
             // post-step distance lets the hook overshoot forever on a slow or
@@ -176,7 +197,6 @@ export function updateHook(delta: number): void {
                 state.hookPosition.copy(state.hookTarget);
                 if (state.hookWillHit) {
                     state.hookState = 'PULLING';
-                    setHookBadgeVisible(true);
                 } else {
                     resetHook();
                 }
@@ -248,19 +268,19 @@ export function updateHook(delta: number): void {
             }
         }
 
-        if (state.leftGun && state.hookMesh) {
-            state.leftGun.updateWorldMatrix(true, false);
-            _gunTip.copy(GUN_TIP_OFFSET);
-            state.leftGun.localToWorld(_gunTip);
-            const distance = _gunTip.distanceTo(state.hookPosition);
+    }
+}
 
-            state.hookMesh.visible = distance > 0.05;
-            if (state.hookMesh.visible) {
-                _midPoint.addVectors(_gunTip, state.hookPosition).multiplyScalar(0.5);
-                state.hookMesh.position.copy(_midPoint);
-                state.hookMesh.scale.set(1, 1, distance);
-                state.hookMesh.lookAt(state.hookPosition);
-            }
-        }
+/** The moving glove and target must be sampled in the same rendered frame. */
+export function updateGrappleCable(displayOrigin?: THREE.Vector3): void {
+    if (state.hookState === 'IDLE' || !state.leftGun || !state.hookMesh) return;
+    if (displayOrigin) _gunTip.copy(displayOrigin);
+    else grappleMuzzlePosition(state.leftGun, _gunTip);
+    const distance = _gunTip.distanceTo(state.hookPosition);
+    state.hookMesh.visible = distance > .05;
+    if (state.hookMesh.visible) {
+        state.hookMesh.position.copy(_midPoint.addVectors(_gunTip, state.hookPosition).multiplyScalar(.5));
+        state.hookMesh.scale.set(1, 1, distance);
+        state.hookMesh.lookAt(state.hookPosition);
     }
 }

@@ -13,15 +13,16 @@ Devices whose primary pointer is coarse default to touch controls; other devices
 | Hold Hover | Use hover thrusters in the air |
 | Grapple | Fire or release the grappling hook |
 | Weapon | Cycle through all six weapons |
+| Reload | Recharge the equipped firearm |
 | Inspect / View | Inspect the weapon / toggle third person |
 | Power jump | Toggle power jump |
 | Pause | Show Resume and Leave Game/Lobby |
 
-Weapons use their existing automatic cooldown system, so there is no separate reload action. Buttons and the joystick have translucent backgrounds. Each touch owns its control until release, cancellation or lost capture, allowing movement, looking and firing together. Pausing, death, host disconnection, app backgrounding, fullscreen exit and rotation to portrait release held inputs.
+The on-foot ammo bar shows the remaining magazine fraction. Tap Reload with the grapple fully holstered to recharge a partial or empty battery. See [firearms and grappling](firearms.md) for recharge times and support-hand timing. Each touch owns its control until release, cancellation or lost capture, allowing movement, looking and firing together. Pausing, death, host disconnection, app backgrounding, fullscreen exit and rotation to portrait release held inputs.
 
 The Fire joystick uses the same relative drag aiming, sensitivity and scoped slowdown as open screen space. Shooting starts on contact; moving that finger aims while the movement joystick retains its independent touch. Pressing away from the Fire joystick's center does not turn the camera. Pointer capture permits aiming beyond the visible control; its knob is visually bounded and recenters on release. The Button variant keeps the existing hold-to-fire behavior without aiming from that control.
 
-Touch gameplay is landscape-only. Starting or resuming requests fullscreen and a landscape orientation lock where supported. Browsers that reject these APIs remain playable in landscape and show a blocking rotate-device screen in portrait. Returning to landscape after rotation leaves the game paused until Resume is tapped. Menus scroll on short screens, and gameplay controls respect display safe areas. Switching the input method releases the old input session and leaves the game paused; resuming Keyboard mode requests pointer lock.
+Touch gameplay is landscape-only. Starting or resuming requests fullscreen and a landscape orientation lock where supported. Browsers that reject these APIs remain playable in landscape and show a blocking rotate-device screen during portrait gameplay. The main, arsenal, lobby, pause and settings menus remain accessible in portrait. Returning to landscape after rotation leaves the game paused until Resume is tapped. Menus scroll on short screens, and gameplay controls respect display safe areas. Switching the input method releases the old input session and leaves the game paused; resuming Keyboard mode requests pointer lock.
 
 The mobile HUD keeps equal-sized health and reload bars stacked horizontally, with the vertical hover bar beside them. Each horizontal bar is 124 × 19px including borders, with a 6px gap. The stack is 44px tall, matching the default Power jump toggle; the hover bar shares that height and bottom anchor. Desktop bar dimensions are unchanged.
 

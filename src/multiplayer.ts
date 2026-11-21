@@ -1,8 +1,11 @@
 import type { PlayerHitPacket } from './networkTypes.js';
 import type { InfantryPlayer } from './infantry.js';
 import type { InfantryEvent, InfantryEventPacket } from './infantryNetworkTypes.js';
-import { acceptMeleeCommand, invalidateMeleePeer, forgetMeleePeer, receiveMeleeEvent, receiveMeleeHit, localMeleePlayer, resetKatana } from './katana.js';
-import { buildKatana } from './katanaModel.js';
+import { acceptMeleeCommand, invalidateMeleePeer, forgetMeleePeer, receiveMeleeEvent, receiveMeleeHit, localMeleePlayer, resetKatana, getKatanaAction } from './katana.js';
+import { attachPlayerAvatar, getPlayerAvatar, bindAvatarEffects } from './playerAvatar.js';
+import { WeaponHandling, isFirearm, isLight } from './weaponHandling.js';
+import type { HandlingCommand, HandlingStatePacket, WeaponIntent } from './handlingNetworkTypes.js';
+import { userSettings } from './settings.js';
 import { setMeleeNetworkPort } from './weaponNetworkPort.js';
 import { KATANA } from './config.js';
 import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, receiveMechaDenial, resetMechaNetwork, acceptMechaCommand, acceptMechaEndingReady, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
@@ -13,9 +16,9 @@ import { touchesLava } from './lavaDamage.js';
 import { createPlayerLife, damagePlayerLife, healPlayerLife, type PlayerLife } from './playerLife.js';
 import { getTownSpawn } from './town.js';
 import { PacketRate } from './packetRate.js';
-import { cancelHookForTarget } from './hookLifecycle.js';
+import { cancelHookForTarget, clearHookTether } from './hookLifecycle.js';
 import { characterColor } from './appearance.js';
-import { endInput } from './inputSession.js';
+import { endInput, touchMove } from './inputSession.js';
 import { renderPlayerList, setPlayerListVisible } from './playerList.js';
 import { resetProjectiles } from './projectiles.js';
 import type { Peer } from 'peerjs';
@@ -29,24 +32,23 @@ import {
     forgottenMecha, infantry, rebuildInfantryHash,
     generateWorldSeed,
     getWorldSeed,
-    queryObstaclesAlongSegment,
+    queryObstaclesAlongSegment, shotObstructionT,
     queryTargetsAlongSegment,
     rebuildEnvironmentWithSeed,
     rebuildTargetHash,
 } from './world.js';
-import { resetHook, GUN_TIP_OFFSET } from './grapple.js';
+import { resetHook } from './grapple.js';
 import { processMechaHit, processTargetHit, takePlayerDamage } from './damage.js';
 import {
     NETWORK_TICK_MS,
     NETWORK_POSITION_RESPONSE,
     MAX_PLAYERS,
     MAX_PENDING_ROOM_CONNECTIONS, NETWORK_PROTOCOL_VERSION,
-    PROJECTILE_RADIUS,
+    PROJECTILE_RADIUS, FIREARM_MUZZLE_REACH, MAX_MUZZLE_LATERAL, MAX_MUZZLE_BEHIND_EYE,
     TARGET_HIT_RANGE_MULTIPLIER,
     PLAYER_MAX_HP,
     PLAYER_HEIGHT,
     LAVA_DAMAGE_TICK_MS, LAVA_DAMAGE_PER_TICK,
-    PILLAR_WIDTH,
     ROOM_CODE_LENGTH,
     MAP_HALF_SIZE,
     PEER_Y_OFFSET,
@@ -59,7 +61,7 @@ import {
     GRAPPLE_BLUE,
     ENEMY_COUNT, INFANTRY, INFANTRY_NETWORK_INTERVAL, type InfantryKind,
 } from './config.js';
-import { setBeanColor, buildGun, buildShotgun, buildAR, buildSniper, buildMinigun, buildBeanModel, getBeanDamagePulseMaterials, isSharedGeometry, SHARED_BODY_MAT, SHARED_PROJECTILE_GEO } from './weapons.js';
+import { SHARED_PROJECTILE_GEO } from './weapons.js';
 import { triggerMuzzleFlash, updateMuzzleFlash } from './muzzleFlash.js';
 import {
     parseNetworkPacket,
@@ -80,9 +82,9 @@ import {
     type WorldSnapshotPacket
 } from './networkTypes.js';
 import { obstacleData, projectileData, targetData, type TargetUserData } from './userDataTypes.js';
-import { segmentAabbHitT, segmentGroundHitT, segmentSphereHitT } from './gameplayMath.js';
+import { segmentSphereHitT } from './gameplayMath.js';
 import { clearDamagePulse, pulseDamageMaterials } from './damagePulse.js';
-import { excludeFromStablePeerEnvelope } from './smartGogglesPeerMath.js';
+import { excludeFromStablePeerEnvelope, setPeerScanBounds } from './smartGogglesPeerMath.js';
 import { setWeaponNetworkPort } from './weaponNetworkPort.js';
 import { flashHitmarker } from './hitmarker.js';
 import {
@@ -91,7 +93,7 @@ import {
     resolveProjectileHomingTarget,
     type ProjectileHomingTarget,
 } from './projectileHoming.js';
-import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX, PLAYER_HITBOX_BOUNDING_RADIUS, segmentPlayerHitboxHitT } from './playerHitbox.js';
+import { toPlayerLocal, PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX, PLAYER_HITBOX_BOUNDING_RADIUS, segmentPlayerHitboxHitT } from './playerHitbox.js';
 import { beginProjectileTrail } from './projectileTrails.js';
 import {
     admitRoomPeer,
@@ -115,12 +117,11 @@ const _gunTip = new THREE.Vector3();
 const _targetPos = new THREE.Vector3();
 const _midPoint = new THREE.Vector3();
 const _barrelPos = new THREE.Vector3();
+const _observerMuzzle = new THREE.Vector3();
+const _localBarrelOffset = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _baseFireDir = new THREE.Vector3();
-const _shotAabbMin = new THREE.Vector3();
-const _shotAabbMax = new THREE.Vector3();
 const _peerTargetPosition = new THREE.Vector3();
-const _shotObstacleCandidates: THREE.Object3D[] = [];
 
 const SHARED_HOOK_GEO = new THREE.CylinderGeometry(0.035, 0.035, 1, 8);
 SHARED_HOOK_GEO.rotateX(Math.PI / 2);
@@ -204,6 +205,35 @@ function publishLobbyRoster(): void {
     const players = refreshHostRoster();
     broadcastToAll({ type: 'lobby_roster', players });
     if (state.isPlaying) publishPlayerList();
+}
+
+let colorPublishTimer: ReturnType<typeof setTimeout> | null = null;
+let lastColorPublish = -Infinity;
+
+function applyRemoteSuitColor(peerId: string, color: number): void {
+    const peer = state.peers[peerId];
+    if (!peer || peer.mesh.userData.bodyColor === color) return;
+    peer.mesh.userData.bodyColor = color;
+    getPlayerAvatar(peer.mesh)?.setColor(color);
+}
+
+/** Coalesce a dragged native color picker. Always send the last choice, even
+ * if the user leaves the picker between two updates. Room teardown cancels it. */
+export function publishSuitColor(): void {
+    if (!state.isMultiplayer || !state.peer || colorPublishTimer !== null) return;
+    const send = () => {
+        colorPublishTimer = null;
+        lastColorPublish = performance.now();
+        if (state.isHost) publishLobbyRoster();
+        else {
+            const host = getHostPeerId();
+            if (host && clientWorldSynchronized)
+                sendToPeer(host, { type: 'lobby_color', bodyColor: Number.parseInt(characterColor.slice(1), 16) });
+        }
+    };
+    const wait = 100 - (performance.now() - lastColorPublish);
+    if (wait <= 0) send();
+    else colorPublishTimer = setTimeout(send, wait);
 }
 
 function refreshHostRoster(): LobbyPlayer[] {
@@ -307,7 +337,9 @@ function sendToPeer(peerId: string, packet: NetworkPacket): void {
 }
 
 function flashPeerMesh(peerData: PeerData, color = 0xff3333, durationMs = HIT_FLASH_DURATION_MS): void {
-    pulseDamageMaterials(peerData, getBeanDamagePulseMaterials(peerData.mesh), color, durationMs);
+    const avatar = getPlayerAvatar(peerData.mesh);
+    avatar?.hit();
+    pulseDamageMaterials(peerData, avatar?.rig.damageMaterials ?? [], color, durationMs);
 }
 
 let peerInstance: Peer | null = null;
@@ -330,9 +362,18 @@ const pendingConnectionPeers = new Set<string>();
 const targetStateFingerprints = new Map<number, string>();
 const MAX_PLAYER_HORIZONTAL_POSITION = MAP_HALF_SIZE + 100;
 const MAX_PLAYER_VERTICAL_POSITION = 600;
-const MAX_PLAYER_BARREL_OFFSET = 2;
+const peerHitBox = new THREE.Box3(new THREE.Vector3(PLAYER_HITBOX_MIN.x, PLAYER_HITBOX_MIN.y, PLAYER_HITBOX_MIN.z), new THREE.Vector3(PLAYER_HITBOX_MAX.x, PLAYER_HITBOX_MAX.y, PLAYER_HITBOX_MAX.z));
 
 interface PeerRuntimeState {
+    handling: WeaponHandling;
+    commandAck: number;
+    shotAck: number;
+    held: boolean;
+    freshTrigger: boolean;
+    intentRate: PacketRate;
+    correctionDue: boolean;
+    hookFlight: 'firing' | 'latched' | 'spent';
+    wasMounted: boolean;
     motion: TargetMotionHistory;
     username: string;
     position: THREE.Vector3;
@@ -349,6 +390,112 @@ interface PeerRuntimeState {
 
 const peerRuntime = new Map<string, PeerRuntimeState>();
 let hostLife = createPlayerLife(0);
+let localCommand = 0, localShot = -1, handlingRevision = 0, localAckRevision = 0;
+const handlingCopies = new Map<string,{lifeId:number;revision:number;handling:WeaponHandling}>();
+const handlingPhases = new Map<string,string>();
+
+function handlingPacket(id: string): HandlingStatePacket | null {
+    const local = id === state.peer?.id, runtime = peerRuntime.get(id);
+    if (!local && !runtime) return null;
+    const handling = local ? state.weaponHandling : runtime!.handling;
+    const snapshot = handling.snapshot(local ? state.weaponTime : performance.now() / 1000);
+    return { type: 'handling_state', peerId: id, lifeId: local ? hostLife.id : runtime!.life.id,
+        tetherActive: local ? state.hookState !== 'IDLE' : runtime!.hookFlight !== 'spent',
+        revision: ++handlingRevision, commandAck: local ? localCommand : runtime!.commandAck,
+        shotAck: local ? localShot : runtime!.shotAck, handling: snapshot };
+}
+
+function publishHandling(id: string, rejected = false): void {
+    const packet = handlingPacket(id);
+    if (!packet) return;
+    if (rejected) sendToPeer(id, { ...packet, rejected: true });
+    else {
+        const s = packet.handling;
+        handlingPhases.set(id, [s.hand, s.handWeapon, s.outgoingLight, s.reloadWeapon, s.queuedReload, s.pendingFire, s.launchPending].join('/'));
+        broadcastToAll(packet);
+    }
+}
+
+function receiveHandling(packet: HandlingStatePacket): void {
+    const id = packet.peerId;
+    if (!state.lobbyPlayers.some(p => p.peerId === id)) return;
+    if (id === state.peer?.id) {
+        if (packet.lifeId !== state.lifeId || packet.revision <= localAckRevision ||
+            packet.commandAck < localCommand || packet.shotAck < localShot) return;
+        localAckRevision = packet.revision;
+        const h = state.weaponHandling, s = packet.handling;
+        // Reliable replies can arrive after the owner's locally predicted draw
+        // or stow has finished. Rewinding its timer would fire the hook twice.
+        const phaseAgrees = h.hand === s.hand || (s.hand === 'drawing' && h.hand === 'drawn')
+            || (s.hand === 'returning' && h.hand === 'holstered');
+        const lostReload = h.reload && !s.reloadWeapon && s.queuedReload !== h.reload.weapon;
+        if (packet.rejected || !phaseAgrees || lostReload) {
+            h.restore(s, state.weaponTime);
+            if (s.hand !== 'drawn' || packet.rejected && !s.launchPending && !packet.tetherActive) clearHookTether();
+        } else {
+            for (const weapon of Object.keys(s.rounds) as (keyof typeof s.rounds)[]) {
+                if (weapon !== s.reloadWeapon || h.reload) h.rounds[weapon] = s.rounds[weapon];
+            }
+        }
+        return;
+    }
+    const copy = handlingCopies.get(id);
+    if (packet.lifeId < (state.peers[id]?.lifeId ?? 0) || (copy && (packet.lifeId < copy.lifeId ||
+        packet.lifeId === copy.lifeId && packet.revision <= copy.revision))) return;
+    const pose = remotePoses.get(id);
+    if (!packet.tetherActive && !packet.handling.launchPending && pose?.packet.lifeId === packet.lifeId) {
+        pose.packet = {...pose.packet, hookState:'IDLE', hookPos:null, movingHook:false};
+    }
+    const handling = copy?.lifeId === packet.lifeId ? copy.handling : new WeaponHandling();
+    handling.restore(packet.handling, performance.now() / 1000);
+    handlingCopies.set(id, {lifeId: packet.lifeId, revision: packet.revision, handling});
+}
+
+function sendLocalIntent(action: WeaponIntent, weapon: WeaponName): void {
+    if (!state.isMultiplayer || !state.isPlaying || !state.peer || state.matchEnded) return;
+    const sequence = ++localCommand;
+    if (state.isHost) { publishHandling(state.peer.id); return; }
+    sendLocalState(true);
+    broadcastToAll({type:'handling_command', lifeId:state.lifeId, sequence, action, weapon});
+}
+
+function handleWeaponIntent(id: string, packet: HandlingCommand): void {
+    const r = getPeerRuntime(id);
+    if ((packet.senderPeerId && packet.senderPeerId !== id) || !isKnownClient(id) || !state.isPlaying || state.matchEnded || !r || r.life.id !== packet.lifeId ||
+        r.life.hp <= 0 || !r.motion.samples.length || packet.sequence <= r.commandAck) return;
+    r.commandAck = packet.sequence;
+    const now = performance.now(), w = packet.weapon, h = r.handling;
+    if (!r.intentRate.accept(now)) { r.correctionDue = true; return; }
+    const switching = r.weaponState.switchState !== 'IDLE';
+    const equipped = r.weaponState.nextWeapon ?? r.weaponState.activeWeapon;
+    const activeCable = r.hookFlight !== 'spent';
+    let accepted = false;
+    if (w === equipped && !mountedPeerPosition(id)) {
+        switch (packet.action) {
+            case 'cancel':
+                h.interrupt(equipped, now/1000);
+                r.hookFlight = 'spent';
+                accepted = true; break;
+            case 'grapple':
+                if ((!switching || isLight(w)) && !activeCable && !h.launchPending)
+                    accepted = h.pressGrapple(w,now/1000);
+                if (accepted) r.freshTrigger = false;
+                break;
+            case 'release':
+                accepted = h.releaseGrapple(w,now/1000);
+                if (accepted) r.hookFlight = 'spent';
+                break;
+            case 'raise':
+                accepted = isFirearm(w) && r.freshTrigger && h.requestHeavyFire(w,now/1000,switching);
+                if (accepted) r.hookFlight = 'spent';
+                r.freshTrigger = false; break;
+            case 'reload':
+                accepted = !switching && isFirearm(w) && h.beginReload(w,now/1000,activeCable);
+                break;
+        }
+    }
+    publishHandling(id, !accepted);
+}
 
 function playerLife(peerId: string): PlayerLife | undefined {
     return peerId === state.peer?.id ? hostLife : peerRuntime.get(peerId)?.life;
@@ -364,7 +511,10 @@ function applyLocalHealth(packet: PlayerHealthPacket, feedback: boolean): void {
 function applyHealth(packet: PlayerHealthPacket): void {
     if (packet.peerId !== state.peer?.id) {
         const peer = state.peers[packet.peerId];
-        if (peer?.lifeId === packet.lifeId) peer.hp = packet.hp;
+        if (peer?.lifeId === packet.lifeId) {
+            if (packet.hp < peer.hp) getPlayerAvatar(peer.mesh)?.hit();
+            peer.hp = packet.hp;
+        }
         return;
     }
     if (packet.lifeId !== state.lifeId) return;
@@ -402,6 +552,9 @@ function commitPlayerDamage(
     publishHealth(peerId, life, mechaSequence);
     if (life.hp > 0) return true;
     const hostId = state.peer?.id;
+    const victim = peerRuntime.get(peerId);
+    (peerId === hostId ? state.weaponHandling : victim?.handling)?.cancelActions();
+    if (victim) victim.hookFlight = 'spent';
     (peerId === hostId ? hostMechaShots : peerRuntime.get(peerId)?.shots)?.retireLife();
     invalidateMeleePeer(peerId);
     const packet: PlayerDiedPacket = { type: 'player_died', senderPeerId: hostId, lifeId, cause,
@@ -418,6 +571,20 @@ function updateHostPlayerLives(): void {
     const now = performance.now();
     const tick = (peerId: string, life: PlayerLife, position: THREE.Vector3) => {
         const mounted = Boolean(mountedPeerPosition(peerId));
+        const peer = peerRuntime.get(peerId);
+        const h = peer?.handling ?? state.weaponHandling;
+        if (mounted || life.hp <= 0) {
+            h.cancelActions();
+            if (peer) { peer.hookFlight = 'spent'; peer.wasMounted = mounted; }
+        }
+        h.advance(peer ? now/1000 : state.weaponTime);
+        if (peer?.correctionDue) {
+            // Coalesce denials so even a burst of bad inputs gets reconciled at bounded cost.
+            peer.correctionDue = false;
+            publishHandling(peerId, true);
+        }
+        const phase = [h.hand, h.handWeapon, h.outgoingLight, h.reload?.weapon ?? null, h.queuedReload, h.pendingFire, h.launchPending].join('/');
+        if (phase !== handlingPhases.get(peerId)) publishHandling(peerId);
         if (!mounted && life.hp > 0 && now >= life.nextLavaAt && touchesLava(position)) {
             life.nextLavaAt = now + LAVA_DAMAGE_TICK_MS;
             commitPlayerDamage(peerId, life.id, LAVA_DAMAGE_PER_TICK, 'lava');
@@ -432,6 +599,7 @@ function updateHostPlayerLives(): void {
 function createPeerRuntime(username: string, slot: number): PeerRuntimeState {
     const spawn = getTownSpawn(getWorldSeed(), 'house', slot);
     return { username, motion: new TargetMotionHistory(), shots: new ShotLedger(), life: createPlayerLife(0), jumpRate: new PacketRate(4, 2), fireRate: new PacketRate(60, 8),
+        handling: new WeaponHandling('PISTOL'), commandAck: 0, shotAck: -1, held: false, freshTrigger: false, intentRate: new PacketRate(12, 6), correctionDue: false, hookFlight: 'spent', wasMounted: false,
         position: new THREE.Vector3(spawn.x, PLAYER_HEIGHT, spawn.z), yaw: spawn.yaw, pitch: 0,
         lastUpdateAt: performance.now(), travelAllowance: NETWORK_MOVEMENT_BURST, weaponState: initialWeaponState('PISTOL') };
 }
@@ -439,6 +607,7 @@ function createPeerRuntime(username: string, slot: number): PeerRuntimeState {
 function applyRespawn(packet: PlayerRespawnPacket): void {
     if (packet.peerId === state.peer?.id) {
         if (packet.lifeId <= state.lifeId) return;
+        localCommand = 0; localShot = -1; localAckRevision = 0;
         pendingLocalHealth = null;
         state.activeWeaponName = packet.weapon;
         if (onLocalRespawn) onLocalRespawn(packet);
@@ -455,6 +624,15 @@ function applyRespawn(packet: PlayerRespawnPacket): void {
     peer.lifeId = packet.lifeId;
     peer.deathReported = false;
     peer.hp = PLAYER_MAX_HP;
+    peer.minigunRamp = 0;
+    peer.lastHookState = 'IDLE';
+    if (peer.mesh.userData.nameTag) peer.mesh.userData.nameTag.visible = true;
+    const pose = remotePoses.get(packet.peerId);
+    if (pose) receiveRemotePose(packet.peerId, peer, {
+        ...pose.packet, lifeId:packet.lifeId, pos:packet.pos, yaw:packet.yaw, pitch:0, activeWeapon:packet.weapon,
+        hp:PLAYER_MAX_HP, isDead:false, isMouseDown:false, isHovering:false, hookState:'IDLE', hookPos:null,
+        switchState:'IDLE', nextWeapon:null, inspectTime:undefined, grounded:true, scoped:false
+    }, true);
     peer.targetPosition.set(packet.pos.x, packet.pos.y - PEER_Y_OFFSET, packet.pos.z);
     peer.mesh.position.copy(peer.targetPosition);
     peer.targetYaw = peer.mesh.rotation.y = packet.yaw;
@@ -472,6 +650,9 @@ function grantRespawn(peerId: string, lifeId: number): void {
         pos: { x: spawn.x, y: PLAYER_HEIGHT, z: spawn.z }, yaw: spawn.yaw,
         cooldownMs: (runtime?.shots ?? hostMechaShots).remainingCooldown(performance.now()) };
     if (runtime) {
+        runtime.handling.reset(weapon); runtime.commandAck = 0; runtime.shotAck = -1;
+        runtime.held = runtime.freshTrigger = runtime.correctionDue = false;
+        runtime.hookFlight = 'spent'; runtime.wasMounted = false;
         runtime.life = createPlayerLife(packet.lifeId);
         runtime.position.set(packet.pos.x, packet.pos.y, packet.pos.z);
         runtime.yaw = spawn.yaw;
@@ -485,6 +666,7 @@ function grantRespawn(peerId: string, lifeId: number): void {
     }
     broadcastToAll(packet);
     applyRespawn(packet);
+    publishHandling(peerId);
 }
 
 export function requestMultiplayerRespawn(): void {
@@ -689,6 +871,24 @@ function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): vo
     };
     try {
         conn.send(packet);
+        if (state.isPlaying && state.peer) {
+            for (const id of [state.peer.id, ...peerRuntime.keys()]) {
+                // A paused or dead peer may not send another movement update.
+                const last = remotePoses.get(id), runtime = peerRuntime.get(id);
+                if (id !== conn.peer && last && runtime) {
+                    const {inspectTime, switchTime, ...pose} = last.packet;
+                    const age = Math.max(0, performance.now()/1000-last.at);
+                    conn.send({...pose, pos:{x:runtime.position.x,y:runtime.position.y,z:runtime.position.z},
+                        lifeId:runtime.life.id, hp:runtime.life.hp, isDead:runtime.life.hp === 0,
+                        ...(typeof inspectTime === 'number' && inspectTime+age<3.8 ? {inspectTime:inspectTime+age} : {}),
+                        ...(typeof switchTime === 'number' ? {switchTime:Math.min(.15,switchTime+age)} : {}),
+                        ...(runtime.hookFlight === 'spent' ? {hookState:'IDLE' as const,hookPos:null,movingHook:false} : {}),
+                        ...(runtime.life.hp <= 0 ? {isHovering:false} : {})});
+                }
+                const status = handlingPacket(id);
+                if (status) conn.send(status);
+            }
+        }
     } catch (error) {
         console.error(`Failed to send world snapshot to ${conn.peer}:`, error);
         conn.close();
@@ -739,8 +939,8 @@ function applyWorldSnapshot(packet: WorldSnapshotPacket, prepared = false): void
     clearWorldSyncTimeout();
     setCachedUsername(packet.username);
     setJoinReady(true, `You are ${packet.username}. Waiting for the host to start the game…`);
-    if (!packet.gameStarted) state.connections[0]?.send({ type: 'lobby_color',
-        bodyColor: Number.parseInt(characterColor.slice(1), 16) });
+    // The local picker may have changed after the connection metadata was sent.
+    publishSuitColor();
     if (packet.gameStarted) enterMultiplayerMatch();
     if (packet.mecha) receiveMechaState(packet.mecha);
 }
@@ -767,6 +967,8 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 function resetLocalMatch(): void {
+    localCommand = 0; localShot = -1; localAckRevision = 0; handlingRevision = 0;
+    handlingCopies.clear(); handlingPhases.clear(); remotePoses.clear();
     resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null;
     hostLife = createPlayerLife(0); pendingLocalHealth = null; lastInfantryPublish = -Infinity;
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
@@ -975,6 +1177,9 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     if (disconnecting) return;
     const hadSession = state.isMultiplayer || peerInstance !== null;
     disconnecting = true;
+    if (colorPublishTimer !== null) clearTimeout(colorPublishTimer);
+    colorPublishTimer = null;
+    lastColorPublish = -Infinity;
     resetMechaNetwork(); hostMechaShots = new ShotLedger(); mechaMotion = null;
     hostLife = createPlayerLife(0); pendingLocalHealth = null; lastInfantryPublish = -Infinity;
     if (healthInterval) clearInterval(healthInterval);
@@ -1019,6 +1224,7 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     state.dayNightSyncImmediate = false;
     targetStateFingerprints.clear();
     peerRuntime.clear();
+    handlingCopies.clear(); handlingPhases.clear(); remotePoses.clear();
     resetKatana();
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     pendingConnectionPeers.clear();
@@ -1253,29 +1459,8 @@ function getPeerRuntime(peerId: string): PeerRuntimeState | null {
     return peerRuntime.get(peerId) ?? null;
 }
 
-/** Host obstruction uses the shot's radius in both spatial and exact queries. */
-export function shotObstructionT(start: THREE.Vector3, end: THREE.Vector3, radius: number, ignoreMecha = false): number | null {
-    let closest = segmentGroundHitT(start, end, radius) ?? Infinity;
-    if (!ignoreMecha) closest = Math.min(closest, forgottenMecha?.combat.shieldContactT(start, end, start, radius) ?? Infinity);
-    const obstacleCandidates = queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, _shotObstacleCandidates, radius);
-    for (let index = 0; index < obstacleCandidates.length; index++) {
-        const obstacle = obstacleCandidates[index];
-        const data = obstacleData(obstacle);
-        if (ignoreMecha && data.damageTarget === 'forgotten-mecha') continue;
-        const halfW = (data.halfW || PILLAR_WIDTH / 2) + radius;
-        const halfD = (data.halfD || PILLAR_WIDTH / 2) + radius;
-        const halfH = (data.halfH || data.height / 2) + radius;
-        _shotAabbMin.set(obstacle.position.x - halfW, obstacle.position.y - halfH, obstacle.position.z - halfD);
-        _shotAabbMax.set(obstacle.position.x + halfW, obstacle.position.y + halfH, obstacle.position.z + halfD);
-        const hitT = segmentAabbHitT(start, end, _shotAabbMin, _shotAabbMax);
-        if (hitT !== null) closest = Math.min(closest, hitT);
-    }
-    return closest === Infinity ? null : closest;
-}
-function shotIsBlocked(start: THREE.Vector3, end: THREE.Vector3, radius = 0): boolean {
-    const hit = shotObstructionT(start, end, radius);
-    return hit !== null && hit < 1 - 1e-6;
-}
+// Keep the public host query available to authority diagnostics.
+export { shotObstructionT } from './world.js';
 
 /** Guided sweeps also stop at intervening bodies. The claimed victim and
  * shooter are excluded; peer poses come from the same bounded observation time. */
@@ -1411,7 +1596,7 @@ function homingFireContext(fromPeerId: string, packet: FirePacket, now: number):
         (host ? hostLife.hp <= 0 : (!runtime || runtime.life.hp <= 0)) || (!host && !state.peers[lock.targetPeerId])) return null;
     const history = peerMotion(lock.targetPeerId, now);
     if (!history) return null;
-    const box = new THREE.Box3(new THREE.Vector3(PLAYER_HITBOX_MIN.x, PLAYER_HITBOX_MIN.y, PLAYER_HITBOX_MIN.z), new THREE.Vector3(PLAYER_HITBOX_MAX.x, PLAYER_HITBOX_MAX.y, PLAYER_HITBOX_MAX.z));
+    const box = peerHitBox;
     const matrix = new THREE.Matrix4(), yawRotation = new THREE.Quaternion(), unit = new THREE.Vector3(1, 1, 1);
     return { history, kind: 'player', radius: PLAYER_HITBOX_BOUNDING_RADIUS,
         canAcquire: (position, yaw, at, filtered, spend) => {
@@ -1469,15 +1654,38 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         if (!mounted && travel > allowance + 1e-6) return null;
         const weaponState = advanceWeaponState(runtime.weaponState, packet, now);
         if (!weaponState) return null;
+        if (mounted) {
+            runtime.handling.cancelActions();
+            runtime.hookFlight = 'spent';
+        } else if (runtime.wasMounted || (runtime.weaponState.switchState === 'IDLE' && weaponState.switchState !== 'IDLE')) {
+            const equipped = weaponState.nextWeapon ?? weaponState.activeWeapon;
+            runtime.handling.equip(equipped, now/1000, runtime.weaponState.activeWeapon);
+            if (!isLight(equipped)) runtime.hookFlight = 'spent';
+        }
+        runtime.wasMounted = Boolean(mounted);
+        runtime.handling.advance(now/1000);
+        // A held launcher is reusable. Every new flight still needs its own
+        // accepted input, including a flight that reaches a latch between packets.
+        if (packet.hookState !== 'IDLE' && runtime.handling.hand === 'drawn' && !mounted &&
+            (runtime.hookFlight !== 'spent' || runtime.handling.takeLaunch(now/1000)) &&
+            !(packet.hookState === 'FIRING' && runtime.hookFlight === 'latched')) {
+            runtime.hookFlight = packet.hookState === 'PULLING' ? 'latched' : 'firing';
+        } else {
+            if (packet.hookState === 'IDLE') runtime.hookFlight = 'spent';
+            packet = {...packet, hookState:'IDLE', hookPos:null, movingHook:false};
+        }
         runtime.travelAllowance = mounted ? NETWORK_MOVEMENT_BURST : Math.max(0, allowance - travel);
         runtime.position.copy(nextPosition);
         runtime.yaw = packet.yaw;
         runtime.pitch = packet.pitch;
         runtime.lastUpdateAt = now;
         runtime.weaponState = weaponState;
+        if (packet.isMouseDown !== runtime.held) runtime.freshTrigger = packet.isMouseDown;
+        runtime.held = packet.isMouseDown;
         if (packet.switchState !== 'IDLE' || packet.activeWeapon !== 'KATANA') invalidateMeleePeer(fromPeerId);
         runtime.motion.add(now, _peerTargetPosition.copy(runtime.position).addScaledVector(THREE.Object3D.DEFAULT_UP, -PEER_Y_OFFSET), runtime.yaw);
-        runtime.shots.updateTrigger(packet.isMouseDown && packet.activeWeapon === 'MINIGUN' && packet.switchState === 'IDLE', now);
+        runtime.shots.updateTrigger((packet.isMouseDown || runtime.handling.pendingFire === 'MINIGUN') &&
+            packet.activeWeapon === 'MINIGUN' && packet.switchState === 'IDLE' && runtime.handling.canFire('MINIGUN', now/1000), now);
         return { ...packet, senderPeerId: fromPeerId, hp: runtime.life.hp, maxHp: PLAYER_MAX_HP, isDead: false };
     }
 
@@ -1485,14 +1693,22 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     if (!runtime || runtime.life.hp <= 0 || !runtime.motion.samples.length) return null;
 
     if (packet.type === 'fire') {
+        if ((packet.lifeId ?? 0) !== runtime.life.id) return null;
         if (!runtime.fireRate.accept(now)) return null;
         if (forgottenMecha?.pilotPeerId === fromPeerId && forgottenMecha.ownsPilot) return null;
         const stats = WEAPON_STATS[packet.weapon];
-        if (!stats || packet.weapon !== runtime.weaponState.activeWeapon || runtime.weaponState.switchState !== 'IDLE') return null;
+        if (!stats || packet.weapon !== runtime.weaponState.activeWeapon || runtime.weaponState.switchState !== 'IDLE' ||
+            !runtime.handling.canFire(packet.weapon, now/1000)) return null;
         _barrelPos.set(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z);
-        if (_barrelPos.distanceTo(runtime.position) > MAX_PLAYER_BARREL_OFFSET || shotIsBlocked(runtime.position, _barrelPos, packet.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS)) return null;
+        // Long barrels extend forward and swing vertically while aiming. A
+        // radius alone would also grant that extra reach sideways and behind cover.
+        toPlayerLocal(_barrelPos, runtime.position, runtime.yaw, _localBarrelOffset);
+        if (_localBarrelOffset.lengthSq() > FIREARM_MUZZLE_REACH[packet.weapon] ** 2 ||
+            Math.abs(_localBarrelOffset.x) > MAX_MUZZLE_LATERAL || _localBarrelOffset.z > MAX_MUZZLE_BEHIND_EYE ||
+            shotObstructionT(runtime.position, _barrelPos, packet.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS) !== null) return null;
         const firePacket = packet;
         if (!runtime.shots.record(firePacket, now, false, () => homingFireContext(fromPeerId, firePacket, now), forgottenMecha?.revision)) return null;
+        runtime.handling.spendShot(firePacket.weapon, now/1000);
         if (packet.weapon === 'SNIPER') {
             _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
             canonicalSniperBeamEnd(_barrelPos, _baseFireDir, packet.hitPoint, _targetPos);
@@ -1581,6 +1797,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
     }
 
     if (packet.type === 'jump') {
+        if ((packet.lifeId ?? 0) !== runtime.life.id) return null;
         if (mountedPeerPosition(fromPeerId) || !runtime.jumpRate.accept(now)) return null;
         return { ...packet, senderPeerId: fromPeerId };
     }
@@ -1591,6 +1808,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
 
 function spawnRemoteBullet(
     barrelPos: THREE.Vector3,
+    visibleMuzzle: THREE.Vector3,
     direction: THREE.Vector3,
     color: number,
     homingTarget: ProjectileHomingTarget | null,
@@ -1606,7 +1824,7 @@ function spawnRemoteBullet(
         bullet = new THREE.Mesh(SHARED_PROJECTILE_GEO, new THREE.MeshBasicMaterial({ color }));
         bullet.userData = {};
     }
-    bullet.position.copy(barrelPos).addScaledVector(direction, 0.1);
+    bullet.position.copy(visibleMuzzle);
     const data = projectileData(bullet);
     data.dx = direction.x;
     data.dy = direction.y;
@@ -1614,7 +1832,8 @@ function spawnRemoteBullet(
     data.age = 0;
     data.guidanceRemainder = 0;
     data.guidanceTargetPosition = undefined;
-    data.distanceTraveled = bullet.position.distanceTo(barrelPos);
+    data.distanceTraveled = 0;
+    (data.shotOrigin ??= new THREE.Vector3()).copy(barrelPos);
     data.visualOnly = true;
     data.damage = undefined;
     data.homingTarget = homingTarget ?? undefined;
@@ -1643,7 +1862,19 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
 
     let msg: NetworkPacket = parsed;
     if (state.isHost) {
-        if (msg.type === 'melee_command') { if (isKnownClient(fromPeerId)) acceptMeleeCommand(fromPeerId, msg); return; }
+        if (msg.type === 'handling_command') { handleWeaponIntent(fromPeerId, msg); return; }
+        if (msg.type === 'handling_state') return;
+        if (msg.type === 'melee_command') {
+            if (isKnownClient(fromPeerId) && acceptMeleeCommand(fromPeerId, msg) && msg.action === 'start') {
+                const peer = peerRuntime.get(fromPeerId);
+                if (peer && peer.handling.hand !== 'holstered') {
+                    peer.handling.interrupt('KATANA', performance.now()/1000);
+                    peer.hookFlight = 'spent';
+                    publishHandling(fromPeerId);
+                }
+            }
+            return;
+        }
         if (msg.type === 'melee_event' || msg.type === 'melee_hit') return;
         if (msg.type === 'mecha_ending_ready') {
             if (isKnownClient(fromPeerId)) acceptMechaEndingReady(fromPeerId, msg);
@@ -1655,11 +1886,12 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         }
         if (msg.type === 'hit_mecha') { if (isKnownClient(fromPeerId)) authorizeMechaHit(fromPeerId, msg); return; }
         if (msg.type === 'lobby_color') {
-            if (!state.isPlaying && isKnownClient(fromPeerId)) {
+            if (isKnownClient(fromPeerId)) {
                 const player = state.lobbyPlayers.find(item => item.peerId === fromPeerId);
                 if (player && player.bodyColor !== msg.bodyColor) {
                     player.bodyColor = msg.bodyColor;
-                    publishLobbyRoster();
+                    applyRemoteSuitColor(fromPeerId, msg.bodyColor);
+                    publishSuitColor();
                 }
             }
             return;
@@ -1669,7 +1901,18 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             if (isKnownClient(fromPeerId)) grantRespawn(fromPeerId, msg.lifeId);
             return;
         }
+        // Each reliable fire request is final, even when it arrives before the draw,
+        // reload or cadence deadline. A replay cannot spend it later.
+        if (parsed.type === 'fire' && parsed.shotId <= (peerRuntime.get(fromPeerId)?.shotAck ?? -1)) return;
         const authorized = authorizeClientPacket(fromPeerId, parsed);
+        if (parsed.type === 'fire') {
+            const runtime = peerRuntime.get(fromPeerId);
+            if (runtime && runtime.life.id === (parsed.lifeId ?? 0) && parsed.shotId > runtime.shotAck) {
+                runtime.shotAck = parsed.shotId;
+                if (authorized || runtime.intentRate.accept(performance.now())) publishHandling(fromPeerId, !authorized);
+                else runtime.correctionDue = true;
+            }
+        }
         if (!authorized) return;
         msg = authorized;
         if (!state.isPlaying) return;
@@ -1702,6 +1945,11 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             }
             return;
         }
+        if (msg.type === 'handling_command') return;
+        if (msg.type === 'handling_state') {
+            if (clientWorldSynchronized && state.isPlaying && !state.matchEnded) receiveHandling(msg);
+            return;
+        }
         if (msg.type === 'mecha_state') { receiveMechaState(msg.state); return; }
         if (msg.type === 'mecha_event') { receiveMechaEvent(msg); return; }
         if (msg.type === 'mecha_denied') { receiveMechaDenial(msg); return; }
@@ -1716,6 +1964,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
                     if (!msg.players.some(player => player.peerId === peerId)) removePeer(peerId);
                 }
                 state.lobbyPlayers = msg.players;
+                for (const player of msg.players) applyRemoteSuitColor(player.peerId, player.bodyColor);
             }
             return;
         }
@@ -1781,8 +2030,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         let justJoined = false;
         if (!peerData) {
             const username = msg.username || 'Guest';
-            console.log(`Spawning remote peer bean model for: ${username}`);
-            peerData = createPeerBean(username);
+            peerData = createPeerAvatar(username);
             state.peers[senderId] = peerData;
             state.peerIds = Object.keys(state.peers);
             justJoined = true;
@@ -1798,7 +2046,8 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         peerData.maxHp = msg.maxHp;
         peerData.username = msg.username;
 
-        if (msg.bodyColor !== undefined) setBeanColor(peerData.mesh, msg.bodyColor);
+        const color = state.lobbyPlayers.find(player => player.peerId === senderId)?.bodyColor;
+        if (color !== undefined) applyRemoteSuitColor(senderId, color);
         _targetPos.set(msg.pos.x, msg.pos.y - PEER_Y_OFFSET, msg.pos.z);
         peerData.targetPosition.copy(_targetPos);
         peerData.targetYaw = msg.yaw;
@@ -1807,9 +2056,10 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             peerData.mesh.rotation.y = msg.yaw;
         }
 
+        receiveRemotePose(senderId, peerData, msg, justJoined);
         if (msg.isDead) {
             peerData.hp = 0;
-            peerData.mesh.visible = false;
+            peerData.mesh.visible = Boolean(getPlayerAvatar(peerData.mesh));
         } else {
             if (justJoined) {
                 peerData.mesh.visible = true;
@@ -1822,7 +2072,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
                 peerData.mesh.visible = true;
             }
 
-            if (msg.isHovering) {
+            if (msg.isHovering && !getPlayerAvatar(peerData.mesh)) {
                 const now = performance.now();
                 // Packets arrive at 30 Hz per peer. Exhaust is visual-only, so
                 // limit it to a render-friendly cadence instead of allowing a
@@ -1868,58 +2118,12 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
         peerData.mesh.userData.meleeReady = msg.switchState === 'IDLE';
         if(msg.isDead || msg.activeWeapon !== 'KATANA' || msg.switchState !== 'IDLE') invalidateMeleePeer(senderId);
 
-        if (msg.hookState === 'FIRING' && peerData.lastHookState !== 'FIRING') {
-            triggerMuzzleFlash(peerData.leftGun);
-        }
-        peerData.lastHookState = msg.hookState;
-
-        if (msg.activeWeapon === 'MINIGUN' && peerData.minigunMesh && peerData.minigunMesh.userData.barrels) {
-            if (peerData.minigunRamp === undefined)      peerData.minigunRamp = 0.0;
-            if (peerData.lastUpdateTime === undefined)   peerData.lastUpdateTime = performance.now();
-
-            const now = performance.now();
-
-            const dt = Math.min((now - peerData.lastUpdateTime) / 1000, 0.1);
-            peerData.lastUpdateTime = now;
-
-            if (msg.isMouseDown) {
-                peerData.minigunRamp = Math.min(3.0, peerData.minigunRamp + dt);
-            } else {
-                peerData.minigunRamp = Math.max(0.0, peerData.minigunRamp - dt * 2.0);
-            }
-            
-            const spinSpeed = (peerData.minigunRamp / 3.0) * 40.0 + (msg.isMouseDown ? 5.0 : 0.0);
-            peerData.minigunMesh.userData.barrels.rotation.z += spinSpeed * dt;
-        }
-
-        if (!msg.isDead && msg.hookState !== 'IDLE' && msg.hookPos) {
-            if (!peerData.hookLine) {
-                peerData.hookLine = new THREE.Mesh(SHARED_HOOK_GEO, SHARED_HOOK_MAT);
-                peerData.hookLine.castShadow = true;
-                state.scene!.add(peerData.hookLine);
-            }
-
-            peerData.leftGun.updateWorldMatrix(true, false);
-            _gunTip.copy(GUN_TIP_OFFSET);
-            peerData.leftGun.localToWorld(_gunTip);
-            _targetPos.set(msg.hookPos.x, msg.hookPos.y, msg.hookPos.z);
-            const distance = _gunTip.distanceTo(_targetPos);
-
-            if (distance > 0.05) {
-                _midPoint.addVectors(_gunTip, _targetPos).multiplyScalar(0.5);
-                peerData.hookLine.position.copy(_midPoint);
-                peerData.hookLine.scale.set(1, 1, distance);
-                peerData.hookLine.lookAt(_targetPos);
-                peerData.hookLine.visible = true;
-            }
-        } else {
-            if (peerData.hookLine) {
-                peerData.hookLine.visible = false;
-            }
-        }
     } else if (msg.type === 'fire') {
+        const remote = state.peers[senderId];
+        if (remote && ((msg.lifeId ?? 0) !== (remote.lifeId ?? 0) || remote.hp <= 0)) return;
         _barrelPos.set(msg.barrelPos.x, msg.barrelPos.y, msg.barrelPos.z);
         _baseFireDir.set(msg.dir.x, msg.dir.y, msg.dir.z).normalize();
+        _observerMuzzle.copy(_barrelPos);
         const firingPeer = state.peers[senderId];
         if (firingPeer) {
             const firingWeapon = msg.weapon === 'PISTOL' ? firingPeer.pistolMesh
@@ -1927,13 +2131,15 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
                 : msg.weapon === 'AR' ? firingPeer.arMesh
                 : msg.weapon === 'SNIPER' ? firingPeer.sniperMesh
                 : firingPeer.minigunMesh;
+            getPlayerAvatar(firingPeer.mesh)?.rig.muzzleFor(msg.weapon).getWorldPosition(_observerMuzzle);
+            firingWeapon.userData.onAvatarFire?.();
             triggerMuzzleFlash(firingWeapon);
         }
 
         if (msg.weapon === 'SNIPER') {
             const targetPos = _targetPos;
             canonicalSniperBeamEnd(_barrelPos, _baseFireDir, msg.hitPoint, targetPos);
-            createLaserBeam(_barrelPos, targetPos, 0xffff00);
+            createLaserBeam(_observerMuzzle, targetPos, WEAPON_STATS.SNIPER.bulletColor);
 
         } else {
             const stats = WEAPON_STATS[msg.weapon];
@@ -1943,7 +2149,7 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             for (let pellet = 0; pellet < pelletCount; pellet++) {
                 const direction = spreadDirection(_baseFireDir, spreadSeed, pellet, stats.spread, _dir);
                 spawnRemoteBullet(
-                    _barrelPos,
+                    _barrelPos, _observerMuzzle,
                     direction,
                     stats.bulletColor,
                     homingTarget,
@@ -1994,9 +2200,12 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
     } else if (msg.type === 'jump') {
         const peerData = state.peers[senderId];
         if (peerData && peerData.mesh && peerData.mesh.visible) {
+            if (peerData.hp <= 0 || (msg.lifeId ?? 0) !== (peerData.lifeId ?? 0) || msg.powered === false) return;
+            const avatar = getPlayerAvatar(peerData.mesh);
+            avatar?.powerJump();
             _boosterPos.copy(peerData.mesh.position);
             _boosterPos.y -= 1.45;
-            spawnRocketFlame(_boosterPos, 50, true);
+            if (!avatar) spawnRocketFlame(_boosterPos, 50, true);
             createShockwave(_boosterPos, 15.0);
         }
     }
@@ -2010,8 +2219,9 @@ function applyPlayerDeath(packet: PlayerDiedPacket): void {
         victimPeer.lifeId = packet.lifeId;
         victimPeer.deathReported = true;
         victimPeer.hp = 0;
+        if (victimPeer.mesh.userData.nameTag) victimPeer.mesh.userData.nameTag.visible = false;
         spawnParticles(victimPeer.mesh.position, 0x8c7ae6, 40, 30, 0.4, 18.0);
-        victimPeer.mesh.visible = false;
+        victimPeer.mesh.visible = Boolean(getPlayerAvatar(victimPeer.mesh));
         if (victimPeer.hookLine) victimPeer.hookLine.visible = false;
     }
 
@@ -2027,19 +2237,20 @@ function applyPlayerDeath(packet: PlayerDiedPacket): void {
 // Peer avatars own cloned weapon/name-tag resources, so leaving a room must
 // dispose those objects instead of only removing them from the scene.
 function removePeer(peerId: string): void {
+    handlingCopies.delete(peerId); handlingPhases.delete(peerId); remotePoses.delete(peerId);
     forgetMeleePeer(peerId);
     mechaPeerLeft(peerId);
     const peerData = state.peers[peerId];
     if (peerData) {
         clearDamagePulse(peerData);
         if (peerData.mesh) {
+            getPlayerAvatar(peerData.mesh)?.dispose();
             peerData.mesh.removeFromParent();
             const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>(), textures = new Set<THREE.Texture>();
             peerData.mesh.traverse(child => {
-                if ((child instanceof THREE.Mesh || child instanceof THREE.Line) && !isSharedGeometry(child.geometry)) geometries.add(child.geometry);
+                if ((child instanceof THREE.Mesh || child instanceof THREE.Line) && child.geometry !== SHARED_PROJECTILE_GEO) geometries.add(child.geometry);
                 if (!(child instanceof THREE.Mesh || child instanceof THREE.Line || child instanceof THREE.Sprite)) return;
                 for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
-                    if (material === SHARED_BODY_MAT) continue;
                     materials.add(material);
                     for (const value of Object.values(material)) if (value instanceof THREE.Texture) textures.add(value);
                 }
@@ -2062,7 +2273,8 @@ export function sendLocalState(force = false): void {
     const now = performance.now();
     if (!force && now - lastSentTime < NETWORK_TICK_MS) return;
     if (state.isHost) {
-        hostMechaShots.updateTrigger(state.isMouseDown && state.activeWeaponName === 'MINIGUN' && state.switchState === 'IDLE', now);
+        hostMechaShots.updateTrigger((state.isMouseDown || state.weaponHandling.pendingFire === 'MINIGUN') &&
+            state.activeWeaponName === 'MINIGUN' && state.switchState === 'IDLE' && state.weaponHandling.canFire('MINIGUN', state.weaponTime), now);
         if (forgottenMecha?.ready) {
             if (!mechaMotion || mechaMotion.actor !== forgottenMecha || mechaMotion.revision !== forgottenMecha.revision) mechaMotion = { actor: forgottenMecha, revision: forgottenMecha.revision, history: new TargetMotionHistory() };
             mechaMotion.history.add(now, forgottenMecha.hitbox.position, forgottenMecha.group.rotation.y);
@@ -2090,7 +2302,8 @@ export function sendLocalState(force = false): void {
         (state.moveForward ? 8 : 0) |
         (state.moveBackward ? 16 : 0) |
         (state.moveLeft ? 32 : 0) |
-        (state.moveRight ? 64 : 0);
+        (state.moveRight ? 64 : 0) | (state.canJump ? 128 : 0) | (state.isScoped ? 256 : 0) |
+        (state.inspectState === 'INSPECTING' ? 512 : 0) | (state.hookIsEnemy ? 1024 : 0);
 
     const pos = playerObj.position;
     const hookX = state.hookState !== 'IDLE' ? q2(state.hookPosition.x) : 0;
@@ -2151,21 +2364,97 @@ export function sendLocalState(force = false): void {
         hookState: state.hookState,
         hookPos: state.hookState !== 'IDLE' ? { x: hookX, y: hookY, z: hookZ } : null,
         isHovering: state.isHovering,
+        grounded: state.canJump, scoped: state.isScoped, movingHook: state.hookIsEnemy,
+        ...(state.inspectState === 'INSPECTING' ? {inspectTime: Math.min(3.8, state.inspectTimer)} : {}),
+        ...(state.switchState !== 'IDLE' ? {switchTime: Math.min(.15,state.switchTimer)} : {}),
         hp: snapshot.hp,
         maxHp: snapshot.maxHp,
         // BinaryPack encodes explicit undefined as null; omit host-only fields.
         ...(state.isHost ? { dayNightElapsedSeconds: state.dayNightElapsedSeconds } : {}),
         hoverKeys: state.isHovering ? {
-            w: state.moveForward,
-            s: state.moveBackward,
-            a: state.moveLeft,
-            d: state.moveRight
+            w: state.moveForward || touchMove.y < -.1,
+            s: state.moveBackward || touchMove.y > .1,
+            a: state.moveLeft || touchMove.x < -.1,
+            d: state.moveRight || touchMove.x > .1
         } : null
     };
 
     broadcastToAll(packet);
 }
 
+interface RemotePose {
+    packet: UpdatePacket;
+    at: number;
+    velocity: THREE.Vector3;
+}
+const remotePoses = new Map<string, RemotePose>();
+function receiveRemotePose(id: string, peer: PeerData, packet: UpdatePacket, joined: boolean): void {
+    const now = performance.now()/1000, previous = remotePoses.get(id);
+    const velocity = previous?.velocity ?? new THREE.Vector3();
+    if (previous && !joined && previous.packet.lifeId === packet.lifeId && now > previous.at) {
+        velocity.set(packet.pos.x - previous.packet.pos.x, packet.pos.y - previous.packet.pos.y,
+            packet.pos.z - previous.packet.pos.z).divideScalar(Math.max(.01, now - previous.at)).clampLength(0,NETWORK_MOVEMENT_SPEED);
+    } else velocity.set(0,0,0);
+    remotePoses.set(id, {packet, at:now, velocity});
+    if (peer.mesh.userData.nameTag) peer.mesh.userData.nameTag.visible = !packet.isDead;
+}
+function presentPeerHook(peer: PeerData, hook: UpdatePacket['hookState'], hookPos: UpdatePacket['hookPos'], muzzle: THREE.Object3D): void {
+    // Movement and hand receipts may arrive in different frames. Make the
+    // effect and cable visible only after the actual raised pose was sampled.
+    if (hook === 'FIRING' && peer.lastHookState !== 'FIRING') triggerMuzzleFlash(peer.leftGun);
+    peer.lastHookState = hook;
+    if (hook === 'IDLE' || !hookPos || !state.scene) {
+        if (peer.hookLine) peer.hookLine.visible = false;
+        return;
+    }
+    if (!peer.hookLine) {
+        peer.hookLine = new THREE.Mesh(SHARED_HOOK_GEO, SHARED_HOOK_MAT);
+        peer.hookLine.castShadow = true;
+        state.scene.add(peer.hookLine);
+    }
+    muzzle.getWorldPosition(_gunTip);
+    _targetPos.set(hookPos.x,hookPos.y,hookPos.z);
+    const distance = _targetPos.distanceTo(_gunTip);
+    peer.hookLine.visible = distance > .05;
+    peer.hookLine.position.copy(_midPoint.addVectors(_gunTip,_targetPos).multiplyScalar(.5));
+    peer.hookLine.scale.set(1,1,distance);
+    peer.hookLine.lookAt(_targetPos);
+}
+function enablePeerAvatar(peer: PeerData, color: number) {
+    const actor = attachPlayerAvatar(peer.mesh,color);
+    if (actor && !peer.leftGun.userData.grappleMuzzle) {
+        bindAvatarEffects(actor,peer.leftGun,{PISTOL:peer.pistolMesh, SHOTGUN:peer.shotgunMesh, AR:peer.arMesh,
+            SNIPER:peer.sniperMesh, MINIGUN:peer.minigunMesh, KATANA:peer.katanaMesh!});
+    }
+    return actor;
+}
+function animatePeer(id: string, peer: PeerData, delta: number): void {
+    const pose = remotePoses.get(id);
+    if (!pose) return;
+    const p = pose.packet, avatar = enablePeerAvatar(peer, peer.mesh.userData.bodyColor ?? 0x8c7ae6);
+    if (!avatar) return;
+    const now = performance.now()/1000, elapsed = now-pose.at;
+    const copy = handlingCopies.get(id);
+    const h = state.isHost ? peerRuntime.get(id)?.handling : copy && copy.lifeId === peer.lifeId ? copy.handling : undefined;
+    h?.advance(now);
+    if (elapsed > .32 || p.isDead) pose.velocity.set(0,0,0);
+    const spin = p.activeWeapon === 'MINIGUN' && (p.isMouseDown || h?.pendingFire === 'MINIGUN') &&
+        p.switchState === 'IDLE' && (h?.canFire('MINIGUN',now) ?? true);
+    peer.minigunRamp = THREE.MathUtils.clamp((peer.minigunRamp ?? 0) + delta*(spin ? 1 : -2), 0,3);
+    const seat = forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === id ? forgottenMecha : null;
+    const cableAllowed = !state.isHost || peerRuntime.get(id)?.hookFlight !== 'spent';
+    const hook = h?.hand === 'drawn' && cableAllowed && peer.hp > 0 && !p.isDead && !seat ? p.hookState : 'IDLE';
+    avatar.update(delta,{weapon:p.activeWeapon,grounded:p.grounded ?? Math.abs(pose.velocity.y)<.1,
+        velocity:pose.velocity,yaw:peer.mesh.rotation.y,pitch:p.pitch,hover:p.isHovering,hook,
+        hookMoving:p.movingHook,scoped:p.scoped,inspectTime:p.inspectTime === undefined ? undefined : p.inspectTime+elapsed,
+        switchState:p.switchState,switchTime:(p.switchTime ?? 0)+elapsed,minigunRamp:peer.minigunRamp,alive:peer.hp>0,
+        lifeId:peer.lifeId ?? p.lifeId,katana:getKatanaAction(id),gentle:userSettings.photosensitivityMode,
+        pilot:seat?.pilotAvatarPhase, pilotProgress:seat?.pilotAvatarProgress,
+        handling:h ? {hand:h.hand,handWeapon:h.handWeapon,outgoingLight:h.outgoingLight,handProgress:THREE.MathUtils.clamp((now-h.handStarted)/Math.max(.0001,h.handEnds-h.handStarted),0,1),
+            reloadProgress:h.reload ? (now-h.reload.started)/(h.reload.ends-h.reload.started) : undefined,
+            chargeStage:isFirearm(p.activeWeapon)?h.chargeStage(p.activeWeapon,now):4}:undefined});
+    presentPeerHook(peer,hook,p.hookPos,avatar.rig.grappleMuzzle);
+}
 export function updateRemotePeers(delta: number): void {
     if (!state.isMultiplayer) return;
 
@@ -2177,13 +2466,12 @@ export function updateRemotePeers(delta: number): void {
 
         // Health is replicated by the victim. Predicting regeneration here can
         // resurrect a stale health value and makes inspection disagree with combat.
-        if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerIds[i]) continue;
-        peerData.mesh.position.lerp(peerData.targetPosition, alpha);
-
-        const currentYaw = peerData.mesh.rotation.y;
-        let yawDelta = peerData.targetYaw - currentYaw;
-        yawDelta = Math.atan2(Math.sin(yawDelta), Math.cos(yawDelta));
-        peerData.mesh.rotation.y = currentYaw + yawDelta * alpha;
+        if (!(forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerIds[i])) {
+            peerData.mesh.position.lerp(peerData.targetPosition, alpha);
+            const currentYaw = peerData.mesh.rotation.y, diff = peerData.targetYaw - currentYaw;
+            peerData.mesh.rotation.y = currentYaw + Math.atan2(Math.sin(diff), Math.cos(diff))*alpha;
+        }
+        animatePeer(peerIds[i], peerData, delta);
         updateMuzzleFlash(peerData.leftGun, delta);
         updateMuzzleFlash(peerData.pistolMesh, delta);
         updateMuzzleFlash(peerData.shotgunMesh, delta);
@@ -2209,6 +2497,7 @@ function broadcastLocalFire(
 
     const packet: FirePacket = {
         type: 'fire',
+        lifeId: state.lifeId,
         shotId, spreadSeed,
         weapon,
         barrelPos: { x: barrelPos.x, y: barrelPos.y, z: barrelPos.z },
@@ -2226,10 +2515,12 @@ function broadcastLocalFire(
     }
 
     if (state.isHost && forgottenMecha?.networked) {
-        hostMechaShots.updateTrigger(state.isMouseDown && weapon === 'MINIGUN', performance.now());
+        hostMechaShots.updateTrigger(weapon === 'MINIGUN', performance.now());
         hostMechaShots.record(packet, performance.now(), hostLife.hp <= 0, () => homingFireContext(state.peer!.id, packet, performance.now()), forgottenMecha?.revision);
     }
+    localShot = shotId;
     broadcastToAll(packet);
+    if (state.isHost && state.peer) publishHandling(state.peer.id);
 }
 
 export function broadcastTargetKill(targetIndex: number, score: number, newPos: THREE.Vector3, data: TargetUserData, killerPeerId: string | null = null): void {
@@ -2254,10 +2545,10 @@ export function broadcastTargetKill(targetIndex: number, score: number, newPos: 
     broadcastToAll(packet);
 }
 
-export function broadcastLocalJump(): void {
+export function broadcastLocalJump(powered = true): void {
     if (!state.isMultiplayer || state.connections.length === 0) return;
     const packet: JumpPacket = {
-        type: 'jump'
+        type: 'jump', powered, lifeId:state.lifeId
     };
     broadcastToAll(packet);
 }
@@ -2265,48 +2556,33 @@ export function broadcastLocalJump(): void {
 // Keep weapon simulation independent from the networking module so scene-model
 // construction does not participate in a weapons ↔ multiplayer import cycle.
 setWeaponNetworkPort({
+    sendSwitchStart: () => sendLocalState(true),
+    sendWeaponIntent: sendLocalIntent,
     broadcastLocalFire,
     broadcastToAll,
     flashPeerMesh,
 });
 
-// Remote players use the same bean/weapon builders as the local player, but with
-// a canvas-generated name tag attached as a Sprite.
-function createPeerBean(username: string): PeerData {
+// The wrapper is the network pose. The skin, weapon attachment and name tag
+// are children so cockpit placement never changes replicated movement units.
+function createPeerAvatar(username: string): PeerData {
     if (!state.scene) throw new Error('Scene not initialized');
 
-    const peerGroup = buildBeanModel(0x8c7ae6, 0xff4757);
-
-    const leftGun = buildGun(GRAPPLE_BLUE, true);
+    const peerGroup = new THREE.Group();
+    const avatar = attachPlayerAvatar(peerGroup, 0x8c7ae6);
+    // Combat and scanner bounds are available even during asynchronous model loading.
+    setPeerScanBounds(peerGroup, peerHitBox);
+    const leftGun = new THREE.Group(), rightGunContainer = new THREE.Group();
+    peerGroup.add(leftGun,rightGunContainer);
     excludeFromStablePeerEnvelope(leftGun);
-    leftGun.position.set(-0.7, 0.0, -0.5);
-    peerGroup.add(leftGun);
-
-    const rightGunContainer = new THREE.Group();
     excludeFromStablePeerEnvelope(rightGunContainer);
-    rightGunContainer.position.set(0.7, 0.0, -0.5);
-    peerGroup.add(rightGunContainer);
-
-    const pistolMesh = buildGun(WEAPON_STATS.PISTOL.bulletColor);
-    rightGunContainer.add(pistolMesh);
-
-    const shotgunMesh = buildShotgun();
-    shotgunMesh.visible = false;
-    rightGunContainer.add(shotgunMesh);
-
-    const arMesh = buildAR();
-    arMesh.visible = false;
-    rightGunContainer.add(arMesh);
-
-    const sniperMesh = buildSniper();
-    sniperMesh.visible = false;
-    rightGunContainer.add(sniperMesh);
-
-    const minigunMesh = buildMinigun();
-    minigunMesh.visible = false;
-    rightGunContainer.add(minigunMesh);
-
-    const katanaMesh = buildKatana(); katanaMesh.visible = false; rightGunContainer.add(katanaMesh);
+    leftGun.position.set(-.7,0,-.5);
+    rightGunContainer.position.set(.7,0,-.5);
+    const pistolMesh = new THREE.Group(), shotgunMesh = new THREE.Group(), arMesh = new THREE.Group();
+    const sniperMesh = new THREE.Group(), minigunMesh = new THREE.Group(), katanaMesh = new THREE.Group();
+    rightGunContainer.add(pistolMesh,shotgunMesh,arMesh,sniperMesh,minigunMesh,katanaMesh);
+    if (avatar) bindAvatarEffects(avatar,leftGun,{PISTOL:pistolMesh, SHOTGUN:shotgunMesh, AR:arMesh,
+        SNIPER:sniperMesh, MINIGUN:minigunMesh, KATANA:katanaMesh});
 
     const canvas = document.createElement('canvas');
     canvas.width = 256;
@@ -2329,12 +2605,13 @@ function createPeerBean(username: string): PeerData {
         transparent: true 
     });
     const nameSprite = new THREE.Sprite(spriteMat);
-    nameSprite.position.set(0, 1.6, 0);
+    nameSprite.position.set(0, 1.05, 0);
+    peerGroup.userData.nameTag = nameSprite;
     nameSprite.scale.set(3, 0.75, 1);
     peerGroup.add(nameSprite);
 
     state.scene.add(peerGroup);
-    peerGroup.scale.set(1.5, 1.5, 1.5);
+
 
     // Canvas does not repaint when a web font finishes loading. Refresh only
     // while this peer still owns the sprite and its texture.

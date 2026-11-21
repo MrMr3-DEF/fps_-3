@@ -11,7 +11,9 @@ their temporary wrecks share the battlefield, with overflow waiting for slots.
 Robots enter at reachable seeded points along the map edge and travel toward
 outer wall sections. They prioritize the nearest visible living player in a
 50 m sphere. Cover blocks attacks, and robots return to their wall approach
-when they lose the player.
+when they lose the player. At sharp corners and before attacking off-axis targets,
+robots stop and turn in alternating steps. The host sends the landing heading,
+signed turn angle, and clip time so observers see the same footwork.
 
 | Robot | Standing height | HP | Damage per hit | Attack |
 | --- | ---: | ---: | ---: | --- |
@@ -21,7 +23,7 @@ when they lose the player.
 
 The HUD shows **Defend the Town** on entering play and the day below the
 elimination counter. Aim at the central well to see the **Wall durability**
-bar. Scoped goggles scan visible robots as **Enemy**. The locator tracks
+bar above its roof. Aiming through the opening also shows the bar. Scoped goggles scan visible robots as **Enemy**. The locator tracks
 players and Ironmaw. Each defeated bot counts toward Targets Eliminated.
 
 The wall starts at 500 HP. A wall hit that reduces it to zero commits the same

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { state, resetPlayerState } from '../src/state.ts';
-import { createAkimboGuns, createPlayerMesh, disposePlayerVisuals, updateWeapons, setThirdPerson, resetWeaponPresentation, updatePlayerAvatarPose } from '../src/weapons.ts';
+import { createAkimboGuns, createPlayerMesh, prepareLocalPlayerAvatar, disposePlayerVisuals, updateWeapons, setThirdPerson, resetWeaponPresentation, updatePlayerAvatarPose } from '../src/weapons.ts';
+import { loadCyborgTestAssets } from './cyborgTestAsset.ts';
+import { getPlayerAvatar } from '../src/playerAvatar.ts';
 import { PLAYER_BODY_CAMERA_OFFSET } from '../src/playerHitbox.ts';
 import { advanceWeaponState, initialWeaponState } from '../src/shotAuthority.ts';
 import { SWITCH_DURATION, NETWORK_TICK_MS } from '../src/config.ts';
@@ -30,18 +32,24 @@ test('HUD selection follows the committed visual swap rather than queued weapon 
         assert.equal(selectedWeaponIcon(state.activeWeaponName, true), 'ROCKET');
     } finally { disposePlayerVisuals(); resetPlayerState(); resetWeaponPresentation(); }
 });
-test('inspection cannot leave yaw or roll behind when changing views at any animation phase', () => {
-    setup();
+test('an authored inspection moves the visible gun while both logical anchors stay fixed', async () => {
+    await loadCyborgTestAssets();
+    setup(); resetPlayerState(); prepareLocalPlayerAvatar();
     try {
-        for (const time of [0.3, 1.5, 3.2]) {
-            state.inspectState = 'INSPECTING'; state.inspectTimer = time; updateWeapons(0);
-            assert.ok(Math.abs(state.rightGunContainer!.rotation.y) > 0.1);
-            setThirdPerson(true);
-            assert.equal(state.inspectState, 'IDLE');
-            assert.equal(state.rightGunContainer!.rotation.y, 0); assert.equal(state.rightGunContainer!.rotation.z, 0);
-            setThirdPerson(false);
-            assert.deepEqual(state.rightGunContainer!.rotation.toArray().slice(0, 3), [0, 0, 0]);
-        }
+        state.canJump = true;
+        updatePlayerAvatarPose(1);
+        const visual = getPlayerAvatar(state.playerMesh)!.rig.muzzleFor('PISTOL');
+        const ready = visual.getWorldPosition(new THREE.Vector3());
+        const logical = state.rightGun!.getWorldPosition(new THREE.Vector3());
+        const grapple = state.leftGun!.getWorldPosition(new THREE.Vector3());
+        state.inspectState = 'INSPECTING';
+        updateWeapons(.8); updatePlayerAvatarPose(.8);
+        assert.ok(visual.getWorldPosition(new THREE.Vector3()).distanceTo(ready) > .05);
+        assert.ok(state.rightGun!.getWorldPosition(new THREE.Vector3()).equals(logical));
+        assert.ok(state.leftGun!.getWorldPosition(new THREE.Vector3()).equals(grapple));
+        setThirdPerson(true);
+        assert.equal(state.inspectState, 'IDLE');
+        assert.equal(state.rightGunContainer!.parent, state.camera);
     } finally { disposePlayerVisuals(); }
 });
 test('a per-life reset retains equipped weapons and match state but clears both switch phases and held input', () => {
@@ -52,13 +60,11 @@ test('a per-life reset retains equipped weapons and match state but clears both 
             state.activeWeaponName = phase === 'WITHDRAWING' ? 'PISTOL' : 'SNIPER';
             const equipped = state.activeWeaponName;
             state.nextWeaponName = state.desiredWeaponName = 'SNIPER'; state.switchState = phase; state.switchTimer = 0.1;
-            state.sniperMesh!.rotation.set(0.8, 0, 0); state.rightGunContainer!.rotation.y = 1.4;
             state.isMouseDown = state.isHovering = state.isShiftDown = true;
             resetPlayerState(); resetWeaponPresentation();
             assert.equal(state.activeWeaponName, equipped); assert.equal(state.desiredWeaponName, equipped);
             assert.equal(state.nextWeaponName, null); assert.equal(state.switchState, 'IDLE'); assert.equal(state.switchTimer, 0);
             assert.equal(state.isMouseDown || state.isHovering || state.isShiftDown, false);
-            assert.equal(state.rightGunContainer!.rotation.y, 0); assert.equal(state.sniperMesh!.rotation.x, 0);
             assert.equal(state.sniperMesh!.visible, equipped === 'SNIPER');
             assert.equal(state.score, 7); assert.equal(state.dayNightElapsedSeconds, 50); assert.equal(state.gogglesFailure.bricked, true);
         }

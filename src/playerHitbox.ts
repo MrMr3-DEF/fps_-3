@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { segmentAabbHitT, segmentRoundedBoxHitT, cylinderIntersectsBox, type Vec3Like } from './gameplayMath.js';
 
-// The playable bean is always rendered at 1.5x scale. These bounds tightly
-// enclose its body, visor and booster, while intentionally excluding weapons
-// and the remote name tag.
-export const PLAYER_HITBOX_MIN = Object.freeze({ x: -0.9, y: -1.65, z: -1.107 });
-export const PLAYER_HITBOX_MAX = Object.freeze({ x: 0.9, y: 1.65, z: 0.9 });
+// The suit's soles, crown, shoulders and armed gloves bound the fixed combat
+// proxy. It shares the accepted body anchor; locomotion, props and plume
+// lengths never change which shot the host accepts.
+export const PLAYER_HITBOX_MIN = Object.freeze({ x: -0.55, y: -1.65, z: -0.71 });
+export const PLAYER_HITBOX_MAX = Object.freeze({ x: 0.55, y: 0.56, z: 0.35 });
 export const PLAYER_BODY_CAMERA_OFFSET = 0.35;
+/** World-space vertical offset from Ironmaw's pilot anchor to its lens. */
+export const PILOT_LENS_OFFSET = 1;
 export const PLAYER_HITBOX_BOUNDING_RADIUS = Math.hypot(
     Math.max(Math.abs(PLAYER_HITBOX_MIN.x), Math.abs(PLAYER_HITBOX_MAX.x)),
     Math.max(Math.abs(PLAYER_HITBOX_MIN.y), Math.abs(PLAYER_HITBOX_MAX.y)),
@@ -18,7 +20,7 @@ const _localEnd = new THREE.Vector3();
 const _expandedMin = new THREE.Vector3();
 const _expandedMax = new THREE.Vector3();
 
-/** SAT contact between the yaw-oriented bean and an animated world box.
+/** SAT contact between the yaw-oriented player and an animated world box.
  * Support collisions use these same mecha proxies; standing on their tops
  * must count even if the visible armor below the top is sloped. */
 export function playerTouchesWorldBox(position: Vec3Like, yaw: number, min: Vec3Like, max: Vec3Like, margin = 0): boolean {
@@ -26,7 +28,7 @@ export function playerTouchesWorldBox(position: Vec3Like, yaw: number, min: Vec3
     const hz = (PLAYER_HITBOX_MAX.z - PLAYER_HITBOX_MIN.z) / 2, middleZ = (PLAYER_HITBOX_MAX.z + PLAYER_HITBOX_MIN.z) / 2;
     const c = Math.cos(yaw), s = Math.sin(yaw), ac = Math.abs(c), as = Math.abs(s);
     const dx = position.x + s * middleZ - (min.x + max.x) / 2;
-    const dy = position.y - (min.y + max.y) / 2;
+    const dy = position.y + (PLAYER_HITBOX_MIN.y + PLAYER_HITBOX_MAX.y - min.y - max.y) / 2;
     const dz = position.z + c * middleZ - (min.z + max.z) / 2;
     const bx = (max.x - min.x) / 2, by = (max.y - min.y) / 2, bz = (max.z - min.z) / 2;
     return Math.abs(dy) <= hy + by + margin
@@ -36,7 +38,7 @@ export function playerTouchesWorldBox(position: Vec3Like, yaw: number, min: Vec3
         && Math.abs(s * dx + c * dz) <= hz + as * bx + ac * bz + margin;
 }
 
-function toPlayerLocal(point: Vec3Like, position: Vec3Like, yaw: number, out: THREE.Vector3): THREE.Vector3 {
+export function toPlayerLocal(point: Vec3Like, position: Vec3Like, yaw: number, out: THREE.Vector3): THREE.Vector3 {
     const dx = point.x - position.x;
     const dy = point.y - position.y;
     const dz = point.z - position.z;
@@ -59,7 +61,7 @@ export function closestPlayerBodyPoint(point: Vec3Like, position: Vec3Like, yaw:
     return out.set(position.x + c * x + s * z, position.y + out.y, position.z - s * x + c * z);
 }
 
-/** Return the first contact with the bean's tight, yaw-oriented box. */
+/** Return the first contact with the cyborg's tight, yaw-oriented box. */
 export function segmentPlayerHitboxHitT(
     start: Vec3Like,
     end: Vec3Like,

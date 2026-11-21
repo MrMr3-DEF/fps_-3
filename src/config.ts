@@ -36,6 +36,10 @@ export const INFANTRY_LIMIT = 48;
 export const INFANTRY_WARNING_TIME = 3;
 export const INFANTRY_NETWORK_INTERVAL = 100;
 export const INFANTRY_DEBRIS_TIME = 4;
+// The authored two-foot turn covers 60 degrees at full weight.
+export const INFANTRY_TURN_ANGLE = Math.PI / 3;
+export const INFANTRY_STEERING_ANGLE = Math.PI / 15;
+export const INFANTRY_AIM_ANGLE = Math.PI / 45;
 
 const INFANTRY_SIZE_MULTIPLIER = 12 / 7;
 
@@ -56,6 +60,9 @@ export const INFANTRY = {
     fast: { ...infantrySize(4, 1.85, .8, .6), ...infantryMelee(3.57, 1.84, 1.51), hp: 3, damage: 1,
         speed: 11, interval: 1.2, move: 'Run', attack: 'LightHit', contact: 4 / 24, color: 0xd29a6c },
     big: { ...infantrySize(7, 3.5, 1.7, 1.35), ...infantryMelee(5, 3.8, 2.1), hp: 10, damage: 3,
+        // HeavyHit's torso pivot and mid-chest reach origin are fractions of
+        // standing height. Its wrist sits .64 radians above the pivot at contact.
+        swingPivotHeight: .485, reachHeight: .64, swingElevation: .64,
         speed: 4.5, swingYaw: -Math.PI / 5, interval: 2.6, move: 'Walk', attack: 'HeavyHit', contact: 17 / 24, color: 0xb98764 },
 } as const;
 export type InfantryKind = keyof typeof INFANTRY;
@@ -139,6 +146,25 @@ export const GRAPPLE_BLUE = 0x00aaff;
 export const GUN_TIP_Z = -0.19;
 
 export const SWITCH_DURATION = 0.15;
+// Bounds of the fitted firearms through movement, recoil and pitch, with
+// allowance for animation and quantization of the last accepted player pose.
+export const FIREARM_MUZZLE_REACH = {
+    PISTOL: 1.85, SHOTGUN: 2.1, AR: 2.25, SNIPER: 3.1, MINIGUN: 2.2,
+} as const;
+export const MAX_MUZZLE_LATERAL = 1.0;
+export const MAX_MUZZLE_BEHIND_EYE = 0.8;
+export const FIREARM_MAGAZINES = {
+    PISTOL: { capacity: 15, reloadSeconds: 1.5 },
+    SHOTGUN: { capacity: 12, reloadSeconds: 2.5 },
+    AR: { capacity: 40, reloadSeconds: 2.5 },
+    SNIPER: { capacity: 8, reloadSeconds: 3 },
+    MINIGUN: { capacity: 100, reloadSeconds: 4.5 },
+} as const;
+export const GRAPPLE_DRAW_TIME = 0.36;
+export const HEAVY_HANDOFF_TIME = 0.52;
+// Authored Grapple.Return transfers from glove to hip at this clip time.
+export const GRAPPLE_SEAT_TIME = 0.295;
+export const HEAVY_RECENT_SHOT_TIME = 0.30;
 export const BULLET_TRAVEL_DISTANCE = 700;
 // Presentation range and callout density are independent of weapon reach.
 export const GOGGLES_SCAN_DISTANCE = 1200;
@@ -192,9 +218,9 @@ export const FOV_LERP_SPEED = 15;
 // Over-the-shoulder camera framing. The camera stays to the player's right so
 // the avatar occupies the left side of the screen, as in modern third-person
 // shooters, and pulls forward before its near plane can enter world geometry.
-export const THIRD_PERSON_CAMERA_DISTANCE = 5.5;
-export const THIRD_PERSON_CAMERA_HEIGHT = 1.2;
-export const THIRD_PERSON_CAMERA_SHOULDER_OFFSET = 1.5;
+export const THIRD_PERSON_CAMERA_DISTANCE = 3.35;
+export const THIRD_PERSON_CAMERA_HEIGHT = 0.10;
+export const THIRD_PERSON_CAMERA_SHOULDER_OFFSET = 0.95;
 export const THIRD_PERSON_CAMERA_AIM_DISTANCE = 25;
 export const THIRD_PERSON_CAMERA_COLLISION_RADIUS = 0.25;
 export const THIRD_PERSON_CAMERA_WALL_PADDING = 0.08;
@@ -227,8 +253,8 @@ export const LAVA_POOL_HALF_SIZE = 12.8;
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
 export const MAX_PENDING_ROOM_CONNECTIONS = 2 * (MAX_PLAYERS - 1);
-// Peers must share infantry dimensions for host-validated hits.
-export const NETWORK_PROTOCOL_VERSION = 4;
+// Admission requires the same handling snapshot and player appearance schema.
+export const NETWORK_PROTOCOL_VERSION = 9;
 export const ROOM_PENDING_SESSION_MS = 90_000;
 export const MAX_SHOT_PELLET_INDEX = Math.max(...Object.values(WEAPON_STATS).map(stats => stats.pellets ?? 1)) - 1;
 // Eight unambiguous characters make active room discovery infeasible by brute force

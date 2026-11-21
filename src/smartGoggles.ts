@@ -514,14 +514,24 @@ export class SmartGogglesHud {
 
             const record = this.records.get(targetKey);
             const projectionBounds = record?.bounds ?? createScreenBounds();
-            localBox.getSize(_envelopeSize).multiplyScalar(0.5);
-            _envelopeSize.multiply(_npcEnvelope.center.setFromMatrixScale(data.bodyMesh.matrixWorld));
-            _npcEnvelope.center.copy(_bodyCenter);
-            _npcEnvelope.halfWidth = Math.hypot(_envelopeSize.x, _envelopeSize.z);
-            _npcEnvelope.halfHeight = _envelopeSize.y;
-            if (!projectStableTargetEnvelopeToScreen(
-                _npcEnvelope, _worldIdentity, camera, viewportWidth, viewportHeight, projectionBounds,
-            )) continue;
+            let halfWidth: number, halfHeight: number;
+            if (data.infantry) {
+                localBox.getSize(_envelopeSize).multiplyScalar(0.5);
+                _envelopeSize.multiply(_npcEnvelope.center.setFromMatrixScale(data.bodyMesh.matrixWorld));
+                _npcEnvelope.center.copy(_bodyCenter);
+                halfWidth = _npcEnvelope.halfWidth = Math.hypot(_envelopeSize.x, _envelopeSize.z);
+                halfHeight = _npcEnvelope.halfHeight = _envelopeSize.y;
+                if (!projectStableTargetEnvelopeToScreen(
+                    _npcEnvelope, _worldIdentity, camera, viewportWidth, viewportHeight, projectionBounds,
+                )) continue;
+            } else {
+                // A floating cube rotates on all axes. Its bounding sphere keeps
+                // the four corners square through rotation and at screen edges.
+                halfWidth = halfHeight = localSphere.radius * data.bodyMesh.matrixWorld.getMaxScaleOnAxis();
+                if (!projectStableTargetSphereToScreen(
+                    localSphere, data.bodyMesh.matrixWorld, camera, viewportWidth, viewportHeight, projectionBounds,
+                )) continue;
+            }
 
             const reachableDistance = distanceToOrientedBox(
                 weaponOrigin,
@@ -535,8 +545,8 @@ export class SmartGogglesHud {
                 'Enemy',
                 projectionBounds,
                 _bodyCenter,
-                _npcEnvelope.halfWidth,
-                _npcEnvelope.halfHeight,
+                halfWidth,
+                halfHeight,
                 playerPosition.distanceTo(_bodyCenter),
                 reachableDistance,
                 data.hp,

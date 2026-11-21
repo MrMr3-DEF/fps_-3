@@ -1,9 +1,9 @@
-import { INFANTRY, INFANTRY_DEBRIS_TIME, INFANTRY_LIMIT, MAP_HALF_SIZE, TOWN_WALL_HP, type InfantryKind } from './config.js';
+import { INFANTRY, INFANTRY_DEBRIS_TIME, INFANTRY_LIMIT, INFANTRY_TURN_ANGLE, MAP_HALF_SIZE, TOWN_WALL_HP, type InfantryKind } from './config.js';
 import { fields, isPacketRecord as isRecord, variant, vectorFields, type Projection } from './networkProjection.js';
 import { isPeerId } from './roomIdentity.js';
 import type { Vec3Packet } from './networkTypes.js';
 
-export type InfantryPhase = 'idle' | 'moving' | 'attack' | 'death';
+export type InfantryPhase = 'idle' | 'moving' | 'turn' | 'attack' | 'death';
 export interface InfantryPose {
     slot: number;
     revision: number;
@@ -11,6 +11,8 @@ export interface InfantryPose {
     hp: number;
     position: Vec3Packet;
     yaw: number;
+    /** During a step, yaw is the landing heading and turnAngle is the signed sweep. */
+    turnAngle?: number;
     pitch: number;
     phase: InfantryPhase;
     time: number;
@@ -43,6 +45,9 @@ function isPose(value: unknown): value is InfantryPose {
     if (!isRecord(value) || !isKind(value.kind) || !isSlot(value.slot) || !integer(value.revision, 1) ||
         !isPosition(value.position) || value.position.y !== 0 || Math.max(Math.abs(value.position.x), Math.abs(value.position.z)) > MAP_HALF_SIZE || !number(value.yaw, -Math.PI, Math.PI) ||
         !number(value.pitch, -Math.PI / 2, Math.PI / 2) || !number(value.time, 0, INFANTRY_DEBRIS_TIME)) return false;
+    if (value.phase === 'turn') return number(value.turnAngle, -INFANTRY_TURN_ANGLE, INFANTRY_TURN_ANGLE) &&
+        value.turnAngle !== 0 && number(value.hp, Number.EPSILON, INFANTRY[value.kind].hp);
+    if (value.turnAngle !== undefined) return false;
     if (value.phase === 'death') return value.hp === 0;
     return (value.phase === 'idle' || value.phase === 'moving' || value.phase === 'attack') &&
         number(value.hp, Number.EPSILON, INFANTRY[value.kind].hp);
@@ -65,7 +70,7 @@ export function isInfantryEvent(value: unknown): value is InfantryEvent {
 
 export const infantryStateFields: Projection = {
     ...fields('sequence', 'day', 'wallHp'),
-    bots: [{ ...fields('slot', 'revision', 'kind', 'hp', 'yaw', 'pitch', 'phase', 'time'), position: vectorFields }],
+    bots: [{ ...fields('slot', 'revision', 'kind', 'hp', 'yaw', 'turnAngle', 'pitch', 'phase', 'time'), position: vectorFields }],
 };
 export const infantryEventFields = variant('kind', {
     attack: { ...fields('kind', 'robot'), start: vectorFields, end: vectorFields, victim: fields('peerId', 'lifeId') },

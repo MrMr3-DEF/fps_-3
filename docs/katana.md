@@ -1,7 +1,7 @@
 # Katana
 
 The sixth weapon uses a black curved blade and silver grip. Equip with V
-(rebindable), or cycle past Minigun with E, the wheel or touch Weapon.
+(rebindable), or cycle past Minigun with the wheel or touch Weapon.
 Shared values live in `src/config.ts`.
 
 ## Controls and contact
@@ -22,7 +22,7 @@ Goggles and grappling remain available; attacks take priority over inspection.
 
 ## Presentation and assets
 
-`katanaModel.ts` samples grip-centered right-to-left poses. `katanaLightning.ts`
+The cyborg rig plays the right-to-left cut from the same clock in first and third person. The curved tip passes forward at 0.20 s for a regular swing and 0.14 s for a charged one. `katanaLightning.ts`
 owns reusable instance-local charge buffers; `katanaFlicker.ts` samples the
 full-charge brightness loop. Connected arcs rise along the blade during charge.
 Full charge/release retain bright effects through the cut, then fade. Gentle

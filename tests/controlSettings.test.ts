@@ -24,6 +24,9 @@ test('modifier sides remain equivalent and reserved keys cannot be assigned', ()
 });
 
 test('stored keybinds round-trip permutations and sanitize malformed input', () => {
+    const legacy = readKeybinds({ nextWeapon: 'KeyG', jump: 'KeyJ' });
+    assert.equal(legacy.reload, 'KeyE');
+    assert.equal(legacy.jump, 'KeyJ');
     let bindings = { ...DEFAULT_KEYBINDS };
     for (const [action, , code] of [...BIND_ACTIONS].reverse()) bindings = assignKey(bindings, 'forward', code);
     assert.deepEqual(readKeybinds(JSON.parse(JSON.stringify(bindings))), bindings);

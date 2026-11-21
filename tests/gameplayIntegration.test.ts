@@ -6,9 +6,9 @@ import { state } from '../src/state.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { rebuildTargetHash } from '../src/world.ts';
-import { BULLET_TRAVEL_DISTANCE, PROJECTILE_RADIUS } from '../src/config.ts';
+import { BULLET_TRAVEL_DISTANCE, PROJECTILE_RADIUS, PLAYER_HEIGHT } from '../src/config.ts';
 import { setDamageHandlers } from '../src/damage.ts';
-import { buildBeanModel } from '../src/weapons.ts';
+import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX } from '../src/playerHitbox.ts';
 import { setWeaponNetworkPort } from '../src/weaponNetworkPort.ts';
 import type { NetworkPacket } from '../src/networkTypes.ts';
 (globalThis as any).document={getElementById:()=>null};
@@ -112,7 +112,7 @@ test('projectiles cap their final swept segment at the shared bullet range',()=>
     state.projectilePool=[];
 });
 
-test('real projectile updates hit the top and bottom of the bean cuboid', () => {
+test('real projectile updates hit the crown and soles of a culled cyborg', () => {
     state.scene = new THREE.Scene();
     state.isMultiplayer = true;
     state.isHost = false;
@@ -121,9 +121,8 @@ test('real projectile updates hit the top and bottom of the bean cuboid', () => 
     rebuildTargetHash();
     state.projectilePool = [];
 
-    const mesh = buildBeanModel(0x8c7ae6, 0xff4757);
-    mesh.scale.setScalar(1.5);
-    mesh.position.set(0, 1.65, -5);
+    const mesh = new THREE.Group();
+    mesh.position.set(0, PLAYER_HEIGHT - PLAYER_BODY_CAMERA_OFFSET, -5);
     mesh.visible = false; // Render distance never removes a living hit volume.
     state.scene.add(mesh);
     state.peers = { remote: { mesh, hp: 10, lifeId: 4 } as any };
@@ -136,7 +135,7 @@ test('real projectile updates hit the top and bottom of the bean cuboid', () => 
         flashPeerMesh: () => {},
     });
 
-    for (const y of [0.1, 3.2]) {
+    for (const y of [mesh.position.y + PLAYER_HITBOX_MIN.y + PROJECTILE_RADIUS + .025, mesh.position.y + PLAYER_HITBOX_MAX.y - .05]) {
         const bullet = new THREE.Object3D();
         bullet.position.set(0, y, 0);
         bullet.userData = {

@@ -25,7 +25,7 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
         await call(0, 'connect', guest); await flush();
         await call(0, 'arena'); await call(1, 'arena');
         await call(0, 'start'); await flush();
-        await call(0, 'pose', { z: 10, yaw: -0.055 });
+        await call(0, 'pose', { z: 10, yaw: -0.035 });
         const walkGuest = async (yaw: number) => {
             const [guestX, , guestZ] = (await call(1, 'state')).position;
             const steps = Math.max(1, Math.ceil(Math.hypot(guestX, guestZ + 10) / 3));
@@ -36,7 +36,7 @@ test('BinaryPack room: visibility, every weapon in both directions, respawns and
                 await tick();
             }
         };
-        await walkGuest(Math.PI - 0.055);
+        await walkGuest(Math.PI - 0.035);
         await flush();
         for (let i = 0; i < 15; i++) await tick();
         assert.equal((await call(0, 'state')).peers[guest.peerId].visible, true);

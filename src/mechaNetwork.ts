@@ -340,7 +340,7 @@ export function acceptMechaCommand(peerId: string, packet: MechaInputPacket | Me
 }
 function detachRemotePilot(peerId: string, position?: { x: number; y: number; z: number }): void {
     const peer = state.peers[peerId]; if (!peer || !state.scene) return;
-    state.scene.add(peer.mesh); peer.mesh.scale.setScalar(1.5); peer.leftGun.visible = peer.rightGunContainer.visible = true;
+    state.scene.add(peer.mesh); peer.leftGun.visible = peer.rightGunContainer.visible = true;
     if (position) { peer.mesh.position.set(position.x, position.y, position.z); peer.targetPosition.copy(peer.mesh.position); }
 }
 export function syncRemoteMechaPilot(): void {
@@ -349,7 +349,7 @@ export function syncRemoteMechaPilot(): void {
         const peer = state.peers[id]; if (!peer || !actor) continue;
         if (actor.ownsPilot && actor.pilotPeerId === id) {
             if (peer.mesh.parent !== actor.pilotAnchor) actor.pilotAnchor.add(peer.mesh);
-            peer.mesh.position.set(0, 0, 0); peer.mesh.rotation.set(0, Math.PI * actor.boardProgress, 0); peer.mesh.scale.setScalar(actor.pilotScale);
+            peer.mesh.position.set(0, 0, 0); peer.mesh.rotation.set(0, Math.PI * actor.boardProgress, 0);
             peer.mesh.visible = true; peer.leftGun.visible = peer.rightGunContainer.visible = false;
             if (peer.hookLine) peer.hookLine.visible = false;
         } else if (peer.mesh.parent === actor.pilotAnchor) {

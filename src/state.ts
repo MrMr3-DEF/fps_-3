@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PLAYER_MAX_HP } from './config.js';
+import { WeaponHandling } from './weaponHandling.js';
 import type { PointerLockControls } from './pointerLockControls.js';
 import type { Particle } from './particles.js';
 import { createGogglesFailureState, resetGogglesFailure, type GogglesFailureState } from './gogglesFailure.js';
@@ -116,6 +117,8 @@ export interface GameState {
     switchState: 'IDLE' | 'WITHDRAWING' | 'BRINGING_IN';
     switchTimer: number;
     fireCooldown: number;
+    weaponHandling: WeaponHandling;
+    weaponTime: number;
     isMouseDown: boolean;
     minigunRamp: number;
     inspectState: 'IDLE' | 'INSPECTING';
@@ -221,6 +224,8 @@ export const state: GameState = {
     switchState: 'IDLE',
     switchTimer: 0,
     fireCooldown: 0,
+    weaponHandling: new WeaponHandling('PISTOL'),
+    weaponTime: 0,
     isMouseDown: false,
     minigunRamp: 0.0,
     inspectState: 'IDLE',
@@ -288,6 +293,8 @@ export function resetPlayerState() {
     state.hookSurfaceLocalPoint.set(0, 0, 0);
     state.hoverFuel = 1.0;
     state.fireCooldown = 0;
+    state.weaponHandling.reset(state.activeWeaponName);
+    state.weaponTime = 0;
     state.inspectState = 'IDLE';
     state.inspectTimer = 0;
     state.minigunRamp = 0;

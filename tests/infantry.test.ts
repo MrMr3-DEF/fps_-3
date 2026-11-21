@@ -134,3 +134,45 @@ test('infantry snapshot validates bounds and late joiners reject stale state or 
         assert.equal(targetData(targets[0]).hp, 10);
     } finally { defense.dispose(); }
 });
+
+test('infantry pivot on alternating planted feet and replicate a partially completed turn', async () => {
+    const { defense, scene } = await arena({ visible: () => true });
+    const replica = await arena({ visible: () => true }, false);
+    try {
+        const kinds = ['base', 'fast', 'big'] as const;
+        const bots = kinds.map((kind, i) => ({ ...pose(i, kind, 500, 500 + 150 * i), yaw: 0 }));
+        const players = bots.map((bot, i) => ({ id: String(i), lifeId: 1, yaw: 0,
+            position: new THREE.Vector3(bot.position.x + (i === 1 ? -1 : 1) * 1.5, 1.65, bot.position.z) }));
+        defense.receive({ sequence: 1, day: 1, wallHp: TOWN_WALL_HP, bots });
+        defense.update(.01, 1, players);
+        const snapshot = defense.snapshot();
+        const packet = { type: 'infantry_state', state: snapshot };
+        assert.deepEqual(parseNetworkPacket(packet), packet);
+        for (const bad of [undefined, 0, Infinity, Math.PI]) {
+            assert.equal(parseNetworkPacket({ ...packet, state: { ...snapshot,
+                bots: [{ ...snapshot.bots[0], turnAngle: bad }] } }), null);
+        }
+        function foot(world: THREE.Scene, kind: string, side: string): THREE.Vector3 {
+            return world.getObjectByName('enemy_' + kind)!.getObjectByName('foot' + side)!.getWorldPosition(new THREE.Vector3());
+        }
+        for (const [i, bot] of snapshot.bots.entries()) {
+            assert.equal(bot.phase, 'turn');
+            const side = bot.turnAngle! > 0 ? 'L' : 'R';
+            const swing = side === 'L' ? 'R' : 'L';
+            const start = foot(scene, bot.kind, side);
+            const startSwing = foot(scene, bot.kind, swing);
+            const asset = await loadSkinnedTestAsset(new URL(`../blender_assets/enemy_${bot.kind}/enemy_${bot.kind}.glb`, import.meta.url));
+            const seconds = THREE.AnimationClip.findByName(asset.animations, bot.turnAngle! > 0 ? 'TurnLeft' : 'TurnRight').duration;
+            const sample = (time: number, sequence: number) => replica.defense.receive({ ...snapshot, sequence,
+                bots: [{ ...bot, time }] });
+            sample(seconds / 4, 10 + i * 4);
+            assert.ok(foot(replica.scene, bot.kind, side).distanceTo(start) < .025, bot.kind + ' stance foot slides');
+            assert.ok(foot(replica.scene, bot.kind, swing).y > startSwing.y + .1);
+            sample(seconds * .5, 11 + i * 4);
+            const landed = foot(replica.scene, bot.kind, swing);
+            sample(seconds * .75, 12 + i * 4);
+            assert.ok(foot(replica.scene, bot.kind, swing).distanceTo(landed) < .025, bot.kind + ' second stance foot slides');
+            assert.ok(foot(replica.scene, bot.kind, side).y > start.y + .1);
+        }
+    } finally { defense.dispose(); replica.defense.dispose(); }
+});

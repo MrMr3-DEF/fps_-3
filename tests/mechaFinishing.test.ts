@@ -1,3 +1,4 @@
+import { toggleAtDrawEnd } from './grappleInput.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -6,9 +7,10 @@ import { MechaPilot } from '../src/mechaPilot.ts';
 import { MechaNavigation } from '../src/mechaNavigation.ts';
 import { loadIronmawTestAsset } from './ironmawTestAsset.ts';
 import { applyLookInput, setLookInputHandler } from '../src/lookInput.ts';
-import { toggleGrapplingHook, updateHook, resetHook } from '../src/grapple.ts';
+import { updateHook, resetHook } from '../src/grapple.ts';
 import { prepareForgottenMecha, forgottenMecha, disposeWorld } from '../src/world.ts';
 import { state } from '../src/state.ts';
+import { requestReload } from '../src/weapons.ts';
 
 const absent = { position: new THREE.Vector3(), alive: false, grounded: false };
 const empty = (_sx: number, _sz: number, _ex: number, _ez: number, out: THREE.Object3D[]) => { out.length = 0; return out; };
@@ -88,14 +90,14 @@ test('real grapple binding accepts high cabin interior from ground, rejects armo
     ForgottenMecha.prototype.load = async function () { this.install(await loadIronmawTestAsset()); };
     globalThis.document = { getElementById: () => null } as unknown as Document;
     state.scene = new THREE.Scene(); state.renderer = null; state.isMultiplayer = false; state.obstacles = []; state.targets = []; state.lavaPools = [];
-    const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000); state.camera = camera; state.controls = { getObject: () => camera } as unknown as typeof state.controls;
+    const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000); state.camera = camera; state.controls = { getObject: () => camera, isLocked: true } as unknown as typeof state.controls;
     state.leftGun = new THREE.Group(); camera.add(state.leftGun); state.hookMesh = new THREE.Group() as typeof state.hookMesh;
     try {
         await prepareForgottenMecha({ impact() {}, stompPlayer() {}, gameOver() {} }, async () => {});
         const actor = forgottenMecha!; actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0; actor.update(1 / 60, absent);
         camera.position.set(0, 2, 60);
         const leg = [...actor.colliders].sort((a, b) => a.position.y - b.position.y)[0];
-        camera.lookAt(leg.position); camera.updateMatrixWorld(true); toggleGrapplingHook();
+        camera.lookAt(leg.position); camera.updateMatrixWorld(true); toggleAtDrawEnd();
         const surface = state.hookTargetSurface;
         assert.ok(surface, 'an armor grapple records its real collider');
         const anchor = state.hookSurfaceLocalPoint.clone();
@@ -109,11 +111,20 @@ test('real grapple binding accepts high cabin interior from ground, rejects armo
         actor.damage(50); advance(actor, 6.1);
         const seat = actor.seatAnchor.getWorldPosition(new THREE.Vector3()); const interior = seat.clone(); interior.y += 3;
         camera.position.set(0, 2, 60); camera.lookAt(interior); camera.updateMatrixWorld(true);
-        toggleGrapplingHook(); assert.ok(state.hookTargetCockpit === actor); assert.equal(state.hookIsEnemy, true);
-        toggleGrapplingHook(); assert.equal(Boolean(state.hookTargetCockpit), false);
-        camera.lookAt(seat.clone().add(new THREE.Vector3(6, 0, 0))); camera.updateMatrixWorld(true); toggleGrapplingHook(); assert.equal(Boolean(state.hookTargetCockpit), false); resetHook();
-        camera.lookAt(interior); camera.updateMatrixWorld(true); toggleGrapplingHook(); assert.ok(state.hookTargetCockpit === actor); for (let i = 0; i < 10 && actor.mode === 'dead'; i++) updateHook(0.1);
+        toggleAtDrawEnd(); assert.ok(state.hookTargetCockpit === actor); assert.equal(state.hookIsEnemy, true);
+        toggleAtDrawEnd(); assert.equal(Boolean(state.hookTargetCockpit), false);
+        camera.lookAt(seat.clone().add(new THREE.Vector3(6, 0, 0))); camera.updateMatrixWorld(true); toggleAtDrawEnd(); assert.equal(Boolean(state.hookTargetCockpit), false); resetHook();
+        assert.ok(state.weaponHandling.spendShot('PISTOL', state.weaponTime));
+        const rounds = state.weaponHandling.rounds.PISTOL;
+        camera.lookAt(interior); camera.updateMatrixWorld(true); toggleAtDrawEnd(); assert.ok(state.hookTargetCockpit === actor);
+        requestReload();
+        for (let i = 0; i < 10 && actor.mode === 'dead'; i++) updateHook(0.1);
         assert.equal(actor.mode, 'boarding'); assert.ok(camera.position.equals(seat)); assert.equal(state.hookState, 'IDLE');
+        state.weaponTime += 5;
+        state.weaponHandling.advance(state.weaponTime);
+        requestReload();
+        assert.equal(state.weaponHandling.rounds.PISTOL, rounds);
+        assert.equal(state.weaponHandling.reload, null, 'boarding preserves rounds and keeps the on-foot reload inactive');
         state.hookTargetSurface = surface; state.hookState = 'FIRING'; actor.dispose(); updateHook(0);
         assert.equal(state.hookState, 'IDLE'); assert.equal(state.hookTargetSurface, null);
     } finally { resetHook(); disposeWorld(); ForgottenMecha.prototype.load = originalLoad; globalThis.document = originalDocument; }

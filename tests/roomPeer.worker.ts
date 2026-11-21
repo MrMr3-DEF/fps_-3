@@ -83,7 +83,13 @@ parentPort!.on('message', async ({ id, command, args }) => {
             state.desiredWeaponName = args.weapon;
         } else if (command === 'shoot') {
             if (state.activeWeaponName !== args.weapon || state.switchState !== 'IDLE' || state.fireCooldown > 0) throw new Error('Weapon is not ready');
-            fireProjectile();
+            // The room checks successful damage from both ends of a 20 m lane.
+            // A random shotgun spread can legitimately put all pellets outside the suit.
+            const spread = mock.method(crypto, 'getRandomValues', (values: Uint32Array) => {
+                values[0] = 260;
+                return values;
+            });
+            try { fireProjectile(); } finally { spread.mock.restore(); }
         } else if (command === 'tick') {
             now += args.delta * 1000;
             mock.timers.tick(args.delta * 1000);

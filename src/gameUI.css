@@ -288,7 +288,6 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 #death-overlay .menu-actions-column, #game-over-overlay .menu-actions-column { width: 240px; }
 #game-over-overlay { position: absolute; inset: 0; background: radial-gradient(circle, rgba(255, 0, 0, 0.2) 20%, rgba(139, 0, 0, 0.75) 100%); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 15; backdrop-filter: blur(3px); color: white; text-align: center; animation: fadeIn 0.4s ease-in-out; }
 #game-over-overlay p { margin: 24px 16px 32px; }
-.hud-badges { display: flex; gap: 8px; margin-top: 4px; }
 
 /* In-game HUD and effects. */
 #player-list {
@@ -329,7 +328,19 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 .player-list-row:nth-child(even) { background: rgba(101, 107, 116, 0.29); }
 .player-list-self { box-shadow: inset 3px 0 #7de4f7; }
-.player-list-face { width: 32px; height: 32px; image-rendering: pixelated; }
+.player-list-face {
+    width: 32px;
+    height: 32px;
+    background: url('./assets/cyborg-portrait.png') center / contain no-repeat;
+}
+.player-list-face::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-color: currentColor;
+    mask: url('./assets/cyborg-portrait-accents.png') center / contain no-repeat;
+}
 .player-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-list-kd { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -469,19 +480,6 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     pointer-events: none;
     z-index: 5;
 }
-
-#hook-badge {
-    font-size: 14px;
-    color: #00aaee;
-    background: rgba(0, 170, 238, 0.1);
-    padding: 2px 8px;
-    border-radius: 4px;
-    margin-left: 10px;
-    display: none;
-    box-shadow: 0 0 8px rgba(0, 170, 238, 0.2);
-    border: 1px solid rgba(0, 170, 238, 0.3);
-}
-
 
 #fps-counter {
     position: absolute;
@@ -730,7 +728,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 #goggles-scope.mecha-head-display { z-index: 10; }
 #mecha-approach-warning, #defend-town-warning { position: fixed; inset: 0; z-index: 8; display: grid; place-items: center; padding: 24px; pointer-events: none; color: #fff; font: 500 clamp(20px, 3vw, 32px) var(--ui-font); text-align: center; text-shadow: 0 1px 8px #0006; }
 #mecha-approach-warning[hidden], #defend-town-warning[hidden] { display: none; }
-#wall-durability { position: fixed; z-index: 8; top: calc(50% + 40px); left: 50%; transform: translateX(-50%); width: 150px; pointer-events: none; text-align: center; color: #fff; font: 500 13px/1.4 var(--ui-font); text-shadow: 0 1px 3px #000; }
+#wall-durability { position: fixed; z-index: 8; transform: translate(-50%, -100%); width: 150px; pointer-events: none; text-align: center; color: #fff; font: 500 13px/1.4 var(--ui-font); text-shadow: 0 1px 3px #000; }
 #wall-durability-bar { display: block; width: 100%; height: 8px; margin-top: 4px; accent-color: #2ed573; }
 #mecha-exit-warning { position: fixed; left: 50%; top: 60%; transform: translateX(-50%); z-index: 8; max-width: calc(100vw - 32px); padding: 12px; color: #fff; background: #182d40e6; font: 500 16px/1.5 var(--ui-font); text-align: center; pointer-events: none; }
 #mecha-exit-warning[hidden] { display: none; }
@@ -1621,3 +1619,47 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 /* Below the final Game Over panel; gameplay overlays hide at commitment. */
 #mecha-ending-cover { position: fixed; inset: 0; background: #000; opacity: 0; z-index: 14; pointer-events: none; }
 body.mecha-ending #rotate-device { display: none; }
+
+#weapon-details {
+    flex: none; box-sizing: border-box; margin: 4px 0 8px; border: 1px solid #8be9fb80;
+    border-radius: var(--control-radius); background: #0c3040ed; color: #effcff;
+}
+#weapon-reload[hidden] { display: none; }
+#weapon-details summary {
+    display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 3px 12px;
+    box-sizing: border-box; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
+}
+#weapon-details summary::after {
+    content: ''; margin-left:auto; width:6px; height:6px;
+    border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(45deg);
+}
+#weapon-details[open] summary::after { transform: rotate(225deg); }
+#weapon-details summary::-webkit-details-marker { display:none; }
+#weapon-details summary:focus-visible { outline: 2px solid #bcf7ff; }
+#character-stage { position: relative; }
+#character-stage .preview-retry { pointer-events: auto; position: absolute; top: 40%; right: 12%; width:auto; }
+#character-stage .preview-retry[hidden] { display: none; }
+#panel-weapons .weapon-view-controls { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+#panel-weapons .weapon-view-controls .menu-btn { padding:6px; min-height:34px; font-size:13px; }
+#panel-weapons .weapon-view-controls [aria-pressed="true"] { border-color:#bcf7ff; background:#0b6480; }
+#panel-weapons .weapon-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:5px 0 10px; }
+#panel-weapons .weapon-tabs .menu-btn { margin:0; padding:7px; min-height:37px; font-size:14px; }
+#weapon-compact-specs { display:grid; max-height:18vh; overflow:auto; gap:3px; padding:0 12px 10px; font-size:12px; }
+.settings-character-preview { position:relative; flex:none; height:clamp(54px, 16dvh, 132px); border:1px solid #8be9fb80;
+    border-radius:var(--control-radius); background:linear-gradient(140deg,#578ca4,#a6d7dc); overflow:hidden; }
+.settings-character-preview #character-stage { height:100%; min-height:0; }
+@media (max-width:699px) and (max-aspect-ratio:9/10) {
+    #panel-main, #panel-mp, #panel-host-waiting, #panel-join-room, #panel-pause, #panel-weapons {
+        left:max(16px,env(safe-area-inset-left)); width:calc(100% - 32px); max-width:none;
+        max-height:52dvh; bottom:max(34px,calc(env(safe-area-inset-bottom) + 22px)); overflow:auto;
+    }
+    #panel-main #desktop-control-help, #panel-main #touch-control-help { display:none; }
+    #panel-main .menu-btn, #panel-mp .menu-btn, #panel-host-waiting .menu-btn, #panel-join-room .menu-btn,
+    #panel-pause .menu-btn, #panel-weapons .menu-btn { min-height:37px; padding:6px 10px; margin-bottom:5px; }
+    #panel-weapons .weapon-tabs { grid-template-columns:repeat(3,minmax(0,1fr)); margin:1px 0 5px; }
+    #panel-weapons .weapon-tabs .menu-btn { font-size:12px; min-height:32px; }
+    #weapon-details { margin:2px 0 4px; }
+    #title { top: max(16px,env(safe-area-inset-top)); }
+    #menu-goggles-target-layer:has(.is-lobby-peer) .goggles-target-label-panel { font-size:10px; }
+}
+@media (max-height:480px) { .settings-character-preview { height:48px; } }

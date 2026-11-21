@@ -8,6 +8,17 @@ const _peerLocalBounds = new THREE.Box3();
 const _transformedMeshBounds = new THREE.Box3();
 const STABLE_ENVELOPE_EXCLUDED = 'smartGogglesEnvelopeExcluded';
 
+// An animated skin contains equipment and exhaust primitives. Its rest-mesh
+// bounds aren't a body envelope, and growing flames must not expand targeting.
+const fittedBodies = new WeakMap<THREE.Object3D, THREE.Box3>();
+export function setPeerScanBounds(root: THREE.Object3D, bounds: THREE.Box3): void {
+    fittedBodies.set(root, bounds);
+    const horizontalX = Math.max(Math.abs(bounds.min.x), bounds.max.x);
+    const horizontalZ = Math.max(Math.abs(bounds.min.z), bounds.max.z);
+    _stablePeerEnvelopes.set(root, {center:new THREE.Vector3(0,(bounds.min.y+bounds.max.y)/2,0),
+        halfWidth:Math.hypot(horizontalX,horizontalZ), halfHeight:(bounds.max.y-bounds.min.y)/2});
+}
+
 export function excludeFromStablePeerEnvelope(object: THREE.Object3D): void {
     object.userData[STABLE_ENVELOPE_EXCLUDED] = true;
 }
@@ -53,6 +64,8 @@ export function someVisiblePeerMeshBounds(
 ): boolean {
     peerRoot.updateWorldMatrix(true, true);
 
+    const body = fittedBodies.get(peerRoot);
+    if (body) return peerRoot.visible && predicate(body, peerRoot.matrixWorld);
     let matched = false;
     peerRoot.traverseVisible((object) => {
         if (matched || isExcludedFromStableEnvelope(object, peerRoot)) return;
@@ -110,6 +123,8 @@ export function distanceToVisiblePeerMeshes(
 ): number {
     peerRoot.updateWorldMatrix(true, true);
 
+    const body = fittedBodies.get(peerRoot);
+    if (body) return peerRoot.visible ? distanceToOrientedBox(worldPoint, body, peerRoot.matrixWorld) : Infinity;
     let nearestDistance = Number.POSITIVE_INFINITY;
     peerRoot.traverseVisible((object) => {
         if (isExcludedFromStableEnvelope(object, peerRoot)) return;

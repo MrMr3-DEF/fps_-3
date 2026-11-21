@@ -613,30 +613,52 @@ export function queryTargetsAlongSegment(
     return results;
 }
 
-function traceInfantryCover(start: THREE.Vector3, end: THREE.Vector3, ignoreMecha = false) {
-    let closest = segmentGroundHitT(start, end, 0) ?? Infinity;
-    if (!ignoreMecha) closest = Math.min(closest, forgottenMecha?.combat.shieldContactT(start, end, start, 0) ?? Infinity);
-    let obstacle: THREE.Object3D | undefined;
-    for (const candidate of queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, traceObstacles)) {
+/** First contact along a shot or sightline, including ground and active shields. */
+export function shotObstructionT(start: THREE.Vector3, end: THREE.Vector3, radius: number, ignoreMecha = false,
+    contact?: { obstacle?: THREE.Object3D }): number | null {
+    if (contact) contact.obstacle = undefined;
+    let closest = segmentGroundHitT(start, end, radius) ?? Infinity;
+    if (!ignoreMecha) closest = Math.min(closest, forgottenMecha?.combat.shieldContactT(start, end, start, radius) ?? Infinity);
+    for (const candidate of queryObstaclesAlongSegment(start.x, start.z, end.x, end.z, traceObstacles, radius)) {
         const data = obstacleData(candidate);
         if (ignoreMecha && data.damageTarget === 'forgotten-mecha') continue;
         const { x, y, z } = candidate.position;
-        const height = data.halfH || data.height / 2;
-        traceMin.set(x - data.halfW, y - height, z - data.halfD);
-        traceMax.set(x + data.halfW, y + height, z + data.halfD);
+        const halfW = (data.halfW || PILLAR_WIDTH / 2) + radius;
+        const halfD = (data.halfD || PILLAR_WIDTH / 2) + radius;
+        const halfH = (data.halfH || data.height / 2) + radius;
+        traceMin.set(x - halfW, y - halfH, z - halfD);
+        traceMax.set(x + halfW, y + halfH, z + halfD);
         const hit = segmentAabbHitT(start, end, traceMin, traceMax);
-        if (hit !== null && hit < closest) { closest = hit; obstacle = candidate; }
+        if (hit !== null && hit < closest) {
+            closest = hit;
+            if (contact) contact.obstacle = candidate;
+        }
     }
-    return closest === Infinity ? null : { position: start.clone().lerp(end, closest), obstacle };
+    return closest === Infinity ? null : closest;
 }
 
-export function isLookingAtTownWell(camera: THREE.Camera): boolean {
+const infantryCover: { obstacle?: THREE.Object3D } = {};
+function traceInfantryCover(start: THREE.Vector3, end: THREE.Vector3, ignoreMecha = false) {
+    const t = shotObstructionT(start, end, 0, ignoreMecha, infantryCover);
+    return t === null ? null : { position: start.clone().lerp(end, t), obstacle: infantryCover.obstacle };
+}
+
+export function isLookingAtTownWell(camera: THREE.Camera, anchor?: THREE.Vector3): boolean {
     if (wellBounds.isEmpty()) return false;
     camera.getWorldPosition(wellRay.origin);
     camera.getWorldDirection(wellRay.direction);
-    if (!wellRay.intersectBox(wellBounds, wellRayEnd)) return false;
-    wellRayEnd.addScaledVector(wellRay.direction, 10);
-    return traceInfantryCover(wellRay.origin, wellRayEnd)?.obstacle?.name === 'town-well';
+    if (!wellBounds.containsPoint(wellRay.origin)) {
+        // Only cover in front of the inspection volume matters. The opening
+        // between the posts belongs to the well even when the ray hits no stone.
+        if (!wellRay.intersectBox(wellBounds, wellRayEnd)) return false;
+        const obstruction = shotObstructionT(wellRay.origin, wellRayEnd, 0, false, infantryCover);
+        if (obstruction !== null && infantryCover.obstacle?.name !== 'town-well') return false;
+    }
+    if (anchor) {
+        wellBounds.getCenter(anchor);
+        anchor.y = wellBounds.max.y + 0.25;
+    }
+    return true;
 }
 
 export function rebuildInfantryHash(): void {

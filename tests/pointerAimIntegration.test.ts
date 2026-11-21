@@ -1,3 +1,4 @@
+import { toggleAtDrawEnd } from './grappleInput.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -5,10 +6,10 @@ import { PointerLockControls } from '../src/pointerLockControls.js';
 import { SmartGogglesHud } from '../src/smartGoggles.js';
 import { getProjectileHomingTarget } from '../src/projectileHoming.js';
 import { state } from '../src/state.js';
-import { createAkimboGuns, disposePlayerVisuals, fireProjectile } from '../src/weapons.js';
+import { createAkimboGuns, disposePlayerVisuals, fireProjectile, requestReload } from '../src/weapons.js';
 import { resetProjectiles } from '../src/projectiles.js';
 import { disposeParticles } from '../src/particles.js';
-import { resetHook, toggleGrapplingHook } from '../src/grapple.js';
+import { resetHook, updateHook } from '../src/grapple.js';
 import { rebuildTargetHash } from '../src/world.js';
 import { setWeaponNetworkPort } from '../src/weaponNetworkPort.js';
 import { HudElement } from './fakeHudDom.ts';
@@ -41,7 +42,8 @@ test('smoothed aim, actual goggles acquisition, shot capture and grappling share
         isScoped: true, isMultiplayer: true, isHost: false, isThirdPersonView: false, projectiles: [], projectilePool: [], hookMesh, hookState: 'IDLE' });
     state.scene!.add(target); createAkimboGuns(); state.activeWeaponName = 'PISTOL';
     const shots: Array<{ direction: THREE.Vector3; homing: unknown }> = [];
-    setWeaponNetworkPort({ broadcastToAll() {}, flashPeerMesh() {}, broadcastLocalFire(_origin, direction, _hit, _id, _seed, homing) {
+    const intents: string[] = [];
+    setWeaponNetworkPort({ sendWeaponIntent: action => intents.push(action), broadcastToAll() {}, flashPeerMesh() {}, broadcastLocalFire(_origin, direction, _hit, _id, _seed, homing) {
         shots.push({ direction: direction.clone(), homing });
     } });
     const project = (time: number) => {
@@ -62,8 +64,16 @@ test('smoothed aim, actual goggles acquisition, shot capture and grappling share
         assert.ok(shots[0].direction.distanceTo(new THREE.Vector3(0, 0, -1)) < 1e-9);
         const guided = state.projectiles[0];
         assert.ok(guided.userData.homingTarget.object === target);
-        toggleGrapplingHook();
+        toggleAtDrawEnd();
         assert.ok(state.hookTargetEnemy === target, 'between-frame grapple uses the displayed center ray');
+        requestReload();
+        assert.equal(state.hookState, 'FIRING');
+        updateHook(1);
+        assert.equal(state.hookState, 'PULLING');
+        requestReload();
+        assert.equal(state.hookTargetEnemy, target);
+        assert.equal(state.hookState, 'PULLING');
+        assert.ok(!intents.includes('reload'), 'an occupied support hand never sends a reload intent');
         resetHook();
 
         controls.update(2130); project(2130);
@@ -74,7 +84,7 @@ test('smoothed aim, actual goggles acquisition, shot capture and grappling share
         assert.equal(shots[1].homing, undefined, 'turning away cannot reuse the previous lock');
         assert.ok(shots[1].direction.distanceTo(publishedDirection) < 1e-9);
         assert.ok(guided.userData.homingTarget.object === target, 'an already fired guided bullet keeps its captured target');
-        toggleGrapplingHook();
+        toggleAtDrawEnd();
         assert.ok(state.hookTargetEnemy !== target);
         resetHook();
 
@@ -82,7 +92,7 @@ test('smoothed aim, actual goggles acquisition, shot capture and grappling share
         rebuildTargetHash();
         for (const time of [2200, 2400, 2800, 3200]) project(time);
         assert.ok(getProjectileHomingTarget()?.object === target, 'new published view can reacquire normally');
-        state.activeWeaponName = 'SNIPER'; state.rightGun = state.sniperMesh;
+        state.activeWeaponName = 'SNIPER'; state.weaponHandling.reset('SNIPER'); state.rightGun = state.sniperMesh;
         fireProjectile();
         assert.equal(shots.at(-1)!.homing, undefined, 'sniper never inherits a projectile lock');
         assert.ok(shots.at(-1)!.direction.distanceTo(publishedDirection) < 1e-9);
