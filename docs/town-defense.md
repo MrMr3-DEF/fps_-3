@@ -1,7 +1,7 @@
 # Defend the Town
 
 Town defense runs in solo and multiplayer alongside Forgotten Mecha. The match
-starts on Day 1, and each dawn begins a new wave on the eight-minute sky cycle.
+starts on Day 1, and each dawn begins a new wave on the five-minute sky cycle.
 Multiplayer Day 1 begins at the room's current sky phase.
 Five Base robots spawn on Day 1. The Day 2 wave adds three Fast robots, and the
 Day 3 wave adds three Big robots. Each later wave adds one of each kind to the
@@ -10,16 +10,16 @@ their temporary wrecks share the battlefield, with overflow waiting for slots.
 
 Robots enter at reachable seeded points along the map edge and travel toward
 outer wall sections. They prioritize the nearest visible living player in a
-50 m sphere. Cover blocks attacks, and robots return to their wall approach
+75 m sphere. Cover blocks attacks, and robots return to their wall approach
 when they lose the player. At sharp corners and before attacking off-axis targets,
 robots stop and turn in alternating steps. The host sends the landing heading,
 signed turn angle, and clip time so observers see the same footwork.
 
 | Robot | Standing height | HP | Damage per hit | Attack |
 | --- | ---: | ---: | ---: | --- |
-| Base | ≈8.57 m | 20 | 1 | Rifle with a 50 m spherical range and a three-second interval |
-| Fast | ≈6.86 m | 10 | 1 | Quick melee at the LightHit contact frame |
-| Big | 12 m | 30 | 3 | Heavy melee at the HeavyHit contact frame |
+| Base | ≈8.57 m | 20 | 1 | Rifle with a 75 m spherical range and a three-second interval |
+| Fast | ≈6.86 m | 10 | 2 | Quick melee at the LightHit contact frame |
+| Big | 12 m | 30 | 5 | Heavy melee at the HeavyHit contact frame |
 
 The HUD shows **Defend the Town** on entering play and the day below the
 elimination counter. **Enemies remaining** appears below the day and counts living infantry

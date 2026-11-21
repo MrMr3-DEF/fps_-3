@@ -60,7 +60,7 @@ import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmen
 import { CameraShake } from './cameraShake.js';
 import { triggerMechaImpactShake } from './mechaImpactShake.js';
 import type { MechaImpact } from './forgottenMecha.js';
-import { INFANTRY_WARNING_TIME, MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS, TOWN_WALL_HP, REGEN_DELAY_MS } from './config.js';
+import { DAY_NIGHT_CYCLE_SECONDS, PLAYER_NAME_LAYER, INFANTRY_WARNING_TIME, MECHA_APPROACH_WARNING_TIME, MECHA_STOMP_RADIUS, TOWN_WALL_HP, REGEN_DELAY_MS } from './config.js';
 import { setDamageHandlers, type TargetHitResult } from './damage.js';
 import {
     sendLocalState, requestMultiplayerRespawn, setMultiplayerLifePresentation, presentMultiplayerHealth,
@@ -546,6 +546,7 @@ function setupRenderer(): void {
     state.renderer = new THREE.WebGLRenderer({ antialias: true });
     applyRendererSettings(state.renderer);
     
+    state.renderer.domElement.id = 'game-canvas';
     document.body.appendChild(state.renderer.domElement);
 
     state.controls = new PointerLockControls(state.camera, document.body);
@@ -799,6 +800,12 @@ function setupInputListeners(): void {
         // events must not toggle hook/view/weapon actions multiple times.
         if (e.repeat || gothChat?.isOpen) return;
         if (code !== 'Escape' && !isInputActive()) return;
+        if (e.code === 'F2' && state.isPlaying) {
+            e.preventDefault?.();
+            cinematicMode = !cinematicMode;
+            applyCinematicMode(cinematicMode);
+            return;
+        }
         if (code && code !== 'Escape') e.preventDefault?.();
         if (forgottenMecha?.ownsLocalPilot) {
             if (code === 'Digit1' || code === 'Digit2') { selectMountedWeapon(code === 'Digit1' ? 'rocket' : 'stomp'); return; }
@@ -871,7 +878,7 @@ function setupInputListeners(): void {
             case 'KeyG':
                 toggleHeavyGrapple();
                 break;
-            case 'KeyR':
+            case 'KeyE':
                 if (state.controls && isInputActive()) {
                     if (forgottenMecha?.ownsLocalPilot) {
                         if (state.isMultiplayer) { requestMechaAction('exit'); break; }
@@ -885,7 +892,7 @@ function setupInputListeners(): void {
                     toggleGrapplingHook();
                 }
                 break;
-            case 'KeyE':
+            case 'KeyR':
                 if (forgottenMecha?.ownsLocalPilot) cycleWeapon(1);
                 else requestReload();
                 break;
@@ -1076,6 +1083,13 @@ interface DisposeGameRuntimeOptions {
     disconnect?: boolean;
 }
 let disposingGameRuntime = false;
+let cinematicMode = false;
+
+function applyCinematicMode(active: boolean): void {
+    document.body.classList.toggle('cinematic-mode', active);
+    if (active) state.camera?.layers.disable(PLAYER_NAME_LAYER);
+    else state.camera?.layers.enable(PLAYER_NAME_LAYER);
+}
 
 function currentHudPresentation() {
     const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
@@ -1130,6 +1144,8 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
     if (disposingGameRuntime) return;
     disposingGameRuntime = true;
     try {
+        cinematicMode = false;
+        applyCinematicMode(false);
         endingPlayback?.dispose(); endingPlayback = null; offlineEnding = null;
         defenseWarningShown = false;
         const gameOverReason = getUI<HTMLElement>('game-over-reason');
@@ -1835,6 +1851,7 @@ function init(): void {
     onInputStarted(() => {
         atmosphere?.resetHistory();
         if (state.matchEnded) { endInput(); return; }
+        applyCinematicMode(cinematicMode);
         if (UI.btnPauseResume) UI.btnPauseResume.innerText = 'Resume';
         if (state.pendingPlay) {
             state.isPlaying = true;
@@ -1852,6 +1869,7 @@ function init(): void {
     });
 
     onInputEnded(() => {
+        applyCinematicMode(false);
         cancelWeaponHandling();
         resetHitmarker();
         atmosphere?.resetHistory();
@@ -1998,7 +2016,7 @@ function commitOfflineEnding(wall?: { position: THREE.Vector3; heading: number }
     const position = wall?.position ?? actor.group.position;
     offlineEnding = new MechaEndingAuthority({ id: 1, seed, effectsSeed: (seed ^ 0x6d2b79f5) >>> 0,
         position: { x: position.x, y: position.y, z: position.z }, ...(wall ? { cause: 'wall' } : {}),
-        heading: wall?.heading ?? actor.group.rotation.y, lightingElapsed: ((state.dayNightElapsedSeconds % 480) + 480) % 480 }, performance.now());
+        heading: wall?.heading ?? actor.group.rotation.y, lightingElapsed: ((state.dayNightElapsedSeconds % DAY_NIGHT_CYCLE_SECONDS) + DAY_NIGHT_CYCLE_SECONDS) % DAY_NIGHT_CYCLE_SECONDS }, performance.now());
     startMechaEnding(offlineEnding.snapshot(performance.now()));
 }
 

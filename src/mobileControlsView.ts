@@ -32,7 +32,7 @@ export function createTouchControls(fireMode: TouchFireMode = 'joystick'): HTMLE
     helmet.type = 'button'; helmet.textContent = 'Helmet'; helmet.dataset.control = 'helmet'; helmet.dataset.key = 'KeyO';
     helmet.setAttribute('aria-label', 'Toggle mech helmet'); helmet.hidden = true; layer.append(helmet);
     const exit = document.createElement('button');
-    exit.type = 'button'; exit.textContent = 'Exit'; exit.dataset.control = 'exit'; exit.dataset.key = 'KeyR';
+    exit.type = 'button'; exit.textContent = 'Exit'; exit.dataset.control = 'exit'; exit.dataset.key = 'KeyE';
     exit.setAttribute('aria-label', 'Shut down and leave mech'); exit.hidden = true; layer.append(exit);
     setFireMode(layer, fireMode);
     return layer;

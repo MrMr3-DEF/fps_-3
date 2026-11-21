@@ -64,8 +64,8 @@ window.addEventListener('mecha-review-action', event => {
     // Toolbar clicks intentionally blur the iframe, exercising its normal
     // input-release path. Resume before an action that needs live gameplay.
     if (!['pause', 'leave', 'start'].includes(action) && state.isPlaying && state.playerHp > 0) { paused = false; beginInput(); }
-    if (action === 'noon') { state.dayNightElapsedSeconds = 150; state.dayNightSyncPending = state.dayNightSyncImmediate = true; }
-    if (action === 'night') { state.dayNightElapsedSeconds = 390; state.dayNightSyncPending = state.dayNightSyncImmediate = true; }
+    if (action === 'noon') { state.dayNightElapsedSeconds = 90; state.dayNightSyncPending = state.dayNightSyncImmediate = true; }
+    if (action === 'night') { state.dayNightElapsedSeconds = 240; state.dayNightSyncPending = state.dayNightSyncImmediate = true; }
     if (action === 'head-safe') userSettings.photosensitivityMode = !userSettings.photosensitivityMode;
     const actor = forgottenMecha;
     if (!actor?.ready || !state.camera) return;
@@ -103,7 +103,7 @@ window.addEventListener('mecha-review-action', event => {
         hoverInput.checked = false; scanned = false;
     }
     if (action === 'grapple') toggleGrapplingHook();
-    if (action === 'exit') { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR' })); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyR' })); }
+    if (action === 'exit') { window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE' })); window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyE' })); }
     if (action === 'view-lock') {
         for (const code of ['KeyP', 'KeyC']) {
             window.dispatchEvent(new KeyboardEvent('keydown', { code })); window.dispatchEvent(new KeyboardEvent('keyup', { code }));
@@ -139,7 +139,7 @@ window.addEventListener('mecha-review-action', event => {
     if (action === 'reverse') { reversing = !reversing; walking = false; }
     if (action === 'third') setThirdPerson(!state.isThirdPerson);
     if (action === 'rockets') firing = !firing;
-    for (const [name, code] of [['slot-rocket', 'Digit1'], ['slot-stomp', 'Digit2'], ['cycle', 'KeyE']]) if (action === name) {
+    for (const [name, code] of [['slot-rocket', 'Digit1'], ['slot-stomp', 'Digit2'], ['cycle', 'KeyR']]) if (action === name) {
         window.dispatchEvent(new KeyboardEvent('keydown', { code })); window.dispatchEvent(new KeyboardEvent('keyup', { code }));
     }
     if (action === 'wheel-up' || action === 'wheel-down') document.dispatchEvent(new WheelEvent('wheel', { deltaY: action === 'wheel-up' ? -1 : 1, bubbles: true, cancelable: true }));

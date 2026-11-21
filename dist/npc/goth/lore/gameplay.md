@@ -1,5 +1,5 @@
 # Grappling hook
-The player presses R to fire or release the grappling hook. The grappling hook can pull the player toward rooftops and other high surfaces.
+The player presses E to fire or release the grappling hook. The grappling hook can pull the player toward rooftops and other high surfaces.
 
 # Walking
 WASD moves the player around the arena.

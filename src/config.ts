@@ -1,3 +1,8 @@
+export const DAY_DURATION_SECONDS = 3 * 60;
+export const NIGHT_DURATION_SECONDS = 2 * 60;
+export const DAY_NIGHT_CYCLE_SECONDS = DAY_DURATION_SECONDS + NIGHT_DURATION_SECONDS;
+export const PLAYER_NAME_LAYER = 1;
+
 export const MAP_SIZE = 2000;
 export const POINTER_RADIANS_PER_UNIT = 0.002;
 export const POINTER_RESAMPLE_MAX_MS = 1000 / 60;
@@ -31,7 +36,7 @@ export const MECHA_HP = 50;
 export const MECHA_DETECTION_RANGE = 130;
 export const MECHA_APPROACH_WARNING_TIME = 3;
 export const TOWN_WALL_HP = 500;
-export const INFANTRY_RANGE = 50;
+export const INFANTRY_RANGE = 75;
 export const INFANTRY_LIMIT = 48;
 export const INFANTRY_WARNING_TIME = 3;
 export const INFANTRY_NETWORK_INTERVAL = 100;
@@ -57,9 +62,9 @@ function infantryMelee(range: number, engage: number, fistRadius: number) {
 export const INFANTRY = {
     base: { ...infantrySize(5, 2, .95, .8), hp: 20, damage: 1, speed: 6, range: INFANTRY_RANGE,
         engage: INFANTRY_RANGE, interval: 3, move: 'Walk', attack: 'Fire', contact: 0, color: 0xd5a374 },
-    fast: { ...infantrySize(4, 1.85, .8, .6), ...infantryMelee(3.57, 1.84, 1.51), hp: 10, damage: 1,
+    fast: { ...infantrySize(4, 1.85, .8, .6), ...infantryMelee(3.57, 1.84, 1.51), hp: 10, damage: 2,
         speed: 11, interval: 1.2, move: 'Run', attack: 'LightHit', contact: 4 / 24, color: 0xd29a6c },
-    big: { ...infantrySize(7, 3.5, 1.7, 1.35), ...infantryMelee(5, 3.8, 2.1), hp: 30, damage: 3,
+    big: { ...infantrySize(7, 3.5, 1.7, 1.35), ...infantryMelee(5, 3.8, 2.1), hp: 30, damage: 5,
         // HeavyHit's torso pivot and mid-chest reach origin are fractions of
         // standing height. Its wrist sits .64 radians above the pivot at contact.
         swingPivotHeight: .485, reachHeight: .64, swingElevation: .64,

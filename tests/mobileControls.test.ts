@@ -95,7 +95,7 @@ for (const coarsePointer of [true, false]) test(`two touch owners can move and f
         state.weaponHandling.pressGrapple('PISTOL', 0);
         const sync = setupMobileControls({ keyDown(code) {
             presses.push(code);
-            if (code === 'KeyE') requestReload();
+            if (code === 'KeyR') requestReload();
             if (code === 'TouchWeapon') pilotWeapon = cyclePilotWeapon(pilotWeapon);
         }, keyUp() {}, fire: held => fires.push(held) });
         beginInput();
@@ -111,7 +111,7 @@ for (const coarsePointer of [true, false]) test(`two touch owners can move and f
         assert.equal(state.weaponHandling.reload, null, 'holding Reload through a cancelled grapple cannot start a recharge');
         reload.pointer('pointerup', 39, 0, 0);
         reload.pointer('pointerdown', 39, 0, 0); reload.pointer('pointerup', 39, 0, 0);
-        assert.deepEqual(presses, ['KeyE', 'KeyE']);
+        assert.deepEqual(presses, ['KeyR', 'KeyR']);
         assert.equal(state.weaponHandling.queuedReload, 'PISTOL', 'the fresh press stows the idle launcher');
         state.weaponTime = state.weaponHandling.handEnds;
         state.weaponHandling.advance(state.weaponTime);

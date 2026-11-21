@@ -4,11 +4,11 @@ export const MAX_TOUCH_SCALE = 2.5;
 export const TOUCH_CONTROLS = [
     { id: 'stick', label: 'Movement', width: 106, height: 106 },
     { id: 'weapon', label: 'Weapon', width: 54, height: 54, key: 'TouchWeapon' },
-    { id: 'reload', label: 'Reload', width: 54, height: 54, key: 'KeyE' },
+    { id: 'reload', label: 'Reload', width: 54, height: 54, key: 'KeyR' },
     { id: 'inspect', label: 'Inspect', width: 54, height: 54, key: 'KeyX' },
     { id: 'view', label: 'View', width: 54, height: 54, key: 'KeyP' },
     { id: 'pause', label: 'Ⅱ', width: 54, height: 54 },
-    { id: 'grapple', label: 'Grapple', width: 58, height: 54, key: 'KeyR' },
+    { id: 'grapple', label: 'Grapple', width: 58, height: 54, key: 'KeyE' },
     { id: 'hover', label: 'Hover', width: 58, height: 54, key: 'ShiftLeft' },
     { id: 'aim', label: 'Aim', width: 58, height: 54, key: 'KeyC' },
     { id: 'jump', label: 'Jump', width: 58, height: 54, key: 'Space' },

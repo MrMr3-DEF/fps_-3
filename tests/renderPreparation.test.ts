@@ -46,7 +46,7 @@ test('preparation warms the lantern variants and restores per-lantern chunk sele
     const originalDistance = userSettings.renderDistanceChunks; userSettings.renderDistanceChunks = 1;
     rebuildEnvironmentWithSeed(42);
     const cycle = new DayNightCycle(scene, { shadows: false, shadowMapSize: 1024 });
-    cycle.synchronizeElapsedSeconds(390, true);
+    cycle.synchronizeElapsedSeconds(240, true);
     let target: THREE.WebGLRenderTarget | null = null; const counts: number[] = [];
     const lights = scene.getObjectByName('town-lanterns')!.children.filter(child => child instanceof THREE.PointLight);
     state.renderer = { getRenderTarget: () => target, setRenderTarget: (value: typeof target) => { target = value; }, initTexture() {},

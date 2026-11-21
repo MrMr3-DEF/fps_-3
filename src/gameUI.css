@@ -1646,3 +1646,8 @@ body.mecha-ending #rotate-device { display: none; }
     #menu-goggles-target-layer:has(.is-lobby-peer) .goggles-target-label-panel { font-size:10px; }
 }
 @media (max-height:480px) { .settings-character-preview { height:48px; } }
+
+/* Keep HUD layout and touch hit areas active while the world is shown on its own. */
+body.cinematic-mode > :not(#game-canvas) {
+    opacity: 0 !important;
+}

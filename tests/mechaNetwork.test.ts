@@ -112,7 +112,7 @@ test('wall arrival commits loss before the first punch tick and shares readiness
         updateMechaNetwork(1 / 60);
         assert.equal(state.matchEnded, true); assert.equal(a.mode, 'punching'); assert.equal(a.elapsed, 0);
         assert.equal(overlays, 0); assert.equal(endings.length, 1);
-        assert.equal(endings[0].lightingElapsed, 300);
+        assert.equal(endings[0].lightingElapsed, 180);
         assert.deepEqual(endings[0].position, { x: goal.x, y: 0, z: goal.z });
         assert.ok(parseNetworkPacket(unpack(await pack(packets.at(-1)))));
         assert.equal(a.damage(50).accepted, false, 'loss cannot be reversed after commitment');

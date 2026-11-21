@@ -57,13 +57,13 @@ test('dawn adds increasingly large mixed waves at deterministic reachable border
         assert.equal(defense.damage(ENEMY_COUNT, 1).accepted, false);
         assert.equal(targetData(targets[0]).hp, 0);
         for (const [day, total, kinds] of [[2, 13, ['base', 'fast']], [3, 24, ['base', 'fast', 'big']], [4, 38, ['base', 'fast', 'big']]] as const) {
-            defense.update(.05, 479.99, []); defense.update(.05, .04, []);
+            defense.update(.05, 299.99, []); defense.update(.05, .04, []);
             const snapshot = defense.snapshot();
             assert.equal(snapshot.day, day);
             assert.equal(snapshot.bots.length, total);
             assert.deepEqual([...new Set(snapshot.bots.map(bot => bot.kind))].sort(), [...kinds].sort());
         }
-        defense.update(.05, 479.99, []); defense.update(.05, .04, []);
+        defense.update(.05, 299.99, []); defense.update(.05, .04, []);
         assert.equal(defense.snapshot().bots.length, 48);
         assert.equal(defense.enemiesRemaining, 54);
         defense.update(4, 4.04, []);
@@ -77,7 +77,7 @@ test('dawn adds increasingly large mixed waves at deterministic reachable border
 test('scans use a sphere and choose the nearest visible player', () => {
     const origin = new THREE.Vector3(0, 2, 0);
     const player = (id: string, x: number, y: number): InfantryPlayer => ({ id, lifeId: 0, yaw: 0, position: new THREE.Vector3(x, y, 0) });
-    const closest = player('Covered', 8, 2), visible = player('Visible', 40, 32), outside = player('Outside', 5, 53);
+    const closest = player('Covered', 8, 2), visible = player('Visible', 60, 47), outside = player('Outside', 5, 78);
     assert.equal(nearestInfantryPlayer(origin, [outside, visible, closest], candidate => candidate !== closest), visible);
     assert.equal(nearestInfantryPlayer(origin, [outside], () => true), undefined);
 });
@@ -107,7 +107,8 @@ test('infantry damage the wall at contact and commit the wall loss once', async 
         attack: kind => strikes.push(kind), wallLost: position => losses.push(position.clone()),
     });
     try {
-        defense.receive({ day: 3, wallHp: 5, sequence: 1, bots: [
+        const wallHp = INFANTRY.base.damage + INFANTRY.fast.damage + INFANTRY.big.damage;
+        defense.receive({ day: 3, wallHp, sequence: 1, bots: [
             pose(0, 'fast', 106, 40), pose(1, 'big', 106, -40), pose(2, 'base', 99, -56),
         ] });
         for (let frame = 1; frame <= 100; frame++) defense.update(.05, frame * .05, []);

@@ -1,9 +1,7 @@
 import * as THREE from 'three';
-import { MAP_HALF_SIZE, MAX_PILLAR_HEIGHT } from './config.js';
+import { DAY_DURATION_SECONDS, NIGHT_DURATION_SECONDS, DAY_NIGHT_CYCLE_SECONDS, MAP_HALF_SIZE, MAX_PILLAR_HEIGHT } from './config.js';
 
-export const DAY_DURATION_SECONDS = 5 * 60;
-export const NIGHT_DURATION_SECONDS = 3 * 60;
-export const DAY_NIGHT_CYCLE_SECONDS = DAY_DURATION_SECONDS + NIGHT_DURATION_SECONDS;
+export { DAY_DURATION_SECONDS, NIGHT_DURATION_SECONDS, DAY_NIGHT_CYCLE_SECONDS } from './config.js';
 export const SUN_MEAN_DISTANCE_KM = 149_600_000;
 export const MOON_MEAN_DISTANCE_KM = 384_400;
 
@@ -100,7 +98,7 @@ export function getCelestialOrbitalElevation(elevation: number): number {
     return elevation * (1 + CELESTIAL_HORIZON_DIP) - CELESTIAL_HORIZON_DIP;
 }
 
-/** Owns the scene lighting and visible sun/moon for one continuous eight-minute cycle. */
+/** Owns the scene lighting and visible sun/moon for one continuous five-minute cycle. */
 export class DayNightCycle {
     readonly sunLight: THREE.DirectionalLight;
     readonly moonLight: THREE.DirectionalLight;

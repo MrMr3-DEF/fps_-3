@@ -84,11 +84,16 @@ export function loadUserSettings(): UserSettings {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
-            const parsed = JSON.parse(raw) as Partial<UserSettings>;
+            const parsed = JSON.parse(raw) as Partial<UserSettings> & { keybindVersion?: number };
             userSettings.mobileInput = parsed.mobileInput === 'touch' || parsed.mobileInput === 'keyboard'
                 ? parsed.mobileInput : DEFAULT_USER_SETTINGS.mobileInput;
             userSettings.touchLayout = readTouchLayout(parsed.touchLayout);
             userSettings.touchFireMode = parsed.touchFireMode === 'button' ? 'button' : 'joystick';
+            // Older saves include the entire default map even when only graphics were edited.
+            if (parsed.keybindVersion === undefined && parsed.keybinds?.reload === 'KeyE' && parsed.keybinds.grapple === 'KeyR') {
+                parsed.keybinds.reload = DEFAULT_KEYBINDS.reload;
+                parsed.keybinds.grapple = DEFAULT_KEYBINDS.grapple;
+            }
             userSettings.keybinds = readKeybinds(parsed.keybinds);
             userSettings.crosshair = readCrosshair(parsed.crosshair);
             userSettings.sensitivity = clamp(parsed.sensitivity, 0.1, 3.0, DEFAULT_USER_SETTINGS.sensitivity);
@@ -119,7 +124,7 @@ export function loadUserSettings(): UserSettings {
 
 export function saveUserSettings(): void {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(userSettings));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...userSettings, keybindVersion: 2 }));
     } catch (err) {
         console.warn('Failed to save settings:', err);
     }

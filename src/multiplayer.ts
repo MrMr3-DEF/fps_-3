@@ -7,7 +7,7 @@ import { WeaponHandling, isFirearm, isLight } from './weaponHandling.js';
 import type { HandlingCommand, HandlingStatePacket, WeaponIntent } from './handlingNetworkTypes.js';
 import { userSettings } from './settings.js';
 import { setMeleeNetworkPort } from './weaponNetworkPort.js';
-import { KATANA } from './config.js';
+import { PLAYER_NAME_LAYER, KATANA } from './config.js';
 import { setMechaNetworkPort, captureMechaSnapshot, receiveMechaState, receiveMechaEvent, receiveMechaDenial, resetMechaNetwork, acceptMechaCommand, acceptMechaEndingReady, mechaPeerLeft, mechaPlayer, mountedPeerPosition, announceMechaHit, announceMechaShield } from './mechaNetwork.js';
 import type { MechaHitPacket } from './mechaNetworkTypes.js';
 import { TargetMotionHistory, type HomingFireContext } from './projectileFlight.js';
@@ -2612,6 +2612,7 @@ function createPeerAvatar(username: string): PeerData {
         transparent: true 
     });
     const nameSprite = new THREE.Sprite(spriteMat);
+    nameSprite.layers.set(PLAYER_NAME_LAYER);
     nameSprite.position.set(0, 1.05, 0);
     peerGroup.userData.nameTag = nameSprite;
     nameSprite.scale.set(3, 0.75, 1);

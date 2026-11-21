@@ -4,7 +4,7 @@ export const BIND_ACTIONS = [
     ['backward', 'Move backward', 'KeyS'], ['right', 'Move right', 'KeyD'],
     ['jump', 'Jump', 'Space'], ['hover', 'Hold to hover', 'ShiftLeft'],
     ['powerJump', 'Toggle power jump', 'ControlLeft'], ['interact', 'Interact / talk', 'KeyF'],
-    ['grapple', 'Grappling hook', 'KeyR'], ['reload', 'Reload', 'KeyE'],
+    ['grapple', 'Grappling hook', 'KeyE'], ['reload', 'Reload', 'KeyR'],
     ['grappleMode', 'Equip / stow heavy-weapon grapple', 'KeyG'],
     ['pistol', 'Equip pistol', 'Digit1'], ['shotgun', 'Equip shotgun', 'Digit2'],
     ['rifle', 'Equip assault rifle', 'Digit3'], ['sniper', 'Equip sniper', 'Digit4'],

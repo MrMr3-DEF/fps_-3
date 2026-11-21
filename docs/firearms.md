@@ -1,7 +1,7 @@
 # Firearms and grappling
 
 Equip a firearm with **1–5**, the mouse wheel, or the touch **Weapon** button.
-Press **E** or tap **Reload** to recharge the equipped battery. Every life
+Press **R** or tap **Reload** to recharge the equipped battery. Every life
 starts with all five magazines full. Weapon switches and Mecha boarding
 preserve the rounds in each magazine. Spare charges are unlimited.
 
@@ -38,7 +38,7 @@ With an assault rifle, sniper or minigun, press **G** to draw the grapple
 without launching it. Press **G** again to release any tether and return
 to the heavy gun. A second press during the handoff reverses it.
 
-Press **R** or tap **Grapple** to launch. From the holster, the hand takes
+Press **E** or tap **Grapple** to launch. From the holster, the hand takes
 0.36 s to raise the launcher, or 0.52 s within 0.30 s of a heavy shot.
 Pressing Grapple during an automatic light-weapon draw queues the launch.
 A second press cancels a queued launch or releases an active tether.

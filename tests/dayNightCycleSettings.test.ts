@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { DayNightCycle } from '../src/dayNightCycle.ts';
+import { DAY_DURATION_SECONDS, DayNightCycle } from '../src/dayNightCycle.ts';
 
 test('day/night shadow settings can be applied without recreating the scene', () => {
     const cycle = new DayNightCycle(new THREE.Scene(), { shadows: true, shadowMapSize: 1024 });
@@ -24,7 +24,8 @@ test('day/night shadow settings can be applied without recreating the scene', ()
 test('sun shadows follow the observer and cover nearby ground and tall casters', () => {
     const scene = new THREE.Scene();
     const cycle = new DayNightCycle(scene, { shadows: true, shadowMapSize: 1024 });
-    for (const elapsed of [22, 75, 150, 225, 278]) {
+    for (const fraction of [.07, .25, .5, .75, .93]) {
+        const elapsed = fraction * DAY_DURATION_SECONDS;
         const observer = new THREE.Vector3(870, 2, -820);
         cycle.synchronizeElapsedSeconds(elapsed, true);
         cycle.update(0, observer);
@@ -46,7 +47,7 @@ test('sun shadows follow the observer and cover nearby ground and tall casters',
 test('sub-texel camera movement preserves the sun shadow grid', () => {
     const scene = new THREE.Scene();
     const cycle = new DayNightCycle(scene, { shadows: true, shadowMapSize: 1024 });
-    cycle.synchronizeElapsedSeconds(150, true);
+    cycle.synchronizeElapsedSeconds(DAY_DURATION_SECONDS / 2, true);
     cycle.update(0, new THREE.Vector3(0, 2, 0));
     const firstTarget = cycle.sunLight.target.position.clone();
     cycle.update(0, new THREE.Vector3(0.01, 2, 0));

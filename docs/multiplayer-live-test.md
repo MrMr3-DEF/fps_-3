@@ -25,7 +25,7 @@ environment and limitations in the task response, not in this guide.
 
 - Move, grapple, fire and switch weapons on host and guest; compare accepted hits,
   obstruction and cooldown behavior.
-- Spend rounds on each client, then reload with E. Join during a reload to see
+- Spend rounds on each client, then reload with R. Join during a reload to see
   its current progress. Switching or grappling during reload keeps the old count.
   Hold Reload while pulling, release the hook, then press Reload again. The launcher stays in hand until the fresh press stows it and starts the reload.
 - Hold rifle fire and draw the grapple. The tether launches after the hand reaches

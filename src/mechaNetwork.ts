@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { spawnMechaArmorImpact } from './particles.js';
 import { resolveThirdPersonCameraPosition, resolveThirdPersonAimTarget } from './thirdPersonCamera.js';
 import { forgottenMecha, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment } from './world.js';
-import { MECHA_ROCKET_SHOT_TIME, MECHA_ROCKET_FIRE_TIME, MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE, NETWORK_TICK_MS, MECHA_NETWORK_INPUT_TIMEOUT_MS, MECHA_NETWORK_REFRESH_MS, PLAYER_HEIGHT, NETWORK_POSITION_RESPONSE } from './config.js';
+import { DAY_NIGHT_CYCLE_SECONDS, MECHA_ROCKET_SHOT_TIME, MECHA_ROCKET_FIRE_TIME, MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE, NETWORK_TICK_MS, MECHA_NETWORK_INPUT_TIMEOUT_MS, MECHA_NETWORK_REFRESH_MS, PLAYER_HEIGHT, NETWORK_POSITION_RESPONSE } from './config.js';
 import { isPilotWeapon, type PilotWeapon } from './mechaStomp.js';
 import { PLAYER_BODY_CAMERA_OFFSET } from './playerHitbox.js';
 import type { ForgottenMecha, MechaEvents, MechaPlayer } from './forgottenMecha.js';
@@ -81,7 +81,7 @@ function commitEnding(wall?: { position: THREE.Vector3; heading: number }): void
     endingAuthority = new MechaEndingAuthority({ id: ++endingId, seed, effectsSeed: (seed ^ 0x6d2b79f5) >>> 0,
         position: vector(wall?.position ?? actor.group.position), heading: wall?.heading ?? actor.group.rotation.y,
         ...(wall ? { cause: 'wall' } : {}),
-        lightingElapsed: ((state.dayNightElapsedSeconds % 480) + 480) % 480 }, performance.now(),
+        lightingElapsed: ((state.dayNightElapsedSeconds % DAY_NIGHT_CYCLE_SECONDS) + DAY_NIGHT_CYCLE_SECONDS) % DAY_NIGHT_CYCLE_SECONDS }, performance.now(),
         port?.endingPeers?.() ?? port?.players().flatMap(p => p.peerId && p.peerId !== state.peer?.id ? [p.peerId] : []) ?? []);
     publish(true);
 }

@@ -92,7 +92,7 @@ through entry, shutdown and release; they are not queued.
 | W/S | Align legs, then walk forward/reverse with fitted swept collision |
 | Look | Capped world-space torso aim; sampled input clears on pause/transition |
 | 1 / 2 | Select Rockets / Stomp |
-| E, wheel, touch Weapon | Alternate the two attacks without resetting cooldowns |
+| R, wheel, touch Weapon | Alternate the two attacks without resetting cooldowns |
 | Fire | Repeat the selected ready attack |
 | O / touch Helmet | Open or close the helmet |
 | Shift / touch Shield | Manual shield using the hover-energy bar |

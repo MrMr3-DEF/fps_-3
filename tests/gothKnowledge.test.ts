@@ -17,7 +17,7 @@ test('shipped character is unnamed, already the player’s girlfriend, and fits 
 
 test('retrieval finds relevant world facts without inheriting earlier topics', () => {
     assert.match(retrieveLore(knowledge.chunks, 'Where do I respawn?')[0].title, /respawning/i);
-    assert.match(retrieveLore(knowledge.chunks, 'How does the grappling hook work?')[0].text, /player presses R to fire or release the grappling hook/);
+    assert.match(retrieveLore(knowledge.chunks, 'How does the grappling hook work?')[0].text, /player presses E to fire or release the grappling hook/);
     assert.deepEqual(retrieveLore(knowledge.chunks, 'Why?'), []);
     assert.deepEqual(retrieveLore(knowledge.chunks, 'xyzzy quux'), []);
 });

@@ -59,7 +59,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `inputSession.ts`, `mobileControls.ts` | Shared input activation, selected keyboard/touch mode switching on all devices, touch capture, movement, and action controls |
 | `mobileControlLayout.ts`, `mobileControlsView.ts`, `mobileControlsEditor.ts` | Validated touch layout, shared control geometry/markup, and inactive blank sky layout editor |
 | `settingsMenu.ts`, `controlSettings.ts` | Settings UI, keybind translation, and crosshair configuration |
-| `dayNightCycle.ts` | Eight-minute sky cycle, moving sun/moon, ambient lighting, fog color, and camera-following sun shadows |
+| `dayNightCycle.ts` | Five-minute sky cycle (three minutes of day and two of night), moving sun/moon, ambient lighting, fog color, and camera-following sun shadows |
 | `config.ts` | Shared gameplay constants, world counts, network limits, weapon statistics |
 | `state.ts` | Mutable client runtime state and reset helpers |
 | `world.ts` | Deterministic staged/synchronous arena construction, render chunks, spatial indexes, targets, town/lava lighting, world disposal |
@@ -236,8 +236,9 @@ Player damage records the last damage time for regeneration and kill attribution
 | Left mouse | Fire |
 | Right mouse | Aim down sights |
 | Hold `C` | Aim down sights; temporarily use first person while third-person mode is active |
-| `R` | Draw and launch the grappling hook, cancel a draw or release a tether |
-| `E` | Reload an on-foot firearm (stow the idle launcher first), or cycle the selected Mecha weapon while piloting |
+| `E` | Draw and launch the grappling hook, cancel a draw or release a tether |
+| `F2` | Toggle cinematic mode during play. Hides the HUD, player names, and goggles overlay and tint while retaining scoped zoom |
+| `R` | Reload an on-foot firearm (stow the idle launcher first), or cycle the selected Mecha weapon while piloting |
 | Mouse wheel | Cycle weapons |
 | `1`–`5` | Select pistol, shotgun, AR, sniper, or minigun |
 | `V` | Equip katana; hold primary attack to charge, release to swing |

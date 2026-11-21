@@ -1,5 +1,5 @@
 import { updateKatanaLightning } from './katanaLightning.js';
-import { KATANA } from './config.js';
+import { DAY_DURATION_SECONDS, NIGHT_DURATION_SECONDS, KATANA } from './config.js';
 import { KatanaEffects } from './katanaEffects.js';
 import { createKatanaSlash } from './katanaSlash.js';
 import * as THREE from 'three';
@@ -64,7 +64,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
         // Noon, twilight (sun + lanterns), and night use different light counts.
         // Use real scene draws because compileAsync alone need not upload all
         // geometry/textures. Restore the authoritative phase in finally below.
-        for (const phase of [150, 22, 390]) {
+        for (const phase of [DAY_DURATION_SECONDS / 2, DAY_DURATION_SECONDS * 0.07, DAY_DURATION_SECONDS + NIGHT_DURATION_SECONDS / 2]) {
             await checkpoint();
             cycle.synchronizeElapsedSeconds(phase, true);
             const darkness = cycle.update(0, camera.position);

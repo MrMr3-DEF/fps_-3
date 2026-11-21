@@ -25,7 +25,7 @@ test('modifier sides remain equivalent and reserved keys cannot be assigned', ()
 
 test('stored keybinds round-trip permutations and sanitize malformed input', () => {
     const legacy = readKeybinds({ nextWeapon: 'KeyG', jump: 'KeyJ' });
-    assert.equal(legacy.reload, 'KeyE');
+    assert.equal(legacy.reload, 'KeyR');
     assert.equal(legacy.jump, 'KeyJ');
     let bindings = { ...DEFAULT_KEYBINDS };
     for (const [action, , code] of [...BIND_ACTIONS].reverse()) bindings = assignKey(bindings, 'forward', code);
@@ -68,7 +68,7 @@ test('crosshair bounds and SVG reject invalid stored data', () => {
 test('legacy storage retains existing values and adds new defaults; new settings persist', () => {
     const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
     const previousSettings = cloneSettings(userSettings);
-    let raw = JSON.stringify({ sensitivity: 2, fov: 90, shadows: false });
+    let raw = JSON.stringify({ sensitivity: 2, fov: 90, shadows: false, keybinds: { reload: 'KeyE', grapple: 'KeyR' } });
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
         getItem: () => raw, setItem: (_key: string, value: string) => { raw = value; },
     } });
@@ -87,6 +87,7 @@ test('legacy storage retains existing values and adds new defaults; new settings
         assert.deepEqual(userSettings.keybinds, DEFAULT_KEYBINDS);
         assert.deepEqual(userSettings.crosshair, DEFAULT_CROSSHAIR);
         userSettings.keybinds = assignKey(userSettings.keybinds, 'jump', 'KeyJ');
+        userSettings.keybinds = assignKey(userSettings.keybinds, 'reload', 'KeyE');
         userSettings.crosshair = { ...DEFAULT_CROSSHAIR, style: 'cross', color: '#00ffff' };
         userSettings.muzzleFlashOpacity = 0.35;
         userSettings.bulletTrails = false;
@@ -98,6 +99,7 @@ test('legacy storage retains existing values and adds new defaults; new settings
         Object.assign(userSettings, cloneSettings(DEFAULT_USER_SETTINGS));
         loadUserSettings();
         assert.equal(userSettings.keybinds.jump, 'KeyJ');
+        assert.equal(userSettings.keybinds.reload, 'KeyE');
         assert.equal(userSettings.crosshair.style, 'cross');
         assert.equal(userSettings.crosshair.color, '#00ffff');
         assert.equal(userSettings.muzzleFlashOpacity, 0.35);

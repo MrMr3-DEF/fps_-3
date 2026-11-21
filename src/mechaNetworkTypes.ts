@@ -1,7 +1,7 @@
 import { fields, isPacketRecord as record, projectKnown, variant, vectorFields as vec, type Projection } from './networkProjection.js';
 import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, type MechaEndingState } from './mechaEndingTimeline.js';
 import { isPeerId } from './roomIdentity.js';
-import { MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME,
+import { DAY_NIGHT_CYCLE_SECONDS, MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME,
     MAX_SHOT_PELLET_INDEX, TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS } from './config.js';
 import type { Vec3Packet } from './networkTypes.js';
 import type { MechaMode, MechaImpact } from './forgottenMecha.js';
@@ -66,7 +66,7 @@ export function isMechaEnding(x: unknown): x is MechaEndingState {
         Math.abs(x.heading / (Math.PI / 2) - Math.round(x.heading / (Math.PI / 2))) < 1e-8 &&
         (x.cause === undefined || x.cause === 'wall' && number(x.position.y, 0, TOWN_WALL_HEIGHT) &&
             number(Math.max(Math.abs(x.position.x), Math.abs(x.position.z)), TOWN_HALF_SIZE - TOWN_WALL_THICKNESS, TOWN_HALF_SIZE + TOWN_WALL_THICKNESS)) &&
-        number(x.lightingElapsed, 0, 480) && number(x.elapsed, 0, MECHA_ENDING_DURATION) &&
+        number(x.lightingElapsed, 0, DAY_NIGHT_CYCLE_SECONDS) && number(x.elapsed, 0, MECHA_ENDING_DURATION) &&
         (x.phase === 'preparing' ? x.elapsed <= MECHA_ENDING_TIMING.fadeOut :
             x.phase === 'playing' ? x.elapsed >= MECHA_ENDING_TIMING.fadeOut : x.phase === 'complete' && x.elapsed === MECHA_ENDING_DURATION);
 }
