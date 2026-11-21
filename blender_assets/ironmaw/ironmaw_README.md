@@ -89,7 +89,7 @@ runtime material events rather than GLB animation tracks. The asset defaults red
 Blender preview drivers use blue for mounted state, while game piloting uses
 warm yellow. Death fades to unpowered gray; Mount powers on during frames 44–56.
 
-The physical pilot seat, visible bean and optical views use distinct anchors.
+The grapple ends at the cockpit entrance. The visible cyborg rides on the seat cushion, rigid part `PART_UpperTorso_Cavity_20`, in front of backrest `PART_UpperTorso_Cavity_19`.
 The closed view is at `PART_EyeLens_01`; the interior anchor is chest-owned,
 0.75 game meters behind it, and does not follow the folding lens. HeadOpen/Close
 rotate only the helmet to/from -105 degrees around local X. Runtime head/camera

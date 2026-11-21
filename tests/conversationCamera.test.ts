@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { ConversationCamera, CONVERSATION_MOVE_SECONDS } from '../src/conversationCamera.js';
-import { GothGirlfriend, getGothConversationPose, getGothPlacement, GOTH_MODEL_HEIGHT, GOTH_CONVERSATION_DISTANCE, GOTH_HITBOX_DEPTH, GOTH_HITBOX_WIDTH } from '../src/gothGirlfriend.js';
+import { GothGirlfriend, getGothConversationPose, getGothPlacement, GOTH_MODEL_HEIGHT, GOTH_FACE_HEIGHT, GOTH_CONVERSATION_DISTANCE, GOTH_HITBOX_DEPTH, GOTH_HITBOX_WIDTH } from '../src/gothGirlfriend.js';
 import { generateTownLayout, createTownBoxes } from '../src/town.js';
 import { PLAYER_HEIGHT, PLAYER_RADIUS } from '../src/config.js';
 
@@ -67,7 +67,7 @@ test('centered conversation positions face the NPC and clear room walls/furnitur
         assert.equal(pose.position.y, PLAYER_HEIGHT);
         const offset = pose.position.clone().sub(group.position); offset.y = 0;
         near(offset, new THREE.Vector3(0, 0, GOTH_CONVERSATION_DISTANCE).applyQuaternion(group.quaternion));
-        assert.ok(pose.lookAt.y > pose.position.y, 'look up toward her face');
+        near(pose.lookAt, group.position.clone().add(new THREE.Vector3(0, GOTH_FACE_HEIGHT, 0)));
         for (const box of createTownBoxes(buildings)) {
             const overlaps = box.solid && box.y + box.height / 2 > .1 && box.y - box.height / 2 < PLAYER_HEIGHT
                 && Math.abs(pose.position.x - box.x) < box.width / 2 + PLAYER_RADIUS

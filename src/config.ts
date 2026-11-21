@@ -55,11 +55,11 @@ function infantryMelee(range: number, engage: number, fistRadius: number) {
 }
 
 export const INFANTRY = {
-    base: { ...infantrySize(5, 2, .95, .8), hp: 5, damage: 1, speed: 6, range: INFANTRY_RANGE,
+    base: { ...infantrySize(5, 2, .95, .8), hp: 20, damage: 1, speed: 6, range: INFANTRY_RANGE,
         engage: INFANTRY_RANGE, interval: 3, move: 'Walk', attack: 'Fire', contact: 0, color: 0xd5a374 },
-    fast: { ...infantrySize(4, 1.85, .8, .6), ...infantryMelee(3.57, 1.84, 1.51), hp: 3, damage: 1,
+    fast: { ...infantrySize(4, 1.85, .8, .6), ...infantryMelee(3.57, 1.84, 1.51), hp: 10, damage: 1,
         speed: 11, interval: 1.2, move: 'Run', attack: 'LightHit', contact: 4 / 24, color: 0xd29a6c },
-    big: { ...infantrySize(7, 3.5, 1.7, 1.35), ...infantryMelee(5, 3.8, 2.1), hp: 10, damage: 3,
+    big: { ...infantrySize(7, 3.5, 1.7, 1.35), ...infantryMelee(5, 3.8, 2.1), hp: 30, damage: 3,
         // HeavyHit's torso pivot and mid-chest reach origin are fractions of
         // standing height. Its wrist sits .64 radians above the pivot at contact.
         swingPivotHeight: .485, reachHeight: .64, swingElevation: .64,
@@ -133,7 +133,12 @@ export const MECHA_ROCKET_BLAST_RADIUS = 5;
 export const MECHA_ROCKET_POOL_SIZE = 16;
 
 export const WALK_SPEED = 35.0;
-export const PLAYER_RADIUS = 0.8;
+// The exported armed cyborg measures 1.828 from sole to crown and 1.685 to visor.
+export const PLAYER_STANDING_HEIGHT = 4.3;
+export const CYBORG_SCALE = PLAYER_STANDING_HEIGHT / 1.828;
+export const PLAYER_HEIGHT = 1.685 * CYBORG_SCALE;
+export const PLAYER_BODY_CAMERA_OFFSET = 0.295 * CYBORG_SCALE;
+export const PLAYER_RADIUS = 0.675 * CYBORG_SCALE;
 
 export const JUMP_FORCE = 164.0;
 export const BASE_GRAVITY = 420.0;
@@ -149,10 +154,11 @@ export const SWITCH_DURATION = 0.15;
 // Bounds of the fitted firearms through movement, recoil and pitch, with
 // allowance for animation and quantization of the last accepted player pose.
 export const FIREARM_MUZZLE_REACH = {
-    PISTOL: 1.85, SHOTGUN: 2.1, AR: 2.25, SNIPER: 3.1, MINIGUN: 2.2,
+    PISTOL: 1.56 * CYBORG_SCALE, SHOTGUN: 1.77 * CYBORG_SCALE, AR: 1.90 * CYBORG_SCALE,
+    SNIPER: 2.61 * CYBORG_SCALE, MINIGUN: 1.86 * CYBORG_SCALE,
 } as const;
-export const MAX_MUZZLE_LATERAL = 1.0;
-export const MAX_MUZZLE_BEHIND_EYE = 0.8;
+export const MAX_MUZZLE_LATERAL = 0.845 * CYBORG_SCALE;
+export const MAX_MUZZLE_BEHIND_EYE = 0.675 * CYBORG_SCALE;
 export const FIREARM_MAGAZINES = {
     PISTOL: { capacity: 15, reloadSeconds: 1.5 },
     SHOTGUN: { capacity: 12, reloadSeconds: 2.5 },
@@ -202,11 +208,9 @@ export const ENEMY_CLASSES: EnemyClass[] = [
     { hp: 10, color: 0xff4757, scale: 6 }
 ];
 
-export const PLAYER_HEIGHT = 2.0;
-// Keep the camera's 0.1-unit near plane fully below ceilings, including at the
-// widest supported FOV, so a head impact cannot briefly reveal the roof top.
-export const CAMERA_CEILING_CLEARANCE = 0.15;
-export const NORMAL_JUMP_HEIGHT = PLAYER_HEIGHT * 1.35;
+// The crown must clear lintels even when the visor camera is below them.
+export const CAMERA_CEILING_CLEARANCE = PLAYER_STANDING_HEIGHT - PLAYER_HEIGHT + 0.02;
+export const NORMAL_JUMP_HEIGHT = 2.7;
 // Softer gravity preserves the normal hop’s slower pacing.
 export const NORMAL_JUMP_GRAVITY = BASE_GRAVITY / (1.25 * 1.25);
 export const NORMAL_JUMP_FORCE = Math.sqrt(2 * NORMAL_JUMP_GRAVITY * NORMAL_JUMP_HEIGHT);
@@ -218,9 +222,9 @@ export const FOV_LERP_SPEED = 15;
 // Over-the-shoulder camera framing. The camera stays to the player's right so
 // the avatar occupies the left side of the screen, as in modern third-person
 // shooters, and pulls forward before its near plane can enter world geometry.
-export const THIRD_PERSON_CAMERA_DISTANCE = 3.35;
-export const THIRD_PERSON_CAMERA_HEIGHT = 0.10;
-export const THIRD_PERSON_CAMERA_SHOULDER_OFFSET = 0.95;
+export const THIRD_PERSON_CAMERA_DISTANCE = 2.82 * CYBORG_SCALE;
+export const THIRD_PERSON_CAMERA_HEIGHT = 0.084 * CYBORG_SCALE;
+export const THIRD_PERSON_CAMERA_SHOULDER_OFFSET = 0.80 * CYBORG_SCALE;
 export const THIRD_PERSON_CAMERA_AIM_DISTANCE = 25;
 export const THIRD_PERSON_CAMERA_COLLISION_RADIUS = 0.25;
 export const THIRD_PERSON_CAMERA_WALL_PADDING = 0.08;
@@ -253,14 +257,14 @@ export const LAVA_POOL_HALF_SIZE = 12.8;
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
 export const MAX_PENDING_ROOM_CONNECTIONS = 2 * (MAX_PLAYERS - 1);
-// Admission requires the same handling snapshot and player appearance schema.
-export const NETWORK_PROTOCOL_VERSION = 9;
+// Peers must agree on body dimensions, muzzle limits and packet layouts.
+export const NETWORK_PROTOCOL_VERSION = 10;
 export const ROOM_PENDING_SESSION_MS = 90_000;
 export const MAX_SHOT_PELLET_INDEX = Math.max(...Object.values(WEAPON_STATS).map(stats => stats.pellets ?? 1)) - 1;
 // Eight unambiguous characters make active room discovery infeasible by brute force
 // before the Worker issues short-lived TURN credentials.
 export const ROOM_CODE_LENGTH = 8;
-export const PEER_Y_OFFSET = 0.35;
+export const PEER_Y_OFFSET = PLAYER_BODY_CAMERA_OFFSET;
 export const LOCATOR_HALF_ANGLE = Math.PI / 3;
 export const HIT_FLASH_DURATION_MS = 150;
 

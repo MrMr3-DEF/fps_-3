@@ -22,6 +22,7 @@ export interface InfantryState {
     sequence: number;
     day: number;
     wallHp: number;
+    queued?: number;
     bots: InfantryPose[];
 }
 
@@ -56,7 +57,8 @@ function isPose(value: unknown): value is InfantryPose {
 export function isInfantryState(value: unknown): value is InfantryState {
     if (!isRecord(value) || !integer(value.sequence) || !integer(value.day) || !integer(value.wallHp, 0, TOWN_WALL_HP) ||
         !Array.isArray(value.bots) || value.bots.length > INFANTRY_LIMIT || !value.bots.every(isPose)) return false;
-    if (value.day === 0 && (value.bots.length || value.wallHp !== TOWN_WALL_HP)) return false;
+    if (value.queued !== undefined && !integer(value.queued)) return false;
+    if (value.day === 0 && (value.queued || value.bots.length || value.wallHp !== TOWN_WALL_HP)) return false;
     return new Set(value.bots.map(bot => bot.slot)).size === value.bots.length;
 }
 
@@ -69,7 +71,7 @@ export function isInfantryEvent(value: unknown): value is InfantryEvent {
 }
 
 export const infantryStateFields: Projection = {
-    ...fields('sequence', 'day', 'wallHp'),
+    ...fields('sequence', 'day', 'wallHp', 'queued'),
     bots: [{ ...fields('slot', 'revision', 'kind', 'hp', 'yaw', 'turnAngle', 'pitch', 'phase', 'time'), position: vectorFields }],
 };
 export const infantryEventFields = variant('kind', {

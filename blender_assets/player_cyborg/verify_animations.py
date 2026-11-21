@@ -259,18 +259,14 @@ def verify(body, props):
             else:
                 stance = "L" if phase < .5 or phase == 1 else "R"
                 close(sole[stance], 0, .009, f"{clip} grounded {stance} sole at {phase}")
-    # mechaMount.test.ts sweeps the physical cabin against these wrapper-space
-    # limits. Fit the visor and test all seated armor vertices in that same box.
+    # The runtime fits the exported seated armor to the moving Ironmaw chair.
+    # Check that both knees stay out in front of the hips and above the boots.
     body.pose([("Pilot.Seated", 0)])
     refresh()
-    obj = mesh.evaluated_get(bpy.context.evaluated_depsgraph_get())
-    seated = [obj.matrix_world @ v.co for v in obj.data.vertices]
-    glass = next(i for i, slot in enumerate(obj.material_slots) if slot.material.name.startswith("Visor_Smoked_Glass"))
-    visor = [seated[v].z for p in obj.data.polygons if p.material_index == glass for v in p.vertices]
-    offset = .5 - (min(visor) + max(visor)) / 2
-    close(offset, -.847, .005, "Ironmaw seated visor offset")
-    if not all(-.60 <= -v.x <= .60 and -1.10 <= v.z + offset <= 1.10 and -.74 <= v.y <= .60 for v in seated):
-        raise ValueError("Seated character leaves Ironmaw's pilot clearance envelope")
+    for side in ("L", "R"):
+        hip, knee, ankle = [body.point(name + "." + side) for name in ("thigh", "shin", "foot")]
+        if hip.y - knee.y < .25 or knee.z - ankle.z < .25:
+            raise ValueError(f"Pilot.Seated has no seated knee bend on {side}")
     print(f"Verified {len(body.clips)} re-imported actions, 7 props. Sniper drawer {abs(opened.y):.3f} m. "
           f"Support/grapple/lid maximum gaps {max_support:.4f}/{max_grapple:.4f}/{max_lid_gap:.4f} m.", flush=True)
 

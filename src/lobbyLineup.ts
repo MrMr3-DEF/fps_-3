@@ -1,3 +1,4 @@
+import { CYBORG_SCALE } from './config.js';
 import type { LobbyPlayer } from './networkTypes.js';
 import type { CalloutHorizontalDirection, CalloutVerticalDirection } from './smartGogglesMath.js';
 
@@ -44,5 +45,5 @@ export function lobbyPreviewPosition(index: number, aspect: number): { x: number
     const width = Math.min(1, Math.max(0.55, aspect / 1.2));
     // The outer pair needs extra lateral spacing to remain visible behind the
     // nearer pair; tighten that spread on portrait viewports.
-    return { x: side * (2.35 + row * (0.65 + 1.8 * width)) * width, z: -1.45 - row * 1.5 };
+    return { x: side * (1.98 + row * (0.55 + 1.52 * width)) * width * CYBORG_SCALE, z: (-1.22 - row * 1.26) * CYBORG_SCALE };
 }

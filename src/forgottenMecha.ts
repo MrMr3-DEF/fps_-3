@@ -2,7 +2,7 @@ import { MechaNape } from './mechaNape.js';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE, MAP_HALF_SIZE } from './config.js';
+import { CYBORG_SCALE, PLAYER_HEIGHT, MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE, MAP_HALF_SIZE } from './config.js';
 import { obstacleData, targetData } from './userDataTypes.js';
 import { MechaStomp, stompContact, type PilotWeapon } from './mechaStomp.js';
 import { MechaNavigation, type NavigationBox, type MechaRoute } from './mechaNavigation.js';
@@ -20,7 +20,7 @@ import { MECHA_ENEMY_ROCKET_DAMAGE, MECHA_ENEMY_ROCKET_TURN_SPEED, MECHA_ENEMY_R
 import { MechaMovement } from './mechaMovement.js';
 import { MECHA_MOVEMENT_MARGIN, MECHA_DEFEAT_YAW_SPEED, MECHA_DEFEAT_ALIGNMENT, MECHA_FINAL_BREAKUP_TIME } from './config.js';
 import type { MechaState } from './mechaNetworkTypes.js';
-import { PILOT_LENS_OFFSET, PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_BOUNDING_RADIUS, playerTouchesWorldBox, segmentPlayerBeamHitT } from './playerHitbox.js';
+import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_BOUNDING_RADIUS, playerTouchesWorldBox, segmentPlayerBeamHitT } from './playerHitbox.js';
 import type { MechaPilotRelease } from './mechaPilotRelease.js';
 
 export type MechaMode = 'walking' | 'tracking' | 'rocketing' | 'stomping' | 'punching' | 'aligning' | 'dying' | 'dead' | 'game-over' | 'boarding' | 'startup' | 'piloted' | 'shutting-down' | 'destroying' | 'destroyed';
@@ -30,6 +30,7 @@ export interface MechaEvents { impact(kind: MechaImpact, position: THREE.Vector3
 type ObstacleQuery = (startX: number, startZ: number, endX: number, endZ: number, out: THREE.Object3D[], padding?: number) => THREE.Object3D[];
 const modelUrl = new URL('../blender_assets/ironmaw/ironmaw_siege_robot.glb', import.meta.url).href;
 const LOOP = 4 / 3;
+const PILOT_RECLINE = .42;
 const IDENTITY_ROTATION = new THREE.Quaternion();
 // The five legacy clips carry a 1/24-second lead-in in the GLB. Events use
 // Blender frame / 24, not (frame - 1) / 24, to stay aligned with exported time.
@@ -321,11 +322,18 @@ export class ForgottenMecha {
         this.viewAnchor.position.copy(chest.worldToLocal(this.target)); this.viewAnchor.quaternion.copy(frame); this.viewAnchor.scale.setScalar(1 / scale); chest.add(this.viewAnchor);
         this.viewAnchor.getWorldPosition(this.target); this.target.z -= MECHA_INTERIOR_VIEW_BACK;
         this.interiorAnchor.position.copy(chest.worldToLocal(this.target)); this.interiorAnchor.quaternion.copy(frame); this.interiorAnchor.scale.setScalar(1 / scale); chest.add(this.interiorAnchor);
-        // Fit the visible occupant independently of the grapple seat and optics.
-        // The visor faces +Z; its head center shares the neutral lens height.
-        this.viewAnchor.getWorldPosition(this.target); this.target.set(this.group.position.x, this.target.y - PILOT_LENS_OFFSET, this.group.position.z + 5);
-        this.pilotAnchor.position.copy(chest.worldToLocal(this.target));
-        this.pilotAnchor.quaternion.copy(frame); this.pilotAnchor.scale.setScalar(1 / scale); chest.add(this.pilotAnchor);
+        // Rigid part 20 is the actual seat pan. This point on its cushion supports
+        // the seated thighs; its local +Z is Blender up. Keep the rider in world units.
+        const cushion = this.bones.get('PART_UpperTorso_Cavity_20');
+        if (!cushion) throw new Error('Ironmaw is missing its seat cushion');
+        this.pilotAnchor.name = 'Seated cyborg';
+        this.pilotAnchor.position.set(0, -.273, -.007);
+        this.pilotAnchor.rotation.x = Math.PI / 2 - PILOT_RECLINE;
+        this.pilotAnchor.scale.setScalar(1 / scale);
+        // Pilot.Seated contacts the pan 0.49 model metres above the rig origin.
+        // The shell retains its standing eye-to-sole offset in every pose.
+        this.pilotAnchor.translateY((PLAYER_HEIGHT - PLAYER_BODY_CAMERA_OFFSET - .49 * CYBORG_SCALE) / scale);
+        cushion.add(this.pilotAnchor);
         const slide = this.bones.get('CTRL_RocketSlide_R')!;
         const metadata = slide.userData;
         if (!Array.isArray(metadata.muzzle_rest_position) || !Array.isArray(metadata.muzzle_rest_direction)) throw new Error('Ironmaw is missing cassette muzzle metadata');
@@ -477,9 +485,30 @@ export class ForgottenMecha {
     get pilotAvatarProgress(): number {
         if (this.mode === 'boarding') return this.boardProgress;
         // The seated pilot stands only as the reversed Mount reaches the open cabin.
-        if (this.mode === 'shutting-down' && this.shutdownReverse && this.action)
-            return THREE.MathUtils.clamp(1 - this.action.time / .66, 0, 1);
+        if (this.mode === 'shutting-down' && this.headView.phase === 'shutdown-opening') {
+            const mount = this.actions.get('Mount')!.getClip().duration;
+            const remaining = mount + MECHA_HUD_FADE_TIME + MECHA_VISION_REVEAL_TIME - this.elapsed;
+            return THREE.MathUtils.clamp(1 - remaining / .66, 0, 1);
+        }
         return 0;
+    }
+    /** Both the local player and observers follow the same host-timed chair transfer. */
+    placePilot(shell: THREE.Group): void {
+        if (shell.parent !== this.pilotAnchor) this.pilotAnchor.add(shell);
+        const phase = this.pilotAvatarPhase;
+        const seated = phase === 'Board' ? this.boardProgress : phase === 'Exit' ? 1 - this.pilotAvatarProgress : 1;
+        shell.position.set(0, 0, 0);
+        if (seated < 1) {
+            this.seatAnchor.getWorldPosition(shell.position);
+            shell.position.y -= PLAYER_BODY_CAMERA_OFFSET;
+            this.pilotAnchor.worldToLocal(shell.position);
+            shell.position.multiplyScalar(1 - THREE.MathUtils.smoothstep(seated, 0, 1));
+            // Lift over the front edge as the knees fold or straighten.
+            const lift = 1.5 * Math.sin(Math.PI * seated);
+            shell.position.y += lift * Math.cos(PILOT_RECLINE);
+            shell.position.z += lift * Math.sin(PILOT_RECLINE);
+        }
+        shell.rotation.set(PILOT_RECLINE * (1 - seated), Math.PI * THREE.MathUtils.smoothstep(seated, 0, .7), 0);
     }
     get helmetClosed(): boolean { return !this.headView.wantedOpen && this.headView.fold <= 1e-9; }
     get helmetProgress(): number { return this.headView.fold; }
@@ -536,7 +565,8 @@ export class ForgottenMecha {
     beginBoarding(position: THREE.Vector3, quaternion: THREE.Quaternion, thirdPerson = false, secondaryHeld = false): boolean {
         if (!this.canMount) return false;
         this.transitionCamera.begin('entry', thirdPerson, position, quaternion, secondaryHeld);
-        this.pilotAnchor.getWorldPosition(this.exitLocalStart);
+        this.seatAnchor.getWorldPosition(this.exitLocalStart);
+        this.exitLocalStart.y -= PLAYER_BODY_CAMERA_OFFSET;
         this.group.worldToLocal(this.exitLocalStart);
         this.clearPendingDamage(); this.combat.stop(); this.hp = this.maxHp; this.revision++;
         this.boardPosition.copy(position); this.boardQuaternion.copy(quaternion);
@@ -600,7 +630,8 @@ export class ForgottenMecha {
         this.headView.updateShutdown(this.elapsed, duration);
         this.updateColliders(); this.updateCombatAnchors(); this.updateEye(); this.updatePilotCamera();
         if (reverseTime >= duration - 1e-9) {
-            this.pilotAnchor.getWorldPosition(this.releasePose.position);
+            this.seatAnchor.getWorldPosition(this.releasePose.position);
+            this.releasePose.position.y -= PLAYER_BODY_CAMERA_OFFSET;
             this.viewAnchor.getWorldPosition(this.releasePose.viewPosition);
             this.releasePose.quaternion.setFromEuler(this.cameraRotation.set(0, this.group.rotation.y + Math.PI, 0, 'YXZ'));
             // Prefer the front of the cabin, then its sides when parked at a wall.

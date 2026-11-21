@@ -67,8 +67,8 @@ exchange visibility while the glove wraps the seated grip. The sleeve follows th
 exposes `GrappleMuzzle` on its hand-held mechanism.
 
 The same uniform scale applies to the standing player, seated pilot and held equipment.
-The seated visor is 1.347 authoring metres above the source origin. The cockpit
-anchors position the rider and the optical view independently.
+The armed standing mesh measures 1.828 authoring metres from sole to crown.
+Ironmaw’s cushion supports the seated hips and thighs, while the mecha’s lens supplies the optical view.
 
 During firearm reload, play the character and prop Reload clips from the same
 normalized time. The right hand presents each receiver, and the left hand leaves

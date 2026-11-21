@@ -1,16 +1,14 @@
 import * as THREE from 'three';
 import { CyborgAvatar, cyborgAssetsReady, type CyborgPose } from './cyborgAvatar.js';
-import { APEX_VELOCITY_THRESHOLD, PLAYER_HEIGHT, GRAPPLE_SEAT_TIME, HEAVY_HANDOFF_TIME, SWITCH_DURATION, MINIGUN_RAMP_TIME, WEAPON_STATS, GRAPPLE_BLUE } from './config.js';
-import { PILOT_LENS_OFFSET, PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX } from './playerHitbox.js';
+import { CYBORG_SCALE, APEX_VELOCITY_THRESHOLD, PLAYER_HEIGHT, GRAPPLE_SEAT_TIME, HEAVY_HANDOFF_TIME, SWITCH_DURATION, MINIGUN_RAMP_TIME, WEAPON_STATS, GRAPPLE_BLUE } from './config.js';
+import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX } from './playerHitbox.js';
 import { attachGrappleMuzzleShockwave, attachMuzzleShockwave } from './muzzleFlash.js';
 import type { LightWeapon } from './handlingNetworkTypes.js';
 import type { WeaponName } from './networkTypes.js';
 import { createKatanaLightning } from './katanaLightning.js';
 import { setPeerScanBounds } from './smartGogglesPeerMath.js';
 
-/** The armed visor is 1.685 authored metres above the soles. Gameplay owns eye height. */
-export const CYBORG_SCALE = PLAYER_HEIGHT / 1.685;
-export const CYBORG_SEATED_OFFSET = PILOT_LENS_OFFSET - 1.347 * CYBORG_SCALE;
+export { CYBORG_SCALE } from './config.js';
 const actors = new WeakMap<THREE.Group, PlayerAvatarController>();
 const scanBounds = new THREE.Box3(new THREE.Vector3(PLAYER_HITBOX_MIN.x, PLAYER_HITBOX_MIN.y, PLAYER_HITBOX_MIN.z), new THREE.Vector3(PLAYER_HITBOX_MAX.x, PLAYER_HITBOX_MAX.y, PLAYER_HITBOX_MAX.z));
 // Distances between touchdown and toe-off in the exported Run clips, in model metres.
@@ -214,7 +212,6 @@ export class PlayerAvatarController {
         } else this.interruptedReload = undefined;
         if (this.age-this.hurt < .26 && f.alive) pose.hitTime = this.age-this.hurt;
         this.rig.setPrimaryVisible(!f.pilot && f.alive);
-        this.rig.root.position.y = f.pilot ? CYBORG_SEATED_OFFSET : PLAYER_BODY_CAMERA_OFFSET-PLAYER_HEIGHT;
         this.rig.pose(pose);
         this.lastPose = pose;
         this.ground=f.grounded; this.hover=f.hover; this.hook=f.hook==='PULLING'; this.pilot=f.pilot ?? '';

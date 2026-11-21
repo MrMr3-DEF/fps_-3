@@ -1,14 +1,14 @@
 import * as THREE from 'three';
+import { CYBORG_SCALE, PLAYER_BODY_CAMERA_OFFSET, PLAYER_HEIGHT, PLAYER_STANDING_HEIGHT } from './config.js';
 import { segmentAabbHitT, segmentRoundedBoxHitT, cylinderIntersectsBox, type Vec3Like } from './gameplayMath.js';
 
 // The suit's soles, crown, shoulders and armed gloves bound the fixed combat
 // proxy. It shares the accepted body anchor; locomotion, props and plume
 // lengths never change which shot the host accepts.
-export const PLAYER_HITBOX_MIN = Object.freeze({ x: -0.55, y: -1.65, z: -0.71 });
-export const PLAYER_HITBOX_MAX = Object.freeze({ x: 0.55, y: 0.56, z: 0.35 });
-export const PLAYER_BODY_CAMERA_OFFSET = 0.35;
-/** World-space vertical offset from Ironmaw's pilot anchor to its lens. */
-export const PILOT_LENS_OFFSET = 1;
+const sole = PLAYER_BODY_CAMERA_OFFSET - PLAYER_HEIGHT;
+export const PLAYER_HITBOX_MIN = Object.freeze({ x: -0.465 * CYBORG_SCALE, y: sole, z: -0.60 * CYBORG_SCALE });
+export const PLAYER_HITBOX_MAX = Object.freeze({ x: 0.465 * CYBORG_SCALE, y: sole + PLAYER_STANDING_HEIGHT + 0.04, z: 0.295 * CYBORG_SCALE });
+export { PLAYER_BODY_CAMERA_OFFSET } from './config.js';
 export const PLAYER_HITBOX_BOUNDING_RADIUS = Math.hypot(
     Math.max(Math.abs(PLAYER_HITBOX_MIN.x), Math.abs(PLAYER_HITBOX_MAX.x)),
     Math.max(Math.abs(PLAYER_HITBOX_MIN.y), Math.abs(PLAYER_HITBOX_MAX.y)),

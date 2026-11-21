@@ -2141,6 +2141,9 @@ function animate(): void {
         const counter = getUI<HTMLElement>('defense-day');
         const day = String(Math.max(1, infantry.day));
         if (counter && counter.textContent !== day) counter.textContent = day;
+        const remainingCounter = getUI<HTMLElement>('enemies-remaining');
+        const remaining = String(infantry.enemiesRemaining);
+        if (remainingCounter && remainingCounter.textContent !== remaining) remainingCounter.textContent = remaining;
     }
     if (state.matchEnded) { state.prevTime = time; return; }
 
@@ -2181,12 +2184,10 @@ function animate(): void {
         if (state.playerMesh) {
             if (state.playerMesh.parent !== mountedActor.pilotAnchor) {
                 mountedBoardFov = state.camera.fov;
-                mountedActor.pilotAnchor.add(state.playerMesh); state.playerMesh.position.set(0, 0, 0);
-                state.playerMesh.rotation.set(0, 0, 0);
                 state.camera.add(state.leftGun!, state.rightGunContainer!); state.leftGun!.visible = state.rightGunContainer!.visible = false;
                 cancelInspect(); smartGoggles?.reset();
             }
-            state.playerMesh.rotation.y = Math.PI * mountedActor.boardProgress;
+            mountedActor.placePilot(state.playerMesh);
             state.playerMesh.visible = mountedActor.pilotVisible;
         }
         syncThirdPersonPresentation();

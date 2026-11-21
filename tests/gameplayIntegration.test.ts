@@ -6,7 +6,7 @@ import { state } from '../src/state.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { rebuildTargetHash } from '../src/world.ts';
-import { BULLET_TRAVEL_DISTANCE, PROJECTILE_RADIUS, PLAYER_HEIGHT } from '../src/config.ts';
+import { BULLET_TRAVEL_DISTANCE, PROJECTILE_RADIUS, PLAYER_HEIGHT, PLAYER_RADIUS, CAMERA_CEILING_CLEARANCE } from '../src/config.ts';
 import { setDamageHandlers } from '../src/damage.ts';
 import { PLAYER_BODY_CAMERA_OFFSET, PLAYER_HITBOX_MIN, PLAYER_HITBOX_MAX } from '../src/playerHitbox.ts';
 import { setWeaponNetworkPort } from '../src/weaponNetworkPort.ts';
@@ -24,7 +24,8 @@ test('50ms enemy-grapple movement stops at pillar instead of crossing it',()=>{
 test('diagonal movement slides along a pillar corner without entering it', () => {
     state.scene = new THREE.Scene();
     state.camera = new THREE.PerspectiveCamera();
-    state.camera.position.set(3.81, 2, 3.81);
+    const collisionExtent = 3 + PLAYER_RADIUS;
+    state.camera.position.set(collisionExtent + .01, PLAYER_HEIGHT, collisionExtent + .01);
     state.controls = { isLocked: true, getObject: () => state.camera } as any;
     state.isPlaying = true;
     state.canJump = false;
@@ -41,7 +42,6 @@ test('diagonal movement slides along a pillar corner without entering it', () =>
 
     updatePlayerPhysics(0.016);
 
-    const collisionExtent = 3.8;
     assert.equal(
         Math.abs(state.camera.position.x) < collisionExtent && Math.abs(state.camera.position.z) < collisionExtent,
         false
@@ -88,13 +88,14 @@ test('horizontal head clearance blocks a low overhang without snapping falling p
     state.isPlaying = true; state.hookState = 'IDLE';
     const roof = new THREE.Object3D(); roof.position.set(2, 6.5, 0);
     roof.userData = { halfW: 1, halfD: 2, halfH: 0.5, height: 1 }; state.obstacles = [roof];
-    state.camera.position.set(0.19, 5.9, 0); state.velocity.set(30, -1, 0);
+    const edge = 1 - PLAYER_RADIUS, headroom = 6 - CAMERA_CEILING_CLEARANCE;
+    state.camera.position.set(edge - .01, headroom + .05, 0); state.velocity.set(30, -1, 0);
     updatePlayerPhysics(0.001);
-    assert.ok(state.camera.position.x <= 0.2, 'head clearance is part of horizontal admission');
-    assert.ok(state.camera.position.y > 5.85, 'falling does not invoke an upward ceiling snap');
-    state.camera.position.set(0.19, 5.8, 0); state.velocity.set(30, -1, 0);
+    assert.ok(state.camera.position.x <= edge, 'head clearance is part of horizontal admission');
+    assert.ok(state.camera.position.y > headroom, 'falling does not invoke an upward ceiling snap');
+    state.camera.position.set(edge - .01, headroom - .05, 0); state.velocity.set(30, -1, 0);
     updatePlayerPhysics(0.001);
-    assert.ok(state.camera.position.x > 0.2, 'enough clearance allows entry while falling');
+    assert.ok(state.camera.position.x > edge, 'enough clearance allows entry while falling');
     state.obstacles = [];
 });
 
@@ -186,7 +187,7 @@ test('analog movement preserves partial speed, caps diagonals and is ignored whi
     touchMove.x = touchMove.y = 0;
 });
 
-test('normal jumps reach 135% of player height across frame rates and reset on landing', async () => {
+test('normal jumps keep their 2.7-unit rise across frame rates and reset on landing', async () => {
     const { NORMAL_JUMP_FORCE, PLAYER_HEIGHT } = await import('../src/config.ts');
     for (const fps of [30, 60, 120, 240]) {
         state.camera = new THREE.PerspectiveCamera();
@@ -207,7 +208,7 @@ test('normal jumps reach 135% of player height across frame rates and reset on l
             peak = Math.max(peak, state.camera.position.y - PLAYER_HEIGHT);
             if (state.canJump) break;
         }
-        assert.ok(Math.abs(peak - PLAYER_HEIGHT * 1.35) < 0.06, `${fps} FPS: peak ${peak}`);
+        assert.ok(Math.abs(peak - 2.7) < 0.06, `${fps} FPS: peak ${peak}`);
         assert.equal(state.canJump, true);
         assert.equal(state.normalJumpActive, false);
         assert.equal(state.camera.position.y, PLAYER_HEIGHT);

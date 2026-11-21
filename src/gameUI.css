@@ -1620,22 +1620,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 #mecha-ending-cover { position: fixed; inset: 0; background: #000; opacity: 0; z-index: 14; pointer-events: none; }
 body.mecha-ending #rotate-device { display: none; }
 
-#weapon-details {
-    flex: none; box-sizing: border-box; margin: 4px 0 8px; border: 1px solid #8be9fb80;
-    border-radius: var(--control-radius); background: #0c3040ed; color: #effcff;
-}
 #weapon-reload[hidden] { display: none; }
-#weapon-details summary {
-    display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 3px 12px;
-    box-sizing: border-box; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none;
-}
-#weapon-details summary::after {
-    content: ''; margin-left:auto; width:6px; height:6px;
-    border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(45deg);
-}
-#weapon-details[open] summary::after { transform: rotate(225deg); }
-#weapon-details summary::-webkit-details-marker { display:none; }
-#weapon-details summary:focus-visible { outline: 2px solid #bcf7ff; }
 #character-stage { position: relative; }
 #character-stage .preview-retry { pointer-events: auto; position: absolute; top: 40%; right: 12%; width:auto; }
 #character-stage .preview-retry[hidden] { display: none; }
@@ -1644,7 +1629,6 @@ body.mecha-ending #rotate-device { display: none; }
 #panel-weapons .weapon-view-controls [aria-pressed="true"] { border-color:#bcf7ff; background:#0b6480; }
 #panel-weapons .weapon-tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:5px 0 10px; }
 #panel-weapons .weapon-tabs .menu-btn { margin:0; padding:7px; min-height:37px; font-size:14px; }
-#weapon-compact-specs { display:grid; max-height:18vh; overflow:auto; gap:3px; padding:0 12px 10px; font-size:12px; }
 .settings-character-preview { position:relative; flex:none; height:clamp(54px, 16dvh, 132px); border:1px solid #8be9fb80;
     border-radius:var(--control-radius); background:linear-gradient(140deg,#578ca4,#a6d7dc); overflow:hidden; }
 .settings-character-preview #character-stage { height:100%; min-height:0; }
@@ -1658,7 +1642,6 @@ body.mecha-ending #rotate-device { display: none; }
     #panel-pause .menu-btn, #panel-weapons .menu-btn { min-height:37px; padding:6px 10px; margin-bottom:5px; }
     #panel-weapons .weapon-tabs { grid-template-columns:repeat(3,minmax(0,1fr)); margin:1px 0 5px; }
     #panel-weapons .weapon-tabs .menu-btn { font-size:12px; min-height:32px; }
-    #weapon-details { margin:2px 0 4px; }
     #title { top: max(16px,env(safe-area-inset-top)); }
     #menu-goggles-target-layer:has(.is-lobby-peer) .goggles-target-label-panel { font-size:10px; }
 }

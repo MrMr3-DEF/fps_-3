@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PLAYER_HEIGHT } from './config.js';
+import { CYBORG_SCALE, PLAYER_HEIGHT } from './config.js';
 import type { CyborgAvatar, CyborgPose } from './cyborgAvatar.js';
 
 // Only the sleeve is fitted to the bottom of the holder frame. Keeping an
@@ -144,9 +144,9 @@ export class FirstPersonReloadFrame {
         const run = pose.body.startsWith('Run.') && !pose.reducedMotion ? pose.runWeight ?? 1 : 0;
         const phase = 2 * Math.PI * pose.bodyTime / .5; // one complete baked running cycle
         const ease = 1 - Math.exp(-14*dt);
-        this.sway.x += (.012*run*Math.sin(phase)-this.sway.x)*ease;
-        this.sway.y += (.009*run*Math.cos(2*phase)-this.sway.y)*ease;
-        this.position.set(this.sway.x, -PLAYER_HEIGHT + .16 + this.sway.y, -.40)
+        this.sway.x += (.010*CYBORG_SCALE*run*Math.sin(phase)-this.sway.x)*ease;
+        this.sway.y += (.0076*CYBORG_SCALE*run*Math.cos(2*phase)-this.sway.y)*ease;
+        this.position.set(this.sway.x, -PLAYER_HEIGHT + .135*CYBORG_SCALE + this.sway.y, -.337*CYBORG_SCALE)
             .applyQuaternion(camera.quaternion).add(camera.position);
         rig.root.position.copy(parent.worldToLocal(this.position));
         parent.getWorldQuaternion(this.parentRotation);
@@ -170,7 +170,7 @@ export class FirstPersonReloadFrame {
             const y = THREE.MathUtils.clamp(-.32+.14*(fy*lid.y/Math.max(.15,depth)-projection[9]+.32),-.46,-.20);
             const slopeX = (x+projection[8])/fx, slopeY = (y+projection[9])/fy;
             // Frame the drawer and both hands at their fitted size across aspect ratios.
-            let forward = Math.max(0, .70 * fy * Math.tan(THREE.MathUtils.degToRad(75/2)) - depth);
+            let forward = Math.max(0, .59 * CYBORG_SCALE * fy * Math.tan(THREE.MathUtils.degToRad(75/2)) - depth);
             for (const point of this.points) {
                 const d = -point.z;
                 // With the lid on its chosen screen ray, each other point's
@@ -179,8 +179,8 @@ export class FirstPersonReloadFrame {
                 const marginX = dx < 0 ? x+.86 : .86-x;
                 const marginY = dy < 0 ? y+.82 : .48-y;
                 forward = Math.max(forward, camera.near+.14-d,
-                    (Math.abs(dx)+.065)*fx/marginX-d,
-                    (Math.abs(dy)+.065)*fy/marginY-d);
+                    (Math.abs(dx)+.055*CYBORG_SCALE)*fx/marginX-d,
+                    (Math.abs(dy)+.055*CYBORG_SCALE)*fy/marginY-d);
             }
             const weight = THREE.MathUtils.smoothstep(progress,0,.16)*(1-THREE.MathUtils.smoothstep(progress,.83,1));
             this.desired.set(slopeX*(depth+forward)-lid.x,slopeY*(depth+forward)-lid.y,-forward).multiplyScalar(weight);

@@ -15,7 +15,6 @@ type InteractionObstacleQuery = (sx: number, sz: number, ex: number, ez: number,
 export const GOTH_GESTURES = ['Wave', 'Explain', 'Shrug', 'Agree'] as const;
 export type GothGesture = typeof GOTH_GESTURES[number];
 export const GOTH_INTERACTION_RANGE = 4;
-// The visible bean avatar is 2.2 units tall at its 1.5 world scale (3.3 total).
 export const GOTH_MODEL_HEIGHT = 3.3 * 1.08;
 export const GOTH_FACE_HEIGHT = GOTH_MODEL_HEIGHT * 0.9;
 export const GOTH_CONVERSATION_DISTANCE = 3.2;
@@ -237,7 +236,6 @@ export class GothGirlfriend {
             const gltf = await new GLTFLoader().loadAsync(modelUrl);
             if (this.disposed) { disposeModel(gltf.scene); return; }
             this.model = gltf.scene;
-            // Compare against the visible player model, rather than the camera's eye height.
             fitGothModel(this.model);
             this.group.add(this.model);
             this.animator = new GothAnimator(this.model);

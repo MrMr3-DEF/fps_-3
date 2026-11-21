@@ -6,8 +6,8 @@ import { loadIronmawTestAsset } from './ironmawTestAsset.ts';
 import { MechaPilot } from '../src/mechaPilot.ts';
 import { MechaCombat } from '../src/mechaCombat.ts';
 import { applyLookInput, setLookInputHandler } from '../src/lookInput.ts';
-import { attachPlayerAvatar, CYBORG_SEATED_OFFSET } from '../src/playerAvatar.ts';
-import { loadCyborgTestAssets, armorBounds } from './cyborgTestAsset.ts';
+import { attachPlayerAvatar } from '../src/playerAvatar.ts';
+import { loadCyborgTestAssets, visitArmorVertices } from './cyborgTestAsset.ts';
 import { updateHook } from '../src/grapple.ts';
 import { state } from '../src/state.ts';
 import { playerTouchesWorldBox } from '../src/playerHitbox.ts';
@@ -48,40 +48,77 @@ test('boarding eases for 0.45s, plays full Mount and protected boot/reveal, and 
     actor.preparePilotView(false); assert.equal(helmet.visible, true); actor.restorePilotView(); actor.dispose();
 });
 
-test('seated cyborg visor aligns to lens and armor clears cabin and helmet through Mount', async () => {
+test('full-size pilot settles onto the cushion and clears the moving cockpit armor', async () => {
     await loadCyborgTestAssets();
     const actor = await defeated(), pilot = new THREE.Group(), avatar = attachPlayerAvatar(pilot, 0x55cc33)!;
-    pilot.rotation.y = Math.PI;
-    avatar.rig.root.position.y = CYBORG_SEATED_OFFSET;
-    avatar.rig.pose({body:'Pilot.Seated', bodyTime:0, weapon:'PISTOL'});
-    actor.pilotAnchor.add(pilot);
+    const standingScale = avatar.rig.root.getWorldScale(new THREE.Vector3());
     actor.beginBoarding(actor.seatAnchor.getWorldPosition(new THREE.Vector3()), new THREE.Quaternion());
-    const pilotBox = armorBounds(pilot);
-    const triangle = new THREE.Triangle(), inverse = new THREE.Matrix4();
-    const verify = (label: string) => {
-        pilot.updateWorldMatrix(true, true); inverse.copy(pilot.matrixWorld).invert();
-        for (const name of ['M_UpperTorso_Cavity', 'M_ChestDoor_L', 'M_ChestDoor_R', 'M_Abdomen', 'M_HelmetShell', 'M_EyeLens']) {
-            const mesh = actor.group.getObjectByName(name) as THREE.SkinnedMesh; const geometry = mesh.geometry, index = geometry.index;
-            for (let vertex = 0; vertex < (index?.count ?? geometry.attributes.position.count); vertex += 3) {
-                for (const [offset, point] of [[0, triangle.a], [1, triangle.b], [2, triangle.c]] as const)
-                    mesh.getVertexPosition(index ? index.getX(vertex + offset) : vertex + offset, point).applyMatrix4(mesh.matrixWorld).applyMatrix4(inverse);
-                assert.equal(pilotBox.intersectsTriangle(triangle), false, `${name} clips pilot during ${label}`);
+    const triangle = new THREE.Triangle(), inverse = new THREE.Matrix4(), pilotBox = new THREE.Box3();
+    const verify = () => {
+        if (!actor.ownsPilot) return;
+        actor.placePilot(pilot);
+        avatar.update(1 / 24, { weapon:'AR', alive:true, lifeId:1, grounded:false, hover:false, hook:'IDLE',
+            velocity:absent.position, yaw:0, pitch:0, pilot:actor.pilotAvatarPhase, pilotProgress:actor.pilotAvatarProgress });
+        pilot.updateWorldMatrix(true, true);
+        assert.ok(avatar.rig.root.getWorldScale(new THREE.Vector3()).distanceTo(standingScale) < 1e-5);
+        inverse.copy(pilot.matrixWorld).invert();
+        // The pan and backrest are two convex rigid pieces within the cavity mesh.
+        // Test the deformed suit against their faces; the space between the boots is empty.
+        const solids = new Map<string, THREE.Plane[]>();
+        const readTriangle = (mesh: THREE.SkinnedMesh, i: number) => {
+            const index = mesh.geometry.index!;
+            for (const [offset, point] of [[0,triangle.a], [1,triangle.b], [2,triangle.c]] as const)
+                mesh.getVertexPosition(index.getX(i + offset), point).applyMatrix4(mesh.matrixWorld).applyMatrix4(inverse);
+        };
+        for (const name of ['M_UpperTorso_Cavity', 'M_Abdomen']) {
+            const mesh = actor.group.getObjectByName(name) as THREE.SkinnedMesh, index = mesh.geometry.index!;
+            for (let i=0; i<index.count; i+=3) {
+                const bone = mesh.skeleton.bones[mesh.geometry.attributes.skinIndex.getX(index.getX(i))].name;
+                if (name === 'M_UpperTorso_Cavity' && !['PART_UpperTorso_Cavity_20','PART_UpperTorso_Cavity_19'].includes(bone)) continue;
+                let faces = solids.get(bone);
+                if (!faces) solids.set(bone, faces = []);
+                readTriangle(mesh, i);
+                const plane = triangle.getPlane(new THREE.Plane());
+                if (!faces.some(p => p.normal.dot(plane.normal) > .999)) faces.push(plane);
+            }
+        }
+        const pan = solids.get('PART_UpperTorso_Cavity_20');
+        let support = Infinity, penetration = 0;
+        pilotBox.makeEmpty();
+        visitArmorVertices(pilot, (point, bone) => {
+            pilotBox.expandByPoint(point);
+            for (const faces of solids.values()) {
+                let separation = -Infinity;
+                for (const plane of faces) separation = Math.max(separation, plane.distanceToPoint(point));
+                penetration = Math.min(penetration, separation);
+                if (faces === pan && /^(thigh|pelvis)/.test(bone)) support = Math.min(support, separation);
+            }
+        });
+        assert.ok(penetration > -.045, `pilot goes through chair during ${actor.pilotAvatarPhase} at ${actor.pilotAvatarProgress}: ${penetration}`);
+        if (actor.pilotAvatarPhase === 'Seated') assert.ok(support < .045, 'hips or thighs rest on the cushion');
+        for (const name of ['M_ChestDoor_L', 'M_ChestDoor_R', 'M_HelmetShell', 'M_EyeLens']) {
+            const mesh = actor.group.getObjectByName(name) as THREE.SkinnedMesh;
+            for (let i=0; i<mesh.geometry.index!.count; i+=3) {
+                readTriangle(mesh, i);
+                assert.equal(pilotBox.intersectsTriangle(triangle), false, `${name} clips pilot during ${actor.mode}`);
             }
         }
     };
-    const sample = (seconds: number, label: string) => {
-        for (let time = 0; time < seconds - 1e-9; time += 1 / 24) { actor.update(Math.min(1 / 24, seconds - time), absent); verify(label); }
+    const sample = (seconds: number) => {
+        for (let t=0; t<seconds-1e-9; t+=1/12) { advance(actor, Math.min(1/12, seconds-t)); verify(); }
     };
-    sample(8.3, 'Mount');
-    const head = armorBounds(pilot, true).getCenter(new THREE.Vector3()).applyMatrix4(pilot.matrixWorld);
-    assert.ok(Math.abs(head.y - actor.viewAnchor.getWorldPosition(new THREE.Vector3()).y) < 0.1, 'head at actual lens height');
-    actor.toggleHelmet(); sample(1.4, 'HeadOpen'); actor.toggleHelmet(); sample(1.4, 'HeadClose');
-    actor.requestRocket(); const camera = new THREE.PerspectiveCamera();
-    for (let t = 0; t < 3.2; t += 1 / 24) {
-        actor.update(1 / 24, absent); actor.fireRocket(camera, [], (_sx, _sz, _ex, _ez, out) => { out.length = 0; return out; }); verify('RocketFire');
+    verify(); sample(8.3);
+    actor.toggleHelmet(); sample(1.4); actor.toggleHelmet(); sample(1.4);
+    actor.requestRocket();
+    const camera = new THREE.PerspectiveCamera();
+    for (let t=0; t<3.2; t+=.1) {
+        advance(actor, .1);
+        actor.fireRocket(camera, [], (_sx, _sz, _ex, _ez, out) => { out.length = 0; return out; });
+        verify();
     }
-    assert.equal(actor.requestExit(), true); sample(8, 'reversed Mount'); assert.equal(actor.canMount, true);
-    actor.dispose(); assert.equal(pilot.parent, null, 'GLB disposal releases externally owned pilot visuals'); avatar.dispose();
+    assert.equal(actor.requestExit(), true); sample(8);
+    assert.equal(actor.canMount, true);
+    actor.dispose(); assert.equal(pilot.parent, null); avatar.dispose();
 });
 
 test('mounted destruction releases the living pilot at immediate breakup, then finishes independently without remounting', async () => {

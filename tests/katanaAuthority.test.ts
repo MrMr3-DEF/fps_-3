@@ -136,7 +136,7 @@ test('both swings catch entry through 0.4s, but never later; repeated contact hi
 test('damage follows attacker movement, yaw and pitch; a new swing resets deduplication', () => {
     for (const move of ['position', 'yaw', 'pitch']) {
         const f = fixture(); f.victim.position.set(0, 2, 3); f.far.position.z = -40;
-        if (move === 'pitch') f.victim.position.set(0, 6, 0);
+        if (move === 'pitch') f.victim.position.set(0, 7.5, 0);
         f.command('start'); f.command('release'); assert.equal(f.hits.length, 0);
         if (move === 'position') f.attacker.position.z = 5;
         if (move === 'yaw') f.attacker.yaw = Math.PI;

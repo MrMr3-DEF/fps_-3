@@ -12,9 +12,9 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-DLLgoP_T.js"></script>
+  <script type="module" crossorigin src="/assets/index-DjodWEpZ.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-D9SrnXRD.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-DtwZV697.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-RQGRRT_I.css">
 </head>
 
 <body>
@@ -69,11 +69,10 @@
             <div id="panel-weapons" class="menu-panel">
                 <div class="weapon-view-controls" role="group" aria-label="Weapon preview">
                     <button type="button" class="menu-btn secondary" id="weapon-held" aria-pressed="true">Held view</button>
-                    <button type="button" class="menu-btn secondary" id="weapon-closeup" aria-pressed="false">Close-up</button>
+                    <button type="button" class="menu-btn secondary" id="weapon-closeup" aria-pressed="false">Specifications</button>
                 </div>
                 <div class="weapon-tabs" aria-label="Choose a weapon"></div>
                 <button type="button" id="weapon-reload" class="menu-btn secondary">Replay reload</button>
-                <details id="weapon-details"><summary>Specifications</summary><div id="weapon-compact-specs"></div></details>
                 <button class="menu-btn secondary" data-menu-back>Back</button>
             </div>
 
@@ -342,6 +341,7 @@
     <div id="ui">
         <div>Targets Eliminated: <span id="score">0</span></div>
         <div>Day <span id="defense-day">1</span></div>
+        <div>Enemies remaining: <span id="enemies-remaining">0</span></div>
         <div id="pvp-stats">
             Kills: <span id="kills">0</span> &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
         </div>

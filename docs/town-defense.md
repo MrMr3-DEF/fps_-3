@@ -17,12 +17,13 @@ signed turn angle, and clip time so observers see the same footwork.
 
 | Robot | Standing height | HP | Damage per hit | Attack |
 | --- | ---: | ---: | ---: | --- |
-| Base | ≈8.57 m | 5 | 1 | Rifle with a 50 m spherical range and a three-second interval |
-| Fast | ≈6.86 m | 3 | 1 | Quick melee at the LightHit contact frame |
-| Big | 12 m | 10 | 3 | Heavy melee at the HeavyHit contact frame |
+| Base | ≈8.57 m | 20 | 1 | Rifle with a 50 m spherical range and a three-second interval |
+| Fast | ≈6.86 m | 10 | 1 | Quick melee at the LightHit contact frame |
+| Big | 12 m | 30 | 3 | Heavy melee at the HeavyHit contact frame |
 
 The HUD shows **Defend the Town** on entering play and the day below the
-elimination counter. Aim at the central well to see the **Wall durability**
+elimination counter. **Enemies remaining** appears below the day and counts living infantry
+from every wave plus robots waiting to spawn. Aim at the central well to see the **Wall durability**
 bar above its roof. Aiming through the opening also shows the bar. Scoped goggles scan visible robots as **Enemy**. The locator tracks
 players and Ironmaw. Each defeated bot counts toward Targets Eliminated.
 

@@ -11,7 +11,7 @@ import { MechaCameraHandoff, resolveThirdPersonCameraPosition } from '../src/thi
 import { createAkimboGuns, createPlayerMesh, prepareLocalPlayerAvatar, disposePlayerVisuals, syncThirdPersonPresentation } from '../src/weapons.ts';
 import { state } from '../src/state.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
-import { playerTouchesWorldBox, PLAYER_BODY_CAMERA_OFFSET } from '../src/playerHitbox.ts';
+import { playerTouchesWorldBox, PLAYER_HITBOX_MIN, PLAYER_BODY_CAMERA_OFFSET } from '../src/playerHitbox.ts';
 
 const absent: MechaPlayer = { position: new THREE.Vector3(), alive: false, grounded: false };
 const part = (x = 0, z = 0, bottom = 0, top = 2) => ({ x, z, halfW: 1, halfD: 1, bottom, top });
@@ -131,8 +131,8 @@ test('impact kills on either animated foot, shin/knee or thigh at varied frame r
 
 test('oriented leg contact rejects height gaps and space between legs', () => {
     const min = new THREE.Vector3(1.5, 0, -1), max = new THREE.Vector3(3, 6, 1);
-    assert.equal(playerTouchesWorldBox(new THREE.Vector3(1.5, 7.65, 0), 0, min, max, 0.1), true);
-    assert.equal(playerTouchesWorldBox(new THREE.Vector3(1.5, 7.8, 0), 0, min, max, 0.1), false);
+    assert.equal(playerTouchesWorldBox(new THREE.Vector3(1.5, max.y - PLAYER_HITBOX_MIN.y, 0), 0, min, max, 0.1), true);
+    assert.equal(playerTouchesWorldBox(new THREE.Vector3(1.5, max.y - PLAYER_HITBOX_MIN.y + .15, 0), 0, min, max, 0.1), false);
     assert.equal(playerTouchesWorldBox(new THREE.Vector3(0, 2, 0), 0, min, max, 0.1), false);
 });
 

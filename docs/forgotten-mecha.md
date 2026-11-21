@@ -78,8 +78,7 @@ deal nine damage once to eligible player lives, excluding the launching actor.
 
 Grapple into the defeated cockpit's actual front opening. Armor remains an ordinary
 surface grapple. The pull sweeps world cover and clamps arrival to the physical
-seat. Boarding and complete Mount startup protect the occupant. The visual pilot,
-physical seat and optical camera use separate anchors.
+boarding anchor. Boarding and the full Mount startup protect the occupant.
 
 First-person startup relocates behind opaque cover, fills an orange loading bar,
 then reveals mounted goggles. Third-person entry captures the saved view, swivels
@@ -132,6 +131,11 @@ not cancel an attack; exit waits for committed animation to finish.
 
 ### Visible pilot and voluntary shutdown
 
+The cyborg turns into the open cockpit and settles onto the modeled seat cushion
+at full on-foot scale. The chair follows the torso, with the pilot reclined against
+the backrest and knees bent into the footwell. The optical camera follows the
+mecha’s eye. Opening the helmet while driving keeps the chest panels closed.
+
 Manual shielding needs a completed build. Release/exhaustion removes protection
 immediately; recharge begins on deactivation, and exhaustion requires release
 before reactivation. It does not run enemy automatic-shutdown logic.
@@ -140,7 +144,7 @@ Voluntary exit closes the helmet, aligns the torso and reverses the startup
 presentation and Mount. Clearance is checked before shutdown and again at release.
 A blocked preflight leaves controls active and reports a retry message. A newly
 blocked exit restores piloting without refilling energy. A valid exit restores
-the standing cyborg’s scale, controls, equipped weapon, camera and gravity while preserving HP, life,
+the standing pose, controls, equipped weapon, camera and gravity while preserving HP, life,
 fuel and score. The zero-HP wreck remains mountable; remounting restores 50 HP
 and full shield energy.
 

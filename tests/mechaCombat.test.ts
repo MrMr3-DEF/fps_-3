@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { MechaCombat, classifyMechaAttack, type MechaLaserInput } from '../src/mechaCombat.ts';
 import { MECHA_LASER_DAMAGE, MECHA_TORSO_YAW_SPEED } from '../src/config.ts';
 import { segmentRoundedBoxHitT, cylinderIntersectsBox } from '../src/gameplayMath.ts';
-import { segmentPlayerBeamHitT } from '../src/playerHitbox.ts';
+import { PLAYER_HITBOX_MIN, segmentPlayerBeamHitT } from '../src/playerHitbox.ts';
 
 function setup() {
     const damage: number[] = [];
@@ -147,7 +147,7 @@ test('thick beam uses rounded box edges and cannot hit a body beyond its physica
     const min = { x: -1, y: -1, z: -1 }, max = { x: 1, y: 1, z: 1 };
     assert.equal(segmentRoundedBoxHitT({ x: 1.8, y: 1.8, z: -10 }, { x: 1.8, y: 1.8, z: 10 }, min, max, 1), null);
     assert.notEqual(segmentRoundedBoxHitT({ x: 1.6, y: 1.6, z: -10 }, { x: 1.6, y: 1.6, z: 10 }, min, max, 1), null);
-    assert.equal(segmentPlayerBeamHitT({ x: 0, y: 23, z: 0 }, { x: 0, y: 23, z: 700 }, { x: 0, y: 23, z: 701.2 }, 0, 1), null);
+    assert.equal(segmentPlayerBeamHitT({ x: 0, y: 23, z: 0 }, { x: 0, y: 23, z: 700 }, { x: 0, y: 23, z: 700 - PLAYER_HITBOX_MIN.z + .1 }, 0, 1), null);
     const start = { x: 0, y: 0, z: 0 }, end = { x: 0, y: 0, z: 10 };
     assert.equal(cylinderIntersectsBox(start, end, { x: -0.1, y: -0.1, z: 10.1 }, { x: 0.1, y: 0.1, z: 10.2 }, 1), false, 'flat cap has no capsule extension');
     assert.equal(cylinderIntersectsBox(start, end, { x: -0.1, y: -0.1, z: 9.9 }, { x: 0.1, y: 0.1, z: 10.2 }, 1), true);

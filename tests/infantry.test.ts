@@ -52,7 +52,7 @@ test('dawn adds increasingly large mixed waves at deterministic reachable border
         assert.equal(first.bots.length, 5);
         assert.ok(first.bots.every(bot => bot.kind === 'base' && Math.max(Math.abs(bot.position.x), Math.abs(bot.position.z)) > 980));
         assert.equal(new Set(first.bots.map(bot => JSON.stringify(bot.position))).size, 5);
-        assert.equal(defense.damage(ENEMY_COUNT, 4).killed, false);
+        assert.equal(defense.damage(ENEMY_COUNT, INFANTRY.base.hp - 1).killed, false);
         assert.equal(defense.damage(ENEMY_COUNT, 1).killed, true);
         assert.equal(defense.damage(ENEMY_COUNT, 1).accepted, false);
         assert.equal(targetData(targets[0]).hp, 0);
@@ -65,6 +65,7 @@ test('dawn adds increasingly large mixed waves at deterministic reachable border
         }
         defense.update(.05, 479.99, []); defense.update(.05, .04, []);
         assert.equal(defense.snapshot().bots.length, 48);
+        assert.equal(defense.enemiesRemaining, 54);
         defense.update(4, 4.04, []);
         defense.update(.05, 4.09, []);
         const replenished = defense.snapshot();
@@ -120,18 +121,20 @@ test('infantry damage the wall at contact and commit the wall loss once', async 
 test('infantry snapshot validates bounds and late joiners reject stale state or old kills', async () => {
     const { defense, targets } = await arena({}, false);
     try {
-        const snapshot = { sequence: 9, day: 3, wallHp: 419, bots: [pose(0, 'big', 900, 400)] };
+        const snapshot = { sequence: 9, day: 3, queued: 7, wallHp: 419, bots: [pose(0, 'big', 900, 400)] };
         const packet = { type: 'infantry_state', state: snapshot };
         assert.deepEqual(parseNetworkPacket(packet), packet);
         assert.equal(parseNetworkPacket({ ...packet, state: { ...snapshot, bots: [...snapshot.bots, ...snapshot.bots] } }), null);
         assert.equal(parseNetworkPacket({ ...packet, state: { ...snapshot, wallHp: 501 } }), null);
+        assert.equal(parseNetworkPacket({ ...packet, state: { ...snapshot, queued: -1 } }), null);
         defense.receive(snapshot);
+        assert.equal(defense.enemiesRemaining, 8);
         defense.receive({ ...snapshot, sequence: 8, wallHp: 10, bots: [] });
         assert.equal(defense.wallHp, 419);
         assert.equal(defense.day, 3);
         defense.receive({ ...snapshot, sequence: 10, bots: [{ ...snapshot.bots[0], revision: 3 }] });
         defense.acceptKill({ kind: 'kill', slot: 0, revision: 1, score: 1, killer: null });
-        assert.equal(targetData(targets[0]).hp, 10);
+        assert.equal(targetData(targets[0]).hp, INFANTRY.big.hp);
     } finally { defense.dispose(); }
 });
 

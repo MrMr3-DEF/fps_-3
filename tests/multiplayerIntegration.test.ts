@@ -12,7 +12,7 @@ import { getTownSpawn } from '../src/town.ts';
 import { getWorldSeed, rebuildTargetHash } from '../src/world.ts';
 import { state } from '../src/state.ts';
 import { setMultiplayerWorldLoader, onMultiplayerDisconnected, hostGame, joinGame, disconnectMultiplayer, broadcastToAll, broadcastTargetKill, startHostMatch, authorizeClientPacket, sendLocalState, updateRemotePeers } from '../src/multiplayer.ts';
-import { PROJECTILE_SPEED, GRAPPLE_DRAW_TIME, HEAVY_HANDOFF_TIME, BULLET_TRAVEL_DISTANCE, ENEMY_COUNT, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED, WEAPON_STATS, NETWORK_PROTOCOL_VERSION, MAX_PENDING_ROOM_CONNECTIONS } from '../src/config.ts';
+import { PLAYER_HEIGHT, FIREARM_MUZZLE_REACH, MAX_MUZZLE_LATERAL, PROJECTILE_SPEED, GRAPPLE_DRAW_TIME, HEAVY_HANDOFF_TIME, BULLET_TRAVEL_DISTANCE, ENEMY_COUNT, PLAYER_MAX_HP, NETWORK_MOVEMENT_BURST, NETWORK_MOVEMENT_SPEED, WEAPON_STATS, NETWORK_PROTOCOL_VERSION, MAX_PENDING_ROOM_CONNECTIONS } from '../src/config.ts';
 import { Peer, Connection as FakeConnection } from './fakePeer.ts';
 
 class Connection extends FakeConnection {
@@ -62,7 +62,7 @@ function update(name:string,lifeId=0){return {type:'update' as const,lifeId,user
 function stagePeer(connection: Connection, packet: UpdatePacket): void {
     const snapshot = connection.sent.find(item => item.type === 'world_snapshot');
     const spawn = getTownSpawn(snapshot.seed, 'house', snapshot.spawnHouseSlot);
-    const steps = Math.ceil(Math.hypot(packet.pos.x - spawn.x, packet.pos.y - 2, packet.pos.z - spawn.z) / (NETWORK_MOVEMENT_BURST / 2));
+    const steps = Math.ceil(Math.hypot(packet.pos.x - spawn.x, packet.pos.y - PLAYER_HEIGHT, packet.pos.z - spawn.z) / (NETWORK_MOVEMENT_BURST / 2));
     const now = performance.now(), previous = Object.getOwnPropertyDescriptor(performance, 'now');
     let clock = now - steps * 200 - HEAVY_HANDOFF_TIME * 1000 - 20;
     Object.defineProperty(performance, 'now', { configurable: true, value: () => clock });
@@ -73,7 +73,7 @@ function stagePeer(connection: Connection, packet: UpdatePacket): void {
         for (let i = 1; i <= steps; i++) {
             clock += 200;
             const t = i / steps;
-            send({ x: THREE.MathUtils.lerp(spawn.x, packet.pos.x, t), y: THREE.MathUtils.lerp(2, packet.pos.y, t),
+            send({ x: THREE.MathUtils.lerp(spawn.x, packet.pos.x, t), y: THREE.MathUtils.lerp(PLAYER_HEIGHT, packet.pos.y, t),
                 z: THREE.MathUtils.lerp(spawn.z, packet.pos.z, t) }, 'PISTOL', 'IDLE', null);
         }
         if (packet.activeWeapon !== 'PISTOL') {
@@ -249,7 +249,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         await hostGame('Host','ABCDEFGH','create-room');const host=Peer.latest;
         state.dayNightElapsedSeconds=137.25;
         const hostSpawn=getTownSpawn(getWorldSeed(),'house');
-        assert.deepEqual(state.camera!.position.toArray(),[hostSpawn.x,2,hostSpawn.z]);
+        assert.deepEqual(state.camera!.position.toArray(),[hostSpawn.x,PLAYER_HEIGHT,hostSpawn.z]);
         const denied=new Connection('intruder');host.emit('connection',denied);await tick();assert.equal(denied.open,false);assert.equal(denied.sent.length,0);
         await assert.rejects(registerTurnSession('ABCDEFGH','join-room','host','duplicate'),/username/);
         const a=await registerTurnSession('ABCDEFGH','join-room','Pilot','peer-a');
@@ -307,7 +307,7 @@ test('Worker-backed host admission, fixed names, host kill credit, departure and
         const grants = ca.sent.filter(p => p.type === 'player_respawn');
         assert.equal(grants.length,1);
         const spawn = getTownSpawn(getWorldSeed(),'church');
-        assert.deepEqual(grants[0].pos,{x:spawn.x,y:2,z:spawn.z});
+        assert.deepEqual(grants[0].pos,{x:spawn.x,y:PLAYER_HEIGHT,z:spawn.z});
         assert.ok(grants[0].cooldownMs > 0);
         assert.deepEqual(state.peers['peer-a'].mesh.position.toArray(),state.peers['peer-a'].targetPosition.toArray());
         ca.close();await tick();assert.ok(cb.sent.some(p=>p.type==='peer_left'&&p.peerId==='peer-a'));
@@ -354,7 +354,7 @@ test('client rejects host without proof and applies kills while waiting to play'
         conn.emit('data',{...update('Host'),dayNightElapsedSeconds:57});
         assert.equal(state.dayNightElapsedSeconds,57,'host clock keeps synchronizing while this client is in its lobby');
         const spawn=getTownSpawn(1,'house',2);
-        assert.deepEqual(state.camera!.position.toArray(),[spawn.x,2,spawn.z]);
+        assert.deepEqual(state.camera!.position.toArray(),[spawn.x,PLAYER_HEIGHT,spawn.z]);
         state.camera!.position.x+=3;
         conn.emit('data',{type:'world_snapshot',gameStarted:false,username:'Guest3',spawnHouseSlot:1,seed:99,score:0,dayNightElapsedSeconds:0,targets:[]});
         assert.equal(state.camera!.position.x,spawn.x+3,'duplicate snapshots cannot teleport an existing player');
@@ -489,11 +489,11 @@ test('host canonical sniper presentation stops on the floor', async () => {
             type: 'fire', weapon: 'SNIPER', shotId: 1, spreadSeed: 1, barrelPos: { x, y, z },
             dir: { x: 0, y: -1, z: 0 }, hitPoint: { x, y: -500, z },
         });
-        assert.equal(shoot(0, 2, -4), null, 'a distant claimed barrel is rejected');
-        assert.equal(shoot(2.5, 2, 0), null, 'the sniper cannot move its forward reach sideways');
+        assert.equal(shoot(0, 2, -FIREARM_MUZZLE_REACH.SNIPER - .1), null, 'a distant claimed barrel is rejected');
+        assert.equal(shoot(MAX_MUZZLE_LATERAL + .1, 2, 0), null, 'the sniper cannot move its forward reach sideways');
         assert.equal(shoot(0, -.01, 0), null, 'a claimed barrel across the floor is rejected');
         const fire = shoot(.2, 1.8, -2.55);
-        assert.equal(fire?.type, 'fire', 'the fitted sniper extends past the old two-metre limit');
+        assert.equal(fire?.type, 'fire', 'a valid fitted sniper barrel is accepted');
         if (fire?.type === 'fire') assert.deepEqual(fire.hitPoint, { x: .2, y: 0, z: -2.55 });
     } finally { disconnectMultiplayer(); }
 });

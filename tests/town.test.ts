@@ -283,12 +283,12 @@ test('players enter and exit every doorway without teleporting onto the roof', (
         for (const b of generateTownLayout(seed)) {
             const axis = b.doorAxis;
             const edge = (axis === 'x' ? b.width : b.depth) / 2;
-            player(b.x, 2, b.z);
+            player(b.x, PLAYER_HEIGHT, b.z);
             state.camera!.position[axis] -= b.doorSide * (edge + 3);
             for (let frame = 0; frame < 12; frame++) {
                 state.velocity[axis] = b.doorSide * 20;
                 updatePlayerPhysics(0.05);
-                assert.ok(state.camera!.position.y < 2.01, 'no roof snap');
+                assert.ok(state.camera!.position.y < PLAYER_HEIGHT + .01, 'no roof snap');
             }
             assert.ok(Math.abs(state.camera!.position[axis] - b[axis]) < edge - 1, 'entered room');
             for (let frame = 0; frame < 16; frame++) {
@@ -304,17 +304,17 @@ test('players enter and exit every doorway without teleporting onto the roof', (
 test('ceilings and lintels stop upward motion, rooftops support landings and walls stop fast grapples', () => {
     setup();
     const b = generateTownLayout(42).find(b => b.kind === 'house' && !b.name)!;
-    player(b.x, 2, b.z, 0, 164);
-    let highest = 2;
+    player(b.x, PLAYER_HEIGHT, b.z, 0, 164);
+    let highest = PLAYER_HEIGHT;
     for (let i = 0; i < 40; i++) {
         updatePlayerPhysics(0.05);
         highest = Math.max(highest, state.camera!.position.y);
     }
     assert.ok(highest <= b.height - 0.7);
-    assert.equal(state.camera!.position.y, 2);
-    player(b.x, 2, b.z, 0, 164);
+    assert.equal(state.camera!.position.y, PLAYER_HEIGHT);
+    player(b.x, PLAYER_HEIGHT, b.z, 0, 164);
     state.camera!.position[b.doorAxis] -= b.doorSide * ((b.doorAxis === 'x' ? b.width : b.depth) / 2 - 0.35);
-    highest = 2;
+    highest = PLAYER_HEIGHT;
     for (let i = 0; i < 20; i++) {
         updatePlayerPhysics(0.05);
         highest = Math.max(highest, state.camera!.position.y);
@@ -324,12 +324,12 @@ test('ceilings and lintels stop upward motion, rooftops support landings and wal
     for (let i = 0; i < 20; i++) updatePlayerPhysics(0.05);
     assert.equal(state.camera!.position.y, b.height + PLAYER_HEIGHT);
     assert.equal(state.canJump, true);
-    player(30, 2, 82, 0, 0, 225);
+    player(30, PLAYER_HEIGHT, 82, 0, 0, 225);
     state.hookState = 'PULLING'; state.hookIsEnemy = true;
     updatePlayerPhysics(0.05);
     assert.ok(state.camera!.position.z <= 87 - PLAYER_RADIUS);
     assert.equal(state.velocity.z, 0);
-    player(0, 2, 82, 0, 0, 225);
+    player(0, PLAYER_HEIGHT, 82, 0, 0, 225);
     state.hookState = 'PULLING'; state.hookIsEnemy = true;
     updatePlayerPhysics(0.05);
     assert.ok(state.camera!.position.z > 92, 'gateway permits high-speed traversal');
@@ -415,7 +415,7 @@ test('all four covered wall doorways remain traversable and stop jumps, shots an
         player(0, 2, 0);
         state.camera!.position[axis] = side * 90;
         state.velocity.y = 164;
-        let highest = 2;
+        let highest = PLAYER_HEIGHT;
         for (let frame = 0; frame < 40; frame++) {
             updatePlayerPhysics(.05);
             highest = Math.max(highest, state.camera!.position.y);
@@ -445,14 +445,14 @@ test('church nave has a clear center aisle, a solid ceiling and a grappleable to
     for (const seed of [0, 1, 42, 0xffffffff]) {
         setup(seed);
         const church = generateTownLayout(seed).find(b => b.kind === 'church')!;
-        player(church.x, 2, church.z, 0, 164);
-        let highest = 2;
+        player(church.x, PLAYER_HEIGHT, church.z, 0, 164);
+        let highest = PLAYER_HEIGHT;
         for (let frame = 0; frame < 40; frame++) {
             updatePlayerPhysics(.05);
             highest = Math.max(highest, state.camera!.position.y);
         }
         assert.ok(highest <= church.height - .7);
-        assert.equal(state.camera!.position.y, 2);
+        assert.equal(state.camera!.position.y, PLAYER_HEIGHT);
         const tower = state.obstacles.filter(o => o.name === 'town-church-tower');
         assert.ok(tower.length > 0);
         const cross = tower.reduce((a, b) => a.position.y + a.userData.halfH > b.position.y + b.userData.halfH ? a : b);
@@ -479,7 +479,7 @@ test('the full rampart loop is walkable through all four open corner lookouts', 
             assert.equal(occupied(sx * along, TOWN_WALL_HEIGHT + PLAYER_HEIGHT, sz * 94.4, boxes, 0.001), true);
             assert.equal(occupied(sx * 94.4, TOWN_WALL_HEIGHT + PLAYER_HEIGHT, sz * along, boxes, 0.001), true);
         }
-        assert.equal(occupied(sx * 90, TOWN_WALL_HEIGHT + 4, sz * 94.4, boxes, 0), false, 'view above the low wall remains open');
+        assert.equal(occupied(sx * 90, TOWN_WALL_HEIGHT + PLAYER_HEIGHT + 2, sz * 94.4, boxes, 0), false, 'view above the low wall remains open');
         player(sx * 90, TOWN_WALL_HEIGHT + PLAYER_HEIGHT, sz * 90);
         updatePlayerPhysics(.05);
         assert.equal(state.camera!.position.y, TOWN_WALL_HEIGHT + PLAYER_HEIGHT);

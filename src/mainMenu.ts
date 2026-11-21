@@ -39,7 +39,6 @@ export function setupMainMenu(): void {
     const heldButton = document.getElementById('weapon-held') as HTMLButtonElement;
     const closeButton = document.getElementById('weapon-closeup') as HTMLButtonElement;
     const replayButton = document.getElementById('weapon-reload') as HTMLButtonElement;
-    const compactSpecs = document.getElementById('weapon-compact-specs')!;
     const setWeaponSpecs = (name: string) => {
         let facts: (string | number)[][];
         if (name === 'KATANA') {
@@ -65,7 +64,6 @@ export function setupMainMenu(): void {
             const fact = document.createElement('span');
             fact.className = 'goggles-target-fact'; fact.textContent = `${key}: ${value}`; return fact;
         });
-        compactSpecs.replaceChildren(...nodes.map(n => n.cloneNode(true)));
         panel.replaceChildren(...nodes);
     };
     function chooseView(next: 'held' | 'closeup') {
@@ -102,14 +100,14 @@ export function setupMainMenu(): void {
     const weaponScan = new WeaponMenuScan(document.getElementById('weapon-scan-layer')!, document.getElementById('weapon-specs')!);
     const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 30); camera.position.set(0, 0.25, 11.5); camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100); camera.position.set(0, 0.25, 11.5); camera.lookAt(0, 0, 0);
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); stage.append(renderer.domElement);
     scene.add(new THREE.HemisphereLight(0xd9f3ff, 0x455670, 3));
     const light = new THREE.DirectionalLight(0xffffff, 4); light.position.set(-3, 4, 5); scene.add(light);
     const previewRoot = new THREE.Group();
     scene.add(previewRoot);
     // Keep the frame on the armored silhouette as the boots and back ducts fire.
-    const previewBounds = new THREE.Box3(new THREE.Vector3(-.57,-1.02,-.35), new THREE.Vector3(.57,1.14,.42));
+    const previewBounds = new THREE.Box3(new THREE.Vector3(-.48,-.86,-.30).multiplyScalar(CYBORG_SCALE), new THREE.Vector3(.48,.96,.36).multiplyScalar(CYBORG_SCALE));
     setPeerScanBounds(previewRoot, previewBounds);
     const previewPeer = { menu: { username: 'Character', mesh: previewRoot, hp: 10, maxHp: 10 } };
     let avatar: CyborgAvatar | undefined;
@@ -128,7 +126,7 @@ export function setupMainMenu(): void {
     function createPreviewAvatar(wrapper: THREE.Group, color: number): CyborgAvatar {
         const rig = new CyborgAvatar(color);
         rig.root.scale.setScalar(CYBORG_SCALE);
-        rig.root.position.y = -1.02;
+        rig.root.position.y = previewBounds.min.y;
         wrapper.add(rig.root);
         return rig;
     }
@@ -433,12 +431,12 @@ export function setupMainMenu(): void {
             THREE.MathUtils.lerp(distanceFor(slide.from),distanceFor(slide.to!),slideEase) : distanceFor(displayedWeapon);
         else {
             const weapon = weaponsOpen ? selectedWeapon : state.isPlaying ? state.activeWeaponName : 'PISTOL';
-            const reach = weaponsOpen && weapon === 'SNIPER' ? 2 : weaponsOpen && weapon === 'KATANA' ? 1.3 : .94;
+            const reach = weaponsOpen && weapon === 'SNIPER' ? 1.69 : weaponsOpen && weapon === 'KATANA' ? 1.10 : .80;
             const availableWidth = halfW * .88, availableHeight = halfH * (settingsOpen ? .95 : .90);
-            distance = Math.max(1.34*focal/availableHeight+.18, reach*focal/availableWidth+.36);
+            distance = CYBORG_SCALE * Math.max(1.13*focal/availableHeight+.15, reach*focal/availableWidth+.30);
             if (lobbyOpen) for (let i=1;i<state.lobbyPlayers.length;i++) {
                 const pos = lobbyPreviewPosition(i,w/h);
-                distance = Math.max(distance,(Math.abs(pos.x)+.62)*focal/availableWidth+pos.z+.35);
+                distance = Math.max(distance,(Math.abs(pos.x)+.52*CYBORG_SCALE)*focal/availableWidth+pos.z+.30*CYBORG_SCALE);
             }
         }
         camera.position.set(0,0,distance);

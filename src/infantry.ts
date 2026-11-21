@@ -200,6 +200,20 @@ export class InfantryDefense {
         }
     }
 
+    private replicaQueued = 0;
+
+    private get queued(): number {
+        return this.nav ? this.pending[0] + this.pending[1] + this.pending[2] : this.replicaQueued;
+    }
+
+    get enemiesRemaining(): number {
+        let count = this.queued;
+        for (const bot of this.bots) {
+            if (bot.pose && bot.pose.hp > 0) count++;
+        }
+        return count;
+    }
+
     get warmModels(): THREE.Group[] {
         return [...this.assets.values()].map(asset => asset.scene);
     }
@@ -551,7 +565,7 @@ export class InfantryDefense {
             yaw: THREE.MathUtils.clamp(round(pose.yaw), -Math.PI, Math.PI),
             pitch: THREE.MathUtils.clamp(round(pose.pitch), -Math.PI / 2, Math.PI / 2), time: round(pose.time),
         }] : []);
-        return { sequence: this.nextSequence(), day: this.day, wallHp: this.wallHp, bots };
+        return { sequence: this.nextSequence(), day: this.day, wallHp: this.wallHp, queued: this.queued, bots };
     }
 
     acceptSequence(sequence: number): boolean {
@@ -563,6 +577,7 @@ export class InfantryDefense {
     receive(snapshot: InfantryState): void {
         if (snapshot.day < this.day || snapshot.wallHp > this.wallHp || !this.acceptSequence(snapshot.sequence)) return;
         this.day = snapshot.day;
+        this.replicaQueued = snapshot.queued ?? 0;
         this.wallHp = snapshot.wallHp;
         const slots = new Set(snapshot.bots.map(pose => pose.slot));
         for (const pose of snapshot.bots) {
