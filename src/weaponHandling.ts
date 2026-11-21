@@ -98,6 +98,24 @@ export class WeaponHandling {
         return true;
     }
 
+    private drawGrapple(weapon: string, now: number): void {
+        this.moveHand(true, now, isHeavy(weapon) && now <= this.lastHeavyShot + HEAVY_RECENT_SHOT_TIME
+            ? HEAVY_HANDOFF_TIME : GRAPPLE_DRAW_TIME, weapon);
+    }
+
+    toggleGrappleMode(weapon: string, now: number): boolean {
+        if (!isHeavy(weapon)) return false;
+        this.advance(now);
+        this.reload = null;
+        this.queuedReload = null;
+        this.pendingFire = null;
+        this.launchPending = false;
+        if (this.hand === 'drawing' || this.hand === 'drawn')
+            this.moveHand(false, now, HEAVY_HANDOFF_TIME, weapon);
+        else this.drawGrapple(weapon, now);
+        return true;
+    }
+
     pressGrapple(weapon: string, now: number): boolean {
         this.advance(now);
         if (this.hand === 'returning' || this.queuedReload) return false;
@@ -105,8 +123,7 @@ export class WeaponHandling {
         this.reload = null;
         this.pendingFire = null;
         this.launchPending = true;
-        this.moveHand(true, now, isHeavy(weapon) && now <= this.lastHeavyShot + HEAVY_RECENT_SHOT_TIME
-            ? HEAVY_HANDOFF_TIME : GRAPPLE_DRAW_TIME, weapon);
+        this.drawGrapple(weapon, now);
         return true;
     }
 

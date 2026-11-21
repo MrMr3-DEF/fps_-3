@@ -58,6 +58,7 @@ export function setupMainMenu(): void {
             if (name === 'MINIGUN') facts.push(['Spin-up delay', `${MINIGUN_SHOOT_DELAY}s`], ['Full ramp', `${MINIGUN_RAMP_TIME}s`]);
             else facts.push(['Shot cooldown', `${stats.fireRate}s`]);
         }
+        facts.unshift(['Type', isLight(name) ? 'Light' : 'Heavy']);
         const panel = document.getElementById('weapon-specs')!;
         panel.setAttribute('aria-label', `${labels[name]} specifications`);
         const nodes = facts.map(([key,value]) => {

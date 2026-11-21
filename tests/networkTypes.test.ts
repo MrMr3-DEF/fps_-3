@@ -228,6 +228,7 @@ test('weapon handoff packets bound magazine counts, phase deadlines and deferred
     }
     const command = {type:'handling_command', action:'grapple', weapon:'AR', lifeId:2, sequence:1};
     assert.ok(parseNetworkPacket(command));
+    assert.ok(parseNetworkPacket({...command, action:'toggleGrapple'}));
     for (const change of [{action:'launch'}, {sequence:0}, {lifeId:-1}, {weapon:'RIFLE'}])
         assert.equal(parseNetworkPacket({...command,...change}), null);
     for (const change of [{inspectTime:Infinity},{switchTime:-.3},{movingHook:'false'},{grounded:3}])

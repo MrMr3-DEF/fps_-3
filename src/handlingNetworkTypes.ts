@@ -2,7 +2,7 @@ import { FIREARM_MAGAZINES, HEAVY_HANDOFF_TIME, HEAVY_RECENT_SHOT_TIME } from '.
 import { fields, isPacketRecord } from './networkProjection.js';
 import type { FirearmName, WeaponName } from './networkTypes.js';
 
-export type WeaponIntent = 'reload' | 'grapple' | 'release' | 'raise' | 'cancel';
+export type WeaponIntent = 'reload' | 'grapple' | 'toggleGrapple' | 'release' | 'raise' | 'cancel';
 export type HandPhase = 'holstered' | 'drawing' | 'drawn' | 'returning';
 export type LightWeapon = 'PISTOL' | 'SHOTGUN';
 export interface HandlingSnapshot {

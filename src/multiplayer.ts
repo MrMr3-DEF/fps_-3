@@ -476,6 +476,13 @@ function handleWeaponIntent(id: string, packet: HandlingCommand): void {
                 h.interrupt(equipped, now/1000);
                 r.hookFlight = 'spent';
                 accepted = true; break;
+            case 'toggleGrapple':
+                accepted = !switching && h.toggleGrappleMode(w, now/1000);
+                if (accepted) {
+                    r.hookFlight = 'spent';
+                    r.freshTrigger = false;
+                }
+                break;
             case 'grapple':
                 if ((!switching || isLight(w)) && !activeCable && !h.launchPending)
                     accepted = h.pressGrapple(w,now/1000);

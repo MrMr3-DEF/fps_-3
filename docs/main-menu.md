@@ -47,7 +47,7 @@ of admission order even when reusing a spawn slot. Starting play hides the lineu
 
 Choose one of five guns, the katana or the grapple. Held view shows the fitted prop on the cyborg at gameplay scale. Select Specifications to isolate the weapon and show its stats in the close-up scan. The pistol and shotgun hold the grapple on the left. Their held reload preview stows the grapple before opening the drawer and draws it again afterward. All five guns replay their actual battery duration. The grapple can show its authored battery service motion. Preview actions leave game ammunition and controls untouched.
 
-Drag or use the focused arrow keys to rotate either view. Close-up returns to automatic spin after input. Switching close-ups retracts the scan and slides the new prop into view. Reduced motion skips automatic rotation and transitions. Specifications include magazine capacity and recharge time for guns, melee properties for the katana, and range and draw timing for the grapple.
+Drag or use the focused arrow keys to rotate either view. Close-up returns to automatic spin after input. Switching close-ups retracts the scan and slides the new prop into view. Reduced motion skips automatic rotation and transitions. The Type row lists the pistol and shotgun as Light and all other weapons as Heavy. Specifications include magazine capacity and recharge time for guns, melee properties for the katana, and range and draw timing for the grapple.
 
 ## Local chat download settings
 

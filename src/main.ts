@@ -55,7 +55,7 @@ import { disposeProjectiles, updateProjectiles } from './projectiles.js';
 import { applyHudPresentation, setFpsText, updateAccelerometer, updateHealthBar, resetHealthBarFlash, updateHoverBar, updateReloadBar, updateSpeedlines } from './hud.js';
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook, updateGrappleCable } from './grapple.js';
-import { createAkimboGuns, requestPrimaryFire, requestReload, cancelWeaponHandling, weaponHudFraction, updateWeapons, createPlayerMesh, prepareLocalPlayerAvatar, setThirdPerson, syncThirdPersonPresentation, cancelInspect, resetWeaponPresentation, updatePlayerAvatarPose, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
+import { createAkimboGuns, requestPrimaryFire, toggleHeavyGrapple, requestReload, cancelWeaponHandling, weaponHudFraction, updateWeapons, createPlayerMesh, prepareLocalPlayerAvatar, setThirdPerson, syncThirdPersonPresentation, cancelInspect, resetWeaponPresentation, updatePlayerAvatarPose, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
 import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, infantry, prepareInfantry, rebuildInfantryHash, isLookingAtTownWell } from './world.js';
 import { CameraShake } from './cameraShake.js';
 import { triggerMechaImpactShake } from './mechaImpactShake.js';
@@ -867,6 +867,9 @@ function setupInputListeners(): void {
                 break;
             case 'KeyF':
                 interactWithGirlfriend(e);
+                break;
+            case 'KeyG':
+                toggleHeavyGrapple();
                 break;
             case 'KeyR':
                 if (state.controls && isInputActive()) {

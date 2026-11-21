@@ -137,3 +137,17 @@ test('a late observer advances a queued manual reload through stow, refill and p
     assert.equal(observer.hand, 'drawn');
     assert.equal(observer.rounds.PISTOL, 15);
 });
+
+test('heavy grapple mode changes grip without queuing a hook or a shot', () => {
+    const h = new WeaponHandling('AR');
+    assert.equal(h.toggleGrappleMode('AR', 0), true);
+    assert.equal(h.takeLaunch(1), false);
+    assert.equal(h.hand, 'drawn');
+    assert.equal(h.canFire('AR', 1), false);
+    assert.ok(h.pressGrapple('AR', 1));
+    assert.ok(h.toggleGrappleMode('AR', 1));
+    assert.equal(h.takeLaunch(2), false);
+    assert.equal(h.canFire('AR', 2), true);
+    assert.equal(h.pendingFire, null);
+    assert.equal(h.toggleGrappleMode('SHOTGUN', 2), false);
+});

@@ -311,7 +311,7 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
     switch (value.type) {
         case 'handling_command':
             return isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.sequence, 1, Number.MAX_SAFE_INTEGER)
-                && isWeaponName(value.weapon) && ['reload','grapple','release','raise','cancel'].some(action => action === value.action)
+                && isWeaponName(value.weapon) && ['reload','grapple','toggleGrapple','release','raise','cancel'].some(action => action === value.action)
                 ? value as unknown as HandlingCommand : null;
         case 'handling_state':
             return isPeerId(value.peerId) && isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER)

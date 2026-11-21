@@ -34,6 +34,10 @@ grip and tether. An assault rifle, sniper or minigun uses both hands until
 the left hand leaves the support grip. A supported gun fires as soon as its
 ordinary cooldown and any minigun spin-up allow, on the ground or in the air.
 
+With an assault rifle, sniper or minigun, press **G** to draw the grapple
+without launching it. Press **G** again to release any tether and return
+to the heavy gun. A second press during the handoff reverses it.
+
 Press **R** or tap **Grapple** to launch. From the holster, the hand takes
 0.36 s to raise the launcher, or 0.52 s within 0.30 s of a heavy shot.
 Pressing Grapple during an automatic light-weapon draw queues the launch.

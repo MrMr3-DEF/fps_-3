@@ -424,6 +424,16 @@ export function weaponHudFraction(): number {
         Math.max(0, Math.min(1, 1 - state.fireCooldown / KATANA.duration));
 }
 
+export function toggleHeavyGrapple(): void {
+    const weapon = state.activeWeaponName;
+    if (!isInputActive() || state.playerHp <= 0 || forgottenMecha?.ownsLocalPilot ||
+        state.switchState !== 'IDLE' || state.desiredWeaponName !== weapon ||
+        !isFirearm(weapon) || !state.weaponHandling.toggleGrappleMode(weapon, state.weaponTime)) return;
+    cancelInspect();
+    clearHookTether();
+    if (state.isMultiplayer) sendWeaponIntent('toggleGrapple', weapon);
+}
+
 export function requestReload(): void {
     const weapon = state.activeWeaponName;
     if (!isFirearm(weapon) || !isInputActive() || state.playerHp <= 0 || state.hookState !== 'IDLE' ||
