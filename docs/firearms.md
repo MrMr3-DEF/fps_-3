@@ -60,7 +60,9 @@ the launcher again when the cycle finishes.
 
 Firearm shots originate at the fitted barrel opening, including all five
 shotgun pellets. In first person the flash and tracer start at the visible
-barrel. The minigun uses whichever of its six openings is highest in the
+barrel and shots follow the logical camera direction. In third person, shots
+aim from the physical barrel toward the nearest surface or target under the
+rendered shoulder crosshair, skipping geometry behind the barrel. The minigun uses whichever of its six openings is highest in the
 housing when it fires. The game checks cover between the eye and the physical
 muzzle. On-foot goggles hide the local hands, weapons, and attached flashes
 as soon as zoom starts. Shooting and reloading continue while scoped.

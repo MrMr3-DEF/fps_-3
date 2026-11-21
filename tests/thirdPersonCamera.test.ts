@@ -10,8 +10,12 @@ import { CyborgAvatar } from '../src/cyborgAvatar.ts';
 import { CYBORG_SCALE } from '../src/playerAvatar.ts';
 import { loadCyborgTestAssets } from './cyborgTestAsset.ts';
 import { DEFAULT_FOV, PLAYER_HEIGHT } from '../src/config.ts';
-import { state } from '../src/state.ts';
-import { createAkimboGuns, createPlayerMesh, prepareLocalPlayerAvatar, disposePlayerVisuals, setThirdPerson, syncThirdPersonPresentation } from '../src/weapons.ts';
+import { resetPlayerState, state } from '../src/state.ts';
+import { createAkimboGuns, createPlayerMesh, prepareLocalPlayerAvatar, disposePlayerVisuals, fireProjectile, resetWeaponPresentation, setThirdPerson, syncThirdPersonPresentation, updatePlayerAvatarPose } from '../src/weapons.ts';
+import { disposeParticles } from '../src/particles.ts';
+import { disposeProjectiles, resetProjectiles } from '../src/projectiles.ts';
+import { setDamageHandlers } from '../src/damage.ts';
+import { rebuildTargetHash } from '../src/world.ts';
 
 test('third-person mode uses a shoulder camera until C is held', () => {
     assert.equal(shouldUseThirdPersonView(false, false), false);
@@ -119,4 +123,81 @@ test('holding C switches between the fitted arms and full suit while logical fir
         assert.equal(right.parent, state.camera);
         assert.ok(right.getWorldPosition(new THREE.Vector3()).equals(fixed));
     } finally { disposePlayerVisuals(); setThirdPerson(false); state.scene = null; state.camera = null; }
+});
+
+test('third-person firearms aim from the barrel toward the shoulder crosshair and ignore cover behind the barrel', async () => {
+    await loadCyborgTestAssets();
+    const eye = new THREE.Vector3(0, PLAYER_HEIGHT, 0);
+    const camera = new THREE.PerspectiveCamera(DEFAULT_FOV, 16 / 9, 0.1, 1500);
+    camera.position.copy(eye);
+    camera.updateMatrixWorld(true);
+
+    const shoulderCamera = new THREE.PerspectiveCamera(DEFAULT_FOV, 16 / 9, 0.1, 1500);
+    resolveThirdPersonCameraPosition(eye, camera.quaternion, [], shoulderCamera.position);
+    shoulderCamera.lookAt(resolveThirdPersonAimTarget(eye, camera.quaternion, new THREE.Vector3()));
+    shoulderCamera.updateMatrixWorld(true);
+    const aimRay = new THREE.Ray(
+        shoulderCamera.position.clone(),
+        shoulderCamera.getWorldDirection(new THREE.Vector3()),
+    );
+
+    const makeTarget = (index: number, position: THREE.Vector3) => {
+        const group = new THREE.Group();
+        const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), new THREE.MeshBasicMaterial());
+        group.position.copy(position);
+        group.add(bodyMesh);
+        group.userData = { index, hp: 50, maxHp: 50, scale: 1.5, color: 0xffaa00, bodyMesh };
+        group.updateMatrixWorld(true);
+        return group;
+    };
+
+    // Place one target well beyond the 25 m convergence point along the
+    // shoulder crosshair ray, and another behind the player between the
+    // shoulder camera and the avatar.
+    const distantPoint = aimRay.origin.clone().addScaledVector(aimRay.direction, 120);
+    const behindPoint = aimRay.origin.clone().addScaledVector(aimRay.direction, 2);
+    const distantTarget = makeTarget(0, distantPoint);
+    const behindTarget = makeTarget(1, behindPoint);
+
+    const hitIndices: number[] = [];
+    setDamageHandlers(
+        index => { hitIndices.push(index); return { accepted: true, killed: false }; },
+        () => {},
+    );
+
+    state.scene = new THREE.Scene();
+    state.camera = camera;
+    state.controls = { getObject: () => camera } as typeof state.controls;
+    state.targets = [distantTarget, behindTarget];
+    rebuildTargetHash();
+    resetPlayerState();
+    createAkimboGuns(); createPlayerMesh(); prepareLocalPlayerAvatar();
+    setThirdPerson(true);
+    try {
+        // Sniper hitscan hits the distant target under the crosshair, not the
+        // target behind the barrel or empty space along logical forward.
+        state.activeWeaponName = 'SNIPER';
+        resetPlayerState(); resetWeaponPresentation();
+        updatePlayerAvatarPose(0.016);
+        fireProjectile(aimRay);
+        assert.deepEqual(hitIndices, [0]);
+
+        // Projectile weapons also converge from the barrel onto the crosshair point.
+        resetProjectiles();
+        state.activeWeaponName = 'PISTOL';
+        resetPlayerState(); resetWeaponPresentation();
+        updatePlayerAvatarPose(0.016);
+        fireProjectile(aimRay);
+        assert.equal(state.projectiles.length, 1);
+        const bullet = state.projectiles[0];
+        const velocity = new THREE.Vector3(bullet.userData.dx, bullet.userData.dy, bullet.userData.dz);
+        const toDistant = distantPoint.clone().sub(bullet.position).normalize();
+        // Pistol spread is 0.005 rad; logical forward would miss by ~0.05 rad (~6 m at 120 m).
+        assert.ok(velocity.angleTo(toDistant) < 0.015, `expected shot toward crosshair, angle=${velocity.angleTo(toDistant)}`);
+    } finally {
+        disposeProjectiles(); disposeParticles(); disposePlayerVisuals();
+        setThirdPerson(false);
+        state.targets = []; rebuildTargetHash();
+        Object.assign(state, { camera: null, controls: null, scene: null });
+    }
 });

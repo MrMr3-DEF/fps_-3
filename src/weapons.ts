@@ -60,6 +60,11 @@ const _camDirection = new THREE.Vector3();
 
 const _hitPoint = new THREE.Vector3();
 const _rayEnd = new THREE.Vector3();
+const _aimDir = new THREE.Vector3();
+const _aimStart = new THREE.Vector3();
+const _aimEnd = new THREE.Vector3();
+const _aimPoint = new THREE.Vector3();
+const _aimOffset = new THREE.Vector3();
 const _homingTargetPosition = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
 const _targetCandidates: THREE.Group[] = [];
@@ -155,7 +160,83 @@ function sampleHomingStartDistance(
     return minigunHomingDistanceSample.startDistance;
 }
 
-export function fireProjectile(): void {
+/**
+ * Aim a third-person firearm from its physical muzzle toward the nearest point
+ * under the rendered shoulder crosshair, skipping geometry behind the barrel.
+ */
+function resolveThirdPersonShotDirection(
+    barrelPos: THREE.Vector3,
+    aimRay: THREE.Ray,
+    out: THREE.Vector3,
+): THREE.Vector3 {
+    _aimDir.copy(aimRay.direction).normalize();
+    // Advance past the barrel plane so objects between the shoulder camera and
+    // the avatar cannot bend shots backward.
+    const startDist = Math.max(0, _aimOffset.subVectors(barrelPos, aimRay.origin).dot(_aimDir)) + 0.05;
+    _aimStart.copy(aimRay.origin).addScaledVector(_aimDir, startDist);
+    const maxDist = BULLET_TRAVEL_DISTANCE;
+    _aimEnd.copy(_aimStart).addScaledVector(_aimDir, maxDist);
+
+    const floorT = segmentGroundHitT(_aimStart, _aimEnd);
+    let closestDist = floorT === null ? maxDist : floorT * maxDist;
+
+    _raycaster.set(_aimStart, _aimDir);
+    _raycaster.far = maxDist;
+    (_raycaster as any).camera = state.camera;
+
+    const obstacleCandidates = queryObstaclesAlongSegment(
+        _aimStart.x, _aimStart.z, _aimEnd.x, _aimEnd.z, _obstacleCandidates,
+    );
+    const obstacleHits = _raycaster.intersectObjects(obstacleCandidates);
+    if (obstacleHits.length > 0 && obstacleHits[0].distance < closestDist) {
+        closestDist = obstacleHits[0].distance;
+    }
+
+    const shieldT = forgottenMecha?.combat.shieldContactT(_aimStart, _aimEnd, barrelPos);
+    if (shieldT != null && shieldT * maxDist < closestDist) {
+        closestDist = shieldT * maxDist;
+    }
+
+    const targetCandidates = queryTargetsAlongSegment(
+        _aimStart.x, _aimStart.z, _aimEnd.x, _aimEnd.z, _targetCandidates,
+    );
+    for (let j = 0; j < targetCandidates.length; j++) {
+        const targetGroup = targetCandidates[j];
+        const data = targetData(targetGroup);
+        if (data.hp <= 0) continue;
+        const bodyMesh = data.bodyMesh;
+        if (!bodyMesh) continue;
+        bodyMesh.updateWorldMatrix(true, false);
+        const targetHits = _raycaster.intersectObject(bodyMesh);
+        if (targetHits.length > 0 && targetHits[0].distance < closestDist) {
+            closestDist = targetHits[0].distance;
+        }
+    }
+
+    if (state.isMultiplayer) {
+        for (let j = 0; j < state.peerIds.length; j++) {
+            const peerId = state.peerIds[j];
+            const peerData = state.peers[peerId];
+            if (forgottenMecha?.ownsPilot && forgottenMecha.pilotPeerId === peerId) continue;
+            if (peerData?.mesh && peerData.hp > 0) {
+                const hit = segmentPlayerHitboxHitT(
+                    _aimStart, _aimEnd, peerData.mesh.position, peerData.mesh.rotation.y,
+                );
+                if (hit !== null && hit * maxDist < closestDist) {
+                    closestDist = hit * maxDist;
+                }
+            }
+        }
+    }
+    _raycaster.far = Infinity;
+
+    _aimPoint.copy(_aimStart).addScaledVector(_aimDir, closestDist);
+    out.subVectors(_aimPoint, barrelPos);
+    if (out.lengthSq() <= 1e-12) return out.copy(_aimDir);
+    return out.normalize();
+}
+
+export function fireProjectile(aimRay?: THREE.Ray): void {
     if (forgottenMecha?.ownsLocalPilot) return;
     if (!state.scene || !state.camera || !state.rightGunContainer || !state.rightGun) return;
 
@@ -177,7 +258,8 @@ export function fireProjectile(): void {
     if (!rig || state.isScoped || state.isThirdPersonView || !getHolderMuzzlePosition(rig, weapon, _visualMuzzle)) {
         _visualMuzzle.copy(_barrelPos);
     }
-    state.camera.getWorldDirection(_camDirection);
+    if (aimRay) resolveThirdPersonShotDirection(_barrelPos, aimRay, _camDirection);
+    else state.camera.getWorldDirection(_camDirection);
     state.rightGun.userData.onAvatarFire?.();
 
     let homingTarget: ProjectileHomingTarget | null = state.isScoped && state.activeWeaponName !== 'SNIPER'
@@ -447,7 +529,7 @@ let emptyTriggerReported = false;
 
 /** Automatic fire never claims the support hand from a pre-held trigger.
  * A fresh press can queue exactly one heavy shot behind the stow/raise. */
-export function requestPrimaryFire(fresh: boolean): void {
+export function requestPrimaryFire(fresh: boolean, aimRay?: THREE.Ray): void {
     if (!isInputActive() || state.playerHp <= 0 || forgottenMecha?.ownsLocalPilot) return;
     beginWeaponSwitch();
     const switching = state.switchState !== 'IDLE';
@@ -466,7 +548,7 @@ export function requestPrimaryFire(fresh: boolean): void {
     }
     if (!switching && state.fireCooldown <= 0 && handling.canFire(weapon, state.weaponTime)) {
         cancelInspect();
-        fireProjectile();
+        fireProjectile(aimRay);
     }
 }
 

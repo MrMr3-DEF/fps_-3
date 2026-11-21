@@ -114,6 +114,9 @@ const conversationCamera = new ConversationCamera();
 const cameraShake = new CameraShake();
 const lastRenderedAimRay = new THREE.Ray();
 let hasRenderedAim = false;
+function currentThirdPersonAimRay(): THREE.Ray | undefined {
+    return state.isThirdPersonView && hasRenderedAim ? lastRenderedAimRay : undefined;
+}
 let mountedFireRequested = false;
 let mountedBoardFov = DEFAULT_FOV;
 let mountedControlsPresented = false;
@@ -998,7 +1001,7 @@ function setupInputListeners(): void {
             if (!held && state.isMultiplayer && (state.weaponHandling.hand !== 'holstered' || state.weaponHandling.pendingFire)) sendLocalState(true);
             if (forgottenMecha?.ownsLocalPilot) { mountedFireRequested ||= held; return; }
             if (state.activeWeaponName === 'KATANA' && state.desiredWeaponName === 'KATANA') { katanaInput(held); return; }
-            if (held) requestPrimaryFire(true);
+            if (held) requestPrimaryFire(true, currentThirdPersonAimRay());
         },
         layout: bounds => weaponIndicator?.placeTouch(userSettings.touchLayout, bounds, userSettings.touchFireMode),
     });
@@ -1389,7 +1392,7 @@ function handleGameMouseButtons(e: MouseEvent | PointerEvent): void {
         if (state.inspectState === 'INSPECTING') {
             cancelInspect();
         }
-        requestPrimaryFire(true);
+        requestPrimaryFire(true, currentThirdPersonAimRay());
     }
 
     if (state.rightClickActive) {
@@ -2128,7 +2131,7 @@ function animate(): void {
 
     if (!forgottenMecha?.ownsLocalPilot) updateReloadBar(weaponHudFraction());
     const automatic = state.isMouseDown && (touchMode || state.activeWeaponName === 'AR' || state.activeWeaponName === 'MINIGUN');
-    if (state.controls && (automatic || state.weaponHandling.pendingFire)) requestPrimaryFire(false);
+    if (state.controls && (automatic || state.weaponHandling.pendingFire)) requestPrimaryFire(false, currentThirdPersonAimRay());
 
     if (gothChat?.isOpen) {
         // The conversation owns the player pose; gravity must not fight the eased move.
@@ -2150,7 +2153,7 @@ function animate(): void {
 
     if (!state.isMultiplayer && !forgottenMecha?.ownsLocalPilot) { checkLavaDamage(delta); updateHealthRegen(delta); }
 
-    updateHook(delta, state.isThirdPersonView && hasRenderedAim ? lastRenderedAimRay : undefined, updatePlayerAvatarPose);
+    updateHook(delta, currentThirdPersonAimRay(), updatePlayerAvatarPose);
     updateRemotePeers(delta);
 
     if (infantry && state.isPlaying) {
@@ -2353,7 +2356,7 @@ function animate(): void {
             cameraShake.apply(state.camera);
             state.camera.updateMatrixWorld(true);
             // Input events run after the render camera is restored to its logical
-            // pose. Keep the visible shoulder ray for screen-center grappling.
+            // pose. Keep the visible shoulder ray for screen-center firing and grappling.
             lastRenderedAimRay.origin.copy(state.camera.position);
             state.camera.getWorldDirection(lastRenderedAimRay.direction);
             hasRenderedAim = true;
