@@ -17,7 +17,7 @@ export { checkLavaDamage } from './lavaDamage.js';
 import { GothChat } from './gothChat.js';
 import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
-import { setupMainMenu, updateMenuPreview } from './mainMenu.js';
+import { getSettingsLivePreviewCanvas, setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setPlayerListVisible } from './playerList.js';
 import { LocatorBar } from './locatorBar.js';
 import { WeaponIndicator } from './weaponIndicator.js';
@@ -103,6 +103,7 @@ let endingCover: HTMLDivElement | null = null;
 let gothChat: GothChat | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
 let dayNightCycle: DayNightCycle | null = null;
+let lastLanternStrength = 0;
 let atmosphere: AtmosphereEffects | null = null;
 const atmosphereFrame: AtmosphereFrame = { elapsed: 0, delta: 0, blurAllowed: false, cameraKey: '' };
 function drawAtmosphere(): void {
@@ -548,6 +549,9 @@ function onWindowResize(): void {
         state.camera.updateProjectionMatrix();
         applyRendererSettings(state.renderer);
     }
+    if (UI.panelSettings?.style.display === 'flex' && state.isPlaying && !state.isMultiplayer) {
+        requestAnimationFrame(() => renderPausedSettingsPreview());
+    }
 }
 
 // Renderer and camera setup is intentionally centralized because pointer lock,
@@ -606,6 +610,11 @@ function setupMenuListeners(): void {
             resetPendingSettings();
             if (UI.panelSettings) UI.panelSettings.style.display = 'none';
             const returnToPause = settingsOrigin === 'pause' && state.isPlaying && !state.isMultiplayer;
+            if (returnToPause && state.camera) {
+                applyLiveSettings();
+                updateEnvironmentVisibility(state.camera.position, userSettings.renderDistanceChunks);
+                updateLavaLights(state.dayNightElapsedSeconds, state.camera.position, lastLanternStrength, userSettings.lavaGlow);
+            }
             if (UI.panelPause) UI.panelPause.style.display = returnToPause ? 'flex' : 'none';
             if (UI.panelMain) UI.panelMain.style.display = returnToPause ? 'none' : 'flex';
             settingsOrigin = 'main';
@@ -617,6 +626,7 @@ function setupMenuListeners(): void {
             e.stopPropagation();
             pendingSettings = cloneSettings(DEFAULT_USER_SETTINGS);
             syncSettingsControls();
+            renderPausedSettingsPreview();
         });
     }
 
@@ -624,6 +634,7 @@ function setupMenuListeners(): void {
         UI.btnSettingsApply.addEventListener('click', (e) => {
             e.stopPropagation();
             applyPendingSettings();
+            renderPausedSettingsPreview();
         });
     }
 
@@ -721,6 +732,7 @@ function setupMenuListeners(): void {
             resetPendingSettings();
             if (UI.panelPause) UI.panelPause.style.display = 'none';
             if (UI.panelSettings) UI.panelSettings.style.display = 'flex';
+            requestAnimationFrame(() => renderPausedSettingsPreview());
         });
     }
 
@@ -1644,6 +1656,89 @@ function applyPendingSettings(): void {
 function updatePendingSettings(mutator: (settings: UserSettings) => void): void {
     mutator(pendingSettings);
     syncSettingsControls();
+    renderPausedSettingsPreview();
+}
+
+function renderPausedSettingsPreview(): void {
+    if (
+        UI.panelSettings?.style.display !== 'flex' ||
+        !state.isPlaying ||
+        state.isMultiplayer ||
+        !state.renderer ||
+        !state.scene ||
+        !state.camera
+    ) {
+        return;
+    }
+    updateMenuPreview();
+    const livePreviewCanvas = getSettingsLivePreviewCanvas();
+    if (!livePreviewCanvas) return;
+    const previewWidth = livePreviewCanvas.clientWidth;
+    const previewHeight = livePreviewCanvas.clientHeight;
+    if (!previewWidth || !previewHeight) return;
+
+    atmosphere?.applySettings({ fog: pendingSettings.fog, motionBlur: false });
+    dayNightCycle?.applySettings({
+        shadows: pendingSettings.shadows,
+        shadowMapSize: pendingSettings.shadowQuality === 'high' ? 2048 : 1024,
+    });
+    updateEnvironmentVisibility(state.camera.position, pendingSettings.renderDistanceChunks);
+    updateLavaLights(state.dayNightElapsedSeconds, state.camera.position, lastLanternStrength, pendingSettings.lavaGlow);
+    updateLeafAnimation(
+        0,
+        state.dayNightElapsedSeconds,
+        getLeafInteractionPosition(),
+        forgottenMecha?.ownsLocalPilot ? null : state.velocity,
+        pendingSettings.leafAnimation,
+    );
+    state.camera.fov = state.isScoped ? pendingSettings.scopedFov : pendingSettings.fov;
+    state.camera.updateProjectionMatrix();
+    applyRendererSettings(state.renderer, pendingSettings);
+
+    const biomeWeights = getWorldBiomeField()?.sample(state.camera.position.x, state.camera.position.z);
+    atmosphereFrame.elapsed = state.dayNightElapsedSeconds;
+    atmosphereFrame.delta = 0;
+    atmosphereFrame.blurAllowed = false;
+    atmosphereFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
+    atmosphereFrame.fogTimeMultiplier = getDayNightFogMultiplier(state.dayNightElapsedSeconds);
+
+    if (state.isThirdPersonView) {
+        _logicalCameraPos.copy(state.camera.position);
+        _logicalCameraQuaternion.copy(state.camera.quaternion);
+        try {
+            state.camera.position.copy(lastRenderedAimRay.origin);
+            state.camera.quaternion.copy(lastViewRotation);
+            drawAtmosphere();
+        } finally {
+            state.camera.position.copy(_logicalCameraPos);
+            state.camera.quaternion.copy(_logicalCameraQuaternion);
+        }
+    } else {
+        drawAtmosphere();
+    }
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const targetW = Math.max(1, Math.round(previewWidth * dpr));
+    const targetH = Math.max(1, Math.round(previewHeight * dpr));
+    if (livePreviewCanvas.width !== targetW || livePreviewCanvas.height !== targetH) {
+        livePreviewCanvas.width = targetW;
+        livePreviewCanvas.height = targetH;
+    }
+    const ctx = livePreviewCanvas.getContext('2d');
+    const src = state.renderer.domElement;
+    if (ctx && src.width > 0 && src.height > 0) {
+        const srcAspect = src.width / src.height;
+        const dstAspect = targetW / targetH;
+        let sx = 0, sy = 0, sw = src.width, sh = src.height;
+        if (srcAspect > dstAspect) {
+            sw = src.height * dstAspect;
+            sx = (src.width - sw) * 0.5;
+        } else if (srcAspect < dstAspect) {
+            sh = src.width / dstAspect;
+            sy = (src.height - sh) * 0.5;
+        }
+        ctx.drawImage(src, sx, sy, sw, sh, 0, 0, targetW, targetH);
+    }
 }
 
 function applyLiveSettings(): void {
@@ -2155,6 +2250,7 @@ function animate(): void {
         observerPosition,
         biomeWeights,
     ) ?? 0;
+    lastLanternStrength = lanternStrength;
     if (dayNightCycle) state.dayNightElapsedSeconds = dayNightCycle.elapsedTimeSeconds;
     atmosphereFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
     atmosphereFrame.fogTimeMultiplier = getDayNightFogMultiplier(state.dayNightElapsedSeconds);

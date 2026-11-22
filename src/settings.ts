@@ -133,16 +133,21 @@ export function saveUserSettings(): void {
     }
 }
 
-export function applyRendererSettings(renderer: THREE.WebGLRenderer): void {
-    const pixelRatio = Math.min(window.devicePixelRatio * userSettings.renderScale, 2.0);
+export function applyRendererSettings(
+    renderer: THREE.WebGLRenderer,
+    // Settings-menu previews pass a pending copy so paused thumbnails can render
+    // live changes without committing them to `userSettings`.
+    settings: Pick<UserSettings, 'renderScale' | 'shadows'> = userSettings,
+): void {
+    const pixelRatio = Math.min(window.devicePixelRatio * settings.renderScale, 2.0);
     renderer.setPixelRatio(pixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.shadowMap.enabled = userSettings.shadows;
+    renderer.shadowMap.enabled = settings.shadows;
     // Avoid shadow-map update bookkeeping entirely while the user has shadows
     // disabled; re-enabling requests a fresh map on the next render.
-    renderer.shadowMap.autoUpdate = userSettings.shadows;
-    renderer.shadowMap.needsUpdate = userSettings.shadows;
-    if (userSettings.shadows) {
+    renderer.shadowMap.autoUpdate = settings.shadows;
+    renderer.shadowMap.needsUpdate = settings.shadows;
+    if (settings.shadows) {
         renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     }
 }

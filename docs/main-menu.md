@@ -1,12 +1,13 @@
 # Full-screen menu
 
-The main menu uses a sky background, a hovering cyborg preview and shared goggles
+The main menu uses a sky background with a 3D foggy multi-biome background forest (`src/menuForest.ts`, hidden when Settings is open), a hovering cyborg preview and shared goggles
 scans. Play, Multiplayer, Weapons and Settings occupy the lower-left column.
 The character’s scan callout on the main menu contains the suit color picker.
+Switching between the main menu and Weapons retracts the active scan (`descan`), then crossfades the panels over 320 ms while interpolating the camera framing and character pose (or switches immediately under reduced motion).
 Pause and multiplayer panels reuse the same button layout. The Host room-code
 button copies its ready code; Join uses a matching input.
 
-Offline pause freezes simulation and exposes settings; Back returns to Pause.
+Offline pause freezes simulation and exposes settings; Back discards unapplied visual changes, restores committed settings, and returns to Pause. While Settings is open from offline pause, its sidebar tile displays a live frozen-simulation preview of the match using the pending visual settings.
 Multiplayer pause keeps simulation running and offers resume/leave without
 settings. Pause previews the equipped weapon in both modes.
 
@@ -15,7 +16,8 @@ settings. Pause previews the equipped weapon in both modes.
 | File | Responsibility |
 | --- | --- |
 | `index.html` | Static menu, weapon panel, scan overlays and color controls |
-| `src/mainMenu.ts` | Preview models, menu actions and visible-only rendering |
+| `src/mainMenu.ts` | Preview models, menu transitions, menu actions and visible-only rendering |
+| `src/menuForest.ts` | 3D foggy multi-biome background forest for the menu stage |
 | `src/appearance.ts`, `src/playerAppearance.ts` | Validated local suit color, persistence and multiplayer publication |
 | `src/lobbyLineup.ts` | Lobby slot geometry and callout placement preferences |
 | `src/weaponMenuScan.ts` | Visible weapon bounds, camera fitting and stable scan frames |

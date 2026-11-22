@@ -8,10 +8,12 @@ import { characterColor } from './appearance.js';
 import { changePlayerSuitColor } from './playerAppearance.js';
 import { state } from './state.js';
 import { WEAPON_STATS, MINIGUN_MIN_RPM, MINIGUN_MAX_RPM, MINIGUN_RAMP_TIME, MINIGUN_SHOOT_DELAY, PROJECTILE_SPEED } from './config.js';
-import { SmartGogglesHud } from './smartGoggles.js';
+import { SCAN_EXIT_DURATION_MS, SmartGogglesHud } from './smartGoggles.js';
+import { createMenuForest } from './menuForest.js';
 import { createWeaponScanGeometry, fitWeaponPreviewDistance, getVisibleWeaponBounds, WeaponMenuScan, type WeaponScanGeometry } from './weaponMenuScan.js';
 import { lobbyPreviewPosition, lobbyScanPlayers } from './lobbyLineup.js';
 
+const MENU_MORPH_MS = 320;
 const WEAPON_SCAN_EXIT_MS = 180;
 const WEAPON_SLIDE_MS = 520;
 const WEAPON_RETURN_DELAY_MS = 850;
@@ -19,7 +21,12 @@ const WEAPON_RETURN_MS = 700;
 const WEAPON_IDLE_RADIANS_PER_SECOND = 0.24;
 
 let renderPreview: (() => void) | undefined;
+let livePreviewCanvasRef: HTMLCanvasElement | null = null;
+let setLivePreviewActiveRef: ((active: boolean) => void) | undefined;
+
 export function updateMenuPreview(): void { renderPreview?.(); }
+export function getSettingsLivePreviewCanvas(): HTMLCanvasElement | null { return livePreviewCanvasRef; }
+export function setSettingsLivePreviewActive(active: boolean): void { setLivePreviewActiveRef?.(active); }
 
 export function setupMainMenu(): void {
     const blocker = document.getElementById('blocker')!;
@@ -28,8 +35,81 @@ export function setupMainMenu(): void {
     const main = document.getElementById('panel-main')!;
     const weaponsButton = document.getElementById('btn-menu-weapons')!;
     const arsenal = document.getElementById('panel-weapons')!;
-    weaponsButton.onclick = () => { main.style.display = 'none'; arsenal.style.display = 'flex'; };
-    arsenal.querySelector<HTMLButtonElement>('[data-menu-back]')!.onclick = () => { arsenal.style.display = 'none'; main.style.display = 'flex'; };
+    const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    interface MenuTransitionState {
+        direction: 'to-weapons' | 'to-main';
+        phase: 'descan' | 'morph';
+        startedAt: number;
+        fromPose: {
+            centeredX: number;
+            centeredY: number;
+            distance: number;
+            rotX: number;
+            rotY: number;
+            posY: number;
+        };
+    }
+    let menuTransition: MenuTransitionState | null = null;
+    const lastPose = { centeredX: 0, centeredY: 0, distance: 11.5, rotX: 0, rotY: -0.28, posY: 0 };
+    const startMenuMorph = (direction: 'to-weapons' | 'to-main', now: number) => {
+        const leaving = direction === 'to-weapons' ? main : arsenal;
+        const entering = direction === 'to-weapons' ? arsenal : main;
+        leaving.classList.remove('menu-panel-entering');
+        entering.classList.remove('menu-panel-leaving');
+        entering.classList.add('menu-panel-entering');
+        entering.style.display = 'flex';
+        void entering.offsetWidth;
+        leaving.classList.add('menu-panel-leaving');
+        entering.classList.remove('menu-panel-entering');
+        menuTransition = { direction, phase: 'morph', startedAt: now, fromPose: { ...lastPose } };
+        layoutDirty = true;
+    };
+    const cancelMenuTransition = (keepPanel?: HTMLElement) => {
+        if (!menuTransition) return;
+        const dir = menuTransition.direction;
+        menuTransition = null;
+        main.classList.remove('menu-panel-leaving', 'menu-panel-entering');
+        arsenal.classList.remove('menu-panel-leaving', 'menu-panel-entering');
+        if (keepPanel) {
+            if (keepPanel !== main) main.style.display = 'none';
+            if (keepPanel !== arsenal) arsenal.style.display = 'none';
+        } else {
+            const target = dir === 'to-weapons' ? arsenal : main;
+            main.style.display = target === main ? 'flex' : 'none';
+            arsenal.style.display = target === arsenal ? 'flex' : 'none';
+        }
+        layoutDirty = true;
+    };
+    weaponsButton.onclick = () => {
+        if (menuTransition) return;
+        if (reducedMotionQuery?.matches) {
+            main.style.display = 'none';
+            arsenal.style.display = 'flex';
+            updateMenuPreview();
+            return;
+        }
+        const now = performance.now();
+        const left = scan.leave(now);
+        scanActive = false;
+        if (!left) startMenuMorph('to-weapons', now);
+        else menuTransition = { direction: 'to-weapons', phase: 'descan', startedAt: now, fromPose: { ...lastPose } };
+    };
+    arsenal.querySelector<HTMLButtonElement>('[data-menu-back]')!.onclick = () => {
+        if (menuTransition) return;
+        if (reducedMotionQuery?.matches) {
+            arsenal.style.display = 'none';
+            main.style.display = 'flex';
+            updateMenuPreview();
+            return;
+        }
+        const now = performance.now();
+        if (view === 'closeup') {
+            weaponScan.leave();
+            menuTransition = { direction: 'to-main', phase: 'descan', startedAt: now, fromPose: { ...lastPose } };
+        } else {
+            startMenuMorph('to-main', now);
+        }
+    };
     const labels: Record<string, string> = { PISTOL: 'Pistol', SHOTGUN: 'Shotgun', AR: 'Assault rifle', SNIPER: 'Sniper', MINIGUN: 'Minigun', KATANA: 'Katana', GRAPPLE: 'Grapple' };
     const tabs = arsenal.querySelector('.weapon-tabs')!;
     const weaponOrder = [...Object.keys(WEAPON_STATS), 'KATANA', 'GRAPPLE'];
@@ -99,12 +179,13 @@ export function setupMainMenu(): void {
         main, document.getElementById('panel-host-waiting')!, document.getElementById('panel-join-room')!,
     ] });
     const weaponScan = new WeaponMenuScan(document.getElementById('weapon-scan-layer')!, document.getElementById('weapon-specs')!);
-    const reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 100); camera.position.set(0, 0.25, 11.5); camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 260); camera.position.set(0, 0.25, 11.5); camera.lookAt(0, 0, 0);
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); stage.append(renderer.domElement);
     scene.add(new THREE.HemisphereLight(0xd9f3ff, 0x455670, 3));
     const light = new THREE.DirectionalLight(0xffffff, 4); light.position.set(-3, 4, 5); scene.add(light);
+    const menuForest = createMenuForest();
+    scene.add(menuForest.group);
     const previewRoot = new THREE.Group();
     scene.add(previewRoot);
     // Keep the frame on the armored silhouette as the boots and back ducts fire.
@@ -195,13 +276,13 @@ export function setupMainMenu(): void {
         if (pointerId !== undefined && stage.hasPointerCapture(pointerId)) stage.releasePointerCapture(pointerId);
     };
     stage.addEventListener('pointerdown', e => {
-        if (e.target === retry || !isWeaponsOpen() || transition || drag || e.button !== 0) return;
+        if (e.target === retry || !isWeaponsOpen() || transition || menuTransition || drag || e.button !== 0) return;
         e.preventDefault(); stage.setPointerCapture(e.pointerId);
         motion = 'manual'; lastInteractionAt = performance.now();
         drag = { id: e.pointerId, x: e.clientX, y: e.clientY }; stage.classList.add('dragging');
     });
     const rotateWeapon = (x: number, y: number) => {
-        if (transition) return;
+        if (transition || menuTransition) return;
         if (view === 'held') {
             heldYaw += x; heldPitch = THREE.MathUtils.clamp(heldPitch+y, -.55, .55);
             return;
@@ -221,7 +302,7 @@ export function setupMainMenu(): void {
     }
     window.addEventListener('blur', stopDrag);
     stage.addEventListener('keydown', e => {
-        if (!isWeaponsOpen() || transition || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+        if (!isWeaponsOpen() || transition || menuTransition || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
         e.preventDefault(); rotateWeapon(e.key === 'ArrowLeft' ? -0.15 : e.key === 'ArrowRight' ? 0.15 : 0,
             e.key === 'ArrowUp' ? -0.15 : e.key === 'ArrowDown' ? 0.15 : 0);
     });
@@ -249,9 +330,19 @@ export function setupMainMenu(): void {
     let width = 0, height = 0, last = 0, scanActive = false, lobbyScanActive = false;
     const panels = ['settings','pause','weapons','host-waiting','join-room','mp','main'].map(key =>
         document.getElementById('panel-'+key)!);
+    const otherPanels = panels.filter(p => p !== main && p !== arsenal);
     let activePanel: HTMLElement | null = null;
     const settingsSlot = document.createElement('div');
     settingsSlot.className = 'settings-character-preview';
+    const livePreviewCanvas = document.createElement('canvas');
+    livePreviewCanvas.className = 'settings-live-preview';
+    livePreviewCanvas.hidden = true;
+    settingsSlot.append(livePreviewCanvas);
+    livePreviewCanvasRef = livePreviewCanvas;
+    setLivePreviewActiveRef = (active: boolean) => {
+        stage.hidden = active;
+        livePreviewCanvas.hidden = !active;
+    };
     let layoutDirty = true;
     const resize = new ResizeObserver(() => { layoutDirty = true; });
     for (const panel of panels) resize.observe(panel);
@@ -263,6 +354,7 @@ export function setupMainMenu(): void {
         const visible = blocker.style.display !== 'none' && !document.hidden;
         if (!visible) {
             if (previewVisible) {
+                cancelMenuTransition();
                 stopDrag(); scan.reset(); lobbyScan.reset(); weaponScan.hide();
                 scanActive = lobbyScanActive = false;
                 for (const id of lobbyModels.keys()) disposeLobbyModel(id);
@@ -273,9 +365,25 @@ export function setupMainMenu(): void {
             previewVisible = false; return;
         }
         previewVisible = true;
-        if (performance.now() - last < 33) return;
-        const panel = panels.find(item => item.style.display === 'flex') ?? main;
+        const now = performance.now();
+        if (now - last < 33) return;
+        const otherOpen = otherPanels.find(item => item.style.display === 'flex');
+        if (otherOpen && menuTransition) cancelMenuTransition(otherOpen);
+        if (menuTransition?.phase === 'descan') {
+            const exitDuration = menuTransition.direction === 'to-weapons' ? SCAN_EXIT_DURATION_MS : WEAPON_SCAN_EXIT_MS;
+            if (now - menuTransition.startedAt >= exitDuration) {
+                if (menuTransition.direction === 'to-weapons') scan.reset();
+                else weaponScan.hide();
+                startMenuMorph(menuTransition.direction, now);
+            }
+        }
+        const panel = otherOpen ?? (menuTransition
+            ? (menuTransition.phase === 'morph'
+                ? (menuTransition.direction === 'to-weapons' ? arsenal : main)
+                : (menuTransition.direction === 'to-weapons' ? main : arsenal))
+            : (panels.find(item => item.style.display === 'flex') ?? main));
         const settingsOpen = panel.id === 'panel-settings';
+        setSettingsLivePreviewActive(settingsOpen && state.isPlaying && !state.isMultiplayer);
         if (activePanel !== panel) {
             activePanel = panel; layoutDirty = true;
             stopDrag(); reloadAt = undefined;
@@ -347,11 +455,11 @@ export function setupMainMenu(): void {
         }
         stage.setAttribute('aria-label', weaponsOpen ? `${labels[selectedWeapon]} 3D model. Drag or use arrow keys to rotate.` :
             lobbyOpen ? `Lobby lineup with ${state.lobbyPlayers.length} players` : 'Preview of your playable character');
-        const shouldScan = !state.isPlaying && !weaponsOpen && main.style.display !== 'none';
+        const shouldScan = !state.isPlaying && !weaponsOpen && !menuTransition && main.style.display !== 'none';
         if (!shouldScan && scanActive) { scan.reset(); scanActive = false; }
         if (!lobbyOpen && lobbyScanActive) { lobbyScan.reset(); lobbyScanActive = false; }
         if (!weaponsOpen || view === 'held') weaponScan.hide();
-        last = performance.now();
+        last = now;
         const reducedMotion = reducedMotionQuery?.matches ?? false;
         const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;
         if (w !== width || h !== height) {
@@ -440,9 +548,18 @@ export function setupMainMenu(): void {
                 distance = Math.max(distance,(Math.abs(pos.x)+.52*CYBORG_SCALE)*focal/availableWidth+pos.z+.30*CYBORG_SCALE);
             }
         }
-        camera.position.set(0,0,distance);
+        const morph = menuTransition?.phase === 'morph' ? menuTransition : null;
+        const morphProgress = morph ? Math.min(1, (last - morph.startedAt) / MENU_MORPH_MS) : 0;
+        const morphEase = morphProgress * morphProgress * (3 - 2 * morphProgress);
+        const renderCenteredX = morph ? THREE.MathUtils.lerp(morph.fromPose.centeredX, centeredX, morphEase) : centeredX;
+        const renderCenteredY = morph ? THREE.MathUtils.lerp(morph.fromPose.centeredY, centeredY, morphEase) : centeredY;
+        const renderDistance = morph ? THREE.MathUtils.lerp(morph.fromPose.distance, distance, morphEase) : distance;
+        camera.position.set(0,0,renderDistance);
         camera.lookAt(0,0,0);
-        camera.setViewOffset(w,h,w/2-centeredX,h/2-centeredY,w,h);
+        camera.setViewOffset(w,h,w/2-renderCenteredX,h/2-renderCenteredY,w,h);
+        lastPose.centeredX = renderCenteredX;
+        lastPose.centeredY = renderCenteredY;
+        lastPose.distance = renderDistance;
         if (slide && slideProgress < 1) {
             const travel = Math.max(distanceFor(slide.from), distanceFor(slide.to!)) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
                 + Math.max(weaponGeometries.get(slide.from)!.radius, weaponGeometries.get(slide.to!)!.radius) + 0.5;
@@ -509,8 +626,23 @@ export function setupMainMenu(): void {
                 bodyTime:avatarTime,weapon,action:progress !== undefined && !isGrapple ? 'Reload' : 'Ready',
                 reloadProgress:progress, chargeStage:charge, reducedMotion, grapple, grappleTime,
                 grappleChargeStage:isGrapple ? charge : undefined});
-            previewRoot.rotation.set(held ? heldPitch : 0,held ? heldYaw : -.28,0);
-            previewRoot.position.y = held || settingsOpen || state.isPlaying || reducedMotion ? 0 : Math.sin(avatarTime * .9) * .065;
+            const targetRotX = held ? heldPitch : 0;
+            const targetRotY = held ? heldYaw : -0.28;
+            const targetPosY = held || settingsOpen || state.isPlaying || reducedMotion ? 0 : Math.sin(avatarTime * .9) * .065;
+            if (morph) {
+                previewRoot.rotation.set(
+                    THREE.MathUtils.lerp(morph.fromPose.rotX, targetRotX, morphEase),
+                    THREE.MathUtils.lerp(morph.fromPose.rotY, targetRotY, morphEase),
+                    0,
+                );
+                previewRoot.position.y = THREE.MathUtils.lerp(morph.fromPose.posY, targetPosY, morphEase);
+            } else {
+                previewRoot.rotation.set(targetRotX, targetRotY, 0);
+                previewRoot.position.y = targetPosY;
+            }
+            lastPose.rotX = previewRoot.rotation.x;
+            lastPose.rotY = previewRoot.rotation.y;
+            lastPose.posY = previewRoot.position.y;
         }
         for (let index = 0; index < lobbyGuests.length; index++) {
             const item = lobbyModels.get(lobbyGuests[index].peerId)!;
@@ -519,7 +651,18 @@ export function setupMainMenu(): void {
             item.model.position.set(position.x, reducedMotion ? 0 : Math.sin(t * .9) * .065, position.z);
             item.rig.pose({body:'Hover.Hold', bodyTime:t, weapon:'PISTOL', grapple:'Grapple.Held', reducedMotion});
         }
+        menuForest.group.visible = !settingsOpen;
+        menuForest.update(avatarTime, reducedMotion);
         renderer.render(scene, camera);
+        if (morph && morphProgress >= 1) {
+            const leaving = morph.direction === 'to-weapons' ? main : arsenal;
+            const entering = morph.direction === 'to-weapons' ? arsenal : main;
+            leaving.style.display = 'none';
+            leaving.classList.remove('menu-panel-leaving', 'menu-panel-entering');
+            entering.classList.remove('menu-panel-leaving', 'menu-panel-entering');
+            menuTransition = null;
+            layoutDirty = true;
+        }
         if (lobbyOpen) {
             const lobbyTargets: Record<string, { username: string; mesh: THREE.Group; hp: number; maxHp: number; lobbyOrder: number }> = {};
             for (const player of lobbyScanPlayers(state.lobbyPlayers, state.peer?.id ?? '')) {
@@ -531,10 +674,10 @@ export function setupMainMenu(): void {
             lobbyScan.update(camera, camera.position, camera.position, [], lobbyTargets, true, last, null, [], false);
             lobbyScanActive = true;
         }
-        if (closeOpen && weaponModel && weaponGeometry && !transition && displayedWeapon === selectedWeapon && w >= 1000 && h >= 580) {
+        if (closeOpen && weaponModel && weaponGeometry && !transition && !menuTransition && displayedWeapon === selectedWeapon && w >= 1000 && h >= 580) {
             weaponScan.update(labels[displayedWeapon!], weaponGeometry, camera, w, h, navBounds.right, navBounds.top, last);
         }
-        else if (weaponsOpen) weaponScan.hide();
+        else if (weaponsOpen && !menuTransition) weaponScan.hide();
         if (shouldScan) {
             scan.update(camera, camera.position, camera.position, [], previewPeer, true, last, null, [], false);
             scanActive = true;
@@ -542,7 +685,10 @@ export function setupMainMenu(): void {
     };
     window.addEventListener('pagehide', event => {
         if (event.persisted) return;
+        cancelMenuTransition();
         disposed = true; renderPreview = undefined;
+        livePreviewCanvasRef = null; setLivePreviewActiveRef = undefined;
+        menuForest.dispose();
         for (const id of lobbyModels.keys()) disposeLobbyModel(id);
         avatar?.dispose();
         for (const prop of propPreviews.values()) prop.dispose();

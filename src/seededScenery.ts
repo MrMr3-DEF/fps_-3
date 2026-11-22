@@ -76,7 +76,7 @@ const FOLIAGE_PUFFS: readonly {
 
 /** Multi-tuft sculpted foliage geometry anchored at local (0, 0, 0) with aLeafWeight
  * rising from 0.0 at the branch root to 1.0 at the outer leafy tips. */
-function createSculptedFoliageGeometry(): THREE.BufferGeometry {
+export function createSculptedFoliageGeometry(): THREE.BufferGeometry {
     const parts: THREE.BufferGeometry[] = [];
     const matrix = new THREE.Matrix4();
     const quaternion = new THREE.Quaternion();
@@ -173,6 +173,147 @@ EMPTY_LAVA_PIT_MASK.needsUpdate = true;
  * would silently move pillars, lava, plants and every later enemy for old seeds.
  * New tree details and organic lava use separate seed-derived streams so their
  * positions cannot move the established world stream. */
+export function createBarkTexture(random: () => number): THREE.CanvasTexture {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // A bright neutral-warm grain multiplied by sampleBiomeBarkColor()
+    // produces brown, charcoal or sun-dried tan without extra materials.
+    ctx.fillStyle = '#c8ae8a';
+    ctx.fillRect(0, 0, size, size);
+
+    for (let i = 0; i < 4000; i++) {
+        const x = random() * size;
+        const y = random() * size;
+        const length = 40 + random() * 120;
+
+        const hue = 26 + random() * 10;
+        const sat = 18 + random() * 16;
+        const light = 48 + random() * 26;
+
+        ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
+        ctx.lineWidth = 1.5 + random() * 3.5;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        const jitter = (random() - 0.5) * 2;
+        ctx.lineTo(x + jitter, y + length);
+        ctx.stroke();
+    }
+
+    ctx.strokeStyle = '#8b7357';
+    for (let i = 0; i < 40; i++) {
+        let x = random() * size;
+        ctx.lineWidth = 2 + random() * 4;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        for (let y = 0; y < size; y += 20) {
+            x += (random() - 0.5) * 4;
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 4);
+    return texture;
+}
+
+export function createRingsTexture(random: () => number): THREE.CanvasTexture {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    const cx = size / 2;
+    const cy = size / 2;
+
+    ctx.fillStyle = '#e4c49f';
+    ctx.fillRect(0, 0, size, size);
+
+    const maxRadius = size * 0.75;
+    const step = 6 + random() * 4;
+
+    for (let r = 10; r < maxRadius; r += step) {
+        const hue = 25 + random() * 8;
+        const sat = 30 + random() * 15;
+        const light = 35 + random() * 10;
+        ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
+        ctx.lineWidth = 1 + random() * 1.5;
+
+        ctx.beginPath();
+        const segments = 120;
+        for (let i = 0; i <= segments; i++) {
+            const angle = (i / segments) * Math.PI * 2;
+
+            const wave = Math.sin(angle * 6) * 3 + Math.cos(angle * 3) * 2 + Math.sin(angle * 12) * 0.8;
+            const radialJitter = wave + (random() - 0.5) * 0.5;
+            const currentRadius = r + radialJitter;
+
+            const px = cx + Math.cos(angle) * currentRadius;
+            const py = cy + Math.sin(angle) * currentRadius;
+
+            if (i === 0) {
+                ctx.moveTo(px, py);
+            } else {
+                ctx.lineTo(px, py);
+            }
+        }
+        ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(150, 110, 80, 0.08)';
+    for (let i = 0; i < 5000; i++) {
+        const angle = random() * Math.PI * 2;
+        const radius = random() * maxRadius;
+        const px = cx + Math.cos(angle) * radius;
+        const py = cy + Math.sin(angle) * radius;
+
+        ctx.fillRect(px, py, 1.5, 1.5);
+    }
+
+    const numCracks = 3 + Math.floor(random() * 3);
+    ctx.strokeStyle = 'rgba(65, 40, 20, 0.85)';
+
+    for (let i = 0; i < numCracks; i++) {
+        const baseAngle = random() * Math.PI * 2;
+        const startRad = 15 + random() * 30;
+        const endRad = maxRadius * (0.6 + random() * 0.4);
+
+        ctx.lineWidth = 1.5 + random() * 2;
+        ctx.beginPath();
+
+        let currentX = cx + Math.cos(baseAngle) * startRad;
+        let currentY = cy + Math.sin(baseAngle) * startRad;
+        ctx.moveTo(currentX, currentY);
+
+        const steps = 15;
+        for (let j = 1; j <= steps; j++) {
+            const t = j / steps;
+            const r = startRad + t * (endRad - startRad);
+            const angleJitter = baseAngle + (random() - 0.5) * 0.15;
+
+            currentX = cx + Math.cos(angleJitter) * r;
+            currentY = cy + Math.sin(angleJitter) * r;
+            ctx.lineTo(currentX, currentY);
+        }
+        ctx.stroke();
+    }
+
+    ctx.fillStyle = '#412814';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3 + random() * 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    return texture;
+}
+
 export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPort<T>) {
     const worldRandom = port.random;
     const addWorldObject = port.addObject;
@@ -321,147 +462,6 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
         texture.repeat.set(250, 250);
-        return texture;
-    }
-
-    function createBarkTexture(): THREE.CanvasTexture {
-        const size = 512;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d')!;
-
-        // A bright neutral-warm grain multiplied by sampleBiomeBarkColor()
-        // produces brown, charcoal or sun-dried tan without extra materials.
-        ctx.fillStyle = '#c8ae8a';
-        ctx.fillRect(0, 0, size, size);
-
-        for (let i = 0; i < 4000; i++) {
-            const x = worldRandom() * size;
-            const y = worldRandom() * size;
-            const length = 40 + worldRandom() * 120;
-
-            const hue = 26 + worldRandom() * 10;
-            const sat = 18 + worldRandom() * 16;
-            const light = 48 + worldRandom() * 26;
-
-            ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
-            ctx.lineWidth = 1.5 + worldRandom() * 3.5;
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            const jitter = (worldRandom() - 0.5) * 2;
-            ctx.lineTo(x + jitter, y + length);
-            ctx.stroke();
-        }
-
-        ctx.strokeStyle = '#8b7357';
-        for (let i = 0; i < 40; i++) {
-            let x = worldRandom() * size;
-            ctx.lineWidth = 2 + worldRandom() * 4;
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            for (let y = 0; y < size; y += 20) {
-                x += (worldRandom() - 0.5) * 4;
-                ctx.lineTo(x, y);
-            }
-            ctx.stroke();
-        }
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.wrapS = THREE.RepeatWrapping;
-        texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(1, 4);
-        return texture;
-    }
-
-    function createRingsTexture(): THREE.CanvasTexture {
-        const size = 512;
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d')!;
-
-        const cx = size / 2;
-        const cy = size / 2;
-
-        ctx.fillStyle = '#e4c49f';
-        ctx.fillRect(0, 0, size, size);
-
-        const maxRadius = size * 0.75;
-        const step = 6 + worldRandom() * 4;
-
-        for (let r = 10; r < maxRadius; r += step) {
-            const hue = 25 + worldRandom() * 8;
-            const sat = 30 + worldRandom() * 15;
-            const light = 35 + worldRandom() * 10;
-            ctx.strokeStyle = `hsl(${hue}, ${sat}%, ${light}%)`;
-            ctx.lineWidth = 1 + worldRandom() * 1.5;
-
-            ctx.beginPath();
-            const segments = 120;
-            for (let i = 0; i <= segments; i++) {
-                const angle = (i / segments) * Math.PI * 2;
-
-                const wave = Math.sin(angle * 6) * 3 + Math.cos(angle * 3) * 2 + Math.sin(angle * 12) * 0.8;
-                const radialJitter = wave + (worldRandom() - 0.5) * 0.5;
-                const currentRadius = r + radialJitter;
-
-                const px = cx + Math.cos(angle) * currentRadius;
-                const py = cy + Math.sin(angle) * currentRadius;
-
-                if (i === 0) {
-                    ctx.moveTo(px, py);
-                } else {
-                    ctx.lineTo(px, py);
-                }
-            }
-            ctx.stroke();
-        }
-
-        ctx.fillStyle = 'rgba(150, 110, 80, 0.08)';
-        for (let i = 0; i < 5000; i++) {
-            const angle = worldRandom() * Math.PI * 2;
-            const radius = worldRandom() * maxRadius;
-            const px = cx + Math.cos(angle) * radius;
-            const py = cy + Math.sin(angle) * radius;
-
-            ctx.fillRect(px, py, 1.5, 1.5);
-        }
-
-        const numCracks = 3 + Math.floor(worldRandom() * 3);
-        ctx.strokeStyle = 'rgba(65, 40, 20, 0.85)';
-
-        for (let i = 0; i < numCracks; i++) {
-            const baseAngle = worldRandom() * Math.PI * 2;
-            const startRad = 15 + worldRandom() * 30;
-            const endRad = maxRadius * (0.6 + worldRandom() * 0.4);
-
-            ctx.lineWidth = 1.5 + worldRandom() * 2;
-            ctx.beginPath();
-
-            let currentX = cx + Math.cos(baseAngle) * startRad;
-            let currentY = cy + Math.sin(baseAngle) * startRad;
-            ctx.moveTo(currentX, currentY);
-
-            const steps = 15;
-            for (let j = 1; j <= steps; j++) {
-                const t = j / steps;
-                const r = startRad + t * (endRad - startRad);
-                const angleJitter = baseAngle + (worldRandom() - 0.5) * 0.15;
-
-                currentX = cx + Math.cos(angleJitter) * r;
-                currentY = cy + Math.sin(angleJitter) * r;
-                ctx.lineTo(currentX, currentY);
-            }
-            ctx.stroke();
-        }
-
-        ctx.fillStyle = '#412814';
-        ctx.beginPath();
-        ctx.arc(cx, cy, 3 + worldRandom() * 4, 0, Math.PI * 2);
-        ctx.fill();
-
-        const texture = new THREE.CanvasTexture(canvas);
         return texture;
     }
 
@@ -1098,8 +1098,8 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
         const leafColor = new THREE.Color();
         const boxGeo = new THREE.BoxGeometry(PILLAR_WIDTH, 1, PILLAR_WIDTH);
 
-        const barkTex = createBarkTexture();
-        const ringsTex = createRingsTexture();
+        const barkTex = createBarkTexture(worldRandom);
+        const ringsTex = createRingsTexture(worldRandom);
 
         const barkMat = new THREE.MeshStandardMaterial({
             map: barkTex,

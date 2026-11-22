@@ -56,6 +56,7 @@ export const SCAN_TYPE_START_DELAY_MS = 310;
 export const SCAN_TYPE_CHARACTER_MS = 8;
 export const SCAN_TYPE_LINE_PAUSE_CHARACTERS = 2;
 const EXIT_DURATION_MS = 180;
+export const SCAN_EXIT_DURATION_MS = EXIT_DURATION_MS;
 const ELIMINATION_DURATION_MS = 540;
 const TELEPORT_DISTANCE_SQ = 40 * 40;
 const CORRUPTED_HEALTH_FRAMES = [
@@ -1055,6 +1056,17 @@ export class SmartGogglesHud {
         const visibleHealth = record.lastHealthText.slice(0, healthBudget);
         if (record.distanceFact.textContent !== visibleDistance) record.distanceFact.textContent = visibleDistance;
         if (record.healthFact.textContent !== visibleHealth) record.healthFact.textContent = visibleHealth;
+    }
+
+    /** Runs the descan animation on every tracked scan without releasing it. */
+    leave(now: number): boolean {
+        let started = false;
+        for (const record of this.records.values()) {
+            if (record.phase === 'leaving' || record.phase === 'eliminated') continue;
+            this.beginLeaving(record, now);
+            started = true;
+        }
+        return started;
     }
 
     reset(): void {

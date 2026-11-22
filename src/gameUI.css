@@ -97,6 +97,20 @@ body button:focus-visible, #character-color:focus-visible { outline: 3px solid #
 #panel-weapons .menu-btn { width: 100%; flex: none; background: #082a3acc; border-color: #8be9fb80; color: #effcff; backdrop-filter: blur(8px); }
 #panel-weapons .menu-btn:hover { background: #0c5169ed; }
 #panel-weapons .weapon-tabs .menu-btn[aria-pressed="true"] { background: #00a9d5e6; border-color: #bcf7ff; color: #062b3b; }
+/* Menu swaps cross-fade and slide instead of popping. Callers apply a class
+   across the display change and clear it after the 320ms transition. */
+#panel-main, #panel-weapons {
+    transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1), transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+#panel-main.menu-panel-leaving, #panel-main.menu-panel-entering,
+#panel-weapons.menu-panel-leaving, #panel-weapons.menu-panel-entering { pointer-events: none; }
+#panel-main.menu-panel-leaving, #panel-weapons.menu-panel-leaving { opacity: 0; transform: translateX(-16px); }
+#panel-main.menu-panel-entering, #panel-weapons.menu-panel-entering { opacity: 0; transform: translateX(16px); }
+@media (prefers-reduced-motion: reduce) {
+    #panel-main, #panel-weapons,
+    #panel-main.menu-panel-leaving, #panel-main.menu-panel-entering,
+    #panel-weapons.menu-panel-leaving, #panel-weapons.menu-panel-entering { transition: none; }
+}
 #weapon-specs { display: flex; flex-direction: column; align-items: stretch; gap: 2px; width: 100%; margin: 0; }
 #weapon-specs .goggles-target-fact { position: relative; display: block; width: 100%; }
 #weapon-specs .weapon-fact-measure { visibility: hidden; }
@@ -1632,6 +1646,8 @@ body.mecha-ending #rotate-device { display: none; }
 .settings-character-preview { position:relative; flex:none; height:clamp(54px, 16dvh, 132px); border:1px solid #8be9fb80;
     border-radius:var(--control-radius); background:linear-gradient(140deg,#578ca4,#a6d7dc); overflow:hidden; }
 .settings-character-preview #character-stage { height:100%; min-height:0; }
+.settings-character-preview .settings-live-preview { display:block; width:100%; height:100%; object-fit:cover; }
+.settings-character-preview .settings-live-preview[hidden] { display:none; }
 @media (max-width:699px) and (max-aspect-ratio:9/10) {
     #panel-main, #panel-mp, #panel-host-waiting, #panel-join-room, #panel-pause, #panel-weapons {
         left:max(16px,env(safe-area-inset-left)); width:calc(100% - 32px); max-width:none;

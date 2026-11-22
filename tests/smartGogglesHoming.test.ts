@@ -634,3 +634,21 @@ test('a recycled scan clears variant effects and typing and requires a fresh hom
     assert.equal(getProjectileHomingTarget()?.object, replacement);
     hud.reset();
 });
+
+test('leaving the scan starts a descan without releasing the overlay', () => {
+    const layer = new HudElement(), hud = new SmartGogglesHud(layer as any), view = camera();
+    assert.equal(hud.leave(1000), false, 'no active scan to leave');
+
+    const target = enemy();
+    hud.update(view, view.position, view.position, [target], {}, true, 1000);
+    hud.update(view, view.position, view.position, [target], {}, true, 2000);
+    const scan = record(layer, 'npc:0');
+    assert.equal(scan.classList.contains('is-active'), true);
+
+    assert.equal(hud.leave(2100), true);
+    assert.equal(scan.classList.contains('is-active'), false);
+    assert.equal(scan.classList.contains('is-leaving'), true);
+    assert.equal(scan.parent, layer, 'overlay stays in the DOM for its descan animation');
+    assert.equal(hud.leave(2150), false, 'an overlay already leaving does not restart');
+    hud.reset();
+});
