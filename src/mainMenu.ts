@@ -23,10 +23,12 @@ const WEAPON_IDLE_RADIANS_PER_SECOND = 0.24;
 let renderPreview: (() => void) | undefined;
 let livePreviewCanvasRef: HTMLCanvasElement | null = null;
 let setLivePreviewActiveRef: ((active: boolean) => void) | undefined;
+let mountSettingsLivePreviewRef: (() => HTMLCanvasElement | null) | undefined;
 
 export function updateMenuPreview(): void { renderPreview?.(); }
 export function getSettingsLivePreviewCanvas(): HTMLCanvasElement | null { return livePreviewCanvasRef; }
 export function setSettingsLivePreviewActive(active: boolean): void { setLivePreviewActiveRef?.(active); }
+export function mountSettingsLivePreview(): HTMLCanvasElement | null { return mountSettingsLivePreviewRef?.() ?? null; }
 
 export function setupMainMenu(): void {
     const blocker = document.getElementById('blocker')!;
@@ -343,6 +345,17 @@ export function setupMainMenu(): void {
         stage.hidden = active;
         livePreviewCanvas.hidden = !active;
     };
+    mountSettingsLivePreviewRef = () => {
+        const settingsPanel = document.getElementById('panel-settings');
+        const sidebar = settingsPanel?.querySelector<HTMLElement>('.settings-sidebar');
+        if (sidebar && settingsSlot.parentElement !== sidebar) {
+            sidebar.prepend(settingsSlot);
+            settingsSlot.append(stage);
+        }
+        stage.hidden = true;
+        livePreviewCanvas.hidden = false;
+        return livePreviewCanvas;
+    };
     let layoutDirty = true;
     const resize = new ResizeObserver(() => { layoutDirty = true; });
     for (const panel of panels) resize.observe(panel);
@@ -383,7 +396,8 @@ export function setupMainMenu(): void {
                 : (menuTransition.direction === 'to-weapons' ? main : arsenal))
             : (panels.find(item => item.style.display === 'flex') ?? main));
         const settingsOpen = panel.id === 'panel-settings';
-        setSettingsLivePreviewActive(settingsOpen && state.isPlaying && !state.isMultiplayer);
+        const liveSettingsPreview = settingsOpen && state.isPlaying && !state.isMultiplayer;
+        setSettingsLivePreviewActive(liveSettingsPreview);
         if (activePanel !== panel) {
             activePanel = panel; layoutDirty = true;
             stopDrag(); reloadAt = undefined;
@@ -393,6 +407,10 @@ export function setupMainMenu(): void {
                 settingsSlot.append(stage);
             } else if (stage.parentElement !== preview) preview.append(stage);
             blocker.dataset.previewPanel = panel.id;
+        }
+        if (liveSettingsPreview) {
+            last = now;
+            return;
         }
         customization.disabled = state.isPlaying;
         if (colorInput.value.toLowerCase() !== characterColor.toLowerCase()) showColor();

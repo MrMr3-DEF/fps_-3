@@ -17,7 +17,7 @@ export { checkLavaDamage } from './lavaDamage.js';
 import { GothChat } from './gothChat.js';
 import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
-import { getSettingsLivePreviewCanvas, setupMainMenu, updateMenuPreview } from './mainMenu.js';
+import { mountSettingsLivePreview, setupMainMenu, updateMenuPreview } from './mainMenu.js';
 import { setPlayerListVisible } from './playerList.js';
 import { LocatorBar } from './locatorBar.js';
 import { WeaponIndicator } from './weaponIndicator.js';
@@ -732,7 +732,7 @@ function setupMenuListeners(): void {
             resetPendingSettings();
             if (UI.panelPause) UI.panelPause.style.display = 'none';
             if (UI.panelSettings) UI.panelSettings.style.display = 'flex';
-            requestAnimationFrame(() => renderPausedSettingsPreview());
+            renderPausedSettingsPreview();
         });
     }
 
@@ -1659,7 +1659,7 @@ function updatePendingSettings(mutator: (settings: UserSettings) => void): void 
     renderPausedSettingsPreview();
 }
 
-function renderPausedSettingsPreview(): void {
+function renderPausedSettingsPreview(fromRaf = false): void {
     if (
         UI.panelSettings?.style.display !== 'flex' ||
         !state.isPlaying ||
@@ -1670,12 +1670,14 @@ function renderPausedSettingsPreview(): void {
     ) {
         return;
     }
-    updateMenuPreview();
-    const livePreviewCanvas = getSettingsLivePreviewCanvas();
+    const livePreviewCanvas = mountSettingsLivePreview();
     if (!livePreviewCanvas) return;
     const previewWidth = livePreviewCanvas.clientWidth;
     const previewHeight = livePreviewCanvas.clientHeight;
-    if (!previewWidth || !previewHeight) return;
+    if (!previewWidth || !previewHeight) {
+        if (!fromRaf) requestAnimationFrame(() => renderPausedSettingsPreview(true));
+        return;
+    }
 
     atmosphere?.applySettings({ fog: pendingSettings.fog, motionBlur: false });
     dayNightCycle?.applySettings({
@@ -1702,19 +1704,46 @@ function renderPausedSettingsPreview(): void {
     atmosphereFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
     atmosphereFrame.fogTimeMultiplier = getDayNightFogMultiplier(state.dayNightElapsedSeconds);
 
-    if (state.isThirdPersonView) {
-        _logicalCameraPos.copy(state.camera.position);
-        _logicalCameraQuaternion.copy(state.camera.quaternion);
-        try {
+    const playerVisible = state.playerMesh?.visible;
+    const leftGunVisible = state.leftGun?.visible;
+    const rightGunVisible = state.rightGunContainer?.visible;
+    _logicalCameraPos.copy(state.camera.position);
+    _logicalCameraQuaternion.copy(state.camera.quaternion);
+    try {
+        const pilot = forgottenMecha?.ownsLocalPilot ? forgottenMecha : null;
+        const gogglesView = state.isScoped && !pilot;
+        if (gothChat?.isOpen || gogglesView) {
+            if (state.playerMesh) state.playerMesh.visible = false;
+            if (state.leftGun) state.leftGun.visible = false;
+            if (state.rightGunContainer) state.rightGunContainer.visible = false;
+        }
+        if (state.isThirdPersonView && !gothChat?.isOpen && hasRenderedAim) {
             state.camera.position.copy(lastRenderedAimRay.origin);
             state.camera.quaternion.copy(lastViewRotation);
-            drawAtmosphere();
-        } finally {
-            state.camera.position.copy(_logicalCameraPos);
-            state.camera.quaternion.copy(_logicalCameraQuaternion);
         }
-    } else {
+        state.camera.updateMatrixWorld(true);
+        if (pilot) {
+            if (state.playerMesh && !state.isThirdPersonView) state.playerMesh.visible = false;
+            pilot.preparePilotView(!state.isThirdPersonView);
+        }
+        const holder = !state.isThirdPersonView && !pilot && !gothChat?.isOpen &&
+            state.playerHp > 0 && state.playerMesh?.visible ? getPlayerAvatar(state.playerMesh) : undefined;
+        if (holder?.poseForView) {
+            reloadFrame.begin(holder.rig, state.camera, holder.poseForView, 0);
+        } else {
+            reloadFrame.clear();
+        }
         drawAtmosphere();
+        reloadFrame.render(state.renderer, state.scene);
+        renderKatanaImpact(state.renderer, state.camera);
+    } finally {
+        reloadFrame.restore();
+        forgottenMecha?.restorePilotView();
+        if (state.playerMesh && playerVisible !== undefined) state.playerMesh.visible = playerVisible;
+        if (state.leftGun && leftGunVisible !== undefined) state.leftGun.visible = leftGunVisible;
+        if (state.rightGunContainer && rightGunVisible !== undefined) state.rightGunContainer.visible = rightGunVisible;
+        state.camera.position.copy(_logicalCameraPos);
+        state.camera.quaternion.copy(_logicalCameraQuaternion);
     }
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
