@@ -10,6 +10,7 @@ export interface AtmosphereFrame {
     /** Change on discrete camera modes/lives, even when their poses happen to match. */
     cameraKey: string;
     fogMultiplier?: number;
+    fogTimeMultiplier?: number;
 }
 
 /** Camera matrices, never old color frames: resets cannot leak a previous life/view. */
@@ -67,7 +68,7 @@ uniform sampler2D biomeMap;
 uniform mat4 inverseViewProjection, previousViewProjection;
 uniform vec3 eye, haze;
 uniform vec2 resolution;
-uniform float weatherPhase, exposure, nearPlane, farPlane;
+uniform float weatherPhase, exposure, nearPlane, farPlane, fogTimeMultiplier;
 uniform bool fogEnabled, blurEnabled;
 varying vec2 screenUv;
 float viewDepth(float z) { return nearPlane * farPlane / (farPlane - z * (farPlane - nearPlane)); }
@@ -81,7 +82,7 @@ float density(vec3 p) {
     vec4 bw = texture2D(biomeMap, clamp(p.xz / ${GROUND_VISUAL_SIZE.toFixed(1)} + 0.5, 0.0, 1.0));
     float biomeFog = mix(bw.r * ${BIOME_FOG_MULTIPLIER.warm.toFixed(3)} + bw.g * ${BIOME_FOG_MULTIPLIER.cool.toFixed(3)} + bw.b * ${BIOME_FOG_MULTIPLIER.sand.toFixed(3)}, 1.0, bw.a);
     return holes * (mix(${ATMOSPHERE.groundDensity}, ${ATMOSPHERE.upperDensity}, height) * banks +
-        ${ATMOSPHERE.groundBankDensity} * groundBank * groundBank * (1.0 - height * .5)) * biomeFog;
+        ${ATMOSPHERE.groundBankDensity} * groundBank * groundBank * (1.0 - height * .5)) * biomeFog * fogTimeMultiplier;
 }
 void main() {
     float z = texture2D(sceneDepth, screenUv).x;
@@ -154,6 +155,7 @@ export class AtmosphereEffects {
                 inverseViewProjection: { value: new THREE.Matrix4() }, previousViewProjection: { value: new THREE.Matrix4() },
                 eye: { value: new THREE.Vector3() }, haze: { value: new THREE.Color() }, resolution: { value: new THREE.Vector2() },
                 weatherPhase: { value: 0 }, exposure: { value: 0 }, nearPlane: { value: .1 }, farPlane: { value: 1500 },
+                fogTimeMultiplier: { value: 1 },
                 fogEnabled: { value: true }, blurEnabled: { value: true },
             },
             vertexShader: 'varying vec2 screenUv; void main() { screenUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -212,7 +214,8 @@ export class AtmosphereEffects {
     render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, frame: AtmosphereFrame): void {
         const previousFog = scene.fog;
         const supported = this.supportsDepth(renderer);
-        const fallbackDensity = 0.002 * Math.max(0, frame.fogMultiplier ?? 1);
+        const fogTimeMultiplier = Math.max(0, frame.fogTimeMultiplier ?? 1);
+        const fallbackDensity = 0.002 * Math.max(0, frame.fogMultiplier ?? 1) * fogTimeMultiplier;
         this.fallbackFog.density = fallbackDensity;
         // A sand biome can request zero fog; stock fog must then stay absent.
         scene.fog = !this.disposed && this.fog && !supported && fallbackDensity > 0 ? this.fallbackFog : null;
@@ -239,6 +242,7 @@ export class AtmosphereEffects {
             u.weatherPhase.value = ((frame.elapsed / DAY_NIGHT_CYCLE_SECONDS) % 1 + 1) % 1;
             u.exposure.value = Math.min(1, ATMOSPHERE.exposureSeconds / Math.max(frame.delta, .001));
             u.nearPlane.value = camera.near; u.farPlane.value = camera.far;
+            u.fogTimeMultiplier.value = fogTimeMultiplier;
             u.fogEnabled.value = this.fog; u.blurEnabled.value = blur;
             const previous = renderer.getRenderTarget();
             const autoClear = renderer.autoClear, scissorTest = renderer.getScissorTest();

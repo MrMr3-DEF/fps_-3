@@ -83,7 +83,7 @@ import { targetData } from './userDataTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js';
 import { RoomAccessChallenge } from './turnSecurity.js';
-import { DayNightCycle } from './dayNightCycle.js';
+import { DayNightCycle, getDayNightFogMultiplier } from './dayNightCycle.js';
 import { AtmosphereEffects, type AtmosphereFrame } from './atmosphereEffects.js';
 import { sampleBiomeFogMultiplier } from './biomes.js';
 import { resetLeafAnimation, updateLeafAnimation } from './leafAnimation.js';
@@ -2084,6 +2084,7 @@ function animate(): void {
         updateApproachWarning(0, false);
         if (isWorldReveal && state.scene && state.camera && state.renderer) {
             atmosphereFrame.elapsed = state.dayNightElapsedSeconds; atmosphereFrame.delta = 0; atmosphereFrame.blurAllowed = false;
+            atmosphereFrame.fogTimeMultiplier = getDayNightFogMultiplier(state.dayNightElapsedSeconds);
             drawAtmosphere();
         }
         state.prevTime = time;
@@ -2156,6 +2157,7 @@ function animate(): void {
     ) ?? 0;
     if (dayNightCycle) state.dayNightElapsedSeconds = dayNightCycle.elapsedTimeSeconds;
     atmosphereFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
+    atmosphereFrame.fogTimeMultiplier = getDayNightFogMultiplier(state.dayNightElapsedSeconds);
     if (state.camera) {
         updateTownLanterns(time / 1000, lanternStrength);
     }

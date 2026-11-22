@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { state } from '/src/state.ts';
 import { rebuildEnvironmentWithSeed, updateEnvironmentVisibility, updateLavaLights, getWorldBiomeField, getWorldBiomeMapTexture } from '/src/world.ts';
 import { getLavaPoolDescriptor } from '/src/lavaPools.ts';
-import { DayNightCycle } from '/src/dayNightCycle.ts';
+import { DayNightCycle, getDayNightFogMultiplier } from '/src/dayNightCycle.ts';
 import { AtmosphereEffects } from '/src/atmosphereEffects.ts';
 import { sampleBiomeFogMultiplier, type BiomeId } from '/src/biomes.ts';
 import { resetLeafAnimation, updateLeafAnimation } from '/src/leafAnimation.ts';
@@ -80,6 +80,7 @@ function frame(time) {
     if (wind) weatherTime = (weatherTime + delta) % 300;
     effectsFrame.elapsed = weatherTime; effectsFrame.delta = delta;
     effectsFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
+    effectsFrame.fogTimeMultiplier = getDayNightFogMultiplier(phase);
     updateLeafAnimation(delta, weatherTime, state.camera.position, null, leafAnim);
     renderer.info.reset();
     atmosphere.render(renderer, state.scene, state.camera, effectsFrame);

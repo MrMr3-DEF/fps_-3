@@ -39,6 +39,9 @@ const SAND_SUN_LIGHT_TINT = 0.75;
 const SAND_SUN_INTENSITY_MULTIPLIER = 1.45;
 const CELESTIAL_HORIZON_DIP = 0.045;
 const CELESTIAL_SKY_DISTANCE = 1200;
+const NIGHT_FOG_MULTIPLIER = 1.0;
+const DAY_FOG_MULTIPLIER = 0.8;
+const TWILIGHT_FOG_MULTIPLIER = 1.2;
 const SUN_SHADOW_EXTENT = 256;
 const SUN_SHADOW_DISTANCE = 1100;
 
@@ -102,6 +105,23 @@ function smoothstep(min: number, max: number, value: number): number {
  */
 export function getCelestialOrbitalElevation(elevation: number): number {
     return elevation * (1 + CELESTIAL_HORIZON_DIP) - CELESTIAL_HORIZON_DIP;
+}
+
+/**
+ * Scales fog density across the day/night cycle: 1.0 at night, 1.2 at sunrise
+ * and sundown, and 0.8 during full daytime, with smooth transitions between them.
+ */
+export function getDayNightFogMultiplier(elapsedSeconds: number): number {
+    const state = getDayNightPhase(elapsedSeconds);
+    if (state.phase === 'night') return NIGHT_FOG_MULTIPLIER;
+    const y = getCelestialOrbitalElevation(state.elevation);
+    const twilight = smoothstep(-CELESTIAL_HORIZON_DIP, 0.04, y);
+    const fullDay = smoothstep(0.15, 0.5, y);
+    return THREE.MathUtils.lerp(
+        THREE.MathUtils.lerp(NIGHT_FOG_MULTIPLIER, TWILIGHT_FOG_MULTIPLIER, twilight),
+        DAY_FOG_MULTIPLIER,
+        fullDay,
+    );
 }
 
 /** Owns the scene lighting and visible sun/moon for one continuous five-minute cycle. */

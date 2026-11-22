@@ -87,9 +87,15 @@ test('biome fog multiplier drives fallback fog and setBiomeMap borrows the world
         effects.render(renderer, world, camera, frame);
         effects.render(renderer, world, camera, { ...frame, fogMultiplier: cool });
         effects.render(renderer, world, camera, { ...frame, fogMultiplier: sand });
+        effects.render(renderer, world, camera, { ...frame, fogMultiplier: cool, fogTimeMultiplier: 0.8 });
+        effects.render(renderer, world, camera, { ...frame, fogMultiplier: warm, fogTimeMultiplier: 1.2 });
+        effects.render(renderer, world, camera, { ...frame, fogMultiplier: sand, fogTimeMultiplier: 1.2 });
         assert.equal(seen[0], 0.002 * warm);
         assert.equal(seen[1], 0.002 * cool);
         assert.equal(seen[2], null, 'zero biome fog removes the fallback entirely');
+        assert.ok(Math.abs((seen[3] ?? 0) - 0.002 * cool * 0.8) < 1e-12, 'daytime scales cool fog down 20%');
+        assert.ok(Math.abs((seen[4] ?? 0) - 0.002 * warm * 1.2) < 1e-12, 'sunrise/sundown scales warm fog up 20%');
+        assert.equal(seen[5], null, 'sand stays at zero fog even during sunrise/sundown boost');
         assert.equal(world.fog, null, 'the borrowed scene fog is restored after drawing');
 
         effects.setBiomeMap(null);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DAY_DURATION_SECONDS, DAY_NIGHT_CYCLE_SECONDS, NIGHT_DURATION_SECONDS, DayNightCycle, getDayNightPhase } from '../src/dayNightCycle.ts';
+import { DAY_DURATION_SECONDS, DAY_NIGHT_CYCLE_SECONDS, NIGHT_DURATION_SECONDS, DayNightCycle, getDayNightFogMultiplier, getDayNightPhase } from '../src/dayNightCycle.ts';
 import type { BiomeId, BiomeWeights } from '../src/biomes.ts';
 import * as THREE from 'three';
 
@@ -26,6 +26,15 @@ test('day/night transitions follow configured durations', () => {
 test('cycle calculations wrap cleanly in either direction', () => {
     assert.deepEqual(getDayNightPhase(DAY_NIGHT_CYCLE_SECONDS + 75), getDayNightPhase(75));
     assert.equal(getDayNightPhase(-1).phase, 'night');
+});
+
+test('time-of-day fog multiplier is 1.0 at night, 0.8 in full day, and 1.2 at sunrise and sundown', () => {
+    assert.equal(getDayNightFogMultiplier(DAY_DURATION_SECONDS), 1.0);
+    assert.equal(getDayNightFogMultiplier(DAY_DURATION_SECONDS + NIGHT_DURATION_SECONDS / 2), 1.0);
+    assert.equal(getDayNightFogMultiplier(0), 1.0, 'dawn boundary matches night smoothly');
+    assert.equal(getDayNightFogMultiplier(DAY_DURATION_SECONDS / 2), 0.8);
+    assert.equal(getDayNightFogMultiplier(8), 1.2, 'sunrise boosts fog by 20%');
+    assert.equal(getDayNightFogMultiplier(DAY_DURATION_SECONDS - 8), 1.2, 'sundown boosts fog by 20%');
 });
 
 test('biome sky tints differ across regions and stay neutral inside town', () => {
