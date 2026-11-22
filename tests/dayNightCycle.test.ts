@@ -50,6 +50,36 @@ test('biome sky tints differ across regions and stay neutral inside town', () =>
     cycle.dispose();
 });
 
+test('sand biome gives a brighter yellow sun and stays neutral inside town', () => {
+    const scene = new THREE.Scene();
+    const cycle = new DayNightCycle(scene, { shadows: false, shadowMapSize: 1024 });
+    const observer = new THREE.Vector3();
+    const sunMesh = cycle.celestialScanTargets.find(target => target.key === 'sun')!.mesh;
+    cycle.synchronizeElapsedSeconds(DAY_DURATION_SECONDS / 2, true);
+
+    cycle.update(0, observer, pureWeights('warm'));
+    const warmIntensity = cycle.sunLight.intensity;
+    const warmLightColor = cycle.sunLight.color.clone();
+    const warmDiscColor = sunMesh.material.color.clone();
+
+    cycle.update(0, observer, pureWeights('sand'));
+    assert.ok(cycle.sunLight.intensity > warmIntensity, 'sand sun light is brighter');
+    assert.ok(
+        cycle.sunLight.color.r >= cycle.sunLight.color.g && cycle.sunLight.color.b < warmLightColor.b,
+        'sand sun light shifts warmer yellow',
+    );
+    assert.ok(
+        sunMesh.material.color.r >= sunMesh.material.color.g && sunMesh.material.color.b < warmDiscColor.b,
+        'sand sun disc shifts deeper yellow',
+    );
+
+    cycle.update(0, observer, pureWeights('sand', 1));
+    assert.equal(cycle.sunLight.intensity, warmIntensity, 'town neutralizes sand sun intensity');
+    assert.equal(cycle.sunLight.color.getHex(), warmLightColor.getHex(), 'town neutralizes sand sun light color');
+    assert.equal(sunMesh.material.color.getHex(), warmDiscColor.getHex(), 'town neutralizes sand sun disc color');
+    cycle.dispose();
+});
+
 test('room clock synchronization snaps large drift and ignores network jitter', () => {
     const scene = new THREE.Scene();
     const cycle = new DayNightCycle(scene, { shadows: false, shadowMapSize: 1024 });

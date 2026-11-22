@@ -32,6 +32,11 @@ const TWILIGHT_AMBIENT = new THREE.Color(0x8a5e52);
 const NIGHT_AMBIENT = new THREE.Color(0x4c5d82);
 const SUN_NOON = new THREE.Color(0xffffff);
 const SUN_HORIZON = new THREE.Color(0xffa46b);
+const SUN_DISC_COLOR = new THREE.Color(0xfff0b0);
+const SAND_SUN_LIGHT = new THREE.Color(0xffdc36);
+const SAND_SUN_DISC = new THREE.Color(0xffee38);
+const SAND_SUN_LIGHT_TINT = 0.75;
+const SAND_SUN_INTENSITY_MULTIPLIER = 1.45;
 const CELESTIAL_HORIZON_DIP = 0.045;
 const CELESTIAL_SKY_DISTANCE = 1200;
 const SUN_SHADOW_EXTENT = 256;
@@ -149,7 +154,7 @@ export class DayNightCycle {
 
         this.celestialGeometry = new THREE.SphereGeometry(1, 24, 12);
         this.sunMesh = new THREE.Mesh(this.celestialGeometry, new THREE.MeshBasicMaterial({
-            color: 0xfff0b0,
+            color: SUN_DISC_COLOR.clone(),
             fog: false,
             toneMapped: false,
         }));
@@ -216,6 +221,9 @@ export class DayNightCycle {
         if (state.phase === 'day') {
             const sunGlow = smoothstep(-CELESTIAL_HORIZON_DIP, 0.04, y);
             const daylight = smoothstep(0, 0.5, y);
+            const sandStrength = biomeWeights
+                ? THREE.MathUtils.clamp(biomeWeights.sand, 0, 1) * Math.max(0, 1 - biomeWeights.town)
+                : 0;
             this.skyColor.copy(NIGHT_SKY).lerp(TWILIGHT_SKY, sunGlow).lerp(DAY_SKY, daylight);
             this.colorScratch.copy(NIGHT_AMBIENT).lerp(TWILIGHT_AMBIENT, sunGlow).lerp(DAY_AMBIENT, daylight);
             this.ambientLight.color.copy(this.colorScratch);
@@ -226,11 +234,14 @@ export class DayNightCycle {
             );
 
             this.sunLight.color.copy(SUN_HORIZON).lerp(SUN_NOON, daylight);
+            if (sandStrength > 0) this.sunLight.color.lerp(SAND_SUN_LIGHT, SAND_SUN_LIGHT_TINT * sandStrength);
             this.sunLight.intensity = THREE.MathUtils.lerp(
                 THREE.MathUtils.lerp(0, 0.12, sunGlow),
                 1.2,
                 daylight,
-            );
+            ) * THREE.MathUtils.lerp(1, SAND_SUN_INTENSITY_MULTIPLIER, sandStrength);
+            this.sunMesh.material.color.copy(SUN_DISC_COLOR);
+            if (sandStrength > 0) this.sunMesh.material.color.lerp(SAND_SUN_DISC, sandStrength);
             // Snap in the light's plane, not world X/Z, to keep camera motion
             // from sliding the shadow texel grid over stationary surfaces.
             this.shadowRight.set(0, 1, 0).cross(this.directionScratch).normalize();
