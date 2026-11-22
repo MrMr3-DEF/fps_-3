@@ -9,8 +9,10 @@ previous wave's composition. Surviving robots carry over. Up to 48 robots and
 their temporary wrecks share the battlefield, with overflow waiting for slots.
 
 Robots enter at reachable seeded points along the map edge and travel toward
-outer wall sections. They prioritize the nearest visible living player in a
-75 m sphere. Cover blocks attacks, and robots return to their wall approach
+outer wall sections on varied seeded flanking routes rather than one identical
+shortest path, keeping their horizontal footprints apart so they neither spawn
+nor walk inside one another. They prioritize the nearest visible living player
+in a 75 m sphere. Cover blocks attacks, and robots return to their wall approach
 when they lose the player. At sharp corners and before attacking off-axis targets,
 robots stop and turn in alternating steps. The host sends the landing heading,
 signed turn angle, and clip time so observers see the same footwork.

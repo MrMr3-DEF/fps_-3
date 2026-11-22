@@ -1,10 +1,13 @@
-import { createSceneryBuilder, SHARED_WORLD_GEOMETRIES, SHARED_WORLD_MATERIALS } from './seededScenery.js';
+import { createSceneryBuilder, SHARED_WORLD_GEOMETRIES, SHARED_WORLD_MATERIALS, type SceneryRole } from './seededScenery.js';
 import { cancelHookForTarget } from './hookLifecycle.js';
 import * as THREE from 'three';
+import { createBiomeField, createBiomeMapTexture, type BiomeField } from './biomes.js';
+import { resetLeafAnimation } from './leafAnimation.js';
 import { state } from './state.js';
 import { ForgottenMecha, type MechaEvents } from './forgottenMecha.js';
 import {
     MAP_SIZE,
+    GROUND_VISUAL_SIZE,
     PILLAR_WIDTH,
     MAX_ENEMY_HEIGHT,
     ENEMY_COUNT,
@@ -18,6 +21,14 @@ import { InfantryDefense, type InfantryEnvironment } from './infantry.js';
 import { segmentAabbHitT, segmentGroundHitT } from './gameplayMath.js';
 import { SpatialHash } from './spatialHash.js';
 import { createLavaGlowTexture, getLavaDarknessStrength, LAVA_GLOW_SIZE } from './lavaGlow.js';
+import {
+    LAVA_PIT_MASK_ENCODE_RANGE,
+    LAVA_POOL_QUERY_RADIUS,
+    createLavaPitMaskTexture,
+    getLavaPitFloorY,
+    getLavaPoolDescriptor,
+    isPointInLava,
+} from './lavaPools.js';
 import { obstacleData, targetData } from './userDataTypes.js';
 import { GothGirlfriend } from './gothGirlfriend.js';
 import { createGothHouseDecor } from './gothHouse.js';
@@ -106,6 +117,8 @@ interface ChunkedInstanceSet {
     mesh: THREE.InstancedMesh;
     matricesByChunk: Map<string, THREE.Matrix4[]>;
     packedByChunk: Map<string, Float32Array>;
+    colorsByChunk: Map<string, number[]> | null;
+    packedColorsByChunk: Map<string, Float32Array> | null;
 }
 
 // Static props keep one draw call per material while their instance buffers are
@@ -115,6 +128,21 @@ let targetUpdateFrame = 0;
 let lastRenderChunkX = Number.NaN;
 let lastRenderChunkZ = Number.NaN;
 let lastRenderDistanceChunks = -1;
+
+// Biome presentation is owned by the current world. It never participates in
+// collision, spawn or hit authority.
+let worldBiomeField: BiomeField | null = null;
+let worldBiomeMapTexture: THREE.DataTexture | null = null;
+let lavaPitMaskTexture: THREE.DataTexture | null = null;
+let fakeLavaPools: THREE.Object3D[] = [];
+
+export function getWorldBiomeField(): BiomeField | null {
+    return worldBiomeField;
+}
+
+export function getWorldBiomeMapTexture(): THREE.DataTexture | null {
+    return worldBiomeMapTexture;
+}
 
 // Procedural gameplay geometry must be identical for every player in a room.
 // Keep its PRNG private to world generation so particle/UI randomness cannot
@@ -163,6 +191,11 @@ function worldRandom(): number {
 
 const _placementObstacleCandidates: THREE.Object3D[] = [];
 const _grappleLavaCandidates: THREE.Object3D[] = [];
+const _terrainLavaCandidates: THREE.Object3D[] = [];
+const _lavaContactCandidates: THREE.Object3D[] = [];
+// The largest scaled organic pool spans ~32 units; use the shared query radius
+// so terrain and contact lookups stay branch-free.
+const LAVA_QUERY_RADIUS = LAVA_POOL_QUERY_RADIUS;
 
 function addWorldObject<T extends THREE.Object3D>(obj: T): T {
     state.scene!.add(obj);
@@ -217,10 +250,10 @@ function createTownLanterns(): void {
 
     const group = new THREE.Group();
     group.name = 'town-lanterns';
-    const frameSet = createChunkedInstanceSet(frameGeometry, frameMaterial, TOWN_LANTERN_POSITIONS.length, false, false, group);
+    const frameSet = createChunkedInstanceSet(frameGeometry, frameMaterial, TOWN_LANTERN_POSITIONS.length, false, false, undefined, group);
     const frames = frameSet.mesh;
     frames.name = 'town-lantern-frames';
-    const glassSet = createChunkedInstanceSet(glassGeometry, townLanternGlassMaterial, TOWN_LANTERN_POSITIONS.length, false, false, group);
+    const glassSet = createChunkedInstanceSet(glassGeometry, townLanternGlassMaterial, TOWN_LANTERN_POSITIONS.length, false, false, undefined, group);
     const glass = glassSet.mesh;
     glass.name = 'town-lantern-glass';
     townLanternFlames = new THREE.InstancedMesh(flameGeometry, flameMaterial, TOWN_LANTERN_POSITIONS.length);
@@ -374,16 +407,40 @@ function createLavaGlowMaterial(): THREE.MeshBasicMaterial {
         blending: THREE.AdditiveBlending, depthWrite: false,
         polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
     });
+    const pitMaskUniform = { value: lavaPitMaskTexture };
     material.onBeforeCompile = (shader) => {
         shader.uniforms.lavaVisibleChunks = lavaVisibleChunks;
-        shader.fragmentShader = 'uniform vec3 lavaVisibleChunks;\n' + shader.fragmentShader;
+        shader.uniforms.uLavaPitMask = pitMaskUniform;
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <common>',
+            `#include <common>
+            varying vec2 vGlowWorldXZ;`,
+        );
+        shader.vertexShader = shader.vertexShader.replace(
+            '#include <begin_vertex>',
+            `#include <begin_vertex>
+            vGlowWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;`,
+        );
+        shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            `#include <common>
+            uniform vec3 lavaVisibleChunks;
+            uniform sampler2D uLavaPitMask;
+            varying vec2 vGlowWorldXZ;`,
+        );
         shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+            // Clip the ground-level glow sheet out of recessed pit interiors
+            // along the exact same smooth SDF contour used by the terrain floor.
+            vec2 glowPitUv = clamp(vGlowWorldXZ / ${GROUND_VISUAL_SIZE.toFixed(1)} + 0.5, 0.0, 1.0);
+            float glowPitSdf = (texture2D(uLavaPitMask, glowPitUv).r - 0.5) * ${(2 * LAVA_PIT_MASK_ENCODE_RANGE).toFixed(1)};
+            if (glowPitSdf < 0.0) discard;
             vec4 spillData = texture2D(map, vMapUv);
             vec2 sourceUv = (floor(vMapUv * ${material.map!.image.width.toFixed(1)}) + 0.5) / ${material.map!.image.width.toFixed(1)};
             vec2 sourceChunk = floor(texture2D(map, sourceUv).gb * 255.0 + 0.5) - 128.0;
             vec2 chunkDistance = abs(sourceChunk - lavaVisibleChunks.xy);
             if (spillData.r < 0.002 || max(chunkDistance.x, chunkDistance.y) > lavaVisibleChunks.z) discard;
-            diffuseColor.a *= spillData.r;
+            float rimFade = smoothstep(0.0, 0.45, glowPitSdf);
+            diffuseColor.a *= spillData.r * rimFade;
         `);
         // Additive light fades to zero in fog, rather than adding the sky color.
         shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', THREE.ShaderChunk.fog_fragment.replace(
@@ -391,7 +448,7 @@ function createLavaGlowMaterial(): THREE.MeshBasicMaterial {
             'gl_FragColor.rgb *= 1.0 - fogFactor;',
         ));
     };
-    material.customProgramCacheKey = () => 'lava-ground-spill-v2';
+    material.customProgramCacheKey = () => 'lava-ground-spill-v3';
     return material;
 }
 
@@ -405,9 +462,11 @@ function createChunkedInstanceSet(
     capacity: number,
     castShadow = false,
     receiveShadow = false,
+    role?: SceneryRole,
     parent?: THREE.Group
 ): ChunkedInstanceSet {
     const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    mesh.name = role ? `world-${role}` : '';
     mesh.count = 0;
     mesh.castShadow = castShadow;
     mesh.receiveShadow = receiveShadow;
@@ -420,13 +479,21 @@ function createChunkedInstanceSet(
     const instanceSet: ChunkedInstanceSet = {
         mesh,
         matricesByChunk: new Map<string, THREE.Matrix4[]>(),
-        packedByChunk: new Map<string, Float32Array>()
+        packedByChunk: new Map<string, Float32Array>(),
+        colorsByChunk: null,
+        packedColorsByChunk: null,
     };
     chunkedInstanceSets.push(instanceSet);
     return instanceSet;
 }
 
-function addChunkedInstance(instanceSet: ChunkedInstanceSet, x: number, z: number, matrix: THREE.Matrix4): void {
+function addChunkedInstance(
+    instanceSet: ChunkedInstanceSet,
+    x: number,
+    z: number,
+    matrix: THREE.Matrix4,
+    color?: THREE.Color,
+): void {
     const key = getRenderChunkKey(x, z);
     const matrices = instanceSet.matricesByChunk.get(key);
     if (matrices) {
@@ -434,18 +501,40 @@ function addChunkedInstance(instanceSet: ChunkedInstanceSet, x: number, z: numbe
     } else {
         instanceSet.matricesByChunk.set(key, [matrix.clone()]);
     }
+
+    if (!color) return;
+    if (!instanceSet.colorsByChunk) instanceSet.colorsByChunk = new Map<string, number[]>();
+    if (!instanceSet.packedColorsByChunk) instanceSet.packedColorsByChunk = new Map<string, Float32Array>();
+    const colors = instanceSet.colorsByChunk.get(key);
+    if (colors) {
+        colors.push(color.r, color.g, color.b);
+    } else {
+        instanceSet.colorsByChunk.set(key, [color.r, color.g, color.b]);
+    }
+    if (!instanceSet.mesh.instanceColor) {
+        const capacity = instanceSet.mesh.instanceMatrix.count;
+        instanceSet.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
+        instanceSet.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    }
 }
 
 function refreshChunkedInstances(): void {
     for (let setIndex = 0; setIndex < chunkedInstanceSets.length; setIndex++) {
         const instanceSet = chunkedInstanceSets[setIndex];
         let instanceIndex = 0;
+        let colorIndex = 0;
+        const instanceColor = instanceSet.mesh.instanceColor;
 
         activeRenderChunks.forEach((key) => {
             const packed = instanceSet.packedByChunk.get(key);
             if (!packed) return;
             (instanceSet.mesh.instanceMatrix.array as Float32Array).set(packed, instanceIndex * 16);
             instanceIndex += packed.length / 16;
+            const packedColors = instanceSet.packedColorsByChunk?.get(key);
+            if (packedColors && instanceColor) {
+                (instanceColor.array as Float32Array).set(packedColors, colorIndex * 3);
+                colorIndex += packedColors.length / 3;
+            }
         });
 
         instanceSet.mesh.count = instanceIndex;
@@ -454,6 +543,13 @@ function refreshChunkedInstances(): void {
             instanceSet.mesh.instanceMatrix.addUpdateRange(0, instanceIndex * 16);
             instanceSet.mesh.instanceMatrix.needsUpdate = true;
         }
+        if (instanceColor) {
+            instanceColor.clearUpdateRanges();
+            if (colorIndex > 0) {
+                instanceColor.addUpdateRange(0, colorIndex * 3);
+                instanceColor.needsUpdate = true;
+            }
+        }
     }
 }
 
@@ -461,13 +557,24 @@ function refreshChunkedInstances(): void {
 export function prepareWorldInstanceBuffers(): void {
     for (const set of chunkedInstanceSets) {
         let offset = 0;
-        for (const packed of set.packedByChunk.values()) {
+        let colorOffset = 0;
+        const instanceColor = set.mesh.instanceColor;
+        for (const [key, packed] of set.packedByChunk) {
             (set.mesh.instanceMatrix.array as Float32Array).set(packed, offset);
             offset += packed.length;
+            const packedColors = set.packedColorsByChunk?.get(key);
+            if (packedColors && instanceColor) {
+                (instanceColor.array as Float32Array).set(packedColors, colorOffset);
+                colorOffset += packedColors.length;
+            }
         }
         set.mesh.count = offset / 16;
         set.mesh.instanceMatrix.clearUpdateRanges();
         set.mesh.instanceMatrix.needsUpdate = true;
+        if (instanceColor) {
+            instanceColor.clearUpdateRanges();
+            instanceColor.needsUpdate = true;
+        }
     }
     lastRenderChunkX = Number.NaN;
 }
@@ -573,6 +680,18 @@ export function queryObstaclesNear(x: number, z: number, radius: number, out?: T
 
 export function queryLavaPoolsNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
     return lavaHash.query(x, z, radius, out);
+}
+
+/** Ground height from recessed lava basins; dry ground returns zero. */
+export function getTerrainHeightAt(x: number, z: number): number {
+    const pools = lavaHash.query(x, z, LAVA_QUERY_RADIUS, _terrainLavaCandidates);
+    return getLavaPitFloorY(x, z, pools);
+}
+
+/** Feet-level contact against the organic liquid rim of nearby pools. */
+export function isInLavaAt(x: number, z: number, feetY: number, radius = 0): boolean {
+    const pools = lavaHash.query(x, z, LAVA_QUERY_RADIUS + radius, _lavaContactCandidates);
+    return isPointInLava(x, z, feetY, radius, pools);
 }
 
 export function queryTargetsNear(x: number, z: number, radius: number, out?: THREE.Group[]): THREE.Group[] {
@@ -744,17 +863,33 @@ export function respawnTarget(targetGroup: THREE.Group): void {
 }
 
 const sceneryBuilder = createSceneryBuilder({
+    get seed() { return worldSeed; },
+    get biomeField() { return worldBiomeField!; },
+    get biomeMapTexture() { return worldBiomeMapTexture!; },
     random: worldRandom, addObject: addWorldObject,
-    instances: (geometry, material, capacity, castShadow, receiveShadow) => createChunkedInstanceSet(geometry, material, capacity, castShadow, receiveShadow),
+    instances: (geometry, material, capacity, castShadow, receiveShadow, role) => createChunkedInstanceSet(geometry, material, capacity, castShadow, receiveShadow, role),
     instance: addChunkedInstance, renderObject: addChunkedRenderObject,
     floor: object => { grappleFloor = object; },
     pillar: object => { state.obstacles.push(object); obstacleHash.insert(object.position.x, object.position.z, PILLAR_WIDTH, object); },
-    lava: object => { state.lavaPools.push(object); lavaHash.insert(object.position.x, object.position.z, LAVA_POOL_HALF_SIZE, object); },
+    lava: object => {
+        state.lavaPools.push(object);
+        const radius = getLavaPoolDescriptor(object)?.boundRadius ?? LAVA_POOL_HALF_SIZE;
+        lavaHash.insert(object.position.x, object.position.z, radius, object);
+    },
+    fakeLava: objects => { fakeLavaPools = objects; },
     fakePillars: objects => { state.fakePillars = objects; },
 });
 function createLavaPools(): void {
     lavaHash.clear();
     sceneryBuilder.createLavaPools();
+    // Bake one ground mask from every recessed pit, including the decorative
+    // pools beyond the arena border, so the floor shader can open their holes.
+    lavaPitMaskTexture?.dispose();
+    lavaPitMaskTexture = createLavaPitMaskTexture([...state.lavaPools, ...fakeLavaPools]);
+    const floor = state.scene?.getObjectByName('grass-floor') as THREE.Mesh | undefined;
+    const floorMaterial = floor?.material as THREE.Material | undefined;
+    const maskUniform = floorMaterial?.userData.lavaPitMaskUniform as { value: THREE.Texture } | undefined;
+    if (maskUniform) maskUniform.value = lavaPitMaskTexture;
     lavaGlowMaterial = createLavaGlowMaterial();
     const glowGeometry = new THREE.PlaneGeometry(LAVA_GLOW_SIZE, LAVA_GLOW_SIZE);
     glowGeometry.rotateX(-Math.PI / 2);
@@ -903,8 +1038,11 @@ function finishStaticWorld(): void {
             const packed = new Float32Array(matrices.length * 16);
             matrices.forEach((matrix, index) => matrix.toArray(packed, index * 16));
             set.packedByChunk.set(key, packed);
+            const colors = set.colorsByChunk?.get(key);
+            if (colors && set.packedColorsByChunk) set.packedColorsByChunk.set(key, new Float32Array(colors));
         }
         set.matricesByChunk.clear();
+        set.colorsByChunk?.clear();
     }
     // Freeze only stationary world roots. Enemy hierarchies, billboard pillars,
     // lights, and the separately-owned animated character remain dynamic.
@@ -926,6 +1064,11 @@ const WORLD_GENERATION_STAGES = [
     sceneryBuilder.createBushes, createTown, createTownLanterns, createEnemies, finishStaticWorld,
 ];
 
+function createWorldBiomeLayer(): void {
+    worldBiomeField = createBiomeField(worldSeed);
+    worldBiomeMapTexture = createBiomeMapTexture(worldBiomeField);
+}
+
 /** Fresh-world builder. Public replacements use one of the disposing entry
  * points so old arrays, hashes and GPU resources cannot be silently retained. */
 export function createEnvironment(preserveSeed = false): void {
@@ -933,6 +1076,7 @@ export function createEnvironment(preserveSeed = false): void {
     if (worldObjects.length || gothGirlfriend || forgottenMecha) throw new Error('World already exists; use rebuildEnvironmentWithSeed or createEnvironmentAsync.');
     if (!state.isMultiplayer && !preserveSeed) setWorldSeed(generateWorldSeed());
     resetWorldRandom();
+    createWorldBiomeLayer();
     for (const stage of WORLD_GENERATION_STAGES) stage();
 }
 
@@ -941,6 +1085,7 @@ export async function createEnvironmentAsync(seed: number, checkpoint: () => Pro
     setWorldSeed(seed);
     disposeWorld();
     resetWorldRandom();
+    createWorldBiomeLayer();
     const generation = worldGeneration;
     try {
         for (const stage of WORLD_GENERATION_STAGES) {
@@ -977,6 +1122,14 @@ export function disposeWorld(): void {
             disposedTextures.add(texture);
             texture.dispose();
         }
+        const extraTextures = (mat.userData as { extraTextures?: THREE.Texture[] }).extraTextures;
+        if (extraTextures) {
+            for (const extra of extraTextures) {
+                if (disposedTextures.has(extra)) continue;
+                disposedTextures.add(extra);
+                extra.dispose();
+            }
+        }
 
         mat.dispose();
     };
@@ -1004,6 +1157,15 @@ export function disposeWorld(): void {
 
     worldObjects.forEach(disposeObject);
     worldObjects.length = 0;
+    worldBiomeMapTexture?.dispose();
+    worldBiomeMapTexture = null;
+    worldBiomeField = null;
+    // The baked mask lives only in the floor shader uniform, outside material
+    // fields, so the world owns its disposal explicitly.
+    lavaPitMaskTexture?.dispose();
+    lavaPitMaskTexture = null;
+    fakeLavaPools = [];
+    resetLeafAnimation();
     state.targets = [];
     state.obstacles = [];
     grappleFloor = null;

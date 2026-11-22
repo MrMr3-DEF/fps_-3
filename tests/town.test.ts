@@ -11,6 +11,7 @@ import { resetHook } from '../src/grapple.ts';
 import { updatePlayerPhysics } from '../src/physics.ts';
 import { updateProjectiles, resetProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
+import { getLavaPoolDescriptor } from '../src/lavaPools.ts';
 
 // Canvas drawing is cosmetic; run the real world generation and spatial indexes.
 const context = new Proxy({}, { get: () => () => {} });
@@ -117,7 +118,10 @@ test('real world respects explicit seeds, reserves the town, synchronizes geomet
         for (const o of state.obstacles.filter(o => !o.name.startsWith('town-'))) {
             assert.equal(overlapsTown(o.position.x, o.position.z, o.userData.halfW), false);
         }
-        for (const lava of state.lavaPools) assert.equal(overlapsTown(lava.position.x, lava.position.z, LAVA_POOL_HALF_SIZE), false);
+        for (const lava of state.lavaPools) {
+            const radius = getLavaPoolDescriptor(lava)?.boundRadius ?? LAVA_POOL_HALF_SIZE;
+            assert.equal(overlapsTown(lava.position.x, lava.position.z, radius), false);
+        }
         for (const pillar of state.fakePillars) {
             assert.ok(Math.abs(pillar.position.x) > MAP_HALF_SIZE || Math.abs(pillar.position.z) > MAP_HALF_SIZE);
         }

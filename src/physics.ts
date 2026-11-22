@@ -2,7 +2,7 @@ import { isInputActive, touchMove } from './inputSession.js';
 import * as THREE from 'three';
 import { state } from './state.js';
 import { resetHook } from './grapple.js';
-import { queryObstaclesNear } from './world.js';
+import { getTerrainHeightAt, isInLavaAt, queryObstaclesNear } from './world.js';
 import { obstacleData } from './userDataTypes.js';
 import {
     PILLAR_WIDTH,
@@ -26,7 +26,8 @@ import {
     AIR_DRAG,
     GROUND_ACCEL_RATE,
     APEX_VELOCITY_THRESHOLD,
-    DESCENT_FALL_RATIO_CAP
+    DESCENT_FALL_RATIO_CAP,
+    LAVA_SPEED_MULTIPLIER
 } from './config.js';
 
 // Scratch vectors reused by the hot physics path.
@@ -51,7 +52,6 @@ interface ScanResult {
 // Independent X/Z collision checks prevent snagging on corners, followed by
 // floor and ceiling checks at the accepted horizontal position.
 function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPosZ: THREE.Vector3, feetY: number): ScanResult {
-    let groundY = 0;
     let ceilingY = Infinity;
     let colX = false;
     let colZ = false;
@@ -108,6 +108,9 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     // position can miss a roof edge during a fast falling/grappling frame.
     const finalX = resolvedX;
     const finalZ = colZ ? actualPos.z : testPosZ.z;
+    // Recessed lava basins supply the baseline floor; obstacle tops can only
+    // raise support above it.
+    let groundY = getTerrainHeightAt(finalX, finalZ);
     for (const box of candidates) {
         const data = obstacleData(box);
         const ex = (data.halfW || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
@@ -142,6 +145,7 @@ function stepPlayerPhysics(delta: number): void {
         
         if (isInputActive() || isPaused) {
             const playerObj = state.controls.getObject();
+            const wasGrounded = state.canJump;
             
             // Keep gravity/collisions alive while paused, but ignore movement input.
             const moveForward = isPaused ? false : state.moveForward;
@@ -232,7 +236,9 @@ function stepPlayerPhysics(delta: number): void {
             _moveDir.addScaledVector(_camRight, analogX).addScaledVector(_camForward, -analogY);
             if (_moveDir.lengthSq() > 1) _moveDir.normalize();
 
-            const currentSpeed = WALK_SPEED;
+            const inLava = state.canJump &&
+                isInLavaAt(playerObj.position.x, playerObj.position.z, playerObj.position.y - PLAYER_HEIGHT, PLAYER_RADIUS);
+            const currentSpeed = inLava ? WALK_SPEED * LAVA_SPEED_MULTIPLIER : WALK_SPEED;
 
             if (state.canJump) {
                 if (state.hookState !== 'PULLING' && isMoving) {
@@ -304,15 +310,29 @@ function stepPlayerPhysics(delta: number): void {
 
             const minCameraY = currentGroundY + PLAYER_HEIGHT; 
 
-            const isGrounded = minCameraY <= maxCameraY && playerObj.position.y <= minCameraY && state.velocity.y <= 0;
-            if (isGrounded) {
+            // A grounded walk follows a gentle drop without leaving the floor.
+            // The 0.25-grade lava banks change less than STEP_HEIGHT per frame,
+            // so stepping into or out of a 0.8-unit basin needs no jump.
+            const followsDescent = wasGrounded && state.velocity.y <= 0 &&
+                minCameraY <= maxCameraY &&
+                playerObj.position.y > minCameraY &&
+                playerObj.position.y - minCameraY <= PLAYER_STEP_HEIGHT;
+            if (followsDescent) {
                 state.normalJumpActive = false;
                 state.velocity.y = 0;
                 playerObj.position.y = minCameraY;
+                state.canJump = true;
+            } else {
+                const isGrounded = minCameraY <= maxCameraY && playerObj.position.y <= minCameraY && state.velocity.y <= 0;
+                if (isGrounded) {
+                    state.normalJumpActive = false;
+                    state.velocity.y = 0;
+                    playerObj.position.y = minCameraY;
+                }
+                // Grounded state must be recomputed every frame. Otherwise a player
+                // who walks off a pillar keeps their previous canJump=true state.
+                state.canJump = isGrounded;
             }
-            // Grounded state must be recomputed every frame. Otherwise a player
-            // who walks off a pillar keeps their previous canJump=true state.
-            state.canJump = isGrounded;
         }
     }
 }

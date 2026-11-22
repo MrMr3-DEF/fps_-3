@@ -1,13 +1,16 @@
 <!doctype html>
 <html lang="en"><meta charset="utf-8"><title>Lighting inspection</title>
 <style>body{margin:0;font:14px system-ui;background:#111}canvas{display:block}nav{position:fixed;top:12px;left:12px;right:12px;padding:12px;background:#15202eee;color:white;border-radius:8px}button{padding:8px}#info{margin-top:8px}label{display:inline-block;margin:4px}</style>
-<nav><button id="lava">Lava</button><button id="town">Town</button><button id="day">Noon</button><button id="low">Low sun</button><button id="night">Night</button><button id="glow">Toggle glow</button><button id="quality">Toggle shadow quality</button><label>Render distance <input id="distance" type="range" min="1" max="16" value="4"></label><button id="motion">Toggle movement</button><button id="fog">Toggle fog</button><button id="blur">Toggle blur</button><button id="wind">Toggle wind</button><label>Altitude offset <input id="altitude" type="range" min="0" max="180" value="0"></label><label>Weather time <input id="weather-time" type="range" min="0" max="300" value="0"></label><div id="info"></div></nav>
+<nav><button id="lava">Lava</button><button id="town">Town</button><button id="warm">Warm</button><button id="cool">Cool</button><button id="sand">Sand</button><button id="day">Noon</button><button id="low">Low sun</button><button id="night">Night</button><button id="glow">Toggle glow</button><button id="quality">Toggle shadow quality</button><label>Render distance <input id="distance" type="range" min="1" max="16" value="4"></label><button id="motion">Toggle movement</button><button id="fog">Toggle fog</button><button id="blur">Toggle blur</button><button id="wind">Toggle wind</button><button id="leaves">Toggle leaf anim</button><label>Altitude offset <input id="altitude" type="range" min="0" max="180" value="0"></label><label>Weather time <input id="weather-time" type="range" min="0" max="300" value="0"></label><div id="info"></div></nav>
 <script type="module">
 import * as THREE from 'three';
 import { state } from '/src/state.ts';
-import { rebuildEnvironmentWithSeed, updateEnvironmentVisibility, updateLavaLights } from '/src/world.ts';
+import { rebuildEnvironmentWithSeed, updateEnvironmentVisibility, updateLavaLights, getWorldBiomeField, getWorldBiomeMapTexture } from '/src/world.ts';
+import { getLavaPoolDescriptor } from '/src/lavaPools.ts';
 import { DayNightCycle } from '/src/dayNightCycle.ts';
 import { AtmosphereEffects } from '/src/atmosphereEffects.ts';
+import { sampleBiomeFogMultiplier, type BiomeId } from '/src/biomes.ts';
+import { resetLeafAnimation, updateLeafAnimation } from '/src/leafAnimation.ts';
 state.scene = new THREE.Scene();
 state.camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, .1, 1500);
 state.controls = { getObject: () => state.camera };
@@ -20,26 +23,40 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.append(renderer.domElement);
 renderer.info.autoReset = false;
 const atmosphere = new AtmosphereEffects(42);
-const effectsFrame = { elapsed: 0, delta: 0, blurAllowed: true, cameraKey: 'fixture' };
+const effectsFrame = { elapsed: 0, delta: 0, blurAllowed: true, cameraKey: 'fixture', fogMultiplier: 1 };
 const cycle = new DayNightCycle(state.scene, { shadows: true, shadowMapSize: 1024 });
 rebuildEnvironmentWithSeed(42);
-let glow = true, quality = 1024, moving = false, phase = 90, fog = true, blur = true, wind = true, weatherTime = 0;
+atmosphere.setBiomeMap(getWorldBiomeMapTexture());
+let glow = true, quality = 1024, moving = false, phase = 90, fog = true, blur = true, wind = true, weatherTime = 0, leafAnim = true;
 const center = new THREE.Vector3();
 const cameraBase = new THREE.Vector3();
 const aim = new THREE.Vector3();
 function lava() {
     const pool = state.lavaPools[0];
-    center.copy(pool.position);
-    cameraBase.copy(center).add(new THREE.Vector3(36, 15, 36));
+    if (!pool) return;
+    // Frame the recessed organic pit from above so its cut rim, basin and lava
+    // surface are all visible.
+    const radius = getLavaPoolDescriptor(pool)?.boundRadius ?? 12.8;
+    center.set(pool.position.x, pool.position.y, pool.position.z);
+    cameraBase.copy(center).add(new THREE.Vector3(radius * 1.7, radius * 1.1 + 10, radius * 1.7));
 }
 function town() { center.set(0, 8, -55); cameraBase.set(0, 6, 30); }
-for (const [id, fn] of Object.entries({lava, town, day: () => phase = 90, low: () => phase = 13,
+function biome(id: BiomeId) {
+    const site = getWorldBiomeField()?.sites.find(candidate => candidate.biome === id);
+    if (!site) return;
+    center.set(site.x, 34, site.z);
+    cameraBase.set(site.x + 92, 58, site.z + 92);
+}
+for (const [id, fn] of Object.entries({lava, town,
+    warm: () => biome('warm'), cool: () => biome('cool'), sand: () => biome('sand'),
+    day: () => phase = 90, low: () => phase = 13,
     night: () => phase = 240, glow: () => glow = !glow,
     quality: () => { quality = quality === 1024 ? 2048 : 1024; cycle.applySettings({shadows: true, shadowMapSize: quality}); },
     motion: () => moving = !moving,
     fog: () => { fog = !fog; atmosphere.applySettings({fog, motionBlur: blur}); },
     blur: () => { blur = !blur; atmosphere.applySettings({fog, motionBlur: blur}); },
-    wind: () => wind = !wind})) document.getElementById(id).onclick = () => { fn(); atmosphere.resetHistory(); };
+    wind: () => wind = !wind,
+    leaves: () => leafAnim = !leafAnim})) document.getElementById(id).onclick = () => { fn(); atmosphere.resetHistory(); };
 document.getElementById('weather-time').oninput = event => { weatherTime = Number(event.target.value); };
 document.getElementById('altitude').oninput = () => atmosphere.resetHistory();
 lava();
@@ -56,16 +73,19 @@ function frame(time) {
     aim.copy(center); aim.y += altitude;
     state.camera.lookAt(aim);
     cycle.synchronizeElapsedSeconds(phase, true);
-    const darkness = cycle.update(0, state.camera.position);
+    const biomeWeights = getWorldBiomeField()?.sample(state.camera.position.x, state.camera.position.z);
+    const darkness = cycle.update(0, state.camera.position, biomeWeights);
     updateEnvironmentVisibility(state.camera.position, Number(document.getElementById('distance').value));
     updateLavaLights(time / 1000, state.camera.position, darkness, glow);
     if (wind) weatherTime = (weatherTime + delta) % 300;
     effectsFrame.elapsed = weatherTime; effectsFrame.delta = delta;
+    effectsFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
+    updateLeafAnimation(delta, weatherTime, state.camera.position, null, leafAnim);
     renderer.info.reset();
     atmosphere.render(renderer, state.scene, state.camera, effectsFrame);
-    document.getElementById('info').textContent = `${quality}px shadows · glow ${glow ? 'on' : 'off'} · fog ${fog} · blur ${blur} · altitude ${state.camera.position.y.toFixed(0)} m · weather ${weatherTime.toFixed(1)} s · ${renderer.info.render.calls} draw calls · ${average.toFixed(1)} ms/frame (includes display/vsync)`;
+    document.getElementById('info').textContent = `${quality}px shadows · glow ${glow ? 'on' : 'off'} · fog ${fog} · blur ${blur} · leaves ${leafAnim ? 'on' : 'off'} · altitude ${state.camera.position.y.toFixed(0)} m · weather ${weatherTime.toFixed(1)} s · ${renderer.info.render.calls} draw calls · ${average.toFixed(1)} ms/frame (includes display/vsync)`;
 }
 requestAnimationFrame(frame);
 addEventListener('resize', () => { state.camera.aspect = innerWidth / innerHeight; state.camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); atmosphere.resetHistory(); });
-addEventListener('pagehide', () => atmosphere.dispose());
+addEventListener('pagehide', () => { resetLeafAnimation(); atmosphere.dispose(); });
 </script></html>

@@ -257,7 +257,12 @@ export const WEAPON_STATS: Record<string, WeaponStat> = {
 
 export const LAVA_DAMAGE_TICK_MS = 500;
 export const LAVA_DAMAGE_PER_TICK = 1;
+// Retained for legacy square-pool footprints and their gameplay queries.
 export const LAVA_POOL_HALF_SIZE = 12.8;
+export const LAVA_POOL_COUNT = 26;
+export const LAVA_PIT_MAX_DEPTH = 0.8;
+export const LAVA_SURFACE_Y = -0.22;
+export const LAVA_SPEED_MULTIPLIER = 0.7;
 
 export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
@@ -278,10 +283,18 @@ export const LASER_BEAM_FADE_TIME = 0.3;
 export const TARGET_HIT_RANGE_MULTIPLIER = 1.6;
 
 export const FAKE_PILLAR_COUNT = 84;
-export const FAKE_LAVA_POOL_COUNT = 56;
+export const FAKE_LAVA_POOL_COUNT = 16;
 export const LAVA_CHAIN_COUNT = 260;
 export const BUSH_2D_COUNT = 175;
 export const BUSH_3D_COUNT = 700;
+// Biome weights tint ground and vegetation; sand also gates seeded lava pits.
+export const BIOME_SITE_COUNT = 5;
+export const BIOME_BLEND_WIDTH = 180;
+export const BIOME_WARP_AMPLITUDE = 110;
+export const BIOME_TOWN_FADE = 80;
+export const BIOME_MAP_SIZE = 128;
+export const BIOME_FOG_MULTIPLIER = { warm: 1.0, cool: 1.75, sand: 0.0 } as const;
+export const LEAF_REACTION_RADIUS = 13.5;
 export const BUSH_3D_RADIUS_CAP = 990;
 export const BUSH_2D_INNER_RADIUS = 1005;
 export const BUSH_2D_SPREAD = 745;

@@ -20,7 +20,7 @@ export function setupSettingsMenu(getDraft: () => UserSettings, update: (mutate:
     body.append(sidebar, container);
     const categories = [
         ['gameplay', 'Gameplay', ['sensitivity', 'setting-raw-mouse-input', 'setting-mouse-spike-protection', 'setting-fov', 'setting-scoped-fov', 'setting-webllm-download']],
-        ['graphics', 'Graphics', ['setting-render-scale', 'setting-render-distance', 'setting-particles', 'setting-fog', 'setting-motion-blur', 'setting-shadows', 'setting-shadow-quality', 'setting-lava-glow', 'setting-muzzle-flashes', 'setting-muzzle-flash-opacity', 'setting-bullet-trails', 'setting-fps']],
+        ['graphics', 'Graphics', ['setting-render-scale', 'setting-render-distance', 'setting-particles', 'setting-fog', 'setting-motion-blur', 'setting-shadows', 'setting-shadow-quality', 'setting-lava-glow', 'setting-muzzle-flashes', 'setting-muzzle-flash-opacity', 'setting-bullet-trails', 'setting-leaf-animation', 'setting-fps']],
         ['accessibility', 'Accessibility', ['setting-photosensitivity']],
         ['keybinds', 'Keybinds', []],
         ['crosshair', 'Crosshair', []],

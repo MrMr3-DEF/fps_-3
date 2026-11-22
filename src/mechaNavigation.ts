@@ -50,15 +50,7 @@ export class MechaNavigation {
                 if (index < 0 || this.blocked[index]) continue;
                 const end = { x: Math.abs(Math.sin(yaw)) > 0.5 ? -Math.sin(yaw) * this.punchDistance : x,
                     z: Math.abs(Math.cos(yaw)) > 0.5 ? -Math.cos(yaw) * this.punchDistance : z };
-                let safe = true;
-                // The last approach enters cells conservatively reserved for
-                // the wall, so check the true footprint against actual bounds.
-                for (let step = 0; step <= 32 && safe; step++) {
-                    const px = x + (end.x - x) * step / 32, pz = z + (end.z - z) * step / 32;
-                    safe = !this.boxes.some(box =>
-                        Math.abs(px - box.x) < box.halfW + radius && Math.abs(pz - box.z) < box.halfD + radius);
-                }
-                if (!safe) continue;
+                if (!this.approachClear({ x, z }, end)) continue;
                 this.next[index] = index;
                 this.goalHeading.set(index, yaw);
                 queue[tail++] = index;
@@ -87,6 +79,16 @@ export class MechaNavigation {
     private point(index: number): NavigationPoint {
         return { x: index % this.size * this.cellSize - this.limit, z: Math.floor(index / this.size) * this.cellSize - this.limit };
     }
+    // The last approach enters cells conservatively reserved for the wall, so
+    // check the true footprint against actual bounds instead.
+    private approachClear(start: NavigationPoint, end: NavigationPoint): boolean {
+        for (let step = 0; step <= 32; step++) {
+            const px = start.x + (end.x - start.x) * step / 32, pz = start.z + (end.z - start.z) * step / 32;
+            if (this.boxes.some(box =>
+                Math.abs(px - box.x) < box.halfW + this.radius && Math.abs(pz - box.z) < box.halfD + this.radius)) return false;
+        }
+        return true;
+    }
     segmentClear(a: NavigationPoint, b: NavigationPoint, allowLava = false): boolean {
         if (Math.max(Math.abs(a.x), Math.abs(a.z), Math.abs(b.x), Math.abs(b.z)) > this.limit) return false;
         for (const box of allowLava ? this.solidBoxes : this.boxes) {
@@ -104,26 +106,17 @@ export class MechaNavigation {
         }
         return true;
     }
-    routeFrom(start: NavigationPoint, maxShortcutCells = Infinity): MechaRoute | null {
+    routeFrom(start: NavigationPoint, maxShortcutCells = Infinity, variationSeed?: number): MechaRoute | null {
         let index = this.index(start.x, start.z);
         if (index < 0 || this.next[index] < 0) return null;
         const raw = [this.point(index)];
         while (this.next[index] !== index) { index = this.next[index]; raw.push(this.point(index)); }
         const heading = this.goalHeading.get(index)!;
-        const points = [raw[0]];
-        let anchor = 0;
-        while (anchor < raw.length - 1) {
-            let end = anchor + 1;
-            while (end + 1 < raw.length && end + 1 - anchor <= maxShortcutCells && this.segmentClear(raw[anchor], raw[end + 1])) end++;
-            points.push(raw[end]);
-            anchor = end;
-        }
-        const goal = points[points.length - 1];
-        points.push({ x: Math.abs(Math.sin(heading)) > 0.5 ? -Math.sin(heading) * this.punchDistance : goal.x,
-            z: Math.abs(Math.cos(heading)) > 0.5 ? -Math.cos(heading) * this.punchDistance : goal.z });
-        return { points, heading };
+        return variationSeed === undefined ? this.shortestRoute(raw, heading, maxShortcutCells)
+            : this.variedRoute(raw, heading, maxShortcutCells, variationSeed);
     }
-    borderSpawn(seed: number, available: (point: NavigationPoint) => boolean = () => true, maxShortcutCells = Infinity): MechaRoute {
+    borderSpawn(seed: number, available: (point: NavigationPoint) => boolean = () => true, maxShortcutCells = Infinity,
+        variationSeed?: number): MechaRoute {
         // A separate seed stream never consumes procedural-world randomness.
         let random = seed >>> 0;
         const border: NavigationPoint[] = [];
@@ -138,9 +131,118 @@ export class MechaNavigation {
         }
         for (const point of border) {
             if (!available(point)) continue;
-            const route = this.routeFrom(point, maxShortcutCells);
+            const route = this.routeFrom(point, maxShortcutCells, variationSeed);
             if (route) return route;
         }
         throw new Error('No reachable border spawn for Forgotten Mecha');
+    }
+    private shortestRoute(raw: NavigationPoint[], heading: number, maxShortcutCells: number): MechaRoute {
+        const points = [raw[0]];
+        let anchor = 0;
+        while (anchor < raw.length - 1) {
+            let end = anchor + 1;
+            while (end + 1 < raw.length && end + 1 - anchor <= maxShortcutCells && this.segmentClear(raw[anchor], raw[end + 1])) end++;
+            points.push(raw[end]);
+            anchor = end;
+        }
+        const goal = points[points.length - 1];
+        points.push({ x: Math.abs(Math.sin(heading)) > 0.5 ? -Math.sin(heading) * this.punchDistance : goal.x,
+            z: Math.abs(Math.cos(heading)) > 0.5 ? -Math.cos(heading) * this.punchDistance : goal.z });
+        return { points, heading };
+    }
+    private variedRoute(raw: NavigationPoint[], heading: number, maxShortcutCells: number, variationSeed: number): MechaRoute {
+        const random = this.randomFrom(variationSeed);
+        const along = [0];
+        for (let i = 1; i < raw.length; i++) along.push(along[i - 1] + Math.hypot(raw[i].x - raw[i - 1].x, raw[i].z - raw[i - 1].z));
+        const length = along.at(-1)!;
+        const side = random() < .5 ? -1 : 1;
+        // Long approaches can afford a wide flank; short ones keep their detour
+        // proportional so they still rejoin the wall promptly.
+        const bend = (20 + random() * 55) * Math.min(1, Math.max(.25, length / 500));
+        const phase = random() * Math.PI * 2, frequency = 2.5 + random() * 1.5;
+        const anchors: { index: number; point: NavigationPoint }[] = [];
+        let nextAnchor = 80 + random() * 60;
+        for (let i = 1; i < raw.length - 1; i++) {
+            if (along[i] < nextAnchor || length - along[i] < 90) continue;
+            const tangentX = raw[i + 1].x - raw[i - 1].x, tangentZ = raw[i + 1].z - raw[i - 1].z;
+            const tangent = Math.hypot(tangentX, tangentZ);
+            if (tangent < 1e-6) continue;
+            const u = along[i] / length, arc = Math.sin(Math.PI * u), wave = Math.sin(u * Math.PI * frequency + phase);
+            const lateral = bend * (side * arc * (.7 + .3 * wave) + .22 * wave);
+            const offsetX = -tangentZ / tangent, offsetZ = tangentX / tangent;
+            for (const scale of [1, .65, .35]) {
+                const point = { x: raw[i].x + offsetX * lateral * scale, z: raw[i].z + offsetZ * lateral * scale };
+                const index = this.index(point.x, point.z);
+                if (index < 0 || this.blocked[index]) continue;
+                // Keep both ends of the anchor reachable from its base cell so
+                // stitching can always fall back to the BFS chain.
+                if (!this.segmentClear(raw[i], point) || !this.segmentClear(point, raw[i + 1])) continue;
+                anchors.push({ index: i, point });
+                break;
+            }
+            nextAnchor = along[i] + 80 + random() * 60;
+        }
+        const points = [raw[0]];
+        let cursor = raw[0], cursorBase = 0;
+        for (const anchor of anchors) {
+            const link = this.baseLink(cursor, cursorBase, anchor.point, anchor.index, raw, maxShortcutCells);
+            if (!link) continue;
+            points.push(...link);
+            cursor = anchor.point;
+            cursorBase = anchor.index;
+        }
+        const goal = raw.at(-1)!;
+        const baseEnd = { x: Math.abs(Math.sin(heading)) > 0.5 ? -Math.sin(heading) * this.punchDistance : goal.x,
+            z: Math.abs(Math.cos(heading)) > 0.5 ? -Math.cos(heading) * this.punchDistance : goal.z };
+        // Spread attackers along the wall face. A short probe toward the wall
+        // rejects gateways and other openings where there is nothing to punch.
+        const spread = (random() < .5 ? -1 : 1) * (2 + random() * 10);
+        const tangent = { x: Math.cos(heading), z: -Math.sin(heading) };
+        let link: NavigationPoint[] | null = null;
+        for (const scale of [1, .5, 0]) {
+            const end = { x: baseEnd.x + tangent.x * spread * scale, z: baseEnd.z + tangent.z * spread * scale };
+            if (!this.approachClear(goal, end) || !this.wallAhead(end, heading)) continue;
+            link = this.baseLink(cursor, cursorBase, end, raw.length - 1, raw, maxShortcutCells);
+            if (link) break;
+        }
+        if (!link) return this.shortestRoute(raw, heading, maxShortcutCells);
+        points.push(...link);
+        for (let i = 1; i < points.length; i++) {
+            if (!this.segmentClear(points[i - 1], points[i])) return this.shortestRoute(raw, heading, maxShortcutCells);
+        }
+        return { points, heading };
+    }
+    private baseLink(start: NavigationPoint, startBase: number, target: NavigationPoint, targetBase: number,
+        raw: readonly NavigationPoint[], maxShortcutCells: number): NavigationPoint[] | null {
+        if (this.segmentClear(start, target)) return [target];
+        const points: NavigationPoint[] = [];
+        let cursor = start, base = startBase;
+        while (base < targetBase) {
+            const limit = Number.isFinite(maxShortcutCells) ? Math.min(targetBase, base + Math.max(1, maxShortcutCells)) : targetBase;
+            let chosen = -1;
+            for (let i = limit; i > base; i--) {
+                if (this.segmentClear(cursor, raw[i])) { chosen = i; break; }
+            }
+            if (chosen < 0) return null;
+            points.push(raw[chosen]);
+            cursor = raw[chosen];
+            base = chosen;
+        }
+        if (!this.segmentClear(cursor, target)) return null;
+        points.push(target);
+        return points;
+    }
+    private wallAhead(point: NavigationPoint, heading: number): boolean {
+        // The standoff sits just outside the footprint envelope, so any probe
+        // into an intact wall overlaps it while a gateway stays clear.
+        const probe = { x: point.x + Math.sin(heading) * (this.radius + 1), z: point.z + Math.cos(heading) * (this.radius + 1) };
+        return !this.segmentClear(point, probe);
+    }
+    private randomFrom(seed: number): () => number {
+        let state = seed >>> 0;
+        return () => {
+            state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+            return state / 0x100000000;
+        };
     }
 }

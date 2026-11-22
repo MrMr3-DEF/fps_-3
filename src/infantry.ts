@@ -3,8 +3,9 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import {
     ENEMY_COUNT, INFANTRY, INFANTRY_AIM_ANGLE, INFANTRY_STEERING_ANGLE, INFANTRY_TURN_ANGLE, INFANTRY_DEBRIS_TIME, INFANTRY_LIMIT, INFANTRY_RANGE, LAVA_POOL_HALF_SIZE,
-    MAP_HALF_SIZE, NETWORK_POSITION_RESPONSE, TOWN_WALL_HP, type InfantryKind,
+    LAVA_SPEED_MULTIPLIER, MAP_HALF_SIZE, NETWORK_POSITION_RESPONSE, TOWN_WALL_HP, type InfantryKind,
 } from './config.js';
+import { getLavaPitFloorY, getLavaPoolDescriptor, isPointInLava } from './lavaPools.js';
 import { MechaNavigation, type MechaRoute, type NavigationPoint } from './mechaNavigation.js';
 import { cancelHookForTarget } from './hookLifecycle.js';
 import { closestPlayerBodyPoint } from './playerHitbox.js';
@@ -21,6 +22,10 @@ const URLS = {
 const ACTOR_CLEARANCE = Math.max(...KINDS.map(kind => Math.hypot(INFANTRY[kind].width, INFANTRY[kind].depth) / 2));
 // Leave the route just outside the footprint so the Fast swing can reach the wall.
 const WALL_STANDOFF = ACTOR_CLEARANCE + .025;
+
+export function botFootprintRadius(kind: InfantryKind): number {
+    return Math.hypot(INFANTRY[kind].width, INFANTRY[kind].depth) * .52 + .35;
+}
 const RIGHT_HAND = THREE.PropertyBinding.sanitizeNodeName('hand.R');
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -63,6 +68,7 @@ interface Bot {
     cooldown: number;
     victim?: Pick<InfantryPlayer, 'id' | 'lifeId'> & { mountedRevision?: number };
     wall?: { point: THREE.Vector3; heading: number };
+    variationSeed?: number;
 }
 
 function poseAction(visual: BotVisual, pose: InfantryPose): THREE.AnimationAction {
@@ -147,6 +153,7 @@ export class InfantryDefense {
     private readonly scene: THREE.Scene;
     private readonly seed: number;
     private readonly environment: InfantryEnvironment;
+    private readonly lava: readonly THREE.Object3D[];
     private readonly nav: MechaNavigation | null;
     private disposed = false;
 
@@ -156,12 +163,16 @@ export class InfantryDefense {
         this.scene = scene;
         this.seed = seed;
         this.environment = environment;
+        this.lava = lava;
         this.nav = authoritative ? new MechaNavigation(obstacles.map(object => {
             const { height, halfH = height / 2, halfW, halfD } = obstacleData(object);
             const { x, y, z } = object.position;
             return { x, z, halfW, halfD, bottom: y - halfH, top: y + halfH };
         }), lava.map(pool => ({
-            x: pool.position.x, z: pool.position.z, halfW: LAVA_POOL_HALF_SIZE, halfD: LAVA_POOL_HALF_SIZE, bottom: 0, top: .15,
+            x: pool.position.x, z: pool.position.z,
+            halfW: getLavaPoolDescriptor(pool)?.boundRadius ?? LAVA_POOL_HALF_SIZE,
+            halfD: getLavaPoolDescriptor(pool)?.boundRadius ?? LAVA_POOL_HALF_SIZE,
+            bottom: 0, top: .15,
         })), ACTOR_CLEARANCE, WALL_STANDOFF, MAP_HALF_SIZE, INFANTRY.big.height) : null;
 
         for (let slot = 0; slot < INFANTRY_LIMIT; slot++) {
@@ -242,14 +253,18 @@ export class InfantryDefense {
         this.pending[selected]--;
         this.nextKind = (selected + 1) % KINDS.length;
         const serial = ++this.spawnSerial;
+        const kind = KINDS[selected], radius = botFootprintRadius(kind);
+        const variationSeed = (this.seed ^ Math.imul(serial, 0x517cc1b7)) >>> 0;
         const route = this.nav!.borderSpawn(this.seed ^ Math.imul(serial, 0x9e3779b9),
-            point => this.bots.every(other => !other.pose || Math.hypot(other.group.position.x - point.x, other.group.position.z - point.z) > 2 * ACTOR_CLEARANCE), 12);
+            point => this.bots.every(other => !other.pose || other.pose.phase === 'death' ||
+                Math.hypot(other.group.position.x - point.x, other.group.position.z - point.z) >=
+                    radius + botFootprintRadius(other.pose.kind) + 1.5), 12, variationSeed);
         const [first, next] = route.points;
         const { index, eliminationRevision } = targetData(bot.group);
-        const kind = KINDS[selected];
         this.install(bot, { slot: index - ENEMY_COUNT, revision: eliminationRevision + 1, kind, hp: INFANTRY[kind].hp,
             position: { ...first, y: 0 }, yaw: Math.atan2(next.x - first.x, next.z - first.z), pitch: 0, phase: 'moving', time: 0 });
         this.setRoute(bot, route);
+        bot.variationSeed = variationSeed;
         bot.victim = undefined;
         bot.cooldown = 0;
         this.present(bot);
@@ -459,9 +474,11 @@ export class InfantryDefense {
     private followWallRoute(bot: Bot, delta: number): void {
         if (!bot.route) {
             const position = bot.group.position;
+            const variationSeed = bot.variationSeed ??
+                ((this.seed ^ Math.imul(targetData(bot.group).index - ENEMY_COUNT + 1, 0x517cc1b7)) >>> 0);
             // A chase may end between cells next to a blocked rounded cell.
             for (const [dx, dz] of [[0, 0], [4, 0], [-4, 0], [0, 4], [0, -4], [4, 4], [4, -4], [-4, 4], [-4, -4]]) {
-                const route = this.nav!.routeFrom({ x: position.x + dx, z: position.z + dz }, 12);
+                const route = this.nav!.routeFrom({ x: position.x + dx, z: position.z + dz }, 12, variationSeed);
                 if (route && this.nav!.segmentClear(position, route.points[0])) {
                     this.setRoute(bot, route);
                     // Rejoin the forward segment without turning back to the snapped grid center.
@@ -482,21 +499,99 @@ export class InfantryDefense {
         this.setPhase(bot, 'idle');
     }
 
+    private overlapsLiving(bot: Bot, x: number, z: number, radius: number, tolerance: number): boolean {
+        for (const other of this.bots) {
+            const pose = other.pose;
+            if (other === bot || !pose || pose.phase === 'death') continue;
+            const distance = radius + botFootprintRadius(pose.kind) - tolerance;
+            if ((x - other.group.position.x) ** 2 + (z - other.group.position.z) ** 2 < distance ** 2) return true;
+        }
+        return false;
+    }
+
     private move(bot: Bot, target: NavigationPoint, delta: number, check: boolean): boolean {
-        const position = bot.group.position;
+        const pose = bot.pose!, position = bot.group.position, stats = INFANTRY[pose.kind];
         const dx = target.x - position.x, dz = target.z - position.z;
         const length = Math.hypot(dx, dz);
         if (length < .015) return false;
-        const advance = Math.min(1, INFANTRY[bot.pose!.kind].speed * delta / length);
-        const next = this.step.set(position.x + dx * advance, position.y, position.z + dz * advance);
-        if (check && !this.nav!.segmentClear(position, next)) return false;
-        const heading = Math.atan2(dx, dz);
+        const radius = botFootprintRadius(pose.kind);
+        // Repulsion plus a right-hand tangent lets converging robots arc past
+        // one another instead of locking head-on or marching through a peer.
+        let steerX = 0, steerZ = 0;
+        for (const other of this.bots) {
+            const otherPose = other.pose;
+            if (other === bot || !otherPose || otherPose.phase === 'death') continue;
+            const ox = other.group.position.x - position.x, oz = other.group.position.z - position.z;
+            const distance = Math.hypot(ox, oz), room = radius + botFootprintRadius(otherPose.kind) + 2.2;
+            if (distance >= room || distance < 1e-4) continue;
+            const influence = 1 - distance / room;
+            steerX += (-ox / distance * .9 + oz / distance * .45) * influence;
+            steerZ += (-oz / distance * .9 - ox / distance * .45) * influence;
+        }
+        const desiredX = dx / length + steerX, desiredZ = dz / length + steerZ;
+        const desired = Math.hypot(desiredX, desiredZ);
+        const dirX = desired > 1e-6 ? desiredX / desired : dx / length;
+        const dirZ = desired > 1e-6 ? desiredZ / desired : dz / length;
+        // Infantry wade through lava at the shared reduced speed, using their
+        // feet rather than the group's centre of mass.
+        const inLava = isPointInLava(position.x, position.z, position.y - stats.height / 2, ACTOR_CLEARANCE, this.lava);
+        const step = Math.min(length, stats.speed * (inLava ? LAVA_SPEED_MULTIPLIER : 1) * delta);
+        let nextX = position.x + dirX * step, nextZ = position.z + dirZ * step;
+        if (check && !this.nav!.segmentClear(position, { x: nextX, z: nextZ })) return false;
+        // Resolve any remaining footprint overlap before committing the step.
+        for (let pass = 0; pass < 3; pass++) {
+            let moved = false;
+            for (const other of this.bots) {
+                const otherPose = other.pose;
+                if (other === bot || !otherPose || otherPose.phase === 'death') continue;
+                const ox = nextX - other.group.position.x, oz = nextZ - other.group.position.z;
+                const distance = Math.hypot(ox, oz), clearance = radius + botFootprintRadius(otherPose.kind);
+                if (distance >= clearance) continue;
+                let pushX: number, pushZ: number;
+                if (distance < 1e-4) {
+                    // A stable slot-derived direction separates coincident bots.
+                    const angle = (targetData(bot.group).index - ENEMY_COUNT + 1) * 2.399963229728653;
+                    pushX = Math.cos(angle); pushZ = Math.sin(angle);
+                } else {
+                    pushX = ox / distance; pushZ = oz / distance;
+                }
+                const push = clearance - distance + 1e-3;
+                nextX += pushX * push;
+                nextZ += pushZ * push;
+                moved = true;
+            }
+            if (!moved) break;
+        }
+        let clear = this.nav!.segmentClear(position, { x: nextX, z: nextZ }, true) &&
+            !this.overlapsLiving(bot, nextX, nextZ, radius, 1e-3);
+        if (!clear) {
+            // A peer beside an obstacle can pin the full step. Slide sideways
+            // for one frame instead of pushing through either blocker.
+            for (const side of [1, -1]) {
+                const slideX = position.x - dirZ * side * step, slideZ = position.z + dirX * side * step;
+                if (!this.nav!.segmentClear(position, { x: slideX, z: slideZ }, true) ||
+                    this.overlapsLiving(bot, slideX, slideZ, radius, 1e-3)) continue;
+                nextX = slideX;
+                nextZ = slideZ;
+                clear = true;
+                break;
+            }
+        }
+        if (!clear) {
+            this.setPhase(bot, 'idle');
+            return false;
+        }
+        const heading = Math.atan2(nextX - position.x, nextZ - position.z);
         if (this.beginTurn(bot, heading, INFANTRY_STEERING_ANGLE)) return true;
         this.setPhase(bot, 'moving');
-        bot.pose!.yaw = heading;
-        bot.pose!.pitch = 0;
-        position.copy(next);
-        bot.pose!.position = { x: position.x, y: 0, z: position.z };
+        pose.yaw = heading;
+        pose.pitch = 0;
+        position.x = nextX;
+        position.z = nextZ;
+        // Follow the recessed organic floor so bots visibly step into and out
+        // of lava basins without changing the network pose's ground-relative y.
+        position.y = stats.height / 2 + getLavaPitFloorY(position.x, position.z, this.lava);
+        pose.position = { x: position.x, y: 0, z: position.z };
         return true;
     }
 
@@ -597,6 +692,9 @@ export class InfantryDefense {
             const response = pose.phase === 'death' ? 1 : 1 - Math.exp(-NETWORK_POSITION_RESPONSE * delta);
             position.x = THREE.MathUtils.lerp(position.x, pose.position.x, response);
             position.z = THREE.MathUtils.lerp(position.z, pose.position.z, response);
+            // Remote copies follow the same seeded basin floor as the host so
+            // they visibly sink and climb without extra network fields.
+            position.y = INFANTRY[pose.kind].height / 2 + getLavaPitFloorY(position.x, position.z, this.lava);
             const duration = poseAction(bot.visual, pose).getClip().duration;
             pose.time = pose.phase === 'moving' || pose.phase === 'idle' ? (pose.time + delta) % duration : Math.min(pose.time + delta, duration);
             this.present(bot);

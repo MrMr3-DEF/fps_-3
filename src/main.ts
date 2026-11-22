@@ -48,6 +48,7 @@ import {
     MAX_RENDER_DISTANCE_CHUNKS,
     THIRD_PERSON_CAMERA_QUERY_RADIUS,
     GRAPPLE_BLUE,
+    MECHA_HEIGHT,
     MECHA_CAMERA_DISTANCE, MECHA_CAMERA_HEIGHT, MECHA_CAMERA_SHOULDER, BULLET_TRAVEL_DISTANCE,
 } from './config.js';
 import { spawnParticles, spawnGroundImpact, spawnMechaArmorImpact, updateParticles, createShockwave, disposeParticles } from './particles.js';
@@ -56,7 +57,7 @@ import { applyHudPresentation, setFpsText, updateAccelerometer, updateHealthBar,
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook, updateGrappleCable } from './grapple.js';
 import { createAkimboGuns, requestPrimaryFire, toggleHeavyGrapple, requestReload, cancelWeaponHandling, weaponHudFraction, updateWeapons, createPlayerMesh, prepareLocalPlayerAvatar, setThirdPerson, syncThirdPersonPresentation, cancelInspect, resetWeaponPresentation, updatePlayerAvatarPose, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
-import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, queryObstaclesNear, queryObstaclesAlongSegment, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, infantry, prepareInfantry, rebuildInfantryHash, isLookingAtTownWell } from './world.js';
+import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, getWorldBiomeField, getWorldBiomeMapTexture, queryObstaclesNear, queryObstaclesAlongSegment, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, infantry, prepareInfantry, rebuildInfantryHash, isLookingAtTownWell } from './world.js';
 import { CameraShake } from './cameraShake.js';
 import { triggerMechaImpactShake } from './mechaImpactShake.js';
 import type { MechaImpact } from './forgottenMecha.js';
@@ -84,6 +85,8 @@ import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js'
 import { RoomAccessChallenge } from './turnSecurity.js';
 import { DayNightCycle } from './dayNightCycle.js';
 import { AtmosphereEffects, type AtmosphereFrame } from './atmosphereEffects.js';
+import { sampleBiomeFogMultiplier } from './biomes.js';
+import { resetLeafAnimation, updateLeafAnimation } from './leafAnimation.js';
 import { isGogglesScanZoomReady, SmartGogglesHud } from './smartGoggles.js';
 import {
     finishGogglesShutdown,
@@ -302,7 +305,21 @@ const _mechaFollowPosition = new THREE.Vector3();
 const _mechaFollowQuaternion = new THREE.Quaternion();
 const _gogglesWeaponOrigin = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
+const _leafBodyPos = new THREE.Vector3();
 const _jumpBoosterPos = new THREE.Vector3();
+
+function getLeafInteractionPosition(): THREE.Vector3 | null {
+    if (forgottenMecha?.ownsLocalPilot) {
+        return _leafBodyPos.copy(forgottenMecha.group.position).setY(
+            forgottenMecha.group.position.y + MECHA_HEIGHT * 0.55,
+        );
+    }
+    const source = state.controls?.getObject().position ?? state.camera?.position;
+    if (!source) return null;
+    // Center foliage interaction on the cyborg's chest rather than eye height
+    // so both ground bushes and overhead canopies part naturally around the body.
+    return _leafBodyPos.copy(source).setY(source.y - PLAYER_HEIGHT * 0.42);
+}
 const _lastMotionVelocity = new THREE.Vector3();
 const _motionAccel = new THREE.Vector3();
 const _motionRight = new THREE.Vector3();
@@ -356,6 +373,8 @@ const UI = {
     get settingMuzzleFlashOpacityValue() { return getUI<HTMLElement>('setting-muzzle-flash-opacity-value'); },
     get settingBulletTrails() { return getUI<HTMLInputElement>('setting-bullet-trails'); },
     get settingBulletTrailsValue() { return getUI<HTMLElement>('setting-bullet-trails-value'); },
+    get settingLeafAnimation() { return getUI<HTMLInputElement>('setting-leaf-animation'); },
+    get settingLeafAnimationValue() { return getUI<HTMLElement>('setting-leaf-animation-value'); },
     get settingShadowQuality() { return getUI<HTMLSelectElement>('setting-shadow-quality'); },
     get settingFps() { return getUI<HTMLInputElement>('setting-fps'); },
     get settingFpsValue() { return getUI<HTMLElement>('setting-fps-value'); },
@@ -1185,6 +1204,7 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
         disposePlayerVisuals();
         disposeHookMesh();
         disposeWorld();
+        resetLeafAnimation();
         atmosphere?.dispose(); atmosphere = null;
         dayNightCycle?.dispose();
         dayNightCycle = null;
@@ -1242,6 +1262,7 @@ async function loadPreparedWorld(
         await createEnvironmentAsync(seed, checkpoint);
         atmosphere?.dispose();
         atmosphere = new AtmosphereEffects(seed);
+        atmosphere.setBiomeMap(getWorldBiomeMapTexture());
         atmosphere.applySettings({ fog: userSettings.fog, motionBlur: userSettings.motionBlur && !userSettings.photosensitivityMode && !reducedHeadMotion.matches });
         await prepareForgottenMecha(state.isMultiplayer ? multiplayerMechaEvents() : {
             impact: mechaImpact,
@@ -1536,6 +1557,7 @@ function settingsEqual(a: UserSettings, b: UserSettings): boolean {
         a.muzzleFlashes === b.muzzleFlashes &&
         a.muzzleFlashOpacity === b.muzzleFlashOpacity &&
         a.bulletTrails === b.bulletTrails &&
+        a.leafAnimation === b.leafAnimation &&
         a.shadowQuality === b.shadowQuality &&
         a.showFps === b.showFps &&
         a.photosensitivityMode === b.photosensitivityMode &&
@@ -1591,6 +1613,8 @@ function syncSettingsControls(settings: UserSettings = pendingSettings): void {
     if (UI.settingMuzzleFlashOpacityValue) UI.settingMuzzleFlashOpacityValue.innerText = formatPercent(settings.muzzleFlashOpacity);
     if (UI.settingBulletTrails) UI.settingBulletTrails.checked = settings.bulletTrails;
     setCheckboxLabel(UI.settingBulletTrailsValue, settings.bulletTrails);
+    if (UI.settingLeafAnimation) UI.settingLeafAnimation.checked = settings.leafAnimation;
+    setCheckboxLabel(UI.settingLeafAnimationValue, settings.leafAnimation);
     if (UI.settingShadowQuality) {
         UI.settingShadowQuality.value = settings.shadowQuality;
         UI.settingShadowQuality.disabled = !settings.shadows;
@@ -1625,6 +1649,8 @@ function updatePendingSettings(mutator: (settings: UserSettings) => void): void 
 function applyLiveSettings(): void {
     atmosphere?.applySettings({ fog: userSettings.fog, motionBlur: userSettings.motionBlur && !userSettings.photosensitivityMode && !reducedHeadMotion.matches });
     syncMobileControls?.();
+    updateLeafAnimation(0, state.dayNightElapsedSeconds,
+        getLeafInteractionPosition(), forgottenMecha?.ownsLocalPilot ? null : state.velocity, userSettings.leafAnimation);
     if (UI.crosshair) UI.crosshair.innerHTML = crosshairSvg(userSettings.crosshair);
     applyHitmarkerSettings();
     state.baseSensitivity = userSettings.sensitivity;
@@ -1765,6 +1791,12 @@ function setupSettingsControls(): void {
     UI.settingBulletTrails?.addEventListener('change', (e) => {
         updatePendingSettings((settings) => {
             settings.bulletTrails = (e.target as HTMLInputElement).checked;
+        });
+    });
+
+    UI.settingLeafAnimation?.addEventListener('change', (e) => {
+        updatePendingSettings((settings) => {
+            settings.leafAnimation = (e.target as HTMLInputElement).checked;
         });
     });
 
@@ -2110,13 +2142,20 @@ function animate(): void {
         state.dayNightSyncPending = false;
         state.dayNightSyncImmediate = false;
     }
+    // Biome identity follows the observer, not the logical player pose: fog and
+    // sky should match what the current camera is actually looking through.
+    const observerPosition = state.camera.position;
+    const biomeWeights = getWorldBiomeField()?.sample(observerPosition.x, observerPosition.z);
+    const simDelta = state.isPlaying || state.isMultiplayer ? delta : 0;
     // A multiplayer room owns one continuous clock, including while an
     // individual player is still in the lobby or has released mouse capture.
     const lanternStrength = dayNightCycle?.update(
-        state.isPlaying || state.isMultiplayer ? delta : 0,
-        state.camera.position,
+        simDelta,
+        observerPosition,
+        biomeWeights,
     ) ?? 0;
     if (dayNightCycle) state.dayNightElapsedSeconds = dayNightCycle.elapsedTimeSeconds;
+    atmosphereFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
     if (state.camera) {
         updateTownLanterns(time / 1000, lanternStrength);
     }
@@ -2223,6 +2262,15 @@ function animate(): void {
         updateReloadBar(mountedActor.reloadProgress);
     }
     if (!state.isMultiplayer && forgottenMecha && npcInputActive) forgottenMecha.updateRockets(delta, state.targets, queryObstaclesAlongSegment, processTargetHit);
+    // Update foliage reaction after physics, grapple, and mecha pose resolve
+    // so canopies and bushes part around the body with zero frame lag.
+    updateLeafAnimation(
+        simDelta,
+        state.dayNightElapsedSeconds,
+        getLeafInteractionPosition(),
+        mountedActor ? null : state.velocity,
+        userSettings.leafAnimation,
+    );
     cameraShake.update(delta);
     const interactionPrompt = getUI<HTMLElement>('npc-interaction');
     if (interactionPrompt) {

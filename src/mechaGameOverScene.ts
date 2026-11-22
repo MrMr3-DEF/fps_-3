@@ -612,6 +612,12 @@ export class MechaGameOverScene {
         const textures = new Set<THREE.Texture>(), skeletons = new Set<THREE.Skeleton>();
         const collect = (root: THREE.Object3D) => root.traverse(node => {
             if (node instanceof THREE.SkinnedMesh) skeletons.add(node.skeleton);
+            // Seeded floor shaders keep textures in uniforms, outside material
+            // fields; their owners expose them here for disposal.
+            const extra = node.userData?.extraTextures;
+            if (Array.isArray(extra)) for (const texture of extra) {
+                if (texture instanceof THREE.Texture && texture !== this.environment?.texture) textures.add(texture);
+            }
             if (node instanceof THREE.Mesh || node instanceof THREE.Sprite) {
                 if (node instanceof THREE.Mesh) geometries.add(node.geometry);
                 for (const material of Array.isArray(node.material) ? node.material : [node.material]) {

@@ -16,6 +16,7 @@ import { getProjectileHomingTarget } from '../src/projectileHoming.ts';
 import { updateProjectiles, disposeProjectiles } from '../src/projectiles.ts';
 import { disposeParticles } from '../src/particles.ts';
 import { setDamageHandlers } from '../src/damage.ts';
+import { getLavaPoolDescriptor } from '../src/lavaPools.ts';
 
 async function robot(obstacles: THREE.Object3D[] = []) {
     const impacts: MechaImpact[] = [];
@@ -245,7 +246,12 @@ test('seeded real worlds offer repeatable border routes with footprint clearance
     for (const seed of [0, 1, 42, 12345, 987654321, 0xffffffff]) {
         state.scene = new THREE.Scene(); state.isMultiplayer = false; setWorldSeed(seed); createEnvironment(true);
         const obstacles = navigationBoxes(state.obstacles);
-        const lava = state.lavaPools.map(pool => ({ x: pool.position.x, z: pool.position.z, halfW: LAVA_POOL_HALF_SIZE, halfD: LAVA_POOL_HALF_SIZE, bottom: 0, top: 0.15 }));
+        const lava = state.lavaPools.map(pool => ({
+            x: pool.position.x, z: pool.position.z,
+            halfW: getLavaPoolDescriptor(pool)?.boundRadius ?? LAVA_POOL_HALF_SIZE,
+            halfD: getLavaPoolDescriptor(pool)?.boundRadius ?? LAVA_POOL_HALF_SIZE,
+            bottom: 0, top: 0.15,
+        }));
         const radius = 14.8, nav = new MechaNavigation(obstacles, lava, radius, 19.953);
         const route = nav.borderSpawn(seed);
         assert.deepEqual(nav.borderSpawn(seed), route);

@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { AtmosphereEffects, AtmosphereHistory } from '../src/atmosphereEffects.ts';
+import { sampleBiomeFogMultiplier, type BiomeId, type BiomeWeights } from '../src/biomes.ts';
+
+function pureWeights(biome: BiomeId): BiomeWeights {
+    return {
+        warm: biome === 'warm' ? 1 : 0,
+        cool: biome === 'cool' ? 1 : 0,
+        sand: biome === 'sand' ? 1 : 0,
+        town: 0,
+    };
+}
 
 test('camera blur rejects stale lives, projections, cuts and paused clocks', () => {
     const history = new AtmosphereHistory(), camera = new THREE.PerspectiveCamera(70, 1, .1, 1500);
@@ -47,6 +57,44 @@ test('nested atmosphere rendering restores target, viewport, fog and flags on fa
         effects.render(renderer, world, camera, frame);
         assert.equal(draws, 2); assert.equal(world.fog, originalFog);
     } finally { effects.dispose(); effects.dispose(); output.dispose(); }
+});
+
+test('biome fog multiplier drives fallback fog and setBiomeMap borrows the world map', () => {
+    const effects = new AtmosphereEffects(3), world = new THREE.Scene(), camera = new THREE.Camera();
+    const map = new THREE.DataTexture(new Uint8Array([255, 0, 0, 255]), 1, 1);
+    map.needsUpdate = true;
+    effects.setBiomeMap(map);
+    assert.equal((effects as any).material.uniforms.biomeMap.value, map);
+
+    const warm = sampleBiomeFogMultiplier(pureWeights('warm'));
+    const cool = sampleBiomeFogMultiplier(pureWeights('cool'));
+    const sand = sampleBiomeFogMultiplier(pureWeights('sand'));
+    assert.equal(sand, 0, 'sand disables fog');
+    assert.equal(cool, 1.75, 'cool carries the strongest fog');
+    assert.ok(cool > warm && warm > sand);
+
+    const seen: (number | null)[] = [];
+    const renderer = {
+        capabilities: { isWebGL2: false, maxSamples: 0 },
+        extensions: { has: () => false },
+        render: (scene: THREE.Scene) => {
+            seen.push(scene.fog ? (scene.fog as THREE.FogExp2).density : null);
+        },
+    } as unknown as THREE.WebGLRenderer;
+    const frame = { elapsed: 1, delta: 1 / 60, blurAllowed: true, cameraKey: 'biome', fogMultiplier: warm };
+    effects.applySettings({ fog: true, motionBlur: false });
+    try {
+        effects.render(renderer, world, camera, frame);
+        effects.render(renderer, world, camera, { ...frame, fogMultiplier: cool });
+        effects.render(renderer, world, camera, { ...frame, fogMultiplier: sand });
+        assert.equal(seen[0], 0.002 * warm);
+        assert.equal(seen[1], 0.002 * cool);
+        assert.equal(seen[2], null, 'zero biome fog removes the fallback entirely');
+        assert.equal(world.fog, null, 'the borrowed scene fog is restored after drawing');
+
+        effects.setBiomeMap(null);
+        assert.notEqual((effects as any).material.uniforms.biomeMap.value, map);
+    } finally { effects.dispose(); map.dispose(); }
 });
 
 test('helmet captures retain independent targets and stationary blur creates none', () => {

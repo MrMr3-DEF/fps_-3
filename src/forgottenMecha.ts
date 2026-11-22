@@ -2,10 +2,11 @@ import { MechaNape } from './mechaNape.js';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { CYBORG_SCALE, PLAYER_HEIGHT, MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE, MAP_HALF_SIZE } from './config.js';
+import { CYBORG_SCALE, PLAYER_HEIGHT, MECHA_HEIGHT, MECHA_HP, MECHA_LASER_DAMAGE, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_TORSO_YAW_SPEED, LAVA_POOL_HALF_SIZE, LAVA_SPEED_MULTIPLIER, MAP_HALF_SIZE } from './config.js';
 import { obstacleData, targetData } from './userDataTypes.js';
 import { MechaStomp, stompContact, type PilotWeapon } from './mechaStomp.js';
 import { MechaNavigation, type NavigationBox, type MechaRoute } from './mechaNavigation.js';
+import { getLavaPitFloorY, getLavaPoolDescriptor, isPointInLava } from './lavaPools.js';
 import { MechaFootPlant } from './mechaFootPlant.js';
 import { MechaCombat, classifyMechaAttack } from './mechaCombat.js';
 import { segmentRoundedBoxHitT } from './gameplayMath.js';
@@ -120,6 +121,7 @@ export class ForgottenMecha {
     private released = false;
     private queuedHelmetToggle = false;
     private lavaTime = 0;
+    private inLava = false;
     private readonly barrelDirection = new THREE.Vector3();
     private readonly boardPosition = new THREE.Vector3();
     private readonly boardQuaternion = new THREE.Quaternion();
@@ -290,7 +292,12 @@ export class ForgottenMecha {
         this.play('Idle', true);
         this.mixer.update(0);
         this.updateSkin();
-        const lavaBoxes = this.lava.map(pool => ({ x: pool.position.x, z: pool.position.z, halfW: LAVA_POOL_HALF_SIZE, halfD: LAVA_POOL_HALF_SIZE, bottom: 0, top: 0.15 }));
+        const lavaBoxes = this.lava.map(pool => ({
+            x: pool.position.x, z: pool.position.z,
+            halfW: getLavaPoolDescriptor(pool)?.boundRadius ?? LAVA_POOL_HALF_SIZE,
+            halfD: getLavaPoolDescriptor(pool)?.boundRadius ?? LAVA_POOL_HALF_SIZE,
+            bottom: 0, top: 0.15,
+        }));
         const nav = new MechaNavigation(navigationBoxes(this.obstacles), lavaBoxes, this.radius, punchReach);
         this.movement = new MechaMovement(navigationBoxes(this.obstacles));
         this.followRoute(nav.borderSpawn(this.seed ^ 0x4d454348));
@@ -704,18 +711,19 @@ export class ForgottenMecha {
         action.time = (this.headView.wantedOpen ? this.headView.fold : 1 - this.headView.fold) * action.getClip().duration;
         this.helmetMixer!.update(0);
     }
-    private updateLava(delta: number): void {
-        let contact = false;
+    private feetInLava(): boolean {
         for (const foot of this.lavaFeet) {
-            const { x, y, z } = foot.position;
+            const { x, z } = foot.position;
             const { halfW, halfD, halfH } = obstacleData(foot);
-            if (y - halfH > 0.15) continue;
             // The current pose already has exact skinned foot bounds.
             const pools = this.lavaQuery?.(x, z, Math.max(halfW, halfD), this.lavaCandidates) ?? this.lava;
-            contact = pools.some(pool => Math.abs(x - pool.position.x) <= halfW + LAVA_POOL_HALF_SIZE &&
-                Math.abs(z - pool.position.z) <= halfD + LAVA_POOL_HALF_SIZE);
-            if (contact) break;
+            if (isPointInLava(x, z, foot.position.y - halfH, Math.max(halfW, halfD), pools)) return true;
         }
+        return false;
+    }
+    private updateLava(delta: number): void {
+        const contact = this.feetInLava();
+        this.inLava = contact;
         if (!contact) { this.lavaTime = 0; return; }
         this.lavaTime += delta;
         while (this.lavaTime + 1e-9 >= MECHA_LAVA_INTERVAL && this.mode === 'piloted') { this.lavaTime -= MECHA_LAVA_INTERVAL; this.damage(MECHA_LAVA_DAMAGE); }
@@ -743,8 +751,13 @@ export class ForgottenMecha {
                 this.updateHelmet(0);
             }
         } else {
-            const move = this.pilot.update(delta, this.group.position, this.group.rotation.y, this.speed, this.controlsFrozen || this.queuedExit ? 0 : this.pilotDirection,
+            // Sample the previous pose before moving so the reduced lava speed
+            // applies on the same frame the feet enter a basin.
+            this.inLava = this.feetInLava();
+            const move = this.pilot.update(delta, this.group.position, this.group.rotation.y,
+                this.speed * (this.inLava ? LAVA_SPEED_MULTIPLIER : 1), this.controlsFrozen || this.queuedExit ? 0 : this.pilotDirection,
                 this.resolvePilotMovement);
+            this.group.position.y = getLavaPitFloorY(this.group.position.x, this.group.position.z, this.lava);
             this.group.rotation.y = move.heading;
             this.waistYaw = this.pilot.yaw - move.heading;
             if (move.clip !== this.locomotion) { this.locomotion = move.clip; this.play(move.clip, true, 0.4); }
@@ -790,7 +803,10 @@ export class ForgottenMecha {
         // next damage boundary too, rather than applying a later stomp first.
         const step = Math.min(this.stomp.step(delta, duration), piloted ? Math.max(1e-9, MECHA_LAVA_INTERVAL - this.lavaTime) : Infinity);
         if (piloted) {
-            this.pilot.update(step, this.group.position, this.group.rotation.y, this.speed, 0, this.resolvePilotMovement);
+            this.inLava = this.feetInLava();
+            this.pilot.update(step, this.group.position, this.group.rotation.y,
+                this.speed * (this.inLava ? LAVA_SPEED_MULTIPLIER : 1), 0, this.resolvePilotMovement);
+            this.group.position.y = getLavaPitFloorY(this.group.position.x, this.group.position.z, this.lava);
             this.waistYaw = this.pilot.yaw - this.group.rotation.y;
         } else {
             if (!clockAdvanced) this.combat.advanceClock(step);
@@ -1216,8 +1232,11 @@ export class ForgottenMecha {
         }
         if (turning) this.group.rotation.y += Math.sign(difference) * Math.min(Math.abs(difference), Math.PI / 6 * delta * rate);
         else if (!tracking) {
-            const advance = Math.min(distance, this.speed * delta * rate);
+            this.inLava = this.feetInLava();
+            const advance = Math.min(distance, this.speed * (this.inLava ? LAVA_SPEED_MULTIPLIER : 1) * delta * rate);
             this.group.position.addScaledVector(this.target.normalize(), advance);
+            // Ground the chassis on the organic basin floor while wading.
+            this.group.position.y = getLavaPitFloorY(this.group.position.x, this.group.position.z, this.lava);
             if (distance - advance < 0.03 && this.waypoint < this.route.points.length - 1) this.waypoint++;
             const contacts = Math.floor(this.phase * 2);
             if (contacts !== this.stepCount) { this.stepCount = contacts; this.emitImpact('step', contacts ? 'CTRL_Ankle_R' : 'CTRL_Ankle_L'); }

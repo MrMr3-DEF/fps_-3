@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DAY_DURATION_SECONDS, DAY_NIGHT_CYCLE_SECONDS, NIGHT_DURATION_SECONDS, DayNightCycle, getDayNightPhase } from '../src/dayNightCycle.ts';
+import type { BiomeId, BiomeWeights } from '../src/biomes.ts';
 import * as THREE from 'three';
+
+function pureWeights(biome: BiomeId, town = 0): BiomeWeights {
+    return {
+        warm: biome === 'warm' ? 1 : 0,
+        cool: biome === 'cool' ? 1 : 0,
+        sand: biome === 'sand' ? 1 : 0,
+        town,
+    };
+}
 
 test('day/night transitions follow configured durations', () => {
     assert.equal(DAY_NIGHT_CYCLE_SECONDS, DAY_DURATION_SECONDS + NIGHT_DURATION_SECONDS);
@@ -16,6 +26,28 @@ test('day/night transitions follow configured durations', () => {
 test('cycle calculations wrap cleanly in either direction', () => {
     assert.deepEqual(getDayNightPhase(DAY_NIGHT_CYCLE_SECONDS + 75), getDayNightPhase(75));
     assert.equal(getDayNightPhase(-1).phase, 'night');
+});
+
+test('biome sky tints differ across regions and stay neutral inside town', () => {
+    const scene = new THREE.Scene();
+    const cycle = new DayNightCycle(scene, { shadows: false, shadowMapSize: 1024 });
+    const observer = new THREE.Vector3();
+    cycle.synchronizeElapsedSeconds(DAY_DURATION_SECONDS / 2, true);
+    cycle.update(0, observer);
+    const neutral = (scene.background as THREE.Color).getHex();
+    const tinted = new Map<BiomeId, number>();
+    for (const biome of ['warm', 'cool', 'sand'] as const) {
+        cycle.update(0, observer, pureWeights(biome));
+        tinted.set(biome, (scene.background as THREE.Color).getHex());
+    }
+    assert.notEqual(tinted.get('warm'), tinted.get('cool'));
+    assert.notEqual(tinted.get('warm'), tinted.get('sand'));
+    assert.notEqual(tinted.get('cool'), tinted.get('sand'));
+    for (const biome of ['warm', 'cool', 'sand'] as const) assert.notEqual(tinted.get(biome), neutral);
+
+    cycle.update(0, observer, pureWeights('cool', 1));
+    assert.equal((scene.background as THREE.Color).getHex(), neutral, 'the town keeps the plain sky');
+    cycle.dispose();
 });
 
 test('room clock synchronization snaps large drift and ignores network jitter', () => {

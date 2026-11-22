@@ -1,16 +1,11 @@
 import * as THREE from 'three';
 import { state } from './state.js';
-import { PLAYER_HEIGHT, PLAYER_RADIUS, LAVA_POOL_HALF_SIZE, LAVA_DAMAGE_TICK_MS, LAVA_DAMAGE_PER_TICK } from './config.js';
-import { queryLavaPoolsNear } from './world.js';
+import { PLAYER_HEIGHT, PLAYER_RADIUS, LAVA_DAMAGE_TICK_MS, LAVA_DAMAGE_PER_TICK } from './config.js';
+import { isInLavaAt } from './world.js';
 import { takePlayerDamage } from './damage.js';
-const _lavaCandidates: THREE.Object3D[] = [];
 
 export function touchesLava(position: Readonly<THREE.Vector3>): boolean {
-    if (position.y - PLAYER_HEIGHT > 0.15) return false;
-    const reach = LAVA_POOL_HALF_SIZE + PLAYER_RADIUS;
-    const pools = queryLavaPoolsNear(position.x, position.z, reach, _lavaCandidates);
-    return pools.some(pool => Math.abs(position.x - pool.position.x) < reach &&
-        Math.abs(position.z - pool.position.z) < reach);
+    return isInLavaAt(position.x, position.z, position.y - PLAYER_HEIGHT, PLAYER_RADIUS);
 }
 
 export function checkLavaDamage(delta: number): void {

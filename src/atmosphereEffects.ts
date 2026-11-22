@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ATMOSPHERE } from './config.js';
+import { ATMOSPHERE, BIOME_FOG_MULTIPLIER, GROUND_VISUAL_SIZE } from './config.js';
 import { DAY_NIGHT_CYCLE_SECONDS } from './dayNightCycle.js';
 
 export interface AtmosphereSettings { fog: boolean; motionBlur: boolean }
@@ -9,6 +9,7 @@ export interface AtmosphereFrame {
     blurAllowed: boolean;
     /** Change on discrete camera modes/lives, even when their poses happen to match. */
     cameraKey: string;
+    fogMultiplier?: number;
 }
 
 /** Camera matrices, never old color frames: resets cannot leak a previous life/view. */
@@ -48,8 +49,21 @@ function noiseTexture(seed: number): THREE.DataTexture {
     return texture;
 }
 
+function neutralBiomeTexture(): THREE.DataTexture {
+    // A warm, town-free texel keeps the shader at its original 1.0x fog when
+    // no world biome map has been supplied.
+    const texture = new THREE.DataTexture(new Uint8Array([255, 0, 0, 255]), 1, 1);
+    texture.colorSpace = THREE.NoColorSpace;
+    texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.magFilter = texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    return texture;
+}
+
 const fragmentShader = `
 uniform sampler2D picture, sceneDepth, weather;
+uniform sampler2D biomeMap;
 uniform mat4 inverseViewProjection, previousViewProjection;
 uniform vec3 eye, haze;
 uniform vec2 resolution;
@@ -64,8 +78,10 @@ float density(vec3 p) {
     float banks = smoothstep(.32, .75, n + height * .20);
     float holes = smoothstep(.25, .48, n);
     float groundBank = smoothstep(.58, .85, n);
+    vec4 bw = texture2D(biomeMap, clamp(p.xz / ${GROUND_VISUAL_SIZE.toFixed(1)} + 0.5, 0.0, 1.0));
+    float biomeFog = mix(bw.r * ${BIOME_FOG_MULTIPLIER.warm.toFixed(3)} + bw.g * ${BIOME_FOG_MULTIPLIER.cool.toFixed(3)} + bw.b * ${BIOME_FOG_MULTIPLIER.sand.toFixed(3)}, 1.0, bw.a);
     return holes * (mix(${ATMOSPHERE.groundDensity}, ${ATMOSPHERE.upperDensity}, height) * banks +
-        ${ATMOSPHERE.groundBankDensity} * groundBank * groundBank * (1.0 - height * .5));
+        ${ATMOSPHERE.groundBankDensity} * groundBank * groundBank * (1.0 - height * .5)) * biomeFog;
 }
 void main() {
     float z = texture2D(sceneDepth, screenUv).x;
@@ -120,6 +136,7 @@ export class AtmosphereEffects {
     private readonly material: THREE.ShaderMaterial;
     private readonly quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
     private readonly weather: THREE.DataTexture;
+    private readonly neutralBiome: THREE.DataTexture;
     private target: THREE.WebGLRenderTarget | null = null;
     private captureTarget: THREE.WebGLRenderTarget | null = null;
     private targetResized = false;
@@ -128,10 +145,12 @@ export class AtmosphereEffects {
     private disposed = false;
     constructor(seed: number) {
         this.weather = noiseTexture(seed);
+        this.neutralBiome = neutralBiomeTexture();
         this.material = new THREE.ShaderMaterial({
             depthTest: false, depthWrite: false, toneMapped: false,
             uniforms: {
                 picture: { value: null }, sceneDepth: { value: null }, weather: { value: this.weather },
+                biomeMap: { value: this.neutralBiome },
                 inverseViewProjection: { value: new THREE.Matrix4() }, previousViewProjection: { value: new THREE.Matrix4() },
                 eye: { value: new THREE.Vector3() }, haze: { value: new THREE.Color() }, resolution: { value: new THREE.Vector2() },
                 weatherPhase: { value: 0 }, exposure: { value: 0 }, nearPlane: { value: .1 }, farPlane: { value: 1500 },
@@ -146,6 +165,10 @@ export class AtmosphereEffects {
     applySettings(settings: AtmosphereSettings): void {
         this.fog = settings.fog; this.blur = settings.motionBlur; this.resetHistory();
         if (!this.fog && !this.blur) this.releaseTarget();
+    }
+    setBiomeMap(texture: THREE.DataTexture | null): void {
+        // The world owns its baked map; this only borrows the binding.
+        this.material.uniforms.biomeMap.value = texture ?? this.neutralBiome;
     }
     resetHistory(): void { this.history.reset(); }
     private releaseTarget(): void {
@@ -189,8 +212,10 @@ export class AtmosphereEffects {
     render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, frame: AtmosphereFrame): void {
         const previousFog = scene.fog;
         const supported = this.supportsDepth(renderer);
-        // Stock fog must be disabled even on the direct path when its toggle is off.
-        scene.fog = !this.disposed && this.fog && !supported ? this.fallbackFog : null;
+        const fallbackDensity = 0.002 * Math.max(0, frame.fogMultiplier ?? 1);
+        this.fallbackFog.density = fallbackDensity;
+        // A sand biome can request zero fog; stock fog must then stay absent.
+        scene.fog = !this.disposed && this.fog && !supported && fallbackDensity > 0 ? this.fallbackFog : null;
         if (scene.background instanceof THREE.Color) this.fallbackFog.color.copy(scene.background);
         try {
             if (this.disposed || !supported || (!this.fog && !this.blur)) {
@@ -236,6 +261,7 @@ export class AtmosphereEffects {
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true; this.releaseTarget(); this.resetHistory(); this.weather.dispose();
+        this.neutralBiome.dispose();
         this.quad.geometry.dispose(); this.material.dispose(); this.scene.clear();
     }
 }

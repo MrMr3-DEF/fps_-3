@@ -28,6 +28,7 @@ export interface UserSettings {
     muzzleFlashes: boolean;
     muzzleFlashOpacity: number;
     bulletTrails: boolean;
+    leafAnimation: boolean;
     shadowQuality: ShadowQuality;
     showFps: boolean;
     photosensitivityMode: boolean;
@@ -55,6 +56,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     muzzleFlashes: true,
     muzzleFlashOpacity: 1.0,
     bulletTrails: true,
+    leafAnimation: true,
     shadowQuality: 'low',
     showFps: true,
     photosensitivityMode: false,
@@ -111,6 +113,7 @@ export function loadUserSettings(): UserSettings {
             userSettings.muzzleFlashes = readBoolean(parsed.muzzleFlashes, DEFAULT_USER_SETTINGS.muzzleFlashes);
             userSettings.muzzleFlashOpacity = clamp(parsed.muzzleFlashOpacity, 0, 1, DEFAULT_USER_SETTINGS.muzzleFlashOpacity);
             userSettings.bulletTrails = readBoolean(parsed.bulletTrails, DEFAULT_USER_SETTINGS.bulletTrails);
+            userSettings.leafAnimation = readBoolean(parsed.leafAnimation, DEFAULT_USER_SETTINGS.leafAnimation);
             userSettings.shadowQuality = readShadowQuality(parsed.shadowQuality);
             userSettings.downloadWebLLMImmediately = readBoolean(parsed.downloadWebLLMImmediately, false);
             userSettings.showFps = readBoolean(parsed.showFps, DEFAULT_USER_SETTINGS.showFps);

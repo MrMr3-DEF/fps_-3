@@ -29,7 +29,8 @@ content area's width, including stacked labels and sliders on narrow screens.
   discard genuine flicks. Scoped gain follows perspective projection throughout
   zoom. See [Desktop pointer input](pointer-input.md).
 - **Graphics:** render scale, render distance, particles, shadows and quality,
-  fog, motion blur, lava glow, muzzle flashes, bullet trails, FPS counter.
+  fog, motion blur, lava glow, muzzle flashes, bullet trails, leaf animation,
+  FPS counter.
 - **Accessibility:** photosensitivity mode.
 - **Reset:** global reset for every settings category.
 - **Keybinds:** all existing keyboard gameplay actions. Select an action and press
@@ -63,7 +64,7 @@ their transparency from 0–100%. Bullet Trails disables trail allocation for bo
 existing afterimages when applied. New fields are validated on load. Nested draft
 values are cloned to keep edits separate from the applied settings and defaults.
 
-Lava Pool Glow defaults to on for new settings. A saved explicit `false` stays off after reload; a missing or malformed stored value uses the default. Shadows default to on with low quality, and their quality can be changed without rebuilding the arena.
+Lava Pool Glow defaults to on for new settings. A saved explicit `false` stays off after reload; a missing or malformed stored value uses the default. Shadows default to on with low quality, and their quality can be changed without rebuilding the arena. Leaf Animation defaults to on; turning it off disables idle wind and player pass-through foliage motion.
 
 Fog and Motion Blur default to on, including when loading older saved settings.
 Either can be disabled independently through Apply; Discard and Reset use the

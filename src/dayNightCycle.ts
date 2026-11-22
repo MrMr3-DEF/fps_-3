@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DAY_DURATION_SECONDS, NIGHT_DURATION_SECONDS, DAY_NIGHT_CYCLE_SECONDS, MAP_HALF_SIZE, MAX_PILLAR_HEIGHT } from './config.js';
+import { sampleBiomeSkyTint, type BiomeWeights } from './biomes.js';
 
 export { DAY_DURATION_SECONDS, NIGHT_DURATION_SECONDS, DAY_NIGHT_CYCLE_SECONDS } from './config.js';
 export const SUN_MEAN_DISTANCE_KM = 149_600_000;
@@ -111,6 +112,7 @@ export class DayNightCycle {
     private readonly celestialGeometry: THREE.SphereGeometry;
     private readonly skyColor: THREE.Color;
     private readonly colorScratch = new THREE.Color();
+    private readonly biomeTintScratch = new THREE.Color();
     private readonly directionScratch = new THREE.Vector3();
     private readonly shadowRight = new THREE.Vector3();
     private readonly shadowUp = new THREE.Vector3();
@@ -200,7 +202,7 @@ export class DayNightCycle {
         if (immediate || Math.abs(difference) > 0.25) this.elapsedSeconds = target;
     }
 
-    update(deltaSeconds: number, observerPosition: THREE.Vector3): number {
+    update(deltaSeconds: number, observerPosition: THREE.Vector3, biomeWeights?: BiomeWeights): number {
         this.elapsedSeconds = positiveModulo(this.elapsedSeconds + Math.max(0, deltaSeconds), DAY_NIGHT_CYCLE_SECONDS);
         const state = getDayNightPhase(this.elapsedSeconds);
         const lightDistance = MAP_HALF_SIZE * 0.75;
@@ -208,6 +210,8 @@ export class DayNightCycle {
         const y = getCelestialOrbitalElevation(state.elevation);
         const z = state.phase === 'day' ? -0.22 : 0.18;
         this.directionScratch.set(x, y, z).normalize();
+        let nightAmount: number;
+        let tintScale = 1;
 
         if (state.phase === 'day') {
             const sunGlow = smoothstep(-CELESTIAL_HORIZON_DIP, 0.04, y);
@@ -247,8 +251,8 @@ export class DayNightCycle {
             this.moonLight.visible = false;
             this.moonMesh.visible = false;
 
-            if (this.scene.fog) this.scene.fog.color.copy(this.skyColor);
-            return 1 - daylight;
+            nightAmount = 1 - daylight;
+            tintScale = 0.35 + 0.65 * daylight;
         } else {
             const moonlight = smoothstep(-CELESTIAL_HORIZON_DIP, 0.7, y);
             this.skyColor.copy(NIGHT_SKY).lerp(MOONLIT_SKY, moonlight * 0.45);
@@ -264,10 +268,24 @@ export class DayNightCycle {
 
             this.sunLight.visible = false;
             this.sunMesh.visible = false;
+            nightAmount = 1;
+            // Keep the biome hue at night without washing out the deep sky.
+            tintScale = 0.12 + 0.18 * moonlight;
         }
 
+        if (biomeWeights) this.applyBiomeTint(biomeWeights, tintScale);
         if (this.scene.fog) this.scene.fog.color.copy(this.skyColor);
-        return 1;
+        return nightAmount;
+    }
+
+    private applyBiomeTint(weights: BiomeWeights, scale: number): void {
+        const tint = sampleBiomeSkyTint(weights, this.biomeTintScratch);
+        const strength = tint.strength * scale;
+        if (strength <= 0) return;
+        // The helper fades out at the town; the phase scale keeps the deep night
+        // sky from washing out while regions retain their identity.
+        this.skyColor.lerp(tint.color, strength);
+        this.ambientLight.color.lerp(tint.color, strength * 0.18);
     }
 
     dispose(): void {

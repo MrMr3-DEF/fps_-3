@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ENEMY_COUNT, INFANTRY, TOWN_WALL_HP, type InfantryKind } from '../src/config.ts';
-import { InfantryDefense, nearestInfantryPlayer, type InfantryEnvironment, type InfantryPlayer } from '../src/infantry.ts';
+import { ENEMY_COUNT, INFANTRY, TOWN_HALF_SIZE, TOWN_WALL_HP, TOWN_WALL_THICKNESS, type InfantryKind } from '../src/config.ts';
+import { InfantryDefense, botFootprintRadius, nearestInfantryPlayer, type InfantryEnvironment, type InfantryPlayer } from '../src/infantry.ts';
 import type { InfantryPose } from '../src/infantryNetworkTypes.ts';
+import { MechaNavigation } from '../src/mechaNavigation.ts';
 import { parseNetworkPacket } from '../src/networkTypes.ts';
 import { segmentAabbHitT } from '../src/gameplayMath.ts';
 import { createTownBoxes, generateTownLayout } from '../src/town.ts';
@@ -116,6 +117,63 @@ test('infantry damage the wall at contact and commit the wall loss once', async 
         assert.equal(defense.wallHp, 0);
         assert.equal(losses.length, 1);
         assert.ok(Math.abs(losses[0].x - 95) < 1e-6);
+    } finally { defense.dispose(); }
+});
+
+test('seeded infantry routes flank differently while every segment stays clear', () => {
+    const radius = Math.hypot(INFANTRY.big.width, INFANTRY.big.depth) / 2;
+    const nav = new MechaNavigation(walls.map(({ object }) => {
+        const { height, halfW, halfD } = object.userData as { height: number; halfW: number; halfD: number };
+        return { x: object.position.x, z: object.position.z, halfW, halfD,
+            bottom: object.position.y - height / 2, top: object.position.y + height / 2 };
+    }), [], radius, radius + .025);
+    const first = nav.borderSpawn(seed, () => true, 12, 1), second = nav.borderSpawn(seed, () => true, 12, 2);
+    assert.deepEqual(first.points[0], second.points[0]);
+    assert.notDeepEqual(first.points, second.points);
+    for (const route of [first, second]) {
+        for (let i = 1; i < route.points.length; i++) {
+            assert.equal(nav.segmentClear(route.points[i - 1], route.points[i]), true, `segment ${i}`);
+        }
+        const end = route.points.at(-1)!;
+        assert.ok(Math.abs(Math.max(Math.abs(end.x), Math.abs(end.z)) -
+            (TOWN_HALF_SIZE + TOWN_WALL_THICKNESS / 2 + radius + .025)) < .01);
+    }
+    const divergence = Math.max(...first.points.slice(1, -1).map(point =>
+        Math.min(...second.points.map(other => Math.hypot(point.x - other.x, point.z - other.z)))));
+    assert.ok(divergence > 8, `routes stayed within ${divergence} units`);
+});
+
+test('living infantry never overlap while converging on one target', async () => {
+    const player: InfantryPlayer = { id: 'Focus', lifeId: 1, yaw: 0, position: new THREE.Vector3(540, 1.65, 500) };
+    const { defense } = await arena({ visible: () => true });
+    const assertSeparated = (bots: readonly InfantryPose[], label: string) => {
+        for (let i = 0; i < bots.length; i++) for (let j = i + 1; j < bots.length; j++) {
+            const a = bots[i], b = bots[j];
+            const clearance = botFootprintRadius(a.kind) + botFootprintRadius(b.kind);
+            assert.ok(Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z) >= clearance - .05,
+                `${label}: ${a.kind} and ${b.kind} overlapped`);
+        }
+    };
+    try {
+        defense.update(.05, 0, []);
+        const spawned = defense.snapshot().bots;
+        for (let i = 0; i < spawned.length; i++) for (let j = i + 1; j < spawned.length; j++) {
+            const a = spawned[i], b = spawned[j];
+            assert.ok(Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z) >=
+                botFootprintRadius(a.kind) + botFootprintRadius(b.kind) + 1.49, 'spawn overlap');
+        }
+        for (let frame = 1; frame <= 200; frame++) {
+            defense.update(.05, frame * .05, []);
+            assertSeparated(defense.snapshot().bots, `spawn frame ${frame}`);
+        }
+        defense.receive({ sequence: 1, day: 3, wallHp: TOWN_WALL_HP, bots: [
+            { ...pose(0, 'base', 420, 480), revision: 2 }, { ...pose(1, 'base', 420, 500), revision: 2 },
+            { ...pose(2, 'base', 420, 520), revision: 2 },
+        ] });
+        for (let frame = 1; frame <= 300; frame++) {
+            defense.update(.05, frame * .05, [player]);
+            assertSeparated(defense.snapshot().bots, `chase frame ${frame}`);
+        }
     } finally { defense.dispose(); }
 });
 
