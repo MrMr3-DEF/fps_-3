@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MECHA_LEG_ALIGNMENT, MECHA_LEG_TURN_SPEED, MECHA_TORSO_YAW_SPEED, MECHA_TURN_RADIUS, MECHA_LOOK_WINDOW } from './config.js';
+import { MECHA_LEG_ALIGNMENT, MECHA_PILOT_LEG_TURN_SPEED, MECHA_PILOT_TORSO_YAW_SPEED, MECHA_TURN_RADIUS, MECHA_LOOK_WINDOW } from './config.js';
 import { MechaRockets } from './mechaRockets.js';
 
 export interface PilotMovement { clip: 'Idle' | 'Walk' | 'TurnLeft' | 'TurnRight'; rate: number; distance: number }
@@ -52,7 +52,7 @@ export class MechaPilot {
             const step = Math.min(remaining, 1 / 240, MECHA_LOOK_WINDOW - this.inputAge);
             const cutoff = this.latestTime + this.inputAge * 1000 - MECHA_LOOK_WINDOW * 1000;
             const motion = this.samples.reduce((sum, sample) => sum + (sample.time >= cutoff ? sample.yaw : 0), 0);
-            this.yaw = angle(this.yaw + THREE.MathUtils.clamp(motion / MECHA_LOOK_WINDOW, -MECHA_TORSO_YAW_SPEED, MECHA_TORSO_YAW_SPEED) * step);
+            this.yaw = angle(this.yaw + THREE.MathUtils.clamp(motion / MECHA_LOOK_WINDOW, -MECHA_PILOT_TORSO_YAW_SPEED, MECHA_PILOT_TORSO_YAW_SPEED) * step);
             this.inputAge += step; consumed += step; remaining -= step;
         }
         this.inputAge += delta - consumed;
@@ -64,7 +64,9 @@ export class MechaPilot {
         this.direction = direction;
         this.rate = Math.min(1, this.rate + delta / 0.4);
         const previousHeading = heading;
-        const maxYaw = (turning ? MECHA_LEG_TURN_SPEED : Math.min(MECHA_LEG_TURN_SPEED, speed * this.rate / MECHA_TURN_RADIUS)) * delta * (turning ? this.rate : 1);
+        // Piloted leg catch-up and walking follow use the mounted turn rate;
+        // enemy leg turning keeps its own base rate in move().
+        const maxYaw = (turning ? MECHA_PILOT_LEG_TURN_SPEED : Math.min(MECHA_PILOT_LEG_TURN_SPEED, speed * this.rate / MECHA_TURN_RADIUS)) * delta * (turning ? this.rate : 1);
         if (direction) heading = angle(heading + THREE.MathUtils.clamp(difference, -maxYaw, maxYaw));
         let distance = 0;
         if (clip === 'Walk') {

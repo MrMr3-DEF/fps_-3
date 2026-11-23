@@ -78,7 +78,8 @@ test('dawn adds increasingly large mixed waves at deterministic reachable border
 test('scans use a sphere and choose the nearest visible player', () => {
     const origin = new THREE.Vector3(0, 2, 0);
     const player = (id: string, x: number, y: number): InfantryPlayer => ({ id, lifeId: 0, yaw: 0, position: new THREE.Vector3(x, y, 0) });
-    const closest = player('Covered', 8, 2), visible = player('Visible', 60, 47), outside = player('Outside', 5, 78);
+    // 90^2 + 67.5^2 = 112.5^2 (exact spherical INFANTRY_RANGE boundary); outside sits beyond 112.5 m.
+    const closest = player('Covered', 8, 2), visible = player('Visible', 90, 69.5), outside = player('Outside', 5, 115.5);
     assert.equal(nearestInfantryPlayer(origin, [outside, visible, closest], candidate => candidate !== closest), visible);
     assert.equal(nearestInfantryPlayer(origin, [outside], () => true), undefined);
 });

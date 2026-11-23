@@ -14,11 +14,11 @@ export type RocketObstacleQuery = (sx: number, sz: number, ex: number, ez: numbe
 export type RocketFlightMode = 'guided' | 'straight' | 'wandering';
 export interface RocketPlayer { peerId?: string; position: THREE.Vector3; yaw: number; lifeId: number; alive: boolean; velocity: THREE.Vector3 }
 export interface RocketLaunch { mode: RocketFlightMode; target?: RocketLock | null; seed?: number;
-    enemy?: boolean; player?: RocketPlayer; peerTarget?: RocketPlayer | null; ownerPeerId?: string | null; damage?: number; turnSpeed?: number; guidanceResponse?: number }
+    enemy?: boolean; player?: RocketPlayer; peerTarget?: RocketPlayer | null; ownerPeerId?: string | null; damage?: number; turnSpeed?: number; guidanceResponse?: number; blastRadius?: number }
 interface Rocket { mesh: THREE.Group; active: boolean; start: THREE.Vector3; position: THREE.Vector3; forward: THREE.Vector3;
     end: THREE.Vector3; direction: THREE.Vector3; target: RocketLock | null; travel: number; age: number; smoke: number;
     mode: RocketFlightMode; targetPosition: THREE.Vector3; velocity: THREE.Vector3; landingDistance: number; noise: number;
-    ownerPeerId: string | null; playerPeerId: string | null; enemy: boolean; playerLife: number | null; player: RocketPlayer | null; damage: number; turnSpeed: number; response: number; }
+    ownerPeerId: string | null; playerPeerId: string | null; enemy: boolean; playerLife: number | null; player: RocketPlayer | null; damage: number; turnSpeed: number; response: number; blastRadius: number; }
 interface Spark { position: THREE.Vector3; velocity: THREE.Vector3; age: number; life: number; size: number; smoke: boolean }
 const FORWARD = new THREE.Vector3(0, 0, 1);
 const IDENTITY = new THREE.Quaternion();
@@ -30,9 +30,11 @@ export class MechaRockets {
     readonly group = new THREE.Group();
     selected: RocketLock | null = null;
     replica = false;
-    onExplosion: ((position: THREE.Vector3) => void) | null = null;
+    onExplosion: ((position: THREE.Vector3, scale?: number) => void) | null = null;
     private readonly rockets: Rocket[] = [];
-    private readonly sparks: Spark[] = Array.from({ length: 192 }, () => ({ position: new THREE.Vector3(), velocity: new THREE.Vector3(), age: 10, life: 0, size: 0, smoke: false }));
+    // Headroom for the mounted 2x blast, whose doubled fire/smoke counts can
+    // overlap without evicting the previous explosion's still-visible sparks.
+    private readonly sparks: Spark[] = Array.from({ length: 256 }, () => ({ position: new THREE.Vector3(), velocity: new THREE.Vector3(), age: 10, life: 0, size: 0, smoke: false }));
     private readonly particles: THREE.InstancedMesh;
     private nextSpark = 0;
     private readonly candidates: THREE.Object3D[] = [];
@@ -72,7 +74,7 @@ export class MechaRockets {
             const mesh = new THREE.Group(); const a = new THREE.Mesh(body, hull), b = new THREE.Mesh(tip, nose), c = new THREE.Mesh(flameGeo, flameMat);
             b.position.z = 1.6; c.position.z = -1.5; c.scale.set(1, 1, 2); mesh.add(a, b, c); mesh.visible = false; this.group.add(mesh);
             this.rockets.push({ mesh, active: false, start: new THREE.Vector3(), position: new THREE.Vector3(), forward: new THREE.Vector3(), end: new THREE.Vector3(), direction: new THREE.Vector3(), target: null, travel: 0, age: 0, smoke: 0, mode: 'straight', targetPosition: new THREE.Vector3(), velocity: new THREE.Vector3(), landingDistance: 85, noise: 0,
-                ownerPeerId: null, playerPeerId: null, enemy: false, playerLife: null, player: null, damage: WEAPON_STATS.SNIPER.damage, turnSpeed: MECHA_ROCKET_TURN_SPEED, response: MECHA_ROCKET_GUIDANCE_RESPONSE });
+                ownerPeerId: null, playerPeerId: null, enemy: false, playerLife: null, player: null, damage: WEAPON_STATS.SNIPER.damage, turnSpeed: MECHA_ROCKET_TURN_SPEED, response: MECHA_ROCKET_GUIDANCE_RESPONSE, blastRadius: MECHA_ROCKET_BLAST_RADIUS });
         }
         this.setRadius(this.radius);
         this.particles = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45, depthWrite: false }), this.sparks.length);
@@ -168,7 +170,7 @@ export class MechaRockets {
             }
         }
     }
-    showExplosion(point: THREE.Vector3): void { this.emit(point, 48, false); this.emit(point, 24, true); }
+    showExplosion(point: THREE.Vector3, scale = 1): void { this.emit(point, 48, false, scale, true); this.emit(point, 24, true, scale, true); }
     fire(origin: THREE.Vector3, direction: THREE.Vector3, targets: readonly THREE.Group[], launch: RocketLaunch = { mode: 'guided' }): boolean {
         const rocket = this.rockets.find(r => !r.active); if (!rocket) return false;
         rocket.active = rocket.mesh.visible = true; rocket.start.copy(origin); rocket.position.copy(origin);
@@ -186,6 +188,9 @@ export class MechaRockets {
         rocket.damage = launch.damage ?? WEAPON_STATS.SNIPER.damage;
         rocket.turnSpeed = launch.turnSpeed ?? MECHA_ROCKET_TURN_SPEED;
         rocket.response = launch.guidanceResponse ?? MECHA_ROCKET_GUIDANCE_RESPONSE;
+        // Blast size belongs to the launch: mounted pilots carry the doubled
+        // radius, while enemy launches omit it and keep the base 5 m blast.
+        rocket.blastRadius = launch.blastRadius ?? MECHA_ROCKET_BLAST_RADIUS;
         if (rocket.target) {
             this.bodyPoint(rocket.target.object, origin, rocket.end);
             rocket.targetPosition.copy(rocket.target.object.position);
@@ -240,27 +245,43 @@ export class MechaRockets {
             rocket.direction.applyQuaternion(this.steering).normalize();
         }
     }
-    private emit(position: THREE.Vector3, count: number, smoke: boolean): void {
-        const amount = Math.min(scaleParticleCount(count), Math.max(0, getParticleLimit() - state.activeParticles.length));
-        for (let i = 0; i < amount; i++) { const p = this.sparks[this.nextSpark++ % this.sparks.length]; p.position.copy(position); p.age = 0; p.life = smoke ? 0.9 : 0.6;
-            const a = this.nextSpark * 2.399963; p.velocity.set(Math.cos(a), (i % 5) / 5, Math.sin(a)).multiplyScalar(smoke ? 1.2 : 12); p.size = smoke ? 0.8 : 0.45; p.smoke = smoke; }
+    private emit(position: THREE.Vector3, count: number, smoke: boolean, scale = 1, spherical = false): void {
+        // A mounted blast doubles size and spread, and at most doubles the
+        // visible count; scale 1 keeps every enemy particle identical.
+        const total = Math.round(count * Math.min(2, scale));
+        const amount = Math.min(scaleParticleCount(total), Math.max(0, getParticleLimit() - state.activeParticles.length));
+        const speed = (smoke ? 1.2 : 12) * scale;
+        for (let i = 0; i < amount; i++) {
+            const p = this.sparks[this.nextSpark++ % this.sparks.length]; p.position.copy(position); p.age = 0; p.life = smoke ? 0.9 : 0.6;
+            const a = this.nextSpark * 2.399963;
+            if (spherical) {
+                // Fibonacci sphere distributes explosion bursts evenly across X, Y and Z.
+                const y = 1 - 2 * (i + 0.5) / amount;
+                const radius = Math.sqrt(Math.max(0, 1 - y * y));
+                p.velocity.set(Math.cos(a) * radius, y, Math.sin(a) * radius).multiplyScalar(speed);
+            } else {
+                p.velocity.set(Math.cos(a), (i % 5) / 5, Math.sin(a)).multiplyScalar(speed);
+            }
+            p.size = (smoke ? 0.8 : 0.45) * scale; p.smoke = smoke;
+        }
     }
     private explode(rocket: Rocket, point: THREE.Vector3, targets: readonly THREE.Group[], query: RocketObstacleQuery, hit: (index: number, damage: number) => void,
         player: RocketPlayer | undefined, playerHit: (damage: number) => void,
         players?: readonly RocketPlayer[], hitPlayer?: (player: RocketPlayer, damage: number, owner: string | null) => void): void {
-        this.showExplosion(point); this.onExplosion?.(point);
+        const explosionScale = rocket.blastRadius / MECHA_ROCKET_BLAST_RADIUS;
+        this.showExplosion(point, explosionScale); this.onExplosion?.(point, explosionScale);
         if (players) {
             for (const victim of players) {
                 if (!victim.alive || victim.peerId === rocket.ownerPeerId) continue;
                 closestPlayerBodyPoint(point, victim.position, victim.yaw, this.point);
-                if (point.distanceTo(this.point) <= MECHA_ROCKET_BLAST_RADIUS && this.obstacleT(point, this.point, query) === null) hitPlayer?.(victim, rocket.damage, rocket.ownerPeerId);
+                if (point.distanceTo(this.point) <= rocket.blastRadius && this.obstacleT(point, this.point, query) === null) hitPlayer?.(victim, rocket.damage, rocket.ownerPeerId);
             }
             if (rocket.enemy) return;
         }
         if (rocket.enemy && !players) {
             if (player?.alive && player.lifeId === rocket.playerLife) {
                 closestPlayerBodyPoint(point, player.position, player.yaw, this.point);
-                if (point.distanceTo(this.point) <= MECHA_ROCKET_BLAST_RADIUS && this.obstacleT(point, this.point, query) === null) playerHit(rocket.damage);
+                if (point.distanceTo(this.point) <= rocket.blastRadius && this.obstacleT(point, this.point, query) === null) playerHit(rocket.damage);
             }
             return;
         }
@@ -270,7 +291,7 @@ export class MechaRockets {
         for (const target of targets) {
             const d = targetData(target); if (d.hp <= 0) continue;
             this.bodyPoint(target, point, this.point);
-            if (point.distanceTo(this.point) <= MECHA_ROCKET_BLAST_RADIUS && this.obstacleT(point, this.point, query) === null) victims.push(d.index);
+            if (point.distanceTo(this.point) <= rocket.blastRadius && this.obstacleT(point, this.point, query) === null) victims.push(d.index);
         }
         for (const index of victims) hit(index, rocket.damage);
     }

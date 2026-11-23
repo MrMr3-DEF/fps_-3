@@ -11,7 +11,7 @@ import { initializeNetworkMecha, resetMechaNetwork, setMechaNetworkPort, setMech
     acceptMechaCommand, mechaPeerLeft, receiveMechaState, receiveMechaEvent, acknowledgeMechaRender, flushMechaDamage,
     multiplayerMechaEvents, captureMechaSnapshot, markMechaEndingReady, acceptMechaEndingReady, updateMechaEndingNetwork, announceMechaHit } from '../src/mechaNetwork.ts';
 import { disposeParticles } from '../src/particles.ts';
-import { MECHA_ARMOR_IMPACT } from '../src/config.ts';
+import { MECHA_ARMOR_IMPACT, MECHA_PILOT_STOMP_RADIUS } from '../src/config.ts';
 import { CameraShake } from '../src/cameraShake.ts';
 import { triggerMechaImpactShake } from '../src/mechaImpactShake.ts';
 import { userSettings } from '../src/settings.ts';
@@ -96,6 +96,35 @@ test('confirmed armor hit events validate contacts and show one world-space burs
         receiveMechaEvent(packet); receiveMechaEvent({ ...packet, sequence: packet.sequence - 1 });
         assert.equal(state.activeParticles.length, 20, 'duplicate and older events cannot replay effects');
     } finally { disposeParticles(); cleanup(a); state.scene = null; userSettings.particleAmount = amount; }
+});
+
+test('blast scale and impact radius survive strict parsing and replay scaled client effects', async () => {
+    const a = await actor(); host(a, []);
+    try {
+        const snapshot = a.captureNetworkState(1);
+        const blast = { type: 'mecha_event' as const, sequence: 1, state: snapshot,
+            event: { kind: 'blast' as const, position: { x: 1, y: 2, z: 3 }, scale: 2, extra: 'no' } };
+        const parsedBlast = parseNetworkPacket(structuredClone(blast)) as MechaEventPacket;
+        assert.deepEqual(parsedBlast.event, { kind: 'blast', position: { x: 1, y: 2, z: 3 }, scale: 2 });
+        for (const scale of [0, -1, 4.0001, Infinity, NaN, '2']) {
+            const malformed = structuredClone(blast); (malformed.event as any).scale = scale;
+            assert.equal(parseNetworkPacket(malformed), null);
+        }
+        const impact = { type: 'mecha_event' as const, sequence: 2, state: snapshot,
+            event: { kind: 'impact' as const, impact: 'stomp' as const, position: { x: 4, y: 0.06, z: 5 }, radius: MECHA_PILOT_STOMP_RADIUS, extra: 'no' } };
+        const parsedImpact = parseNetworkPacket(structuredClone(impact)) as MechaEventPacket;
+        assert.deepEqual(parsedImpact.event, { kind: 'impact', impact: 'stomp', position: { x: 4, y: 0.06, z: 5 }, radius: MECHA_PILOT_STOMP_RADIUS });
+        for (const radius of [0, -1, 100.001, Infinity, NaN, '37.5']) {
+            const malformed = structuredClone(impact); (malformed.event as any).radius = radius;
+            assert.equal(parseNetworkPacket(malformed), null);
+        }
+        state.isHost = false;
+        const scales: number[] = [], radii: (number | undefined)[] = [];
+        (a.pilot.rockets as any).showExplosion = (_position: THREE.Vector3, scale = 1) => scales.push(scale);
+        setMechaPresentation({ impact(_kind, _position, radius) { radii.push(radius); }, release() {}, blocked() {}, damage() {}, gameOver() {}, hit() {} });
+        receiveMechaEvent(parsedBlast); receiveMechaEvent(parsedImpact);
+        assert.deepEqual(scales, [2]); assert.deepEqual(radii, [MECHA_PILOT_STOMP_RADIUS]);
+    } finally { cleanup(a); }
 });
 
 test('wall arrival commits loss before the first punch tick and shares readiness with paused/dead viewers', async t => {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { MechaRockets } from '../src/mechaRockets.ts';
+import { MECHA_PILOT_ROCKET_BLAST_RADIUS, MECHA_ROCKET_BLAST_RADIUS } from '../src/config.ts';
 function enemy(index: number, x: number, z: number, y = 10) {
     const target = new THREE.Group(); target.position.set(x, y, z);
     const body = new THREE.Mesh(new THREE.BoxGeometry(2, 3, 2), new THREE.MeshBasicMaterial()); target.add(body);
@@ -19,6 +20,52 @@ test('immediate selection picks nearest crosshair, honors visible range and cove
     const rockets = new MechaRockets(), c = camera(), origin = c.position.clone(); const targets = [enemy(0, 10, 100), enemy(1, 0, 100), enemy(2, 0, 710), enemy(3, 0, -50)];
     assert.equal(rockets.select(c, origin, targets, world())?.index, 1); assert.equal(rockets.select(c, origin, targets, world([wall(50)])), null);
     targets[1].visible = false; assert.equal(rockets.select(c, origin, targets, world())?.index, 0); rockets.dispose();
+});
+
+test('mounted 10m blast hits collateral peers and doubles explosion particles while the default enemy blast stays at 5m', () => {
+    const origin = new THREE.Vector3(0, 2, 0), direction = new THREE.Vector3(0, 0, 1);
+    const owner = { peerId: 'pilot', lifeId: 0, alive: true, position: origin.clone(), yaw: 0, velocity: new THREE.Vector3() };
+    const victim = { ...owner, peerId: 'victim', position: new THREE.Vector3(0, 2, 30) };
+    const nearby = { ...owner, peerId: 'nearby', position: new THREE.Vector3(8, 2, 30) };
+    const hits: string[] = [], blasts: number[] = [];
+    const rockets = new MechaRockets();
+    rockets.onExplosion = (_position, scale = 1) => blasts.push(scale);
+    try {
+        rockets.fire(origin, direction, [], { mode: 'guided', peerTarget: victim, ownerPeerId: 'pilot', blastRadius: MECHA_PILOT_ROCKET_BLAST_RADIUS });
+        for (let frame = 0; frame < 120 && rockets.activeCount; frame++)
+            rockets.update(1 / 60, [], world(), () => {}, undefined, () => {}, [owner, victim, nearby], p => hits.push(p.peerId!));
+        assert.deepEqual(hits.sort(), ['nearby', 'victim']); assert.deepEqual(blasts, [2]);
+    } finally { rockets.dispose(); }
+
+    // Omitting blastRadius models the enemy launch: 8 m collateral survives.
+    hits.length = blasts.length = 0;
+    const enemy = new MechaRockets(); enemy.onExplosion = (_position, scale = 1) => blasts.push(scale);
+    const enemyVictim = { ...victim, lifeId: 1 }, enemyNearby = { ...nearby, lifeId: 1 };
+    try {
+        enemy.fire(origin, direction, [], { mode: 'guided', peerTarget: enemyVictim, ownerPeerId: 'pilot' });
+        const rocket = (enemy as any).rockets.find((r: any) => r.active);
+        assert.equal(rocket.blastRadius, MECHA_ROCKET_BLAST_RADIUS);
+        for (let frame = 0; frame < 120 && enemy.activeCount; frame++)
+            enemy.update(1 / 60, [], world(), () => {}, undefined, () => {}, [owner, enemyVictim, enemyNearby], p => hits.push(p.peerId!));
+        assert.deepEqual(hits, ['victim']); assert.deepEqual(blasts, [1]);
+    } finally { enemy.dispose(); }
+
+    // Scale 1 must reproduce the enemy burst exactly; scale 2 doubles size,
+    // speed and (capped at 2x) the fire/smoke counts.
+    const point = new THREE.Vector3(3, 4, 5), base = new MechaRockets(), doubled = new MechaRockets();
+    const active = (pool: MechaRockets) => (pool as any).sparks.filter((p: any) => p.age < p.life);
+    try {
+        base.showExplosion(point); doubled.showExplosion(point, 2);
+        const normal = active(base), large = active(doubled);
+        assert.equal(normal.length, 72); assert.equal(large.length, 144);
+        const sizes = (pool: any[]) => pool.map(p => p.size).sort((a, b) => a - b);
+        assert.deepEqual(sizes(normal), [...Array(48).fill(0.45), ...Array(24).fill(0.8)]);
+        assert.deepEqual(sizes(large), [...Array(96).fill(0.9), ...Array(48).fill(1.6)]);
+        assert.ok(normal.every(p => p.velocity.length() <= 12 + 1e-9));
+        assert.ok(large.every(p => p.velocity.length() <= 24 + 1e-9));
+        assert.ok(normal.some(p => p.velocity.y > 10) && normal.some(p => p.velocity.y < -10), 'explosion bursts expand spherically along Y as well as XZ');
+        assert.ok(large.some(p => p.velocity.y > 20) && large.some(p => p.velocity.y < -20));
+    } finally { base.dispose(); doubled.dispose(); }
 });
 
 test('guided rocket visibly curves into airborne target and applies 10 damage once to each enemy within 5m', () => {

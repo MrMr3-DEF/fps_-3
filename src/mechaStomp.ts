@@ -30,6 +30,8 @@ export class MechaStomp {
     reset(): void { this.active = false; this.elapsed = this.cooldown = 0; this.impacted = false; }
 }
 
-export function stompContact(center: { x: number; z: number }, victim: { x: number; z: number }, grounded: boolean, legs: boolean): boolean {
-    return legs || grounded && Math.hypot(victim.x - center.x, victim.z - center.z) <= MECHA_STOMP_RADIUS;
+/** `radius` lets a piloted stomp use its larger floor wave; enemy callers and
+ * the default stay on the base 25 m contact radius. Leg contact always wins. */
+export function stompContact(center: { x: number; z: number }, victim: { x: number; z: number }, grounded: boolean, legs: boolean, radius = MECHA_STOMP_RADIUS): boolean {
+    return legs || grounded && Math.hypot(victim.x - center.x, victim.z - center.z) <= radius;
 }

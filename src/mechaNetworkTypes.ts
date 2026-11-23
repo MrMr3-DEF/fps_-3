@@ -37,9 +37,9 @@ export interface MechaHitPacket extends MechaSender { type: 'hit_mecha'; revisio
 export type MechaEvent =
     | { kind: 'damage'; peerId: string; lifeId: number; damage: number; attack: 'laser' | 'stomp' | 'rocket'; attackerPeerId: string | null }
     | { kind: 'release'; peerId: string; lifeId: number; pose: MechaPose }
-    | { kind: 'impact'; impact: MechaImpact; position: Vec3Packet }
+    | { kind: 'impact'; impact: MechaImpact; position: Vec3Packet; radius?: number }
     | { kind: 'shield'; position: Vec3Packet }
-    | { kind: 'blast'; position: Vec3Packet }
+    | { kind: 'blast'; position: Vec3Packet; scale?: number }
     | { kind: 'blocked'; peerId: string }
     | { kind: 'board_denied'; peerId: string; lifeId: number }
     | { kind: 'hit'; peerId: string | null; killed: boolean; score: number; position: Vec3Packet; direction: Vec3Packet }
@@ -53,6 +53,8 @@ export interface MechaDeniedPacket extends MechaSender {
 export type MechaPacket = MechaEndingReadyPacket | MechaInputPacket | MechaBoardPacket | MechaHitPacket | MechaEventPacket | MechaStatePacket | MechaDeniedPacket;
 
 const number = (x: unknown, min: number, max: number): x is number => typeof x === 'number' && Number.isFinite(x) && x >= min && x <= max;
+const positive = (x: unknown, max: number): x is number => typeof x === 'number' && Number.isFinite(x) && x > 0 && x <= max;
+const optionalPositive = (x: unknown, max: number): x is number | undefined => x === undefined || positive(x, max);
 const integer = (x: unknown, max = Number.MAX_SAFE_INTEGER): x is number => number(x, 0, max) && Number.isSafeInteger(x);
 const bool = (x: unknown): x is boolean => typeof x === 'boolean';
 export const isMechaVector = (x: unknown): x is Vec3Packet => record(x) && ['x', 'y', 'z'].every(k => number(x[k], -5000, 5000));
@@ -102,8 +104,10 @@ export function isMechaState(x: unknown): x is MechaState {
 function isEvent(e: unknown): e is MechaEvent {
     if (!record(e)) return false;
     if (e.kind === 'end') return true;
-    if (e.kind === 'impact') return ['step', 'stomp', 'knees', 'fists', 'punch'].includes(e.impact as string) && isMechaVector(e.position);
-    if (e.kind === 'blast' || e.kind === 'shield') return isMechaVector(e.position);
+    if (e.kind === 'impact') return ['step', 'stomp', 'knees', 'fists', 'punch'].includes(e.impact as string) &&
+        isMechaVector(e.position) && optionalPositive(e.radius, 100);
+    if (e.kind === 'blast') return isMechaVector(e.position) && optionalPositive(e.scale, 4);
+    if (e.kind === 'shield') return isMechaVector(e.position);
     if (e.kind === 'hit') return (e.peerId === null || isPeerId(e.peerId)) && bool(e.killed) &&
         integer(e.score) && isMechaVector(e.position) && direction(e.direction);
     if (!isPeerId(e.peerId)) return false;
@@ -139,8 +143,8 @@ export const mechaStateFields: Projection = {
 const eventFields = variant('kind', {
     damage: fields('kind', 'peerId', 'lifeId', 'damage', 'attack', 'attackerPeerId'),
     release: { ...fields('kind', 'peerId', 'lifeId'), pose: { position: vec, viewPosition: vec, quaternion: [true] } },
-    impact: { ...fields('kind', 'impact'), position: vec },
-    shield: { ...fields('kind'), position: vec }, blast: { ...fields('kind'), position: vec },
+    impact: { ...fields('kind', 'impact', 'radius'), position: vec },
+    shield: { ...fields('kind'), position: vec }, blast: { ...fields('kind', 'scale'), position: vec },
     blocked: fields('kind', 'peerId'), board_denied: fields('kind', 'peerId', 'lifeId'),
     hit: { ...fields('kind', 'peerId', 'killed', 'score'), position: vec, direction: vec }, end: fields('kind'),
 });

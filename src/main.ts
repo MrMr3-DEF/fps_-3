@@ -247,12 +247,12 @@ function syncMountedControls(mounted: boolean): void {
     if (UI.hoverContainer) UI.hoverContainer.title = mounted ? 'Shield energy' : 'Hover energy';
 }
 
-function mechaImpact(kind: MechaImpact, position: THREE.Vector3): void {
+function mechaImpact(kind: MechaImpact, position: THREE.Vector3, radius?: number): void {
     const actor = forgottenMecha;
     if (!actor || !state.controls) return;
     if (kind === 'punch') { spawnParticles(position, 0x8b887d, 55, 20, 0.65, 35); return; }
-    spawnGroundImpact(position, kind === 'step' ? 3 : kind === 'stomp' ? MECHA_STOMP_RADIUS : 7, kind !== 'step');
-    triggerMechaImpactShake(cameraShake, kind, state.controls.getObject().position, actor.group.position);
+    spawnGroundImpact(position, kind === 'step' ? 3 : kind === 'stomp' ? radius ?? MECHA_STOMP_RADIUS : 7, kind !== 'step');
+    triggerMechaImpactShake(cameraShake, kind, state.controls.getObject().position, actor.group.position, radius);
 }
 
 const mechaImpactDirection = new THREE.Vector3();

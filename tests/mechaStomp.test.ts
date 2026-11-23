@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { ForgottenMecha, type MechaEvents, type MechaPlayer } from '../src/forgottenMecha.ts';
 import { MechaStomp, cyclePilotWeapon, isPilotWeapon, stompContact } from '../src/mechaStomp.ts';
-import { MECHA_STOMP_IMPACT_TIME, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN } from '../src/config.ts';
+import { MECHA_STOMP_IMPACT_TIME, MECHA_STOMP_DAMAGE, MECHA_STOMP_COOLDOWN, MECHA_STOMP_RADIUS, MECHA_PILOT_STOMP_RADIUS, MECHA_PILOT_TORSO_YAW_SPEED, MECHA_PILOT_ROCKET_BLAST_RADIUS } from '../src/config.ts';
 import { loadIronmawTestAsset } from './ironmawTestAsset.ts';
 import { deriveHudPresentation } from '../src/hudPresentation.ts';
 
@@ -39,10 +39,10 @@ test('shared stomp clock stops at contact and clip end and starts cooldown after
     clock.reset(); assert.equal(clock.active, false); assert.equal(clock.cooldown, 0);
     assert.equal(cyclePilotWeapon('rocket'), 'stomp'); assert.equal(cyclePilotWeapon('stomp'), 'rocket');
     assert.equal(isPilotWeapon('laser'), false); assert.equal(isPilotWeapon('stomp'), true);
-    for (const radius of [24.999, 25, 25.001]) {
-        assert.equal(stompContact({ x: 0, z: 0 }, { x: radius, z: 0 }, true, false), radius <= 25);
-        assert.equal(stompContact({ x: 0, z: 0 }, { x: radius, z: 0 }, false, false), false);
-        assert.equal(stompContact({ x: 0, z: 0 }, { x: radius, z: 0 }, false, true), true);
+    for (const radius of [MECHA_STOMP_RADIUS, MECHA_PILOT_STOMP_RADIUS]) for (const distance of [radius - .001, radius, radius + .001]) {
+        assert.equal(stompContact({ x: 0, z: 0 }, { x: distance, z: 0 }, true, false, radius), distance <= radius);
+        assert.equal(stompContact({ x: 0, z: 0 }, { x: distance, z: 0 }, false, false, radius), false);
+        assert.equal(stompContact({ x: 0, z: 0 }, { x: distance, z: 0 }, false, true, radius), true);
     }
 });
 
@@ -75,15 +75,15 @@ test('enemy and playable stomp sample identical leg poses at frame 39 across rat
 test('piloted contact damages each player/NPC once, preserves grounding rules and credits the pilot', async () => {
     const hits: string[] = [], amounts: number[] = [], owners: (string | null | undefined)[] = [];
     const a = await mounted({ playerHit(p, damage, attack, owner) { assert.equal(attack, 'stomp'); hits.push(p.peerId!); amounts.push(damage); owners.push(owner); } });
-    const targets = [cube(0, 20, .5, 0), cube(1, 25, .5, 0), cube(2, 25.001, .5, 0), cube(3, 20, 4, 0), cube(4, 20, .5, 0, 10), cube(5, 0, 20, 0)];
+    const targets = [cube(0, 20, .5, 0), cube(1, MECHA_PILOT_STOMP_RADIUS - .5, .5, 0), cube(2, MECHA_PILOT_STOMP_RADIUS + .001, .5, 0), cube(3, 20, 4, 0), cube(4, 20, .5, 0, 10), cube(5, 0, 20, 0)];
     const npcHits: number[] = [];
     a.networked = true; a.pilotPeerId = 'pilot'; a.pilotLifeId = 1;
     const players: MechaPlayer[] = [
         { peerId: 'pilot', lifeId: 1, position: new THREE.Vector3(0, 2, 10), grounded: true, alive: true },
-        ...['one', 'two'].map((peerId, i) => ({ peerId, lifeId: 2, position: new THREE.Vector3(25 - i, 2, 0), grounded: true, alive: true })),
+        ...['one', 'two'].map((peerId, i) => ({ peerId, lifeId: 2, position: new THREE.Vector3(MECHA_PILOT_STOMP_RADIUS - 1 - i, 2, 0), grounded: true, alive: true })),
         { peerId: 'jumping', lifeId: 2, position: new THREE.Vector3(20, 4, 0), grounded: false, alive: true },
         { peerId: 'elevated', lifeId: 2, position: new THREE.Vector3(20, 12, 0), grounded: false, alive: true },
-        { peerId: 'outside', lifeId: 2, position: new THREE.Vector3(25.001, 2, 0), grounded: true, alive: true },
+        { peerId: 'outside', lifeId: 2, position: new THREE.Vector3(MECHA_PILOT_STOMP_RADIUS + .001, 2, 0), grounded: true, alive: true },
     ];
     a.setStompTargets(targets, (index, damage) => { npcHits.push(index); targets[index].userData.hp -= damage; });
     try {
@@ -109,7 +109,7 @@ test('stomp freezes travel and legs, keeps capped looking/helmet/shield and game
         a.setPilotInput(1, true); a.look(1, .3, 100); a.toggleHelmet();
         const start = a.group.position.clone(), heading = a.group.rotation.y;
         advance(a, .5); assert.ok(a.group.position.equals(start)); assert.equal(a.group.rotation.y, heading);
-        assert.ok(a.pilot.yaw > 0 && a.pilot.yaw <= .366 * .05 + 1e-8); assert.equal(a.pilot.pitch, .3);
+        assert.ok(a.pilot.yaw > 0 && a.pilot.yaw <= MECHA_PILOT_TORSO_YAW_SPEED * .05 + 1e-8); assert.equal(a.pilot.pitch, .3);
         assert.ok(a.helmetProgress > 0); assert.equal(a.combat.shieldActive, true);
         a.selectPilotWeapon('rocket'); assert.equal(a.requestAttack(), false); assert.equal(a.reloadProgress, 0);
         assert.equal(a.requestStomp(), false); const paused = a.stomp.elapsed; a.update(0, absent); assert.equal(a.stomp.elapsed, paused);
@@ -117,6 +117,7 @@ test('stomp freezes travel and legs, keeps capped looking/helmet/shield and game
         assert.equal(a.requestRocket(), true); a.selectPilotWeapon('stomp'); assert.equal(a.requestStomp(), false);
         advance(a, 1.5); const camera = new THREE.PerspectiveCamera(); camera.position.copy(a.pilot.cameraPosition); camera.quaternion.copy(a.pilot.cameraQuaternion);
         assert.equal(a.fireRocket(camera, [], empty), true); assert.equal(a.pilot.cooldown, 2);
+        assert.equal((a.pilot.rockets as any).rockets.find((r: any) => r.active).blastRadius, MECHA_PILOT_ROCKET_BLAST_RADIUS);
         advance(a, 1.5); const cooldown = a.stomp.cooldown;
         a.selectPilotWeapon('rocket'); a.selectPilotWeapon('stomp'); assert.equal(a.stomp.cooldown, cooldown);
         advance(a, cooldown); assert.equal(a.requestStomp(), true);

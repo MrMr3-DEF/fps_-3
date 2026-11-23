@@ -130,7 +130,7 @@ function emit(event: MechaEvent): void {
 const vector = (p: THREE.Vector3) => ({ x: p.x, y: p.y, z: p.z });
 export function multiplayerMechaEvents(): MechaEvents {
     return {
-        impact: (impact, position) => emit({ kind: 'impact', impact, position: vector(position) }),
+        impact: (impact, position, radius) => emit({ kind: 'impact', impact, position: vector(position), ...(radius !== undefined ? { radius } : {}) }),
         stompPlayer() {},
         wallPunchStarted: commitEnding,
         playerHit: (player, damage, attack, attackerPeerId = null) => {
@@ -152,7 +152,7 @@ export function multiplayerMechaEvents(): MechaEvents {
 export function initializeNetworkMecha(actor = forgottenMecha): void {
     activeActor = actor; if (!actor) return;
     actor.networked = true; actor.localPeerId = state.peer?.id ?? null;
-    actor.pilot.rockets.onExplosion = position => emit({ kind: 'blast', position: vector(position) });
+    actor.pilot.rockets.onExplosion = (position, scale = 1) => emit({ kind: 'blast', position: vector(position), ...(scale !== 1 ? { scale } : {}) });
 }
 export function receiveMechaState(snapshot: MechaState): void {
     if (snapshot.sequence <= receivedSequence || !activeActor?.ready) return;
@@ -210,10 +210,11 @@ function applyEvent(packet: MechaEventPacket): void {
     if (endingAuthority || replica?.ending) return;
     const event = packet.event;
     if (event.kind === 'end') { state.matchEnded = true; presentation?.gameOver(); return; }
-    if (event.kind === 'impact') { presentation?.impact(event.impact, new THREE.Vector3(event.position.x, event.position.y, event.position.z)); return; }
+    if (event.kind === 'impact') { presentation?.impact(event.impact, new THREE.Vector3(event.position.x, event.position.y, event.position.z), event.radius); return; }
     if (event.kind === 'shield') { activeActor?.combat.shieldImpact(event.position); return; }
     if (event.kind === 'blast') {
-        if (!state.isHost) activeActor?.pilot.rockets.showExplosion(new THREE.Vector3(event.position.x, event.position.y, event.position.z));
+        const position = new THREE.Vector3(event.position.x, event.position.y, event.position.z);
+        if (!state.isHost) activeActor?.pilot.rockets.showExplosion(position, event.scale);
         return;
     }
     if (event.kind === 'hit') {

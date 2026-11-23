@@ -102,7 +102,10 @@ through entry, shutdown and release; they are not queued.
 The pilot retains their on-foot weapon and each firearm’s magazine while seated. On-foot jump,
 hover, strafe, inspection and conversation are unavailable while piloting.
 Piloted movement can cross lava; grounded foot contact costs one HP per tick
-through shields. Enemy navigation still avoids lava.
+through shields. Enemy navigation still avoids lava. Piloted walking, torso
+turning and stationary leg alignment run 50% faster than the enemy actor, with
+locomotion clip speed and footstep contacts scaled to match; enemy movement,
+turning and stomp values are unchanged.
 
 Closed-helmet goggles support immediate target acquisition and guidance. Opening
 disables acquisition; ordinary scoped scans remain available without homing.
@@ -115,7 +118,7 @@ Pilot rockets acquire the nearest unobstructed eligible target to the rendered
 crosshair at release, independently of host render chunks. They follow the
 captured life off-screen without retargeting. Closed-helmet unlocked shots coast;
 open/folding shots wander toward a 75–100 m landing point. Swept collision uses
-fitted radius/hull endpoints. A five-meter cover-blocked blast deals 10 damage
+fitted radius/hull endpoints. A ten-meter cover-blocked blast deals 10 damage
 once per eligible body, without extra direct or self-damage. Firing freezes travel
 and look until release, then permits recoil locomotion; recovery gates repetition.
 
@@ -124,8 +127,9 @@ and look until release, then permits recoil locomotion; recovery gates repetitio
 Fresh boarding selects Rockets. A stomp keeps `piloted` ownership while stopping
 travel/leg turning for the complete clip. Looking, helmet controls and shielding
 remain available. Enemy and pilot share exact exported contact sampling across
-slow frames. Each eligible player/NPC takes 10 damage once: the floor wave reaches
-25 m, while animated leg contact also reaches elevated/airborne bodies. The pilot
+slow frames. Each eligible player/NPC takes 10 damage once: the pilot floor wave
+reaches 37.5 m (enemy stomps stay at 25 m), while animated leg contact also
+reaches elevated/airborne bodies. The pilot
 and vehicle are immune. Cooldown begins after completion. Switching slots does
 not cancel an attack; exit waits for committed animation to finish.
 

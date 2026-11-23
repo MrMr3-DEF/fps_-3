@@ -36,7 +36,7 @@ export const MECHA_HP = 50;
 export const MECHA_DETECTION_RANGE = 130;
 export const MECHA_APPROACH_WARNING_TIME = 3;
 export const TOWN_WALL_HP = 500;
-export const INFANTRY_RANGE = 75;
+export const INFANTRY_RANGE = 112.5;
 export const INFANTRY_LIMIT = 48;
 export const INFANTRY_WARNING_TIME = 3;
 export const INFANTRY_NETWORK_INTERVAL = 100;
@@ -136,6 +136,15 @@ export const MECHA_LAVA_INTERVAL = 0.5;
 export const MECHA_LAVA_DAMAGE = 1;
 export const MECHA_ROCKET_BLAST_RADIUS = 5;
 export const MECHA_ROCKET_POOL_SIZE = 16;
+// A piloted Ironmaw is stronger than the autonomous enemy. These values are
+// consumed only by pilot paths; enemy attack selection, damage and movement
+// keep the base constants above.
+export const MECHA_PILOT_ROCKET_BLAST_RADIUS = MECHA_ROCKET_BLAST_RADIUS * 2;
+export const MECHA_PILOT_STOMP_RADIUS = MECHA_STOMP_RADIUS * 1.5;
+export const MECHA_PILOT_STOMP_SHAKE = { radius: MECHA_STOMP_SHAKE.radius * 1.5, strength: MECHA_STOMP_SHAKE.strength, duration: MECHA_STOMP_SHAKE.duration } as const;
+export const MECHA_PILOT_SPEED_MULTIPLIER = 1.5;
+export const MECHA_PILOT_TORSO_YAW_SPEED = MECHA_TORSO_YAW_SPEED * MECHA_PILOT_SPEED_MULTIPLIER;
+export const MECHA_PILOT_LEG_TURN_SPEED = MECHA_LEG_TURN_SPEED * MECHA_PILOT_SPEED_MULTIPLIER;
 
 export const WALK_SPEED = 35.0;
 // The exported armed cyborg measures 1.828 from sole to crown and 1.685 to visor.

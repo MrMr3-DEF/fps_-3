@@ -12,14 +12,14 @@ Robots enter at reachable seeded points along the map edge and travel toward
 outer wall sections on varied seeded flanking routes rather than one identical
 shortest path, keeping their horizontal footprints apart so they neither spawn
 nor walk inside one another. They prioritize the nearest visible living player
-in a 75 m sphere. Cover blocks attacks, and robots return to their wall approach
+in a 112.5 m sphere. Cover blocks attacks, and robots return to their wall approach
 when they lose the player. At sharp corners and before attacking off-axis targets,
 robots stop and turn in alternating steps. The host sends the landing heading,
 signed turn angle, and clip time so observers see the same footwork.
 
 | Robot | Standing height | HP | Damage per hit | Attack |
 | --- | ---: | ---: | ---: | --- |
-| Base | ≈8.57 m | 20 | 1 | Rifle with a 75 m spherical range and a three-second interval |
+| Base | ≈8.57 m | 20 | 1 | Rifle with a 112.5 m spherical range and a three-second interval |
 | Fast | ≈6.86 m | 10 | 2 | Quick melee at the LightHit contact frame |
 | Big | 12 m | 30 | 5 | Heavy melee at the HeavyHit contact frame |
 

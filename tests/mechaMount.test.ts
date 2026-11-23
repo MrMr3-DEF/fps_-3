@@ -11,6 +11,7 @@ import { loadCyborgTestAssets, visitArmorVertices } from './cyborgTestAsset.ts';
 import { updateHook } from '../src/grapple.ts';
 import { state } from '../src/state.ts';
 import { playerTouchesWorldBox } from '../src/playerHitbox.ts';
+import { MECHA_PILOT_LEG_TURN_SPEED, MECHA_PILOT_SPEED_MULTIPLIER, MECHA_PILOT_TORSO_YAW_SPEED, MECHA_LEG_TURN_SPEED, MECHA_TORSO_YAW_SPEED } from '../src/config.ts';
 
 const absent = { position: new THREE.Vector3(), alive: false, grounded: false };
 function advance(actor: ForgottenMecha, seconds: number) { for (let t = 0; t < seconds - 1e-9; t += 1 / 60) actor.update(Math.min(1 / 60, seconds - t), absent); }
@@ -149,13 +150,51 @@ test('world torso yaw remains capped while legs align, walk, reverse and respect
     let heading = 0, previousYaw = 0;
     for (let i = 0; i < 300; i++) {
         const before = position.clone(); const move = pilot.update(1 / 60, position, heading, 6.095, 1, (_start, end, _heading, out) => out.copy(end));
-        assert.ok(Math.abs(pilot.yaw - previousYaw) <= 0.366 / 60 + 1e-9);
+        assert.ok(Math.abs(pilot.yaw - previousYaw) <= MECHA_PILOT_TORSO_YAW_SPEED / 60 + 1e-9);
         if (move.clip === 'Walk' && before.distanceTo(position) > 0) assert.ok(Math.abs(move.heading - heading) <= before.distanceTo(position) / 12 + 1e-9);
         heading = move.heading; previousYaw = pilot.yaw;
     }
     assert.ok(position.length() > 10); const before = position.clone(); const reverse = pilot.update(0.05, position, heading, 6.095, -1, (_start, end, _heading, out) => out.copy(end));
     assert.equal(reverse.clip, 'Walk'); assert.ok(reverse.rate < 0); assert.ok(position.clone().sub(before).dot(new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))) < 0);
     const blocked = position.clone(); const move = pilot.update(0.05, position, heading, 6.095, -1, (start, _end, _heading, out) => out.copy(start)); assert.equal(move.clip, 'Idle'); assert.deepEqual(position.toArray(), blocked.toArray()); pilot.dispose();
+});
+
+test('mounted walking, torso turn and leg catch-up run 50% faster while the enemy actor keeps base speed', async () => {
+    assert.equal(MECHA_PILOT_SPEED_MULTIPLIER, 1.5);
+    assert.equal(MECHA_PILOT_TORSO_YAW_SPEED, MECHA_TORSO_YAW_SPEED * MECHA_PILOT_SPEED_MULTIPLIER);
+    assert.equal(MECHA_PILOT_LEG_TURN_SPEED, MECHA_LEG_TURN_SPEED * MECHA_PILOT_SPEED_MULTIPLIER);
+    const actor = new ForgottenMecha([], [], 42, { impact() {}, stompPlayer() {}, gameOver() {} });
+    actor.install(await loadIronmawTestAsset());
+    try {
+        // Unmounted enemy locomotion still integrates against this.speed only.
+        const spawn = actor.group.position.clone(); advance(actor, 1);
+        const enemyDistance = actor.group.position.distanceTo(spawn);
+        assert.ok(enemyDistance > 3 && enemyDistance <= actor.speed + 1e-5);
+        actor.group.position.set(0, 0, 0); actor.group.rotation.y = 0;
+        actor.damage(50); advance(actor, 6.1);
+        actor.beginBoarding(actor.seatAnchor.getWorldPosition(new THREE.Vector3()), new THREE.Quaternion()); advance(actor, 8.3);
+        assert.equal(actor.mode, 'piloted');
+        actor.setPilotInput(1, false); advance(actor, 1);
+        const start = actor.group.position.clone(), phase = (actor as any).phase;
+        advance(actor, 0.5);
+        assert.ok(Math.abs(actor.group.position.distanceTo(start) - actor.speed * MECHA_PILOT_SPEED_MULTIPLIER * 0.5) < 0.05);
+        assert.equal((actor as any).locomotion, 'Walk');
+        assert.ok(Math.abs((actor as any).action!.getEffectiveTimeScale() - MECHA_PILOT_SPEED_MULTIPLIER) < 1e-9);
+        const advanced = (((actor as any).phase - phase) % 1 + 1) % 1;
+        assert.ok(Math.abs(advanced - 0.5 * MECHA_PILOT_SPEED_MULTIPLIER / (4 / 3)) < 1e-6, 'animation phase matches the faster clip rate');
+    } finally { actor.dispose(); }
+    const pilot = new MechaPilot(); pilot.look(Math.PI, 0, 0);
+    pilot.update(0.05, new THREE.Vector3(), 0, 6.095, 0, (_start, end, _heading, out) => out.copy(end));
+    assert.ok(Math.abs(pilot.yaw - MECHA_PILOT_TORSO_YAW_SPEED * 0.05) < 1e-9);
+    assert.ok(pilot.yaw > MECHA_TORSO_YAW_SPEED * 0.05);
+    pilot.reset(0); pilot.yaw = Math.PI / 2;
+    const step = 1 / 60, position = new THREE.Vector3();
+    const move = pilot.update(step, position, 0, 6.095, 1, (_start, end, _heading, out) => out.copy(end));
+    const firstFrameRate = step / 0.4;
+    assert.equal(move.clip, 'TurnRight');
+    assert.ok(Math.abs(move.heading - MECHA_PILOT_LEG_TURN_SPEED * step * firstFrameRate) < 1e-9);
+    assert.ok(move.heading > MECHA_LEG_TURN_SPEED * step * firstFrameRate, 'legs align at the mounted rate from standstill');
+    pilot.dispose();
 });
 
 test('manual shield requires full build, reverses partially, recharges immediately, and exhausts without automatic reactivation', () => {
@@ -173,7 +212,7 @@ test('manual shield requires full build, reverses partially, recharges immediate
 
 test('shared look routing retains vehicle intent without changing actual view and restores normal camera input', () => {
     const camera = new THREE.PerspectiveCamera(); const pilot = new MechaPilot(); setLookInputHandler((yaw, pitch) => { pilot.look(yaw, pitch); return true; });
-    applyLookInput(camera, 1, 0.2); pilot.update(0.01, new THREE.Vector3(), 0, 6.095, 0, (_start, end, _heading, out) => out.copy(end)); assert.ok(pilot.yaw > 0 && pilot.yaw <= 0.00366); assert.ok(camera.quaternion.equals(new THREE.Quaternion()));
+    applyLookInput(camera, 1, 0.2); pilot.update(0.01, new THREE.Vector3(), 0, 6.095, 0, (_start, end, _heading, out) => out.copy(end)); assert.ok(pilot.yaw > 0 && pilot.yaw <= MECHA_PILOT_TORSO_YAW_SPEED * 0.01); assert.ok(camera.quaternion.equals(new THREE.Quaternion()));
     setLookInputHandler(null); applyLookInput(camera, 0.5, 0.2); assert.ok(camera.quaternion.angleTo(new THREE.Quaternion()) > 0.5); pilot.dispose();
 });
 

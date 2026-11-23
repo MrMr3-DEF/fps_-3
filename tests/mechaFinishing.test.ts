@@ -11,6 +11,7 @@ import { updateHook, resetHook } from '../src/grapple.ts';
 import { prepareForgottenMecha, forgottenMecha, disposeWorld } from '../src/world.ts';
 import { state } from '../src/state.ts';
 import { requestReload } from '../src/weapons.ts';
+import { MECHA_PILOT_TORSO_YAW_SPEED } from '../src/config.ts';
 
 const absent = { position: new THREE.Vector3(), alive: false, grounded: false };
 const empty = (_sx: number, _sz: number, _ex: number, _ez: number, out: THREE.Object3D[]) => { out.length = 0; return out; };
@@ -57,7 +58,7 @@ test('pointer speed is frame/event-rate independent, world capped, settles withi
         for (let frame = 0; frame < hz; frame++) {
             while (next < (frame + 1) / hz - 1e-9) { pilot.look(1 / inputHz, 0, next * 1000); next += 1 / inputHz; }
             const old = pilot.yaw; pilot.update(1 / hz, new THREE.Vector3(), 0, 6.095, 0, (_start, end, _heading, out) => out.copy(end));
-            assert.ok(pilot.yaw - old <= 0.366 / hz + 1e-9);
+            assert.ok(pilot.yaw - old <= MECHA_PILOT_TORSO_YAW_SPEED / hz + 1e-9);
         }
         assert.ok(pilot.yaw > 0.3); pilot.update(0.1, new THREE.Vector3(), 0, 6.095, 0, (_start, end, _heading, out) => out.copy(end)); const stopped = pilot.yaw;
         pilot.update(1, new THREE.Vector3(), 0, 6.095, 0, (_start, end, _heading, out) => out.copy(end)); assert.equal(pilot.yaw, stopped);
