@@ -57,6 +57,7 @@ import { applyHudPresentation, setFpsText, updateAccelerometer, updateHealthBar,
 import { updatePlayerPhysics } from './physics.js';
 import { resetHook, toggleGrapplingHook, updateHook, updateGrappleCable } from './grapple.js';
 import { createAkimboGuns, requestPrimaryFire, toggleHeavyGrapple, requestReload, cancelWeaponHandling, weaponHudFraction, updateWeapons, createPlayerMesh, prepareLocalPlayerAvatar, setThirdPerson, syncThirdPersonPresentation, cancelInspect, resetWeaponPresentation, updatePlayerAvatarPose, SHARED_PROJECTILE_GEO, disposePlayerVisuals } from './weapons.js';
+import { isFirearm } from './weaponHandling.js';
 import { forgottenMecha, prepareForgottenMecha, gothGirlfriend, createEnvironmentAsync, generateWorldSeed, disposeWorld, getWorldSeed, getWorldBiomeField, getWorldBiomeMapTexture, queryObstaclesNear, queryObstaclesAlongSegment, rebuildTargetHash, respawnTarget, updateEnvironmentVisibility, updateLavaLights, updateTargets, updateTownLanterns, infantry, prepareInfantry, rebuildInfantryHash, isLookingAtTownWell } from './world.js';
 import { CameraShake } from './cameraShake.js';
 import { triggerMechaImpactShake } from './mechaImpactShake.js';
@@ -78,7 +79,7 @@ import {
     updateRemotePeers, infantryAttack, infantryPlayers, publishInfantryKill, publishInfantryState
 } from './multiplayer.js';
 import { applyRendererSettings, cloneSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
-import { setProjectileTrailsEnabled } from './projectileTrails.js';
+import { setProjectileTrailsEnabled, syncPendingProjectileTrailOrigins } from './projectileTrails.js';
 import { targetData } from './userDataTypes.js';
 import { clampFrameDelta } from './gameplayMath.js';
 import { decodeMouseButtons, MOUSE_BUTTON_EVENT_TYPES } from './mouseButtons.js';
@@ -308,6 +309,17 @@ const _gogglesWeaponOrigin = new THREE.Vector3();
 const _lavaFeetPos = new THREE.Vector3();
 const _leafBodyPos = new THREE.Vector3();
 const _jumpBoosterPos = new THREE.Vector3();
+
+/** Resolve a tracer's birth-frame muzzle against the rig posed for this draw. */
+function resolveSyncedTrailOrigin(weapon: string, out: THREE.Vector3): boolean {
+    const rig = getPlayerAvatar(state.playerMesh)?.rig;
+    if (!rig || !isFirearm(weapon)) return false;
+    // The fitted first-person frame publishes camera-local sockets only while
+    // it is active; otherwise the avatar's world-space muzzle is authoritative.
+    if (getHolderMuzzlePosition(rig, weapon, out)) return true;
+    rig.muzzleFor(weapon).getWorldPosition(out);
+    return true;
+}
 
 function getLeafInteractionPosition(): THREE.Vector3 | null {
     if (forgottenMecha?.ownsLocalPilot) {
@@ -2606,6 +2618,10 @@ function animate(): void {
                 if (state.hookState !== 'IDLE' && getHolderMuzzlePosition(holder.rig,'GRAPPLE',renderedGrappleTip))
                     updateGrappleCable(renderedGrappleTip);
             } else reloadFrame.clear();
+            // A shot fired earlier this frame recorded its muzzle before the
+            // fitted pose moved. Re-anchor that one birth-frame point now so
+            // later frames do not drag the trail behind the rendered weapon.
+            syncPendingProjectileTrailOrigins(resolveSyncedTrailOrigin);
             if (videoReveal && pilot) {
                 if (lastMechaVideoPhase !== pilot.headView.phase) pilot.headEffects.resetCapture();
                 lastMechaVideoPhase = pilot.headView.phase;

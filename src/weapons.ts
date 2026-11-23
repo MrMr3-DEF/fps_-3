@@ -322,7 +322,7 @@ export function fireProjectile(aimRay?: THREE.Ray): void {
         if (homingTarget) (data.guidanceTargetPosition ??= new THREE.Vector3()).copy(_homingTargetPosition);
         else data.guidanceTargetPosition = undefined;
 
-        beginProjectileTrail(projectile, state.scene!, bulletColor);
+        beginProjectileTrail(projectile, state.scene!, bulletColor, weapon);
 
         state.projectiles.push(projectile);
     };

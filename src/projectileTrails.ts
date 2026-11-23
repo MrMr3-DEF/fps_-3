@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 
-const TRAIL_POINT_LIMIT = 16;
+// A 120 Hz homing arc adds three points per 7.5 m step, so the full 90 m
+// length needs 36 vertices plus the straight prefix.
+const TRAIL_POINT_LIMIT = 48;
 const TRAIL_MAX_LENGTH = 90;
 const TRAIL_FADE_SECONDS = 0.16;
 const TRAIL_OPACITY = 0.95;
+const STRAIGHT_EPSILON = 1 - 1e-6;
 
 interface ProjectileTrail {
     line: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
@@ -13,6 +16,10 @@ interface ProjectileTrail {
     pointCount: number;
     color: THREE.Color;
     fadeRemaining: number;
+    hasCurved: boolean;
+    // Set for a locally fired projectile until the renderer can resolve the
+    // muzzle that belongs to the frame the shot was fired in.
+    pendingOriginWeapon: string | null;
 }
 
 const activeTrails = new Map<THREE.Object3D, ProjectileTrail>();
@@ -23,6 +30,10 @@ const _clippedTail = new THREE.Vector3();
 const _curveControlA = new THREE.Vector3();
 const _curveControlB = new THREE.Vector3();
 const _curvePoint = new THREE.Vector3();
+const _previousDirection = new THREE.Vector3();
+const _nextDirection = new THREE.Vector3();
+const _syncedOrigin = new THREE.Vector3();
+const _trailArcLengths = new Float32Array(TRAIL_POINT_LIMIT);
 let trailsEnabled = true;
 
 function createTrail(): ProjectileTrail {
@@ -52,6 +63,8 @@ function createTrail(): ProjectileTrail {
         pointCount: 0,
         color: new THREE.Color(),
         fadeRemaining: 0,
+        hasCurved: false,
+        pendingOriginWeapon: null,
     };
     allTrails.add(trail);
     return trail;
@@ -63,6 +76,8 @@ function recycleTrail(trail: ProjectileTrail): void {
     trail.line.geometry.setDrawRange(0, 0);
     trail.pointCount = 0;
     trail.fadeRemaining = 0;
+    trail.hasCurved = false;
+    trail.pendingOriginWeapon = null;
     trailPool.push(trail);
 }
 
@@ -79,12 +94,16 @@ function writeTrailGeometry(trail: ProjectileTrail): void {
         const segmentLength = trail.points[index].distanceTo(trail.points[index + 1]);
         if (lengthFromHead + segmentLength > TRAIL_MAX_LENGTH) {
             const remaining = TRAIL_MAX_LENGTH - lengthFromHead;
-            _clippedTail.copy(trail.points[index + 1]).lerp(
-                trail.points[index],
-                segmentLength > 0 ? remaining / segmentLength : 0,
-            );
+            if (remaining > 1e-6) {
+                _clippedTail.copy(trail.points[index + 1]).lerp(
+                    trail.points[index],
+                    remaining / segmentLength,
+                );
+                clipped = true;
+            }
+            // An exact-length boundary already ends at this vertex; emitting the
+            // clipped copy as well would leave a zero-length duplicate tail.
             firstPoint = index + 1;
-            clipped = true;
             break;
         }
         lengthFromHead += segmentLength;
@@ -92,23 +111,37 @@ function writeTrailGeometry(trail: ProjectileTrail): void {
     }
 
     let outputCount = 0;
+    let arcLength = 0;
     if (clipped) {
         trail.positions[0] = _clippedTail.x;
         trail.positions[1] = _clippedTail.y;
         trail.positions[2] = _clippedTail.z;
+        _trailArcLengths[0] = 0;
         outputCount = 1;
     }
     for (let index = firstPoint; index < trail.pointCount; index++) {
         const offset = outputCount * 3;
         const point = trail.points[index];
+        if (outputCount > 0) {
+            const dx = point.x - trail.positions[offset - 3];
+            const dy = point.y - trail.positions[offset - 2];
+            const dz = point.z - trail.positions[offset - 1];
+            arcLength += Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        _trailArcLengths[outputCount] = arcLength;
         trail.positions[offset] = point.x;
         trail.positions[offset + 1] = point.y;
         trail.positions[offset + 2] = point.z;
         outputCount++;
     }
 
+    // Shade by arc length rather than vertex index so a dense homing tail and
+    // its sparse straight prefix fade at the same visual rate.
+    const totalLength = outputCount > 0 ? _trailArcLengths[outputCount - 1] : 0;
     for (let index = 0; index < outputCount; index++) {
-        const brightness = outputCount <= 1 ? 1 : 0.08 + 0.92 * index / (outputCount - 1);
+        const brightness = totalLength > 1e-6
+            ? 0.08 + 0.92 * _trailArcLengths[index] / totalLength
+            : 1;
         const offset = index * 3;
         trail.colors[offset] = trail.color.r * brightness;
         trail.colors[offset + 1] = trail.color.g * brightness;
@@ -124,6 +157,7 @@ export function beginProjectileTrail(
     projectile: THREE.Object3D,
     scene: THREE.Scene,
     color: THREE.ColorRepresentation,
+    pendingOriginWeapon?: string,
 ): THREE.Line | null {
     if (!trailsEnabled) return null;
     const existing = activeTrails.get(projectile);
@@ -138,6 +172,8 @@ export function beginProjectileTrail(
     trail.points[0].copy(projectile.position);
     trail.pointCount = 1;
     trail.fadeRemaining = 0;
+    trail.hasCurved = false;
+    trail.pendingOriginWeapon = pendingOriginWeapon ?? null;
     writeTrailGeometry(trail);
     scene.add(trail.line);
     activeTrails.set(projectile, trail);
@@ -151,9 +187,31 @@ export function setProjectileTrailsEnabled(enabled: boolean): void {
 }
 
 /** Record the resolved post-collision position, preserving visible turns. */
-export function appendProjectileTrail(projectile: THREE.Object3D): void {
+export function appendProjectileTrail(projectile: THREE.Object3D, straight = false): void {
     const trail = activeTrails.get(projectile);
     if (!trail) return;
+    if (trail.points[trail.pointCount - 1].distanceToSquared(projectile.position) < Number.EPSILON) return;
+    if (straight && trail.pointCount >= 2) {
+        // Physical flight begins at the shot socket while points[0] is the
+        // visible muzzle. Replacing the head keeps the offset as one straight
+        // segment instead of freezing a corner at the first flight sample.
+        if (!trail.hasCurved) {
+            trail.points[trail.pointCount - 1].copy(projectile.position);
+            writeTrailGeometry(trail);
+            return;
+        }
+        // After a turn, only a collinear continuation may move the head; a new
+        // heading still appends a vertex so the bend stays visible.
+        const previous = trail.points[trail.pointCount - 2];
+        const head = trail.points[trail.pointCount - 1];
+        _previousDirection.subVectors(head, previous).normalize();
+        _nextDirection.subVectors(projectile.position, head).normalize();
+        if (_previousDirection.dot(_nextDirection) > STRAIGHT_EPSILON) {
+            head.copy(projectile.position);
+            writeTrailGeometry(trail);
+            return;
+        }
+    }
     if (appendTrailPoint(trail, projectile.position)) writeTrailGeometry(trail);
 }
 
@@ -196,6 +254,30 @@ export function appendCurvedProjectileTrail(
         appendTrailPoint(trail, _curvePoint);
     }
     appendTrailPoint(trail, projectile.position);
+    trail.hasCurved = true;
+    writeTrailGeometry(trail);
+}
+
+/** Replace birth-frame muzzle guesses with the muzzle of the frame that is about
+ * to be drawn. Each trail is corrected once; later frames keep it in world space. */
+export function syncPendingProjectileTrailOrigins(
+    resolveOrigin: (weapon: string, out: THREE.Vector3) => boolean,
+): void {
+    for (const trail of activeTrails.values()) syncPendingOrigin(trail, resolveOrigin);
+    for (const trail of fadingTrails) syncPendingOrigin(trail, resolveOrigin);
+}
+
+function syncPendingOrigin(
+    trail: ProjectileTrail,
+    resolveOrigin: (weapon: string, out: THREE.Vector3) => boolean,
+): void {
+    const weapon = trail.pendingOriginWeapon;
+    if (weapon === null) return;
+    // Clear even on failure: a stale weapon or missing rig must not keep
+    // re-anchoring the tracer to a later frame's pose.
+    trail.pendingOriginWeapon = null;
+    if (!resolveOrigin(weapon, _syncedOrigin)) return;
+    trail.points[0].copy(_syncedOrigin);
     writeTrailGeometry(trail);
 }
 

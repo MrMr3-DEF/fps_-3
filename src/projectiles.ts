@@ -280,7 +280,9 @@ function advanceProjectile(i: number, proj: THREE.Object3D, delta: number, attac
     if (curvedTrail) {
         appendCurvedProjectileTrail(proj, _segmentStart, _currentDirection, _steeredDirection);
     } else {
-        appendProjectileTrail(proj);
+        // Straight steps replace the current head so the muzzle-to-socket
+        // offset never freezes into a permanent corner.
+        appendProjectileTrail(proj, true);
     }
 
     if (projectileHit || reachesRangeLimit || data.age > PROJECTILE_LIFETIME) {
