@@ -53,8 +53,8 @@ test('preparation warms the lantern variants and restores per-lantern chunk sele
         compileAsync: async () => { counts.push(lights.filter(light => light.visible).length); }, render() {} } as unknown as THREE.WebGLRenderer;
     try {
         await prepareRenderer(cycle, async () => {});
-        assert.ok(counts.includes(8), 'night shader preparation must include all eight lantern lights');
-        assert.equal(lights.filter(light => light.visible).length, 4, 'restore the actual chunks at the current camera');
+        assert.ok(counts.includes(3), 'night shader preparation must include all three lantern lights');
+        assert.equal(lights.filter(light => light.visible).length, 3, 'all three lantern lights remain active at night');
     } finally {
         disposeParticles(); disposeWorld(); cycle.dispose(); userSettings.renderDistanceChunks = originalDistance;
         state.renderer = null; state.scene = null; state.camera = null;

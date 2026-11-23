@@ -216,7 +216,7 @@ test('all town lanterns emit light together at night', () => {
     updateTownLanterns(1, 1);
     const group = state.scene!.getObjectByName('town-lanterns')!;
     const lights = group.children.filter(child => (child as THREE.PointLight).isPointLight) as THREE.PointLight[];
-    assert.equal(lights.length, 8);
+    assert.equal(lights.length, 3);
     assert.ok(lights.every(light => light.visible && light.intensity > 0));
 
     updateTownLanterns(2, 0);
@@ -227,19 +227,29 @@ test('all town lanterns emit light together at night', () => {
 test('lantern instances and lights follow their own chunks on both sides of zero', () => {
     setup();
     const group = state.scene!.getObjectByName('town-lanterns')!;
-    const frames = group.getObjectByName('town-lantern-frames') as THREE.InstancedMesh;
-    const glass = group.getObjectByName('town-lantern-glass') as THREE.InstancedMesh;
+    const frames = group.getObjectByName('town-lantern-frames')!;
+    const glass = group.getObjectByName('town-lantern-glass')!;
     const flames = group.getObjectByName('town-lantern-flames') as THREE.InstancedMesh;
     const lights = group.children.filter(object => object instanceof THREE.PointLight) as THREE.PointLight[];
+    const countVisible = (root: THREE.Object3D) => root.children
+        .filter((child): child is THREE.InstancedMesh => (child as THREE.InstancedMesh).isInstancedMesh && child.visible)
+        .reduce((sum, mesh) => sum + mesh.count, 0);
+    const lanternPositions = [
+        [-8.5, -60], [8.5, -25], [-8.5, 25], [8.5, 60],
+        [-60, 8.5], [-25, -8.5], [25, 8.5], [60, -8.5],
+    ];
     const matrix = new THREE.Matrix4(), scale = new THREE.Vector3();
     updateTownLanterns(1, 1);
     for (const [x, z] of [[0, 0], [200, 0], [-200, 0], [400, 400], [-400, -400]]) {
         updateEnvironmentVisibility(new THREE.Vector3(x, 0, z), 1);
-        const visible = lights.map(light => Math.abs(Math.floor(light.position.x / 200) - Math.floor(x / 200)) <= 1 &&
-            Math.abs(Math.floor(light.position.z / 200) - Math.floor(z / 200)) <= 1);
-        assert.deepEqual(lights.map(light => light.visible), visible);
-        assert.equal(frames.count, visible.filter(Boolean).length); assert.equal(glass.count, frames.count);
-        lights.forEach((_light, index) => {
+        const visible = lanternPositions.map(([lx, lz]) => Math.abs(Math.floor(lx / 200) - Math.floor(x / 200)) <= 1 &&
+            Math.abs(Math.floor(lz / 200) - Math.floor(z / 200)) <= 1);
+        const visibleCount = visible.filter(Boolean).length;
+        assert.equal(lights.length, 3);
+        assert.ok(lights.every(light => light.visible), 'all 3 lantern lights stay enabled at night');
+        assert.equal(lights.filter(light => light.intensity > 0).length, Math.min(3, visibleCount));
+        assert.equal(countVisible(frames), visibleCount); assert.equal(countVisible(glass), visibleCount);
+        lanternPositions.forEach((_pos, index) => {
             flames.getMatrixAt(index, matrix); scale.setFromMatrixScale(matrix);
             assert.equal(scale.lengthSq() > 0, visible[index], 'culled lantern flame must not remain at the batch origin');
         });
@@ -261,12 +271,18 @@ test('walls, roofs and doorways share real grapple and projectile broad-phase ge
     const doorRay = new THREE.Raycaster(new THREE.Vector3(0, 2, 80), new THREE.Vector3(0, 0, 1), 0, 30);
     assert.equal(doorRay.intersectObjects(queryGrappleSurfacesAlongSegment(0, 80, 0, 110), false).length, 0);
     updateEnvironmentVisibility(new THREE.Vector3(0, 0, 0), 1);
-    const townMeshes = state.scene!.children.filter(o => o.name.startsWith('town-') && (o as THREE.InstancedMesh).isInstancedMesh) as THREE.InstancedMesh[];
-    assert.equal(townMeshes.length, 14);
-    assert.ok(townMeshes.every(mesh => mesh.count > 0));
+    const townRoots = state.scene!.children.filter(
+        o => o.name.startsWith('town-') && o.name !== 'town-lanterns' && ((o as THREE.InstancedMesh).isInstancedMesh || o.type === 'Group'),
+    );
+    assert.equal(townRoots.length, 14);
+    const visibleTownInstances = (root: THREE.Object3D) => (root as THREE.InstancedMesh).isInstancedMesh
+        ? (root.visible ? (root as THREE.InstancedMesh).count : 0)
+        : root.children.filter((c): c is THREE.InstancedMesh => (c as THREE.InstancedMesh).isInstancedMesh && c.visible)
+            .reduce((sum, mesh) => sum + mesh.count, 0);
+    assert.ok(townRoots.every(root => visibleTownInstances(root) > 0));
     updateEnvironmentVisibility(new THREE.Vector3(900, 0, 900), 1);
-    assert.ok(townMeshes.filter(mesh => !mesh.name.startsWith('town-ground-')).every(mesh => mesh.count === 0));
-    assert.ok(townMeshes.filter(mesh => mesh.name.startsWith('town-ground-')).every(mesh => mesh.count > 0), 'ground stays visible outside the active chunks');
+    assert.ok(townRoots.filter(root => !root.name.startsWith('town-ground-')).every(root => visibleTownInstances(root) === 0));
+    assert.ok(townRoots.filter(root => root.name.startsWith('town-ground-')).every(root => visibleTownInstances(root) > 0), 'ground stays visible outside the active chunks');
     assert.ok(ray.intersectObjects(queryGrappleSurfacesAlongSegment(30, 80, 30, 110), false).length > 0);
     disposeWorld();
 });
@@ -839,7 +855,8 @@ test('packed chunk buffers reproduce the same instances when returning to a chun
     setup();
     const position = new THREE.Vector3(0, 2, 0);
     updateEnvironmentVisibility(position, 1);
-    const readInstances = () => state.scene!.children.filter(object => (object as THREE.InstancedMesh).isInstancedMesh)
+    const readInstances = () => state.scene!.getObjectsByProperty('isInstancedMesh', true)
+        .filter(object => object.visible && object.parent?.visible !== false)
         .map(object => {
             const mesh = object as THREE.InstancedMesh;
             return Array.from(mesh.instanceMatrix.array.slice(0, mesh.count * 16));

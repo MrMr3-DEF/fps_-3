@@ -17,11 +17,11 @@ GothGirlfriend.prototype.load = async () => {};
 // Positions are normalized to nine decimal places for ARM64/x64 portability.
 // Include post-scenery enemies: their poses prove the RNG continuation stayed intact.
 const baseline = new Map([
-    [0, 'e8d22276159f438590ee185b7d0a7d66be6f4738500cf52d40428482ab5bd641'],
-    [1, '4e4e5d68bde3c9147dc2d3b469a2da2cc79dc61e1057c33e9325b2796ac02d30'],
-    [42, 'cbd7337bfb74d127acb4f807767f00824a9533502f619c4b166d7e3af2a711db'],
-    [91234, 'b7b708cf2987eb1cdaaa387d76073d6288a077254c4c2dcc2aaf30eae1f6c7a3'],
-    [0xffffffff, '8760391474b9f981172bb73739fe0ec867dfc6cb1d5935c09fb622ea2eba7c1d'],
+    [0, 'f5114bbdb92e00716400e5ff7a58eded00efa09730cb9ba9aa3db163009d6862'],
+    [1, '4582ac97b53b20aacca3074010bed9a6cc1f315ea53751568ccd418d98133959'],
+    [42, '9200b516d9c8e047720de11c951c7892e8c7eceb088247de3b546e12896ffe4a'],
+    [91234, '4c161295fa2482f1dd51937a8943a113f7f5966575325262086599f2566c6653'],
+    [0xffffffff, '9b880dd1451b5e27c1ca9051154c217f57fb2d88bce74a5cd65f7373bb7a4e0b'],
 ]);
 // Material identity follows physical box faces, independently of draw grouping.
 function faceMaterials(object: any): THREE.Material[] {
@@ -37,10 +37,14 @@ function faceMaterials(object: any): THREE.Material[] {
     return result;
 }
 function fingerprint(scene: THREE.Scene, portablePositions = false) {
-    const shapes = scene.children.map((object: any) => ({ type: object.type, name: object.name, pos: object.position.toArray(), scale: object.scale.toArray(),
+    const serialize = (object: any): any => ({
+        type: object.type, name: object.name, pos: object.position.toArray(), scale: object.scale.toArray(),
         matrices: object.isInstancedMesh ? Array.from(object.instanceMatrix.array).slice(0, object.count * 16) : undefined,
         mats: object.material ? faceMaterials(object).map((material: any) => ({ type: material.type, color: material.color?.getHex(),
-            map: material.map ? { repeat: material.map.repeat.toArray(), width: material.map.image?.width, height: material.map.image?.height } : null })) : undefined }));
+            map: material.map ? { repeat: material.map.repeat.toArray(), width: material.map.image?.width, height: material.map.image?.height } : null })) : undefined,
+        children: object.children?.length ? object.children.map(serialize) : undefined,
+    });
+    const shapes = scene.children.map(serialize);
     // Trigonometric positions differ by ~2e-13 across ARM64/x64 V8 builds.
     // Normalize only the golden baseline; mutation checks below stay bit-exact,
     // as do instance matrices, scales, materials and texture metadata.
@@ -87,9 +91,9 @@ test('seeded worlds preserve their fingerprints and keep decorative footprints o
             }
             // Decorative lava uses the same organic shapes but stays beyond the
             // arena border; every in-map pool sits cleanly inside a sand biome.
-            const lavaMeshes = state.scene.children.filter(object =>
-                (object as THREE.InstancedMesh).isInstancedMesh && object.name === 'world-lava') as THREE.InstancedMesh[];
-            assert.equal(lavaMeshes.length, 16, 'four basin and four surface batches exist for map and horizon');
+            const lavaGroups = state.scene.children.filter(object => object.name === 'world-lava');
+            assert.equal(lavaGroups.length, 16, 'four basin and four surface batches exist for map and horizon');
+            const lavaMeshes = lavaGroups.flatMap(group => group.children as THREE.InstancedMesh[]);
             const matrix = new THREE.Matrix4(), position = new THREE.Vector3();
             for (const mesh of lavaMeshes) for (let index = 0; index < mesh.count; index++) {
                 mesh.getMatrixAt(index, matrix);
@@ -114,13 +118,17 @@ test('seeded worlds preserve their fingerprints and keep decorative footprints o
             assert.deepEqual([...lavaShapes].sort(), [0, 1, 2, 3], 'all four organic shapes are used');
             // Tree canopy and branch instancing is presentation only: the arena's
             // wilderness colliders remain exactly the invisible pillar trunks.
-            const pillarMesh = state.scene.getObjectByName('world-pillars') as THREE.InstancedMesh | undefined;
-            const branchMesh = state.scene.getObjectByName('world-branches') as THREE.InstancedMesh | undefined;
-            const canopyMesh = state.scene.getObjectByName('world-canopy') as THREE.InstancedMesh | undefined;
-            assert.ok(pillarMesh && branchMesh && canopyMesh, 'seeded tree meshes exist');
-            assert.ok(branchMesh.count > 0 && canopyMesh.count > 0, 'trees render branches and canopy');
-            const leafWeight = canopyMesh.geometry.getAttribute('aLeafWeight') as THREE.BufferAttribute | undefined;
-            assert.ok(leafWeight && leafWeight.count === canopyMesh.geometry.getAttribute('position').count,
+            const pillarGroup = state.scene.getObjectByName('world-pillars');
+            const branchGroup = state.scene.getObjectByName('world-branches');
+            const canopyGroup = state.scene.getObjectByName('world-canopy');
+            assert.ok(pillarGroup && branchGroup && canopyGroup, 'seeded tree groups exist');
+            const pillarMeshes = pillarGroup.children as THREE.InstancedMesh[];
+            const branchMeshes = branchGroup.children as THREE.InstancedMesh[];
+            const canopyMeshes = canopyGroup.children as THREE.InstancedMesh[];
+            const sumCount = (meshes: THREE.InstancedMesh[]) => meshes.reduce((sum, mesh) => sum + mesh.count, 0);
+            assert.ok(sumCount(branchMeshes) > 0 && sumCount(canopyMeshes) > 0, 'trees render branches and canopy');
+            const leafWeight = canopyMeshes[0].geometry.getAttribute('aLeafWeight') as THREE.BufferAttribute | undefined;
+            assert.ok(leafWeight && leafWeight.count === canopyMeshes[0].geometry.getAttribute('position').count,
                 'sculpted canopy geometry exposes per-vertex branch-anchor leaf weights');
             let minWeight = Infinity, maxWeight = -Infinity;
             for (let i = 0; i < leafWeight.count; i++) {
@@ -130,8 +138,8 @@ test('seeded worlds preserve their fingerprints and keep decorative footprints o
             }
             assert.ok(minWeight <= 0.05 && maxWeight >= 0.95, 'canopy weights anchor roots at 0 and free outer tips at 1');
             const wildernessColliders = state.obstacles.filter(object => !object.name.startsWith('town-'));
-            assert.equal(wildernessColliders.length, pillarMesh.count, 'only pillar trunks add wilderness colliders');
-            assert.ok(wildernessColliders.every(object => object !== branchMesh && object !== canopyMesh));
+            assert.equal(wildernessColliders.length, sumCount(pillarMeshes), 'only pillar trunks add wilderness colliders');
+            assert.ok(wildernessColliders.every(object => !branchMeshes.includes(object as any) && !canopyMeshes.includes(object as any)));
             const floorMask = (state.scene.getObjectByName('grass-floor') as THREE.Mesh).material as THREE.Material;
             const mask = (floorMask.userData.lavaPitMaskUniform as { value: THREE.Texture }).value;
             let maskDisposals = 0;

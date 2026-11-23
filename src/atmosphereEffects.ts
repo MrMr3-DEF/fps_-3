@@ -23,10 +23,19 @@ export class AtmosphereHistory {
     private key = '';
     reset(): void { this.valid = false; }
     advance(camera: THREE.PerspectiveCamera, delta: number, key: string): boolean {
+        let sameProjection = true;
+        const prevProj = this.projection.elements;
+        const nextProj = camera.projectionMatrix.elements;
+        for (let i = 0; i < 16; i++) {
+            if (Math.abs(prevProj[i] - nextProj[i]) >= 0.00001) {
+                sameProjection = false;
+                break;
+            }
+        }
         const continuous = this.valid && key === this.key && delta > 0 && delta < 0.1 &&
             this.position.distanceToSquared(camera.position) < ATMOSPHERE.cutDistance ** 2 &&
             this.rotation.angleTo(camera.quaternion) < ATMOSPHERE.cutAngle &&
-            this.projection.elements.every((v, i) => Math.abs(v - camera.projectionMatrix.elements[i]) < 0.00001);
+            sameProjection;
         const moving = this.position.distanceToSquared(camera.position) > 0.000001 || this.rotation.angleTo(camera.quaternion) > 0.00001;
         // The caller copies previousViewProjection before advancing the history.
         this.previousViewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -115,11 +124,11 @@ void main() {
         ray = normalize(ray) * distance;
         float opticalDepth = 0.0;
         // Fixed quadrature over broad banks; no volumetric particle draw calls.
-        for (int i = 0; i < 4; i++) {
-            float t = (float(i) + .5) / 4.0;
+        for (int i = 0; i < 3; i++) {
+            float t = (float(i) + .5) / 3.0;
             opticalDepth += density(eye + ray * t) * smoothstep(${ATMOSPHERE.nearFade.toFixed(1)}, ${ATMOSPHERE.farFade.toFixed(1)}, distance * t);
         }
-        color = mix(color, haze, 1.0 - exp(-opticalDepth * distance * .25));
+        color = mix(color, haze, 1.0 - exp(-opticalDepth * distance * (1.0 / 3.0)));
     }
     gl_FragColor = vec4(color, 1.0);
     #include <colorspace_fragment>

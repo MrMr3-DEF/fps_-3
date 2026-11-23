@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { segmentAabbHitT } from './gameplayMath.js';
 
 export type TargetObstacleQuery = (
     startX: number,
@@ -12,6 +13,8 @@ const _toBody = new THREE.Vector3(), _sightSample = new THREE.Vector3();
 const _occlusionRaycaster = new THREE.Raycaster();
 const _occlusionCandidates: THREE.Object3D[] = [];
 const _occlusionHits: THREE.Intersection[] = [];
+const _occlusionFallback: THREE.Object3D[] = [];
+const _occlusionMin = new THREE.Vector3(), _occlusionMax = new THREE.Vector3();
 const NO_ADDITIONAL_OCCLUDERS: THREE.Object3D[] = [];
 
 // A 3 x 3 x 3 lattice without its interior point covers face centers, edge
@@ -69,9 +72,7 @@ export function hasLineOfSightToOrientedBox(
         const sampleDistance = _toBody.length();
         if (sampleDistance <= OCCLUSION_SURFACE_EPSILON) return true;
 
-        _occlusionRaycaster.set(origin, _toBody.multiplyScalar(1 / sampleDistance));
-        _occlusionRaycaster.near = 0;
-        _occlusionRaycaster.far = Math.max(0, sampleDistance - OCCLUSION_SURFACE_EPSILON);
+        _toBody.multiplyScalar(1 / sampleDistance);
         const candidates = obstacleQuery(
             origin.x,
             origin.z,
@@ -81,13 +82,50 @@ export function hasLineOfSightToOrientedBox(
         );
         const extra = typeof additionalOccluders === 'function' ? additionalOccluders(origin, _sightSample, candidates.length) : additionalOccluders;
         if (!extra) return false;
-        _occlusionHits.length = 0;
-        _occlusionRaycaster.intersectObjects(candidates, false, _occlusionHits);
-        if (_occlusionHits.some(hit => blocksVisibility(hit.object, ignoredTargetRoot))) continue;
-        _occlusionHits.length = 0;
-        if (extra.length > 0) _occlusionRaycaster.intersectObjects(extra, true, _occlusionHits);
-        if (!_occlusionHits.some(hit => blocksVisibility(hit.object, ignoredTargetRoot)) &&
-            !additionalBlocker?.(origin, _sightSample)) return true;
+
+        // World obstacles are axis-aligned collider boxes with authoritative
+        // half extents, so a segment/AABB slab test replaces a per-triangle
+        // raycast for each of the 26 silhouette samples. Only obstacles without
+        // those dimensions fall back to geometry raycasting.
+        _occlusionFallback.length = 0;
+        let blocked = false;
+        for (let candidate = 0; candidate < candidates.length; candidate++) {
+            const object = candidates[candidate];
+            const data = object.userData;
+            const halfW = data.halfW, halfD = data.halfD, halfH = data.halfH;
+            if (typeof halfW !== 'number' || typeof halfD !== 'number' || typeof halfH !== 'number' ||
+                !Number.isFinite(halfW) || !Number.isFinite(halfD) || !Number.isFinite(halfH)) {
+                _occlusionFallback.push(object);
+                continue;
+            }
+            if (!blocksVisibility(object, ignoredTargetRoot)) continue;
+            _occlusionMin.set(object.position.x - halfW, object.position.y - halfH, object.position.z - halfD);
+            _occlusionMax.set(object.position.x + halfW, object.position.y + halfH, object.position.z + halfD);
+            const hitT = segmentAabbHitT(origin, _sightSample, _occlusionMin, _occlusionMax);
+            if (hitT !== null && hitT * sampleDistance <= sampleDistance - OCCLUSION_SURFACE_EPSILON) {
+                blocked = true;
+                break;
+            }
+        }
+        if (blocked) continue;
+
+        if (_occlusionFallback.length > 0) {
+            _occlusionRaycaster.set(origin, _toBody);
+            _occlusionRaycaster.near = 0;
+            _occlusionRaycaster.far = Math.max(0, sampleDistance - OCCLUSION_SURFACE_EPSILON);
+            _occlusionHits.length = 0;
+            _occlusionRaycaster.intersectObjects(_occlusionFallback, false, _occlusionHits);
+            if (_occlusionHits.some(hit => blocksVisibility(hit.object, ignoredTargetRoot))) continue;
+        }
+        if (extra.length > 0) {
+            _occlusionRaycaster.set(origin, _toBody);
+            _occlusionRaycaster.near = 0;
+            _occlusionRaycaster.far = Math.max(0, sampleDistance - OCCLUSION_SURFACE_EPSILON);
+            _occlusionHits.length = 0;
+            _occlusionRaycaster.intersectObjects(extra, true, _occlusionHits);
+            if (_occlusionHits.some(hit => blocksVisibility(hit.object, ignoredTargetRoot))) continue;
+        }
+        if (!additionalBlocker?.(origin, _sightSample)) return true;
     }
     return false;
 }

@@ -326,16 +326,19 @@ float surfaceDetailMidLod = detailMidLod( surfaceDetailViewDist );
 float surfaceDetailHeight = 0.0;
 float surfaceDetailTone = 0.0;
 float surfaceDetailRoughness = 0.0;
-surfaceDetailSample(
-    vDetailWorldPos,
-    normalize( vDetailWorldNormal ),
-    vDetailLocalPos,
-    surfaceDetailNearLod,
-    surfaceDetailMidLod,
-    surfaceDetailHeight,
-    surfaceDetailTone,
-    surfaceDetailRoughness
-);
+// Both LODs reach zero by 175 m; skip the noise octaves for distant pixels.
+if ( surfaceDetailMidLod > 0.001 ) {
+    surfaceDetailSample(
+        vDetailWorldPos,
+        normalize( vDetailWorldNormal ),
+        vDetailLocalPos,
+        surfaceDetailNearLod,
+        surfaceDetailMidLod,
+        surfaceDetailHeight,
+        surfaceDetailTone,
+        surfaceDetailRoughness
+    );
+}
 diffuseColor.rgb *= 1.0 + surfaceDetailTone * 0.35;
 `;
 
@@ -346,7 +349,7 @@ roughnessFactor = clamp( roughnessFactor + surfaceDetailRoughness * 0.16, 0.05, 
 
 const DETAIL_NORMAL_GLSL = /* glsl */`
 #include <normal_fragment_maps>
-{
+if ( surfaceDetailMidLod > 0.001 ) {
     float surfaceDetailFootprint = max( fwidth( vDetailWorldPos.x ),
         max( fwidth( vDetailWorldPos.y ), fwidth( vDetailWorldPos.z ) ) );
     // A world-space height gradient per pixel is divided by the pixel's world
@@ -399,7 +402,7 @@ export function installSurfaceDetailShader(
             DETAIL_NORMAL_GLSL,
         );
     };
-    material.customProgramCacheKey = () => `surface-detail-v1:${profile}`;
+    material.customProgramCacheKey = () => `surface-detail-v2:${profile}`;
     material.needsUpdate = true;
 }
 
@@ -558,12 +561,14 @@ export const GROUND_DETAIL_ALBEDO_GLSL = /* glsl */`
 `;
 
 export const GROUND_DETAIL_NORMAL_GLSL = /* glsl */`
-    normal = groundDetailPerturbNormal(
-        -vViewPosition,
-        normal,
-        vGroundDetailWorldPos,
-        groundDetailHeightValue,
-        groundDetailNear,
-        groundDetailMid
-    );
+    if ( groundDetailMid > 0.001 ) {
+        normal = groundDetailPerturbNormal(
+            -vViewPosition,
+            normal,
+            vGroundDetailWorldPos,
+            groundDetailHeightValue,
+            groundDetailNear,
+            groundDetailMid
+        );
+    }
 `;

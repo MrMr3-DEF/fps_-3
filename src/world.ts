@@ -85,15 +85,16 @@ const wellRayEnd = new THREE.Vector3();
 const traceMin = new THREE.Vector3(), traceMax = new THREE.Vector3();
 const traceObstacles: THREE.Object3D[] = [];
 
-interface TownLanternLight {
-    light: THREE.PointLight;
+interface TownLantern {
     x: number;
     z: number;
     phase: number;
     chunk: string;
 }
 
-const townLanternLights: TownLanternLight[] = [];
+const TOWN_LANTERN_LIGHT_COUNT = 3;
+const townLanternLights: THREE.PointLight[] = [];
+const townLanterns: TownLantern[] = [];
 const lanternMatrixDummy = new THREE.Object3D();
 const TOWN_LANTERN_POSITIONS = [
     [-8.5, -60], [8.5, -25], [-8.5, 25], [8.5, 60],
@@ -115,15 +116,18 @@ let lavaLightFade = 0;
 let lastLavaLightTime = 0;
 
 interface ChunkedInstanceSet {
-    mesh: THREE.InstancedMesh;
+    group: THREE.Group;
+    geometry: THREE.BufferGeometry;
+    material: THREE.Material | THREE.Material[];
+    castShadow: boolean;
+    receiveShadow: boolean;
+    chunkMeshes: Map<string, THREE.InstancedMesh>;
     matricesByChunk: Map<string, THREE.Matrix4[]>;
-    packedByChunk: Map<string, Float32Array>;
     colorsByChunk: Map<string, number[]> | null;
-    packedColorsByChunk: Map<string, Float32Array> | null;
 }
 
-// Static props keep one draw call per material while their instance buffers are
-// refreshed only when the player crosses a render-chunk boundary.
+// Static props are split into one frustum-culled InstancedMesh per populated
+// render chunk, toggled on chunk crossings with zero buffer copying.
 const chunkedInstanceSets: ChunkedInstanceSet[] = [];
 let targetUpdateFrame = 0;
 let lastRenderChunkX = Number.NaN;
@@ -252,11 +256,9 @@ function createTownLanterns(): void {
     const group = new THREE.Group();
     group.name = 'town-lanterns';
     const frameSet = createChunkedInstanceSet(frameGeometry, frameMaterial, TOWN_LANTERN_POSITIONS.length, false, false, undefined, group);
-    const frames = frameSet.mesh;
-    frames.name = 'town-lantern-frames';
+    frameSet.group.name = 'town-lantern-frames';
     const glassSet = createChunkedInstanceSet(glassGeometry, townLanternGlassMaterial, TOWN_LANTERN_POSITIONS.length, false, false, undefined, group);
-    const glass = glassSet.mesh;
-    glass.name = 'town-lantern-glass';
+    glassSet.group.name = 'town-lantern-glass';
     townLanternFlames = new THREE.InstancedMesh(flameGeometry, flameMaterial, TOWN_LANTERN_POSITIONS.length);
     townLanternFlames.name = 'town-lantern-flames';
     townLanternFlames.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -264,6 +266,13 @@ function createTownLanterns(): void {
     const colliderGeometry = new THREE.BoxGeometry(0.7, 5.7, 0.7);
     const colliderMaterial = new THREE.MeshBasicMaterial();
     townLanternLights.length = 0;
+    townLanterns.length = 0;
+    for (let i = 0; i < TOWN_LANTERN_LIGHT_COUNT; i++) {
+        const light = new THREE.PointLight(0xffa34d, 0, 30, 2);
+        light.visible = false;
+        group.add(light);
+        townLanternLights.push(light);
+    }
     TOWN_LANTERN_POSITIONS.forEach(([x, z], index) => {
         lanternMatrixDummy.position.set(x, 0, z);
         lanternMatrixDummy.scale.set(1, 1, 1);
@@ -276,11 +285,7 @@ function createTownLanterns(): void {
         lanternMatrixDummy.updateMatrix();
         townLanternFlames!.setMatrixAt(index, lanternMatrixDummy.matrix);
 
-        const light = new THREE.PointLight(0xffa34d, 0, 30, 2);
-        light.position.set(x, 4.7, z);
-        light.visible = false;
-        group.add(light);
-        townLanternLights.push({ light, x, z, phase: index * 1.731, chunk: getRenderChunkKey(x, z) });
+        townLanterns.push({ x, z, phase: index * 1.731, chunk: getRenderChunkKey(x, z) });
 
         const collider = new THREE.Mesh(colliderGeometry, colliderMaterial);
         collider.name = 'town-lantern';
@@ -296,11 +301,9 @@ function createTownLanterns(): void {
         state.obstacles.push(collider);
         obstacleHash.insert(x, z, 0.5, collider);
     });
-    frames.instanceMatrix.needsUpdate = true;
-    glass.instanceMatrix.needsUpdate = true;
     townLanternFlames.instanceMatrix.needsUpdate = true;
-    frames.frustumCulled = glass.frustumCulled = townLanternFlames.frustumCulled = false;
-    group.add(frames, glass, townLanternFlames);
+    townLanternFlames.frustumCulled = false;
+    group.add(townLanternFlames);
     addWorldObject(group);
 }
 
@@ -313,26 +316,76 @@ export function getGasLanternFlicker(timeSeconds: number, phase: number): number
 
 let lastLanternTime = 0, lastLanternStrength = 0;
 let lanternsDark = false;
-export function updateTownLanterns(timeSeconds: number, strength: number, preparing = false): void {
-    lastLanternTime = timeSeconds; lastLanternStrength = strength;
+const lastLanternObserver = new THREE.Vector3();
+const nearestLanternIndices = [-1, -1, -1];
+const nearestLanternDistSq = [0, 0, 0];
+
+export function updateTownLanterns(
+    timeSeconds: number,
+    strength: number,
+    preparing = false,
+    observerPosition?: THREE.Vector3,
+): void {
+    lastLanternTime = timeSeconds;
+    lastLanternStrength = strength;
+    if (observerPosition) lastLanternObserver.copy(observerPosition);
     if (!townLanternFlames || !townLanternGlassMaterial) return;
     const clampedStrength = Math.max(0, Math.min(1, strength));
     if (lanternsDark && clampedStrength === 0 && !preparing) return;
     lanternsDark = clampedStrength === 0;
     townLanternGlassMaterial.emissiveIntensity = 0.05 + clampedStrength * 1.25;
 
-    townLanternLights.forEach(({ light, x, z, phase, chunk }, index) => {
+    const obs = observerPosition ?? state.camera?.position ?? lastLanternObserver;
+    const obsX = obs.x;
+    const obsZ = obs.z;
+    for (let slot = 0; slot < TOWN_LANTERN_LIGHT_COUNT; slot++) {
+        nearestLanternIndices[slot] = -1;
+        nearestLanternDistSq[slot] = Number.POSITIVE_INFINITY;
+    }
+
+    for (let index = 0; index < townLanterns.length; index++) {
+        const { x, z, phase, chunk } = townLanterns[index];
         const flicker = getGasLanternFlicker(timeSeconds, phase);
-        light.intensity = 42 * clampedStrength * flicker;
         const visible = preparing || activeRenderChunks.has(chunk);
-        light.visible = visible && clampedStrength > 0.015;
 
         const flameScale = visible ? clampedStrength * flicker : 0;
         lanternMatrixDummy.position.set(x, 4.67, z);
         lanternMatrixDummy.scale.set(flameScale, flameScale * 1.08, flameScale);
         lanternMatrixDummy.updateMatrix();
-        townLanternFlames!.setMatrixAt(index, lanternMatrixDummy.matrix);
-    });
+        townLanternFlames.setMatrixAt(index, lanternMatrixDummy.matrix);
+
+        if (!visible) continue;
+        const dx = x - obsX;
+        const dz = z - obsZ;
+        const distSq = dx * dx + dz * dz;
+        for (let slot = 0; slot < TOWN_LANTERN_LIGHT_COUNT; slot++) {
+            if (distSq < nearestLanternDistSq[slot]) {
+                for (let shift = TOWN_LANTERN_LIGHT_COUNT - 1; shift > slot; shift--) {
+                    nearestLanternIndices[shift] = nearestLanternIndices[shift - 1];
+                    nearestLanternDistSq[shift] = nearestLanternDistSq[shift - 1];
+                }
+                nearestLanternIndices[slot] = index;
+                nearestLanternDistSq[slot] = distSq;
+                break;
+            }
+        }
+    }
+
+    // Keep all 3 point lights active whenever night lighting is enabled so
+    // NUM_POINT_LIGHTS never changes on chunk crossings.
+    const lightsVisible = clampedStrength > 0.015;
+    for (let slot = 0; slot < townLanternLights.length; slot++) {
+        const light = townLanternLights[slot];
+        light.visible = lightsVisible;
+        const lanternIndex = nearestLanternIndices[slot];
+        if (lanternIndex >= 0) {
+            const lantern = townLanterns[lanternIndex];
+            light.position.set(lantern.x, 4.7, lantern.z);
+            light.intensity = 42 * clampedStrength * getGasLanternFlicker(timeSeconds, lantern.phase);
+        } else {
+            light.intensity = 0;
+        }
+    }
     townLanternFlames.instanceMatrix.needsUpdate = true;
 }
 
@@ -460,29 +513,25 @@ function getRenderChunkKey(x: number, z: number): string {
 function createChunkedInstanceSet(
     geometry: THREE.BufferGeometry,
     material: THREE.Material | THREE.Material[],
-    capacity: number,
+    _capacity: number,
     castShadow = false,
     receiveShadow = false,
     role?: SceneryRole,
     parent?: THREE.Group
 ): ChunkedInstanceSet {
-    const mesh = new THREE.InstancedMesh(geometry, material, capacity);
-    mesh.name = role ? `world-${role}` : '';
-    mesh.count = 0;
-    mesh.castShadow = castShadow;
-    mesh.receiveShadow = receiveShadow;
-    // The active instances move between chunks while the mesh itself stays at
-    // the origin, so its static bounding sphere cannot safely cull it.
-    mesh.frustumCulled = false;
-    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    if (parent) parent.add(mesh); else addWorldObject(mesh);
+    const group = new THREE.Group();
+    if (role) group.name = `world-${role}`;
+    if (parent) parent.add(group); else addWorldObject(group);
 
     const instanceSet: ChunkedInstanceSet = {
-        mesh,
+        group,
+        geometry,
+        material,
+        castShadow,
+        receiveShadow,
+        chunkMeshes: new Map<string, THREE.InstancedMesh>(),
         matricesByChunk: new Map<string, THREE.Matrix4[]>(),
-        packedByChunk: new Map<string, Float32Array>(),
         colorsByChunk: null,
-        packedColorsByChunk: null,
     };
     chunkedInstanceSets.push(instanceSet);
     return instanceSet;
@@ -505,76 +554,19 @@ function addChunkedInstance(
 
     if (!color) return;
     if (!instanceSet.colorsByChunk) instanceSet.colorsByChunk = new Map<string, number[]>();
-    if (!instanceSet.packedColorsByChunk) instanceSet.packedColorsByChunk = new Map<string, Float32Array>();
     const colors = instanceSet.colorsByChunk.get(key);
     if (colors) {
         colors.push(color.r, color.g, color.b);
     } else {
         instanceSet.colorsByChunk.set(key, [color.r, color.g, color.b]);
     }
-    if (!instanceSet.mesh.instanceColor) {
-        const capacity = instanceSet.mesh.instanceMatrix.count;
-        instanceSet.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3).fill(1), 3);
-        instanceSet.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-    }
 }
 
-function refreshChunkedInstances(): void {
-    for (let setIndex = 0; setIndex < chunkedInstanceSets.length; setIndex++) {
-        const instanceSet = chunkedInstanceSets[setIndex];
-        let instanceIndex = 0;
-        let colorIndex = 0;
-        const instanceColor = instanceSet.mesh.instanceColor;
-
-        activeRenderChunks.forEach((key) => {
-            const packed = instanceSet.packedByChunk.get(key);
-            if (!packed) return;
-            (instanceSet.mesh.instanceMatrix.array as Float32Array).set(packed, instanceIndex * 16);
-            instanceIndex += packed.length / 16;
-            const packedColors = instanceSet.packedColorsByChunk?.get(key);
-            if (packedColors && instanceColor) {
-                (instanceColor.array as Float32Array).set(packedColors, colorIndex * 3);
-                colorIndex += packedColors.length / 3;
-            }
-        });
-
-        instanceSet.mesh.count = instanceIndex;
-        instanceSet.mesh.instanceMatrix.clearUpdateRanges();
-        if (instanceIndex > 0) {
-            instanceSet.mesh.instanceMatrix.addUpdateRange(0, instanceIndex * 16);
-            instanceSet.mesh.instanceMatrix.needsUpdate = true;
-        }
-        if (instanceColor) {
-            instanceColor.clearUpdateRanges();
-            if (colorIndex > 0) {
-                instanceColor.addUpdateRange(0, colorIndex * 3);
-                instanceColor.needsUpdate = true;
-            }
-        }
-    }
-}
-
-/** Force full-capacity buffers through WebGL before chunk culling resumes. */
+/** Reveal all chunked meshes during WebGL preparation before chunk culling resumes. */
 export function prepareWorldInstanceBuffers(): void {
     for (const set of chunkedInstanceSets) {
-        let offset = 0;
-        let colorOffset = 0;
-        const instanceColor = set.mesh.instanceColor;
-        for (const [key, packed] of set.packedByChunk) {
-            (set.mesh.instanceMatrix.array as Float32Array).set(packed, offset);
-            offset += packed.length;
-            const packedColors = set.packedColorsByChunk?.get(key);
-            if (packedColors && instanceColor) {
-                (instanceColor.array as Float32Array).set(packedColors, colorOffset);
-                colorOffset += packedColors.length;
-            }
-        }
-        set.mesh.count = offset / 16;
-        set.mesh.instanceMatrix.clearUpdateRanges();
-        set.mesh.instanceMatrix.needsUpdate = true;
-        if (instanceColor) {
-            instanceColor.clearUpdateRanges();
-            instanceColor.needsUpdate = true;
+        for (const mesh of set.chunkMeshes.values()) {
+            mesh.visible = true;
         }
     }
     lastRenderChunkX = Number.NaN;
@@ -620,9 +612,14 @@ function refreshChunkedRenderObject(obj: THREE.Object3D): void {
 
 function setRenderChunkVisible(key: string, visible: boolean): void {
     const objects = renderChunks.get(key);
-    if (!objects) return;
-    for (let i = 0; i < objects.length; i++) {
-        objects[i].visible = visible;
+    if (objects) {
+        for (let i = 0; i < objects.length; i++) {
+            objects[i].visible = visible;
+        }
+    }
+    for (let i = 0; i < chunkedInstanceSets.length; i++) {
+        const mesh = chunkedInstanceSets[i].chunkMeshes.get(key);
+        if (mesh) mesh.visible = visible;
     }
 }
 
@@ -662,10 +659,9 @@ export function updateEnvironmentVisibility(position: THREE.Vector3, distanceChu
     for (const pool of state.lavaPools) {
         if (activeRenderChunks.has(getRenderChunkKey(pool.position.x, pool.position.z))) visibleLavaPools.push(pool);
     }
-    refreshChunkedInstances();
     // Repack dynamic flames and lights on the same chunk transition, including
     // zero-delta settings changes and prepared-world reveals.
-    updateTownLanterns(lastLanternTime, lastLanternStrength);
+    updateTownLanterns(lastLanternTime, lastLanternStrength, false, position);
 }
 
 export function queryObstaclesNear(x: number, z: number, radius: number, out?: THREE.Object3D[]): THREE.Object3D[] {
@@ -1008,9 +1004,10 @@ function createTown(): void {
         // buildings are hidden. Culling these tiles would expose the grass hole.
         const ground = materialName === 'road' || materialName === 'plaza';
         const instances = ground ? null : createChunkedInstanceSet(geometry, material, parts.length, true, true);
-        const mesh = instances?.mesh ?? addWorldObject(new THREE.InstancedMesh(geometry, material, parts.length));
-        mesh.name = ground ? `town-ground-${materialName}` : `town-${materialName}`;
-        mesh.receiveShadow = true;
+        const groundMesh = ground ? addWorldObject(new THREE.InstancedMesh(geometry, material, parts.length)) : null;
+        const container = instances?.group ?? groundMesh!;
+        container.name = ground ? `town-ground-${materialName}` : `town-${materialName}`;
+        if (groundMesh) groundMesh.receiveShadow = true;
         for (let index = 0; index < parts.length; index++) {
             const part = parts[index];
             dummy.position.set(part.x, part.y, part.z);
@@ -1018,7 +1015,7 @@ function createTown(): void {
             dummy.scale.set(part.width, part.height, part.depth);
             dummy.updateMatrix();
             if (instances) addChunkedInstance(instances, part.x, part.z, dummy.matrix);
-            else mesh.setMatrixAt(index, dummy.matrix);
+            else groundMesh!.setMatrixAt(index, dummy.matrix);
             if (!part.solid) continue;
             const collider = new THREE.Mesh(geometry, colliderMaterial);
             collider.name = `town-${part.kind}`;
@@ -1037,7 +1034,7 @@ function createTown(): void {
                 wellBounds.expandByPoint(traceMax.copy(collider.position).addScaledVector(collider.scale, .5));
             }
         }
-        if (ground) mesh.instanceMatrix.needsUpdate = true;
+        if (groundMesh) groundMesh.instanceMatrix.needsUpdate = true;
     }
 }
 
@@ -1049,11 +1046,26 @@ function finishStaticWorld(): void {
     state.scene!.updateMatrixWorld(true);
     for (const set of chunkedInstanceSets) {
         for (const [key, matrices] of set.matricesByChunk) {
-            const packed = new Float32Array(matrices.length * 16);
-            matrices.forEach((matrix, index) => matrix.toArray(packed, index * 16));
-            set.packedByChunk.set(key, packed);
+            const count = matrices.length;
+            if (count === 0) continue;
+            const mesh = new THREE.InstancedMesh(set.geometry, set.material, count);
+            mesh.name = set.group.name;
+            mesh.count = count;
+            mesh.castShadow = set.castShadow;
+            mesh.receiveShadow = set.receiveShadow;
+            mesh.frustumCulled = true;
+            const matrixArray = mesh.instanceMatrix.array as Float32Array;
+            for (let i = 0; i < count; i++) matrices[i].toArray(matrixArray, i * 16);
+            mesh.instanceMatrix.needsUpdate = true;
             const colors = set.colorsByChunk?.get(key);
-            if (colors && set.packedColorsByChunk) set.packedColorsByChunk.set(key, new Float32Array(colors));
+            if (colors) {
+                mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(colors), 3);
+                mesh.instanceColor.needsUpdate = true;
+            }
+            mesh.computeBoundingSphere();
+            mesh.visible = activeRenderChunks.has(key);
+            set.group.add(mesh);
+            set.chunkMeshes.set(key, mesh);
         }
         set.matricesByChunk.clear();
         set.colorsByChunk?.clear();
@@ -1186,7 +1198,9 @@ export function disposeWorld(): void {
     townLanternFlames = null;
     townLanternGlassMaterial = null;
     townLanternLights.length = 0;
+    townLanterns.length = 0;
     lastLanternTime = lastLanternStrength = 0; lanternsDark = false;
+    lastLanternObserver.set(0, 0, 0);
     lavaLightGroup = null;
     lavaGlowMesh = null;
     lavaGlowMaterial = null;

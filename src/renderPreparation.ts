@@ -82,7 +82,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
             const darkness = cycle.update(0, camera.position);
             // Only this lighting variant bypasses the per-lantern chunk mask;
             // warming it must not make the rest of the arena visible.
-            updateTownLanterns(0, darkness, true);
+            updateTownLanterns(0, darkness, true, camera.position);
             updateLavaLights(0, camera.position, darkness, userSettings.lavaGlow);
             await renderer.compileAsync(scene, camera);
             await checkpoint();
@@ -90,7 +90,9 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
             renderer.render(scene, camera);
             renderer.setRenderTarget(previousTarget);
             const actor = forgottenMecha;
-            if (phase === 150 && actor) {
+            // Noon is the first listed phase; warm the cockpit variant there so
+            // the actual first fold never compiles shaders during the reveal.
+            if (phase === DAY_DURATION_SECONDS / 2 && actor) {
                 // Compile the cockpit-facing material variant before its first
                 // visible fold; the deliberate video lag must not be shader work.
                 try {
@@ -115,7 +117,7 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
         if (state.scene === scene) {
             cycle.synchronizeElapsedSeconds(elapsed, true);
             const darkness = cycle.update(0, camera.position);
-            updateTownLanterns(0, darkness);
+            updateTownLanterns(0, darkness, false, camera.position);
             updateEnvironmentVisibility(camera.position, userSettings.renderDistanceChunks);
             updateLavaLights(0, camera.position, darkness, userSettings.lavaGlow);
         }

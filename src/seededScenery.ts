@@ -27,7 +27,7 @@ import { SpatialHash } from './spatialHash.js';
 
 export type SceneryRole = 'pillars' | 'lava' | 'branches' | 'canopy';
 
-export interface SceneryInstances { mesh: THREE.InstancedMesh }
+export interface SceneryInstances {}
 export interface SceneryPort<T extends SceneryInstances> {
     seed: number;
     biomeField: BiomeField;
@@ -931,7 +931,7 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
                 #endif`
             );
         };
-        floorMat.customProgramCacheKey = () => 'biome-ground-v4';
+        floorMat.customProgramCacheKey = () => 'biome-ground-v5';
         floorMat.userData.extraTextures = [sandTex];
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.name = 'grass-floor';
@@ -1016,7 +1016,7 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
                     #endif`,
                 );
             };
-            basinMaterial.customProgramCacheKey = () => 'lava-basin-ground-v2';
+            basinMaterial.customProgramCacheKey = () => 'lava-basin-ground-v3';
             basinMaterial.userData.extraTextures = [sandTex];
         }
         if (!worldLavaTex) worldLavaTex = createLavaTexture();

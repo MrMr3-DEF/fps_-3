@@ -588,7 +588,9 @@ function setupRenderer(): void {
         shadowMapSize,
     });
 
-    state.renderer = new THREE.WebGLRenderer({ antialias: true });
+    // The frame loop is the product: ask the browser for the discrete GPU on
+    // hybrid laptops instead of letting it pick the integrated one.
+    state.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     applyRendererSettings(state.renderer);
     
     state.renderer.domElement.id = 'game-canvas';
@@ -2311,7 +2313,7 @@ function animate(): void {
     atmosphereFrame.fogMultiplier = biomeWeights ? sampleBiomeFogMultiplier(biomeWeights) : 1;
     atmosphereFrame.fogTimeMultiplier = getDayNightFogMultiplier(state.dayNightElapsedSeconds);
     if (state.camera) {
-        updateTownLanterns(time / 1000, lanternStrength);
+        updateTownLanterns(time / 1000, lanternStrength, false, state.camera.position);
     }
 
     const previousWeaponPhase = state.switchState;

@@ -46,7 +46,7 @@ test('surface detail gives every profile a distinct cache key and a composable s
         installSurfaceDetailShader(material, profile);
 
         const cacheKey = material.customProgramCacheKey();
-        assert.equal(cacheKey, `surface-detail-v1:${profile}`);
+        assert.equal(cacheKey, `surface-detail-v2:${profile}`);
         cacheKeys.add(cacheKey);
 
         // Shading-only installation must not replace authoring values.

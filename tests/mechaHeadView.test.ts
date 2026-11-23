@@ -92,7 +92,7 @@ test('video reveal holds captures without stopping simulation, caps target size 
         getDrawingBufferSize: (size: THREE.Vector2) => size.set(3840, 2160),
         clear() {}, compileAsync: async () => {},
         render: (scene: THREE.Scene) => {
-            if (scene === world) { captures++; assert.equal(target.width, 1920); assert.equal(target.height, 1080); if (fail) throw new Error('draw failed'); }
+            if (scene === world) { captures++; assert.equal(target.width, 960); assert.equal(target.height, 540); if (fail) throw new Error('draw failed'); }
             else { screens++; assert.ok(target === original); }
         },
     } as unknown as THREE.WebGLRenderer;

@@ -37,8 +37,23 @@ export class MechaHeadEffects {
     });
     private readonly quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material);
     constructor() { this.quad.frustumCulled = false; this.scene.add(this.quad); }
+    /** Size and allocate the capture target before its first reveal. */
+    private resizeCapture(renderer: THREE.WebGLRenderer): void {
+        renderer.getDrawingBufferSize(this.size);
+        // The reveal is a deliberately degraded video feed with eight-band
+        // tearing, so half resolution (capped at 960 px) hides no authored
+        // detail while cutting the capture and blur cost by up to 4×.
+        const scale = Math.min(0.5, 960 / Math.max(1, this.size.x, this.size.y));
+        const width = Math.max(1, Math.round(this.size.x * scale));
+        const height = Math.max(1, Math.round(this.size.y * scale));
+        if (width !== this.target.width || height !== this.target.height) {
+            this.target.setSize(width, height);
+            this.captureStep = -1;
+        }
+    }
     async prepare(renderer: THREE.WebGLRenderer): Promise<void> {
         if (this.disposed) return;
+        this.resizeCapture(renderer);
         const previous = renderer.getRenderTarget();
         try { renderer.setRenderTarget(this.target); renderer.clear(); }
         finally { renderer.setRenderTarget(previous); }
@@ -48,10 +63,7 @@ export class MechaHeadEffects {
         drawScene?: () => void): void {
         if (this.disposed) { renderer.render(scene, camera); return; }
         const previous = renderer.getRenderTarget();
-        renderer.getDrawingBufferSize(this.size);
-        const scale = Math.min(1, 1920 / Math.max(this.size.x, this.size.y));
-        const width = Math.max(1, Math.round(this.size.x * scale)), height = Math.max(1, Math.round(this.size.y * scale));
-        if (width !== this.target.width || height !== this.target.height) { this.target.setSize(width, height); this.captureStep = -1; }
+        this.resizeCapture(renderer);
         const step = Math.floor(progress * 3);
         try {
             if (step !== this.captureStep) {

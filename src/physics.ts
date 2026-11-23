@@ -2,7 +2,8 @@ import { isInputActive, touchMove } from './inputSession.js';
 import * as THREE from 'three';
 import { state } from './state.js';
 import { resetHook } from './grapple.js';
-import { getTerrainHeightAt, isInLavaAt, queryObstaclesNear } from './world.js';
+import { queryLavaPoolsNear, queryObstaclesNear } from './world.js';
+import { getLavaPitFloorY, isPointInLava, LAVA_POOL_QUERY_RADIUS } from './lavaPools.js';
 import { obstacleData } from './userDataTypes.js';
 import {
     PILLAR_WIDTH,
@@ -37,6 +38,17 @@ const _moveDir = new THREE.Vector3();
 const _tempPos = new THREE.Vector3();
 const _tempZ   = new THREE.Vector3();
 const _obstacleCandidates: THREE.Object3D[] = [];
+// One spatial-hash lava query per substep feeds both feet-level contact and
+// the recessed-basin floor sampled after horizontal resolution.
+const _lavaCandidates: THREE.Object3D[] = [];
+// Candidate geometry is prepared once so the vertical support pass does not
+// re-read every collider's user data and transform.
+const _candidateBoxX: number[] = [];
+const _candidateBoxZ: number[] = [];
+const _candidateExtentX: number[] = [];
+const _candidateExtentZ: number[] = [];
+const _candidateTop: number[] = [];
+const _candidateBottom: number[] = [];
 
 const MAX_FALL_SPEED = JUMP_FORCE * 0.88;
 const MAP_LIMIT = (MAP_SIZE / 2) - 1;
@@ -51,58 +63,68 @@ interface ScanResult {
 
 // Independent X/Z collision checks prevent snagging on corners, followed by
 // floor and ceiling checks at the accepted horizontal position.
-function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPosZ: THREE.Vector3, feetY: number): ScanResult {
-    let ceilingY = Infinity;
-    let colX = false;
-    let colZ = false;
-
-    if (Math.abs(testPosX.x) > Math.max(MAP_LIMIT, Math.abs(actualPos.x))) colX = true;
+function scanObstacles(
+    actualPos: THREE.Vector3,
+    testPosX: THREE.Vector3,
+    testPosZ: THREE.Vector3,
+    feetY: number,
+    lavaPools: readonly THREE.Object3D[],
+): ScanResult {
+    let colX = Math.abs(testPosX.x) > Math.max(MAP_LIMIT, Math.abs(actualPos.x));
+    const colZAtBoundary = Math.abs(testPosZ.z) > Math.max(MAP_LIMIT, Math.abs(actualPos.z));
+    // Z acceptance depends on which X position the X pass accepts, so both
+    // choices are accumulated in the same candidate pass instead of re-reading
+    // every obstacle from the spatial hash.
+    let zBlocksFromActualX = false;
+    let zBlocksFromTestX = false;
 
     const candidates = queryObstaclesNear(actualPos.x, actualPos.z, OBSTACLE_QUERY_RADIUS, _obstacleCandidates);
     const len = candidates.length;
+    _candidateBoxX.length = 0;
+    _candidateBoxZ.length = 0;
+    _candidateExtentX.length = 0;
+    _candidateExtentZ.length = 0;
+    _candidateTop.length = 0;
+    _candidateBottom.length = 0;
+    const headY = actualPos.y + CAMERA_CEILING_CLEARANCE;
     for (let i = 0; i < len; i++) {
         const box = candidates[i];
         const data = obstacleData(box);
         const halfH = data.halfH || data.height / 2;
         const top = box.position.y + halfH;
         const bottom = box.position.y - halfH;
-        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y + CAMERA_CEILING_CLEARANCE > bottom + 0.001;
         const halfW = data.halfW || (PILLAR_WIDTH / 2);
         const halfD = data.halfD || (PILLAR_WIDTH / 2);
         const ex = halfW + PLAYER_RADIUS;
         const ez = halfD + PLAYER_RADIUS;
         const bx = box.position.x;
         const bz = box.position.z;
+        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && headY > bottom + 0.001;
+
+        _candidateBoxX.push(bx);
+        _candidateBoxZ.push(bz);
+        _candidateExtentX.push(ex);
+        _candidateExtentZ.push(ez);
+        _candidateTop.push(top);
+        _candidateBottom.push(bottom);
 
         if (!colX &&
             testPosX.x > bx - ex && testPosX.x < bx + ex &&
             testPosX.z > bz - ez && testPosX.z < bz + ez) {
             if (blocksHeight) colX = true;
         }
-    }
 
-    // Test Z against the X position that will actually be accepted. Testing
-    // both axes against the old position lets a diagonal step enter a corner:
-    // each axis is safe alone, but their combined destination overlaps.
-    const resolvedX = colX ? actualPos.x : testPosX.x;
-    if (Math.abs(testPosZ.z) > Math.max(MAP_LIMIT, Math.abs(actualPos.z))) colZ = true;
-
-    for (let i = 0; i < len; i++) {
-        const box = candidates[i];
-        const data = obstacleData(box);
-        const halfH = data.halfH || data.height / 2;
-        const top = box.position.y + halfH;
-        const bottom = box.position.y - halfH;
-        const blocksHeight = feetY < top - PLAYER_STEP_HEIGHT && actualPos.y + CAMERA_CEILING_CLEARANCE > bottom + 0.001;
-        const ex = (data.halfW || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
-        const ez = (data.halfD || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
-
-        if (!colZ &&
-            resolvedX > box.position.x - ex && resolvedX < box.position.x + ex &&
-            testPosZ.z > box.position.z - ez && testPosZ.z < box.position.z + ez) {
-            if (blocksHeight) colZ = true;
+        // Test Z against whichever X is accepted: the old position when X was
+        // blocked, otherwise the attempted X. Accumulating both outcomes keeps
+        // the independent-axis result identical in one pass.
+        if (blocksHeight && testPosZ.z > bz - ez && testPosZ.z < bz + ez) {
+            if (actualPos.x > bx - ex && actualPos.x < bx + ex) zBlocksFromActualX = true;
+            if (testPosX.x > bx - ex && testPosX.x < bx + ex) zBlocksFromTestX = true;
         }
     }
+
+    const resolvedX = colX ? actualPos.x : testPosX.x;
+    const colZ = colZAtBoundary || (colX ? zBlocksFromActualX : zBlocksFromTestX);
 
     // Resolve support at the accepted horizontal position. Sampling the old
     // position can miss a roof edge during a fast falling/grappling frame.
@@ -110,16 +132,14 @@ function scanObstacles(actualPos: THREE.Vector3, testPosX: THREE.Vector3, testPo
     const finalZ = colZ ? actualPos.z : testPosZ.z;
     // Recessed lava basins supply the baseline floor; obstacle tops can only
     // raise support above it.
-    let groundY = getTerrainHeightAt(finalX, finalZ);
-    for (const box of candidates) {
-        const data = obstacleData(box);
-        const ex = (data.halfW || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
-        const ez = (data.halfD || PILLAR_WIDTH / 2) + PLAYER_RADIUS;
-        if (Math.abs(finalX - box.position.x) >= ex || Math.abs(finalZ - box.position.z) >= ez) continue;
-        const halfH = data.halfH || data.height / 2;
-        const top = box.position.y + halfH;
-        const bottom = box.position.y - halfH;
+    let groundY = getLavaPitFloorY(finalX, finalZ, lavaPools);
+    let ceilingY = Infinity;
+    for (let i = 0; i < len; i++) {
+        if (Math.abs(finalX - _candidateBoxX[i]) >= _candidateExtentX[i] ||
+            Math.abs(finalZ - _candidateBoxZ[i]) >= _candidateExtentZ[i]) continue;
+        const top = _candidateTop[i];
         if (top <= feetY + PLAYER_STEP_HEIGHT && top > groundY) groundY = top;
+        const bottom = _candidateBottom[i];
         if (bottom >= actualPos.y - 0.001 && bottom < ceilingY) ceilingY = bottom;
     }
 
@@ -236,8 +256,17 @@ function stepPlayerPhysics(delta: number): void {
             _moveDir.addScaledVector(_camRight, analogX).addScaledVector(_camForward, -analogY);
             if (_moveDir.lengthSq() > 1) _moveDir.normalize();
 
+            // A single broad-phase lava query serves both the speed multiplier
+            // and the basin floor used by this substep's obstacle scan.
+            const lavaPools = queryLavaPoolsNear(
+                playerObj.position.x,
+                playerObj.position.z,
+                LAVA_POOL_QUERY_RADIUS + PLAYER_RADIUS,
+                _lavaCandidates,
+            );
             const inLava = state.canJump &&
-                isInLavaAt(playerObj.position.x, playerObj.position.z, playerObj.position.y - PLAYER_HEIGHT, PLAYER_RADIUS);
+                isPointInLava(playerObj.position.x, playerObj.position.z, playerObj.position.y - PLAYER_HEIGHT,
+                    PLAYER_RADIUS, lavaPools);
             const currentSpeed = inLava ? WALK_SPEED * LAVA_SPEED_MULTIPLIER : WALK_SPEED;
 
             if (state.canJump) {
@@ -277,7 +306,7 @@ function stepPlayerPhysics(delta: number): void {
             const testPosX = _tempPos.set(nextX, playerObj.position.y, playerObj.position.z);
             const testPosZ = _tempZ.set(playerObj.position.x, playerObj.position.y, nextZ);
             const { colX: collisionX, colZ: collisionZ, groundY: currentGroundY, ceilingY } =
-                scanObstacles(playerObj.position, testPosX, testPosZ, feetY);
+                scanObstacles(playerObj.position, testPosX, testPosZ, feetY, lavaPools);
 
             if (!collisionX) {
                 playerObj.position.x = nextX;

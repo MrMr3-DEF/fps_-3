@@ -147,6 +147,9 @@ type ScanArguments = [
 
 interface ScanObservation {
     args: ScanArguments;
+    /** Stable copies of the caller's per-frame scratch bounds and position. */
+    bounds: ScreenBounds;
+    worldPosition: THREE.Vector3;
     distancePosition: THREE.Vector3;
     homingTarget?: ProjectileHomingTarget;
     mechaHidden?: boolean;
@@ -174,6 +177,7 @@ const _eliminatedWorldEnvelope: StableTargetEnvelope = {
 };
 const _worldIdentity = new THREE.Matrix4();
 const _mechaCalloutBounds = createScreenBounds();
+const _projectionBounds = createScreenBounds();
 const _cameraFrustum = new THREE.Frustum();
 const _viewProjection = new THREE.Matrix4();
 const _enemyOccluders: THREE.Object3D[] = [];
@@ -346,6 +350,7 @@ export class SmartGogglesHud {
     private readonly retiringRecords = new Set<TargetLockRecord>();
     private readonly availableRecords: TargetLockRecord[] = [];
     private readonly observations: ScanObservation[] = [];
+    private readonly observationPool: ScanObservation[] = [];
     private readonly selectionCandidates: Array<ScanObservation | TargetLockRecord> = [];
     private readonly observedKeys = new Set<string>();
     private readonly selectedCandidates = new Set<ScanObservation | TargetLockRecord>();
@@ -365,6 +370,10 @@ export class SmartGogglesHud {
     private worldGeneration = -1;
     private readonly hiddenHealthBars = new Map<THREE.Object3D, boolean>();
     private readonly layer: HTMLElement;
+    private readonly resizeObserver: ResizeObserver | null;
+    private viewportWidth = 0;
+    private viewportHeight = 0;
+    private layoutDirty = true;
     private readonly reducedMotionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     private get reducedMotion(): boolean { return this.reducedMotionQuery?.matches ?? false; }
     private readonly calloutDirection?: Readonly<{ horizontal: CalloutHorizontalDirection; vertical: CalloutVerticalDirection }>;
@@ -397,12 +406,29 @@ export class SmartGogglesHud {
         this.lobbyPreview = options?.lobbyPreview ?? false;
         this.gameplayLimits = options?.gameplayLimits ?? !this.lobbyPreview;
         this.lobbyAvoidElements = options?.lobbyAvoidElements ?? [];
+        // Reading clientWidth/getBoundingClientRect every frame forces layout.
+        // Resize the overlay only when the layer or a lobby panel actually
+        // changes; test DOMs without ResizeObserver keep the direct reads.
+        this.resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+            this.layoutDirty = true;
+        });
+        this.resizeObserver?.observe(layer);
+        for (const element of this.lobbyAvoidElements) this.resizeObserver?.observe(element);
         ensureAnomalyTearFilters(layer);
         for (let i = 0; i < GOGGLES_MAX_TARGETS; i++) this.availableRecords.push(this.buildRecord());
     }
 
     get isAnomalyDetected(): boolean {
         return this.anomalyDetectedThisFrame;
+    }
+
+    /** Re-read layout only after a resize (or every call without an observer). */
+    private measureLayout(): boolean {
+        if (this.resizeObserver && !this.layoutDirty && this.viewportWidth > 0 && this.viewportHeight > 0) return false;
+        this.viewportWidth = this.layer.clientWidth || window.innerWidth;
+        this.viewportHeight = this.layer.clientHeight || window.innerHeight;
+        this.layoutDirty = false;
+        return true;
     }
 
     configureLobby(totalPlayers: number, rosterKey: string): void {
@@ -440,7 +466,8 @@ export class SmartGogglesHud {
         this.observations.length = 0;
         this.frame++;
         this.occupiedLobbyLabels.length = 0;
-        if (this.lobbyPreview) {
+        const layoutChanged = this.measureLayout();
+        if (this.lobbyPreview && layoutChanged) {
             const layerRect = this.layer.getBoundingClientRect();
             for (const element of this.lobbyAvoidElements) {
                 const rect = element.getBoundingClientRect();
@@ -449,8 +476,8 @@ export class SmartGogglesHud {
                     right: rect.right - layerRect.left, bottom: rect.bottom - layerRect.top });
             }
         }
-        const viewportWidth = this.layer.clientWidth || window.innerWidth;
-        const viewportHeight = this.layer.clientHeight || window.innerHeight;
+        const viewportWidth = this.viewportWidth || window.innerWidth;
+        const viewportHeight = this.viewportHeight || window.innerHeight;
         if (viewportWidth <= 0 || viewportHeight <= 0) return;
         if (this.lobbyPreview) {
             const viewportKey = `${viewportWidth}:${viewportHeight}`;
@@ -514,7 +541,7 @@ export class SmartGogglesHud {
             )) continue;
 
             const record = this.records.get(targetKey);
-            const projectionBounds = record?.bounds ?? createScreenBounds();
+            const projectionBounds = record?.bounds ?? _projectionBounds;
             let halfWidth: number, halfHeight: number;
             if (data.infantry) {
                 localBox.getSize(_envelopeSize).multiplyScalar(0.5);
@@ -580,7 +607,7 @@ export class SmartGogglesHud {
             if (this.rejectBeyondScanRange(targetKey, playerPosition.distanceTo(_peerRootPosition))) continue;
 
             const record = this.records.get(targetKey);
-            const projectionBounds = record?.bounds ?? createScreenBounds();
+            const projectionBounds = record?.bounds ?? _projectionBounds;
             const stablePeerEnvelope = getStablePeerEnvelope(peer.mesh);
             if (!stablePeerEnvelope || !projectStableTargetEnvelopeToScreen(
                 stablePeerEnvelope,
@@ -638,7 +665,7 @@ export class SmartGogglesHud {
             const hitbox = mecha.hitbox;
             if (!hitbox.geometry.boundingBox) hitbox.geometry.computeBoundingBox();
             const box = hitbox.geometry.boundingBox!;
-            const bounds = this.records.get(key)?.bounds ?? createScreenBounds();
+            const bounds = this.records.get(key)?.bounds ?? _projectionBounds;
             _anomalyEnvelope.center.copy(mecha.group.position);
             _anomalyEnvelope.center.y += MECHA_HEIGHT / 2;
             _anomalyEnvelope.halfWidth = mecha.radius;
@@ -666,7 +693,7 @@ export class SmartGogglesHud {
                 hitbox.updateWorldMatrix(true, false);
                 const targetKey = 'anomaly:goth-girlfriend';
                 const record = this.records.get(targetKey);
-                const projectionBounds = record?.bounds ?? createScreenBounds();
+                const projectionBounds = record?.bounds ?? _projectionBounds;
                 _bodyCenter.copy(_anomalyEnvelope.center).applyMatrix4(hitbox.matrixWorld);
                 if (!this.rejectBeyondScanRange(targetKey, playerPosition.distanceTo(_bodyCenter)) && _cameraFrustum.intersectsObject(hitbox) && hasLineOfSightToOrientedBox(
                     camera.position,
@@ -731,7 +758,7 @@ export class SmartGogglesHud {
 
             const targetKey = `celestial:${celestial.key}`;
             const record = this.records.get(targetKey);
-            const projectionBounds = record?.bounds ?? createScreenBounds();
+            const projectionBounds = record?.bounds ?? _projectionBounds;
             if (!projectStableTargetSphereToScreen(
                 localSphere,
                 mesh.matrixWorld,
@@ -801,17 +828,63 @@ export class SmartGogglesHud {
         }
     }
 
-    private observeTarget(...args: ScanArguments): ScanObservation {
-        const [targetKey, , , , bounds, worldPosition] = args;
+    private observeTarget(
+        targetKey: string,
+        targetRevision: number,
+        variant: TargetVariant,
+        identifierText: string,
+        bounds: ScreenBounds,
+        worldPosition: THREE.Vector3,
+        worldHalfWidth: number,
+        worldHalfHeight: number,
+        centerDistance: number,
+        reachableDistance: number,
+        hp: number,
+        maxHp: number,
+        viewportWidth: number,
+        viewportHeight: number,
+        now: number,
+        lobbyOrder = 0,
+    ): ScanObservation {
         const previous = this.records.get(targetKey);
         if (previous && previous.lastWorldPosition.distanceToSquared(worldPosition) > TELEPORT_DISTANCE_SQ) {
-            this.retire(previous, args[14]);
+            this.retire(previous, now);
             this.records.delete(targetKey);
         }
-        // Projection and center scratch objects are shared across the detection pass.
-        args[4] = { ...bounds };
-        args[5] = worldPosition.clone();
-        const observation = { args, distancePosition: worldPosition.clone() };
+        // Detection runs for every candidate before any view binds, so each
+        // observation owns pooled copies rather than per-frame literals/clones.
+        let observation = this.observationPool[this.observations.length];
+        if (!observation) {
+            observation = {
+                args: new Array<unknown>(16) as unknown as ScanArguments,
+                bounds: createScreenBounds(),
+                worldPosition: new THREE.Vector3(),
+                distancePosition: new THREE.Vector3(),
+            };
+            this.observationPool.push(observation);
+        }
+        Object.assign(observation.bounds, bounds);
+        observation.worldPosition.copy(worldPosition);
+        observation.distancePosition.copy(worldPosition);
+        observation.homingTarget = undefined;
+        observation.mechaHidden = undefined;
+        const args = observation.args;
+        args[0] = targetKey;
+        args[1] = targetRevision;
+        args[2] = variant;
+        args[3] = identifierText;
+        args[4] = observation.bounds;
+        args[5] = observation.worldPosition;
+        args[6] = worldHalfWidth;
+        args[7] = worldHalfHeight;
+        args[8] = centerDistance;
+        args[9] = reachableDistance;
+        args[10] = hp;
+        args[11] = maxHp;
+        args[12] = viewportWidth;
+        args[13] = viewportHeight;
+        args[14] = now;
+        args[15] = lobbyOrder;
         this.observations.push(observation);
         return observation;
     }
@@ -836,7 +909,7 @@ export class SmartGogglesHud {
     ): TargetLockRecord {
         let record = this.records.get(targetKey);
         if (!record) {
-            record = this.createRecord(targetKey, targetRevision, variant, bounds, now);
+            record = this.createRecord(targetKey, targetRevision, variant, now);
             this.records.set(targetKey, record);
         }
 
@@ -1149,7 +1222,7 @@ export class SmartGogglesHud {
     }
 
     private createRecord(targetKey: string, targetRevision: number, variant: TargetVariant,
-        bounds: ScreenBounds, now: number): TargetLockRecord {
+        now: number): TargetLockRecord {
         // Preview callers may explicitly opt out of the six-target budget.
         const record = this.availableRecords.pop() ?? this.buildRecord();
         // A respawn or teleport can retain the key while its old view retracts.
@@ -1160,7 +1233,7 @@ export class SmartGogglesHud {
             setProjectileHomingTarget(null);
         }
         Object.assign(record, {
-            targetKey, targetRevision, bounds, phase: 'entering', seenFrame: this.frame,
+            targetKey, targetRevision, phase: 'entering', seenFrame: this.frame,
             labelWidth: LABEL_WIDTH, naturalLabelWidth: LABEL_WIDTH, sizedFor: '',
             activateAt: now + ENTER_DELAY_MS,
             scanCompleteAt: now + ENTER_DELAY_MS + (this.reducedMotion ? 1 : SCAN_BRACKET_DURATION_MS),
