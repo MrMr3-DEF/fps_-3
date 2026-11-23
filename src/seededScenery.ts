@@ -5,6 +5,14 @@ import { getTownPavingOutline, overlapsTown } from './town.js';
 import { getDominantBiome, sampleBiomeBarkColor, sampleBiomeBushColor, sampleBiomeLeafColor, type BiomeField, type BiomeId, type BiomeWeights } from './biomes.js';
 import { installLeafAnimationShader } from './leafAnimation.js';
 import {
+    GROUND_DETAIL_ALBEDO_GLSL,
+    GROUND_DETAIL_NORMAL_GLSL,
+    GROUND_DETAIL_PARS_GLSL,
+    GROUND_DETAIL_VERTEX_GLSL,
+    GROUND_DETAIL_VERTEX_PARS_GLSL,
+    installSurfaceDetailShader,
+} from './surfaceDetail.js';
+import {
     LAVA_PIT_MASK_ENCODE_RANGE,
     LAVA_POOL_QUERY_RADIUS,
     LAVA_SHAPE_COUNT,
@@ -312,6 +320,14 @@ export function createRingsTexture(random: () => number): THREE.CanvasTexture {
 
     const texture = new THREE.CanvasTexture(canvas);
     return texture;
+}
+
+/** WebGL2 offers dFdx as a core function; WebGL1 Lambert ground shading needs
+ * the derivatives extension that MeshStandardMaterial already requests. */
+function enableGroundDetailDerivatives(material: THREE.MeshLambertMaterial): void {
+    (material as THREE.MeshLambertMaterial & { extensions: { derivatives: boolean } }).extensions = {
+        derivatives: true,
+    };
 }
 
 export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPort<T>) {
@@ -854,6 +870,7 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
         worldGrassTex = grassTex;
         worldSandTex = sandTex;
         const floorMat = new THREE.MeshLambertMaterial({ map: grassTex, color: 0xffffff });
+        enableGroundDetailDerivatives(floorMat);
         const lavaPitMaskUniform: { value: THREE.Texture } = { value: EMPTY_LAVA_PIT_MASK };
         floorMat.userData.lavaPitMaskUniform = lavaPitMaskUniform;
         floorMat.onBeforeCompile = (shader) => {
@@ -863,6 +880,7 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <common>',
                 `#include <common>
+                ${GROUND_DETAIL_VERTEX_PARS_GLSL}
                 varying vec2 vBiomeWorldXZ;`
             );
             // Compute world XZ after the floor's -90 degree rotation. Reusing the
@@ -870,6 +888,7 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <begin_vertex>',
                 `#include <begin_vertex>
+                ${GROUND_DETAIL_VERTEX_GLSL}
                 vBiomeWorldXZ = (modelMatrix * vec4(transformed, 1.0)).xz;`
             );
             shader.fragmentShader = shader.fragmentShader.replace(
@@ -878,7 +897,8 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
                 uniform sampler2D uBiomeMap;
                 uniform sampler2D uSandMap;
                 uniform sampler2D uLavaPitMask;
-                varying vec2 vBiomeWorldXZ;`
+                varying vec2 vBiomeWorldXZ;
+                ${GROUND_DETAIL_PARS_GLSL}`
             );
             shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
                 #ifdef USE_MAP
@@ -899,10 +919,19 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
                     vec3 groundSample = grassSample * biomeWeights.r +
                         coolGrass * biomeWeights.g + sandSample * biomeWeights.b;
                     diffuseColor.rgb *= groundSample / max(biomeWeights.r + biomeWeights.g + biomeWeights.b, 0.001);
+                    vec3 groundDetailBiomeWeights = biomeWeights;
+                    ${GROUND_DETAIL_ALBEDO_GLSL}
                 #endif
             `);
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <normal_fragment_maps>',
+                `#include <normal_fragment_maps>
+                #ifdef USE_MAP
+                    ${GROUND_DETAIL_NORMAL_GLSL}
+                #endif`
+            );
         };
-        floorMat.customProgramCacheKey = () => 'biome-ground-v3';
+        floorMat.customProgramCacheKey = () => 'biome-ground-v4';
         floorMat.userData.extraTextures = [sandTex];
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.name = 'grass-floor';
@@ -930,6 +959,7 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
             polygonOffsetFactor: 1,
             polygonOffsetUnits: 1,
         });
+        enableGroundDetailDerivatives(basinMaterial);
         if (worldGrassTex && worldSandTex) {
             const sandTex = worldSandTex;
             basinMaterial.onBeforeCompile = (shader) => {
@@ -938,11 +968,13 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
                 shader.vertexShader = shader.vertexShader.replace(
                     '#include <common>',
                     `#include <common>
+                    ${GROUND_DETAIL_VERTEX_PARS_GLSL}
                     varying vec2 vBasinWorldXZ;`,
                 );
                 shader.vertexShader = shader.vertexShader.replace(
                     '#include <begin_vertex>',
                     `#include <begin_vertex>
+                    ${GROUND_DETAIL_VERTEX_GLSL}
                     vec4 basinWorldPos = vec4(transformed, 1.0);
                     #ifdef USE_INSTANCING
                         basinWorldPos = instanceMatrix * basinWorldPos;
@@ -954,7 +986,8 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
                     `#include <common>
                     uniform sampler2D uBiomeMap;
                     uniform sampler2D uSandMap;
-                    varying vec2 vBasinWorldXZ;`,
+                    varying vec2 vBasinWorldXZ;
+                    ${GROUND_DETAIL_PARS_GLSL}`,
                 );
                 // Sample the exact same world-aligned biome ground textures as
                 // floorMat so the rim at y=0 (vertexColor=1) is seam-free.
@@ -971,10 +1004,19 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
                         vec3 basinGround = basinGrass * basinBiomeWeights.r +
                             basinCool * basinBiomeWeights.g + basinSand * basinBiomeWeights.b;
                         diffuseColor.rgb *= basinGround / max(basinBiomeWeights.r + basinBiomeWeights.g + basinBiomeWeights.b, 0.001);
+                        vec3 groundDetailBiomeWeights = basinBiomeWeights;
+                        ${GROUND_DETAIL_ALBEDO_GLSL}
                     #endif
                 `);
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <normal_fragment_maps>',
+                    `#include <normal_fragment_maps>
+                    #ifdef USE_MAP
+                        ${GROUND_DETAIL_NORMAL_GLSL}
+                    #endif`,
+                );
             };
-            basinMaterial.customProgramCacheKey = () => 'lava-basin-ground-v1';
+            basinMaterial.customProgramCacheKey = () => 'lava-basin-ground-v2';
             basinMaterial.userData.extraTextures = [sandTex];
         }
         if (!worldLavaTex) worldLavaTex = createLavaTexture();
@@ -1112,6 +1154,11 @@ export function createSceneryBuilder<T extends SceneryInstances>(port: SceneryPo
             roughness: 0.8,
             metalness: 0.1
         });
+
+        // Real-world-scale grain keeps tall instanced trunks and fine branch
+        // cylinders consistent instead of stretching the texture pattern.
+        installSurfaceDetailShader(barkMat, 'bark');
+        installSurfaceDetailShader(ringsMat, 'rings');
 
         // Keep each face's existing vertices/UVs; only group opaque triangles by
         // material so every visible chunk needs two draws instead of six.

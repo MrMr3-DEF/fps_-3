@@ -51,12 +51,24 @@ export async function prepareRenderer(cycle: DayNightCycle, checkpoint: () => Pr
             const material = (object as THREE.Mesh).material;
             for (const mat of Array.isArray(material) ? material : material ? [material] : []) {
                 for (const value of Object.values(mat)) if (value instanceof THREE.Texture) textures.add(value);
+                // Shader-only ground layers (for example the sand blend texture)
+                // live beside the material instead of in a mapped slot.
+                const extra = mat.userData?.extraTextures;
+                if (Array.isArray(extra)) for (const value of extra) if (value instanceof THREE.Texture) textures.add(value);
             }
         });
         await forgottenMecha?.headEffects.prepare(renderer);
         await checkpoint();
+        // Mock renderers in tests omit capabilities; anisotropy is an optional
+        // quality boost, so fall back to the WebGL default of one sample.
+        const maxAnisotropy = Math.min(8, renderer.capabilities?.getMaxAnisotropy?.() ?? 1);
         let uploads = 0;
         for (const texture of textures) {
+            // Repeating canvas art (ground, bark, lava) is most often seen at
+            // grazing angles, where anisotropic sampling keeps it readable.
+            if (texture instanceof THREE.CanvasTexture && texture.wrapS === THREE.RepeatWrapping) {
+                texture.anisotropy = maxAnisotropy;
+            }
             renderer.initTexture(texture);
             if (++uploads % 8 === 0) await checkpoint();
         }

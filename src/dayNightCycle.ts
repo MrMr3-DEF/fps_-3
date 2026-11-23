@@ -27,9 +27,12 @@ const DAY_SKY = new THREE.Color(0xd0dbf0);
 const TWILIGHT_SKY = new THREE.Color(0x9a6070);
 const NIGHT_SKY = new THREE.Color(0x030712);
 const MOONLIT_SKY = new THREE.Color(0x111d38);
-const DAY_AMBIENT = new THREE.Color(0x777777);
-const TWILIGHT_AMBIENT = new THREE.Color(0x8a5e52);
-const NIGHT_AMBIENT = new THREE.Color(0x4c5d82);
+const DAY_HEMISPHERE_SKY = new THREE.Color(0xb9cdf0);
+const DAY_HEMISPHERE_GROUND = new THREE.Color(0x6a5844);
+const TWILIGHT_HEMISPHERE_SKY = new THREE.Color(0xc98f7a);
+const TWILIGHT_HEMISPHERE_GROUND = new THREE.Color(0x5a3d34);
+const NIGHT_HEMISPHERE_SKY = new THREE.Color(0x3b4c74);
+const NIGHT_HEMISPHERE_GROUND = new THREE.Color(0x141a24);
 const SUN_NOON = new THREE.Color(0xffffff);
 const SUN_HORIZON = new THREE.Color(0xffa46b);
 const SUN_DISC_COLOR = new THREE.Color(0xfff0b0);
@@ -42,8 +45,12 @@ const CELESTIAL_SKY_DISTANCE = 1200;
 const NIGHT_FOG_MULTIPLIER = 1.0;
 const DAY_FOG_MULTIPLIER = 0.8;
 const TWILIGHT_FOG_MULTIPLIER = 1.2;
-const SUN_SHADOW_EXTENT = 256;
+const SUN_SHADOW_EXTENT = 192;
 const SUN_SHADOW_DISTANCE = 1100;
+// Near-horizontal sun rays spread one shadow texel across a very long ground
+// footprint. Lifting only the shadow-casting direction keeps sunrise/sundown
+// silhouettes crisp without changing the visible sun disc or phase math.
+const MIN_SHADOW_ELEVATION = 0.16;
 
 // This mutates Three.js shader chunks process-wide, so install it only once.
 // Fade the border of directional shadow maps so camera-following coverage does
@@ -131,14 +138,16 @@ export class DayNightCycle {
     readonly celestialScanTargets: readonly CelestialScanTarget[];
 
     private readonly scene: THREE.Scene;
-    private readonly ambientLight: THREE.AmbientLight;
+    private readonly hemisphereLight: THREE.HemisphereLight;
     private readonly sunMesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
     private readonly moonMesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
     private readonly celestialGeometry: THREE.SphereGeometry;
     private readonly skyColor: THREE.Color;
     private readonly colorScratch = new THREE.Color();
+    private readonly groundScratch = new THREE.Color();
     private readonly biomeTintScratch = new THREE.Color();
     private readonly directionScratch = new THREE.Vector3();
+    private readonly shadowDirectionScratch = new THREE.Vector3();
     private readonly shadowRight = new THREE.Vector3();
     private readonly shadowUp = new THREE.Vector3();
     private readonly shadowCenter = new THREE.Vector3();
@@ -154,7 +163,11 @@ export class DayNightCycle {
         this.skyColor = scene.background instanceof THREE.Color ? scene.background : new THREE.Color();
         scene.background = this.skyColor;
 
-        this.ambientLight = new THREE.AmbientLight(DAY_AMBIENT, 1);
+        this.hemisphereLight = new THREE.HemisphereLight(
+            DAY_HEMISPHERE_SKY.getHex(),
+            DAY_HEMISPHERE_GROUND.getHex(),
+            1,
+        );
 
         this.sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
         this.applySettings(options);
@@ -167,7 +180,7 @@ export class DayNightCycle {
         this.sunLight.shadow.camera.bottom = -shadowExtent;
         this.sunLight.shadow.camera.updateProjectionMatrix();
         this.sunLight.shadow.bias = -0.00008;
-        this.sunLight.shadow.normalBias = 0.25;
+        this.sunLight.shadow.normalBias = 0.14;
 
         this.moonLight = new THREE.DirectionalLight(0x9fb7ff, 0.25);
         this.moonLight.castShadow = false;
@@ -194,7 +207,7 @@ export class DayNightCycle {
             { key: 'moon', mesh: this.moonMesh, distanceKm: MOON_MEAN_DISTANCE_KM },
         ];
 
-        scene.add(this.ambientLight, this.sunLight, this.sunLight.target, this.moonLight, this.sunMesh, this.moonMesh);
+        scene.add(this.hemisphereLight, this.sunLight, this.sunLight.target, this.moonLight, this.sunMesh, this.moonMesh);
         this.update(0, new THREE.Vector3());
     }
 
@@ -245,11 +258,15 @@ export class DayNightCycle {
                 ? THREE.MathUtils.clamp(biomeWeights.sand, 0, 1) * Math.max(0, 1 - biomeWeights.town)
                 : 0;
             this.skyColor.copy(NIGHT_SKY).lerp(TWILIGHT_SKY, sunGlow).lerp(DAY_SKY, daylight);
-            this.colorScratch.copy(NIGHT_AMBIENT).lerp(TWILIGHT_AMBIENT, sunGlow).lerp(DAY_AMBIENT, daylight);
-            this.ambientLight.color.copy(this.colorScratch);
-            this.ambientLight.intensity = THREE.MathUtils.lerp(
-                THREE.MathUtils.lerp(0.35, 0.65, sunGlow),
-                1,
+            this.colorScratch.copy(NIGHT_HEMISPHERE_SKY).lerp(TWILIGHT_HEMISPHERE_SKY, sunGlow).lerp(DAY_HEMISPHERE_SKY, daylight);
+            this.groundScratch.copy(NIGHT_HEMISPHERE_GROUND).lerp(TWILIGHT_HEMISPHERE_GROUND, sunGlow).lerp(DAY_HEMISPHERE_GROUND, daylight);
+            this.hemisphereLight.color.copy(this.colorScratch);
+            this.hemisphereLight.groundColor.copy(this.groundScratch);
+            // Sky fill stays cooler and brighter than the warm ground bounce, so
+            // low sun angles still read uphill surfaces without flattening them.
+            this.hemisphereLight.intensity = THREE.MathUtils.lerp(
+                THREE.MathUtils.lerp(0.35, 0.55, sunGlow),
+                0.75,
                 daylight,
             );
 
@@ -262,10 +279,27 @@ export class DayNightCycle {
             ) * THREE.MathUtils.lerp(1, SAND_SUN_INTENSITY_MULTIPLIER, sandStrength);
             this.sunMesh.material.color.copy(SUN_DISC_COLOR);
             if (sandStrength > 0) this.sunMesh.material.color.lerp(SAND_SUN_DISC, sandStrength);
+            // The shadow cast direction keeps a minimum elevation while the sun
+            // disc and phase math stay on the true horizon-to-horizon arc.
+            if (this.directionScratch.y < MIN_SHADOW_ELEVATION) {
+                const horizontal = Math.hypot(this.directionScratch.x, this.directionScratch.z);
+                if (horizontal > 1e-5) {
+                    const horizontalScale = Math.sqrt(1 - MIN_SHADOW_ELEVATION * MIN_SHADOW_ELEVATION) / horizontal;
+                    this.shadowDirectionScratch.set(
+                        this.directionScratch.x * horizontalScale,
+                        MIN_SHADOW_ELEVATION,
+                        this.directionScratch.z * horizontalScale,
+                    );
+                } else {
+                    this.shadowDirectionScratch.copy(this.directionScratch);
+                }
+            } else {
+                this.shadowDirectionScratch.copy(this.directionScratch);
+            }
             // Snap in the light's plane, not world X/Z, to keep camera motion
             // from sliding the shadow texel grid over stationary surfaces.
-            this.shadowRight.set(0, 1, 0).cross(this.directionScratch).normalize();
-            this.shadowUp.crossVectors(this.directionScratch, this.shadowRight);
+            this.shadowRight.set(0, 1, 0).cross(this.shadowDirectionScratch).normalize();
+            this.shadowUp.crossVectors(this.shadowDirectionScratch, this.shadowRight);
             this.shadowCenter.copy(observerPosition);
             this.shadowCenter.y = Math.max(MAX_PILLAR_HEIGHT * 0.25, observerPosition.y);
             const texel = SUN_SHADOW_EXTENT * 2 / this.sunLight.shadow.mapSize.x;
@@ -274,7 +308,7 @@ export class DayNightCycle {
             this.shadowCenter.addScaledVector(this.shadowRight, Math.round(right / texel) * texel - right);
             this.shadowCenter.addScaledVector(this.shadowUp, Math.round(up / texel) * texel - up);
             this.sunLight.target.position.copy(this.shadowCenter);
-            this.sunLight.position.copy(this.shadowCenter).addScaledVector(this.directionScratch, SUN_SHADOW_DISTANCE);
+            this.sunLight.position.copy(this.shadowCenter).addScaledVector(this.shadowDirectionScratch, SUN_SHADOW_DISTANCE);
             this.sunLight.visible = true;
             this.sunMesh.position.copy(observerPosition).addScaledVector(this.directionScratch, CELESTIAL_SKY_DISTANCE);
             this.sunMesh.visible = true;
@@ -287,9 +321,11 @@ export class DayNightCycle {
         } else {
             const moonlight = smoothstep(-CELESTIAL_HORIZON_DIP, 0.7, y);
             this.skyColor.copy(NIGHT_SKY).lerp(MOONLIT_SKY, moonlight * 0.45);
-            this.colorScratch.copy(NIGHT_AMBIENT);
-            this.ambientLight.color.copy(this.colorScratch);
-            this.ambientLight.intensity = 0.35 + moonlight * 0.15;
+            this.colorScratch.copy(NIGHT_HEMISPHERE_SKY);
+            this.groundScratch.copy(NIGHT_HEMISPHERE_GROUND);
+            this.hemisphereLight.color.copy(this.colorScratch);
+            this.hemisphereLight.groundColor.copy(this.groundScratch);
+            this.hemisphereLight.intensity = 0.35 + moonlight * 0.15;
 
             this.moonLight.intensity = moonlight * 0.38;
             this.moonLight.position.copy(this.directionScratch).multiplyScalar(lightDistance);
@@ -316,11 +352,12 @@ export class DayNightCycle {
         // The helper fades out at the town; the phase scale keeps the deep night
         // sky from washing out while regions retain their identity.
         this.skyColor.lerp(tint.color, strength);
-        this.ambientLight.color.lerp(tint.color, strength * 0.18);
+        this.hemisphereLight.color.lerp(tint.color, strength * 0.18);
     }
 
     dispose(): void {
-        this.scene.remove(this.ambientLight, this.sunLight, this.sunLight.target, this.moonLight, this.sunMesh, this.moonMesh);
+        this.scene.remove(this.hemisphereLight, this.sunLight, this.sunLight.target, this.moonLight, this.sunMesh, this.moonMesh);
+        this.hemisphereLight.dispose();
         this.sunLight.shadow.dispose();
         this.celestialGeometry.dispose();
         this.sunMesh.material.dispose();

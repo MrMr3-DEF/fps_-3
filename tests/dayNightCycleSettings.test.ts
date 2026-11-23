@@ -24,7 +24,7 @@ test('day/night shadow settings can be applied without recreating the scene', ()
 test('sun shadows follow the observer and cover nearby ground and tall casters', () => {
     const scene = new THREE.Scene();
     const cycle = new DayNightCycle(scene, { shadows: true, shadowMapSize: 1024 });
-    for (const fraction of [.07, .25, .5, .75, .93]) {
+    for (const fraction of [.005, .07, .25, .5, .75, .93, .995]) {
         const elapsed = fraction * DAY_DURATION_SECONDS;
         const observer = new THREE.Vector3(870, 2, -820);
         cycle.synchronizeElapsedSeconds(elapsed, true);

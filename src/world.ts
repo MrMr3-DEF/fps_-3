@@ -33,6 +33,7 @@ import { obstacleData, targetData } from './userDataTypes.js';
 import { GothGirlfriend } from './gothGirlfriend.js';
 import { createGothHouseDecor } from './gothHouse.js';
 import { createTownBoxes, generateTownLayout, overlapsTown, type TownMaterial } from './town.js';
+import { installSurfaceDetailShader, type SurfaceDetailProfile } from './surfaceDetail.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const obstacleHash = new SpatialHash<THREE.Object3D>(32);
@@ -984,12 +985,25 @@ function createTown(): void {
         plaster0: 0xd5bd93, plaster1: 0xb9c2b2, plaster2: 0xc6997c, water: 0x2a9ab5,
         gothStone: 0x36313f, gothTrim: 0x797180, gothRoof: 0x34243f,
     };
+    // Worn stone, roof and wood surfaces keep some sheen so sunrise and sundown
+    // grazing light catches ridges while mortar and grooves stay matte.
+    const roughness: Record<TownMaterial, number> = {
+        stone: 0.86, trim: 0.86, roof: 0.82, door: 0.82, window: 0.35,
+        road: 0.86, plaza: 0.86, plaster0: 0.90, plaster1: 0.90, plaster2: 0.90,
+        water: 0.2, gothStone: 0.86, gothTrim: 0.86, gothRoof: 0.82,
+    };
+    const profiles: Record<TownMaterial, SurfaceDetailProfile> = {
+        stone: 'stone', trim: 'trim', roof: 'roof', door: 'door', window: 'window',
+        road: 'road', plaza: 'plaza', plaster0: 'plaster', plaster1: 'plaster', plaster2: 'plaster',
+        water: 'water', gothStone: 'gothStone', gothTrim: 'gothTrim', gothRoof: 'gothRoof',
+    };
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const colliderMaterial = new THREE.MeshBasicMaterial();
     const dummy = new THREE.Object3D();
     for (const materialName of Object.keys(colors) as TownMaterial[]) {
         const parts = boxes.filter(box => box.material === materialName);
-        const material = new THREE.MeshStandardMaterial({ color: colors[materialName], roughness: materialName === 'water' ? 0.2 : 0.95 });
+        const material = new THREE.MeshStandardMaterial({ color: colors[materialName], roughness: roughness[materialName] });
+        installSurfaceDetailShader(material, profiles[materialName]);
         // Ground must remain present like the grass floor, even when distant
         // buildings are hidden. Culling these tiles would expose the grass hole.
         const ground = materialName === 'road' || materialName === 'plaza';
