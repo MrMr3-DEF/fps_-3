@@ -186,3 +186,37 @@ test('the drawn launcher stays renderable after first being culled in its hidden
         }
     } finally { avatar.dispose(); }
 });
+
+test('first-person katana stays smoothly bounded during locomotion and restores its physical pose', async () => {
+    await loadCyborgTestAssets();
+    const avatar = new CyborgAvatar(0x44aacc), shell = new THREE.Group();
+    shell.add(avatar.root);
+    avatar.root.scale.setScalar(CYBORG_SCALE);
+    avatar.root.rotation.y = Math.PI;
+    avatar.root.position.y = PLAYER_BODY_CAMERA_OFFSET - PLAYER_HEIGHT;
+    avatar.setFirstPerson(true);
+    const frame = new FirstPersonReloadFrame();
+    const camera = new THREE.PerspectiveCamera(75, 16/9, .1, 1500);
+    const tip = new THREE.Vector3(), reference = new THREE.Vector3(), physical = new THREE.Vector3();
+    try {
+        for (const [i, body] of ['Idle.Armed', 'Run.Forward', 'Run.Left', 'Run.Right', 'Jump.Fall', 'Hover.Hold'].entries()) {
+            const pitch = i % 2 ? .55 : -.4;
+            camera.position.set(i * 3, PLAYER_HEIGHT, -i * 5);
+            camera.rotation.set(pitch, i * .7, 0, 'YXZ');
+            camera.updateMatrixWorld(true);
+            shell.position.copy(camera.position).y -= PLAYER_BODY_CAMERA_OFFSET;
+            shell.rotation.y = i * .7;
+            const pose = { body, bodyTime: .15 + i * .07, weapon: 'KATANA', action: 'Ready', actionTime: 0, pitch };
+            avatar.pose(pose);
+            avatar.tip.getWorldPosition(physical);
+            frame.begin(avatar, camera, pose, 1/60);
+            assert.equal(avatar.root.visible, false, 'katana renders in the foreground pass outside world motion blur');
+            avatar.tip.getWorldPosition(tip).applyMatrix4(frame.camera.matrixWorldInverse);
+            if (i === 0) reference.copy(tip);
+            assert.ok(tip.distanceTo(reference) < .05, `katana blade jumped during ${body}: ${tip.distanceTo(reference)}`);
+            frame.restore();
+            assert.equal(avatar.root.visible, true);
+            assert.ok(avatar.tip.getWorldPosition(tip).distanceTo(physical) < 1e-8, 'physical blade pose restored');
+        }
+    } finally { frame.clear(); avatar.dispose(); }
+});

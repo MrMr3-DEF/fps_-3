@@ -112,15 +112,6 @@ export class FirstPersonReloadFrame {
 
     begin(rig: CyborgAvatar, worldCamera: THREE.PerspectiveCamera, pose: CyborgPose, delta: number): void {
         this.restore();
-        if (pose.weapon === 'KATANA') {
-            // The blade and its charged trail share the physical pose. Its launcher
-            // and cable use that same world aperture while the sword is equipped.
-            this.clear();
-            worldCamera.updateWorldMatrix(true,false);
-            this.sleeves[0].fit(rig.wrists[0],-1,worldCamera);
-            this.sleeves[1].fit(rig.wrists[1],1,worldCamera);
-            return;
-        }
         if (this.displayed !== rig) this.clear();
         const parent = rig.root.parent;
         if (!parent) return;
@@ -146,8 +137,15 @@ export class FirstPersonReloadFrame {
         const ease = 1 - Math.exp(-14*dt);
         this.sway.x += (.010*CYBORG_SCALE*run*Math.sin(phase)-this.sway.x)*ease;
         this.sway.y += (.0076*CYBORG_SCALE*run*Math.cos(2*phase)-this.sway.y)*ease;
-        this.position.set(this.sway.x, -PLAYER_HEIGHT + .135*CYBORG_SCALE + this.sway.y, -.337*CYBORG_SCALE)
-            .applyQuaternion(camera.quaternion).add(camera.position);
+        // Keep the katana at its authored eye-relative reach so swings stay
+        // aligned with the world slash arc, while still isolating it from
+        // full-body locomotion twist and depth-based camera motion blur.
+        const isKatana = pose.weapon === 'KATANA';
+        this.position.set(
+            this.sway.x,
+            -PLAYER_HEIGHT + (isKatana ? 0 : .135 * CYBORG_SCALE) + this.sway.y,
+            isKatana ? 0 : -.337 * CYBORG_SCALE,
+        ).applyQuaternion(camera.quaternion).add(camera.position);
         rig.root.position.copy(parent.worldToLocal(this.position));
         parent.getWorldQuaternion(this.parentRotation);
         rig.root.quaternion.copy(this.parentRotation).invert().multiply(camera.quaternion).multiply(faceForward);
