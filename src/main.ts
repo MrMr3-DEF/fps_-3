@@ -453,6 +453,13 @@ const joinRoomChallenge = new RoomAccessChallenge('join-room');
 let fpsFrames = 0;
 let fpsLastTime = performance.now();
 
+// Loading and pause overlays stop the loop; restart the sample window so the
+// next reading measures play frames instead of idle wall time.
+function resetFpsCounters(): void {
+    fpsFrames = 0;
+    fpsLastTime = performance.now();
+}
+
 function validateRoomCode(code: string): string | null {
     if (code.length !== ROOM_CODE_LENGTH) {
         return `Code must be ${ROOM_CODE_LENGTH} characters long!`;
@@ -646,13 +653,15 @@ function setupMenuListeners(): void {
         UI.btnSettingsApply.addEventListener('click', (e) => {
             e.stopPropagation();
             applyPendingSettings();
-            renderPausedSettingsPreview();
         });
     }
 
     UI.btnSettingsDiscard?.addEventListener('click', (e) => {
         e.stopPropagation();
         resetPendingSettings();
+        // The preview mutates the live renderer/world, so restore the committed
+        // settings and repaint even though the draft is already discarded.
+        renderPausedSettingsPreview();
     });
 
     if (UI.btnMpBack) {
@@ -1123,6 +1132,7 @@ function createGameRuntime(): void {
     setupGameSystems();
     applyLiveSettings();
     state.prevTime = performance.now();
+    resetFpsCounters();
 }
 
 interface DisposeGameRuntimeOptions {
@@ -1315,6 +1325,7 @@ async function loadPreparedWorld(
     }, loadingMode);
     // No simulation ran during preparation; discard that wall time before play.
     state.prevTime = performance.now();
+    resetFpsCounters();
 }
 
 async function startOfflineGame(): Promise<void> {
@@ -1661,6 +1672,9 @@ function applyPendingSettings(): void {
     saveUserSettings();
     applyLiveSettings();
     syncSettingsControls();
+    // Apply is also reached from the mobile-controls editor; repaint the paused
+    // preview so render distance and lava glow always match the committed values.
+    renderPausedSettingsPreview();
     if (userSettings.downloadWebLLMImmediately) gothChat?.preload();
     else gothChat?.reset({ preserveLoadedModel: false });
 }
@@ -2020,6 +2034,7 @@ function init(): void {
         if (UI.btnPauseLeave) UI.btnPauseLeave.innerText = 'Leave Lobby';
     });
     onInputStarted(() => {
+        resetFpsCounters();
         atmosphere?.resetHistory();
         if (state.matchEnded) { endInput(); return; }
         applyCinematicMode(cinematicMode);
@@ -2427,7 +2442,12 @@ function animate(): void {
     }
 
     fpsFrames++;
-    if (time >= fpsLastTime + 1000) {
+    if (time - fpsLastTime > 2000) {
+        // A pause or hidden tab leaves a long gap; start a fresh window instead
+        // of reporting a bogus idle-averaged reading.
+        fpsFrames = 0;
+        fpsLastTime = time;
+    } else if (time >= fpsLastTime + 1000) {
         if (userSettings.showFps) {
             setFpsText(`FPS: ${Math.round((fpsFrames * 1000) / (time - fpsLastTime))}`);
         }
@@ -2783,8 +2803,11 @@ export function updateWorldBorderOverlay(visible = currentHudPresentation().bord
         const distanceFactor = Math.max(0, Math.min(1.0, (BORDER_WARN_THRESHOLD - minDist) / BORDER_WARN_THRESHOLD));
         
         if (minDist <= BORDER_PULSE_DISTANCE) {
-            const time = performance.now() / 1000;
-            const pulse = 0.6 + 0.25 * Math.sin(time * 6);
+            // Photosensitivity and reduced-motion users get a steady warning
+            // instead of a flashing border.
+            const pulse = userSettings.photosensitivityMode || reducedHeadMotion.matches
+                ? 0.75
+                : 0.6 + 0.25 * Math.sin(performance.now() / 1000 * 6);
             UI.worldBorderOverlay.style.opacity = pulse.toString();
         } else {
             UI.worldBorderOverlay.style.opacity = (distanceFactor * 0.45).toString();

@@ -689,7 +689,7 @@ export class SmartGogglesHud {
                         0,
                         'anomaly',
                         CORRUPTED_IDENTIFIER_FRAMES[
-                            this.reducedMotion ? 0 : Math.floor(now / 72) % CORRUPTED_IDENTIFIER_FRAMES.length
+                            this.reducedMotion || userSettings.photosensitivityMode ? 0 : Math.floor(now / 72) % CORRUPTED_IDENTIFIER_FRAMES.length
                         ],
                         projectionBounds,
                         _bodyCenter,
@@ -878,7 +878,7 @@ export class SmartGogglesHud {
                 ? ''
                 : variant === 'anomaly'
                     ? CORRUPTED_HEALTH_FRAMES[
-                        this.reducedMotion ? 0 : Math.floor(now / 72) % CORRUPTED_HEALTH_FRAMES.length
+                        this.reducedMotion || userSettings.photosensitivityMode ? 0 : Math.floor(now / 72) % CORRUPTED_HEALTH_FRAMES.length
                     ]
                     : `HEALTH: ${Math.max(0, hp)} / ${Math.max(0, maxHp)}`;
         }

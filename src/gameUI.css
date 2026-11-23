@@ -1373,6 +1373,20 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     }
 }
 
+/* Photosensitivity Mode must match the reduced-motion goggles treatment even
+   when the OS preference is not set. */
+#goggles-scope.is-photosensitivity-mode .goggles-target-lock.is-out-of-range.is-active,
+#goggles-scope.is-photosensitivity-mode .goggles-target-lock.is-anomalous.is-active,
+#goggles-scope.is-photosensitivity-mode .goggles-target-fact.is-corrupted,
+#goggles-scope.is-photosensitivity-mode .goggles-target-identifier.is-corrupted,
+#goggles-scope.is-photosensitivity-mode .goggles-target-lock.is-mecha-hidden.is-active {
+    animation: none;
+}
+
+#goggles-scope.is-photosensitivity-mode .goggles-target-lock.is-eliminated {
+    animation-duration: 1ms;
+}
+
 .goggles-dot {
     position: absolute;
     top: 50%;
@@ -1475,6 +1489,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .settings-page select { padding: 9px; border: 1px solid #cbd8e1; border-radius: 4px; background: white; color: #233c50; font: inherit; width: 100%; }
 .settings-page input:focus-visible, .settings-page select:focus-visible { outline: 2px solid #087da8; outline-offset: 4px; }
 .settings-page input:disabled { opacity: .35; }
+.settings-page select:disabled { opacity: .35; cursor: not-allowed; }
 .settings-page input[type="color"] { width: 60px; height: 34px; cursor: pointer; }
 .keybind-list { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; margin-bottom: 22px; }
 .keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid #e3eaf0; color: #425d70; font-size: 14px; }
