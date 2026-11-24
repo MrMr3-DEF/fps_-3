@@ -60,7 +60,7 @@ function infantryMelee(range: number, engage: number, fistRadius: number) {
 }
 
 export const INFANTRY = {
-    base: { ...infantrySize(5, 2, .95, .8), hp: 20, damage: 1, speed: 6, range: INFANTRY_RANGE,
+    base: { ...infantrySize(5, 2, .95, .8), hp: 20, damage: 2, speed: 6, range: INFANTRY_RANGE,
         engage: INFANTRY_RANGE, interval: 3, move: 'Walk', attack: 'Fire', contact: 0, color: 0xd5a374 },
     fast: { ...infantrySize(4, 1.85, .8, .6), ...infantryMelee(3.57, 1.84, 1.51), hp: 10, damage: 2,
         speed: 11, interval: 1.2, move: 'Run', attack: 'LightHit', contact: 4 / 24, color: 0xd29a6c },

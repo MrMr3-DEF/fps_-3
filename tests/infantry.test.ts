@@ -21,9 +21,9 @@ const walls = createTownBoxes(generateTownLayout(seed)).filter(part => part.kind
     return { object, min: object.position.clone().sub(half), max: object.position.clone().add(half) };
 });
 
-async function arena(events: Partial<InfantryEnvironment> = {}, authoritative = true) {
+async function arena(events: Partial<InfantryEnvironment> = {}, authoritative = true, obstacles: THREE.Object3D[] = []) {
     const scene = new THREE.Scene(), targets: THREE.Group[] = [];
-    const defense = new InfantryDefense(scene, targets, seed, walls.map(wall => wall.object), [], {
+    const defense = new InfantryDefense(scene, targets, seed, [...walls.map(wall => wall.object), ...obstacles], [], {
         visible: () => false, attack() {}, wallLost() {},
         trace(start, end) {
             let first = Infinity, obstacle: THREE.Object3D | undefined;
@@ -175,6 +175,25 @@ test('living infantry never overlap while converging on one target', async () =>
             defense.update(.05, frame * .05, [player]);
             assertSeparated(defense.snapshot().bots, `chase frame ${frame}`);
         }
+    } finally { defense.dispose(); }
+});
+
+test('fast robots route around an obstacle to a visible player instead of the wall', async () => {
+    const pillar = new THREE.Object3D();
+    pillar.position.set(520, 6, 500);
+    pillar.userData = { height: 12, halfH: 6, halfW: 6, halfD: 6 };
+    // The pillar blocks the navigation grid but not the line of sight trace, so
+    // the chase must path around cover rather than lose the player.
+    const { defense } = await arena({}, true, [pillar]);
+    const player: InfantryPlayer = { id: 'Covered', lifeId: 1, yaw: 0, position: new THREE.Vector3(540, 1.65, 500) };
+    try {
+        defense.receive({ sequence: 1, day: 1, wallHp: TOWN_WALL_HP,
+            bots: [{ ...pose(0, 'fast', 500, 500), revision: 2 }] });
+        for (let frame = 1; frame <= 240; frame++) defense.update(.05, frame * .05, [player]);
+        const [bot] = defense.snapshot().bots;
+        const remaining = Math.hypot(bot.position.x - player.position.x, bot.position.z - player.position.z);
+        assert.ok(bot.position.x > 530, `bot stayed behind the obstacle at x=${bot.position.x.toFixed(1)}`);
+        assert.ok(remaining < 5, `bot stopped ${remaining.toFixed(1)} units from the player`);
     } finally { defense.dispose(); }
 });
 

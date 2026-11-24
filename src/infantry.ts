@@ -65,6 +65,7 @@ interface Bot {
     pose?: InfantryPose;
     route?: MechaRoute;
     waypoint: number;
+    chase?: { points: NavigationPoint[]; waypoint: number; targetX: number; targetZ: number };
     cooldown: number;
     victim?: Pick<InfantryPlayer, 'id' | 'lifeId'> & { mountedRevision?: number };
     wall?: { point: THREE.Vector3; heading: number };
@@ -320,6 +321,9 @@ export class InfantryDefense {
         }
         if (pose.hp <= 0 && targetData(bot.group).hp > 0) cancelHookForTarget(bot.group);
         bot.pose = { ...pose, position: { ...pose.position } };
+        // Spawned and replicated poses invalidate any route computed from an
+        // earlier position.
+        bot.chase = undefined;
         targetData(bot.group).hp = pose.hp;
     }
 
@@ -437,6 +441,7 @@ export class InfantryDefense {
             const reachOrigin = pose.kind === 'big' ? this.step.copy(origin).setY(stats.height * INFANTRY.big.reachHeight) : origin;
             const inReach = player ? Boolean(target && reachOrigin.distanceToSquared(target) <= stats.engage ** 2) : this.wallInReach(bot, stats.range);
             if (target && inReach) {
+                bot.chase = undefined;
                 const dx = target.x - origin.x, dz = target.z - origin.z;
                 if (Math.hypot(dx, dz) > 1e-6 && this.beginTurn(bot, Math.atan2(dx, dz), INFANTRY_AIM_ANGLE)) {
                     this.present(bot);
@@ -456,7 +461,13 @@ export class InfantryDefense {
                     bot.cooldown = stats.interval;
                     if (stats.contact === 0) this.strike(bot, players, 0);
                 } else this.setPhase(bot, 'idle');
+            } else if (player && pose.kind !== 'base') {
+                if (!this.chasePlayer(bot, player, delta)) {
+                    bot.chase = undefined;
+                    this.followWallRoute(bot, delta);
+                }
             } else if (!player || !this.move(bot, player.position, delta, true)) {
+                bot.chase = undefined;
                 this.followWallRoute(bot, delta);
             }
             this.advanceLocomotionClock(bot, delta);
@@ -469,6 +480,38 @@ export class InfantryDefense {
         if (pose.phase === 'idle' || pose.phase === 'moving') {
             pose.time = (pose.time + delta) % bot.visual!.actions[pose.phase].getClip().duration;
         }
+    }
+
+    /** Fast and Big robots close on a visible player along the shortest clear
+     * grid route; the seeded wall route resumes only when chasing cannot step. */
+    private chasePlayer(bot: Bot, player: InfantryPlayer, delta: number): boolean {
+        const position = bot.group.position;
+        // Losing the player mid-chase must rebuild the wall route from here
+        // rather than walk back to a waypoint chosen before the chase began.
+        bot.route = undefined;
+        if (this.nav!.segmentClear(position, player.position)) {
+            bot.chase = undefined;
+            return this.move(bot, player.position, delta, true);
+        }
+        let chase = bot.chase;
+        if (chase && (!chase.points[chase.waypoint] ||
+            Math.hypot(player.position.x - chase.targetX, player.position.z - chase.targetZ) > 4 ||
+            !this.nav!.segmentClear(position, chase.points[chase.waypoint]))) {
+            bot.chase = chase = undefined;
+        }
+        if (!chase) {
+            const points = this.nav!.routeTo(position, player.position, 12);
+            if (!points?.length) return false;
+            chase = bot.chase = { points, waypoint: 0, targetX: player.position.x, targetZ: player.position.z };
+        }
+        while (chase.waypoint < chase.points.length &&
+            Math.hypot(chase.points[chase.waypoint].x - position.x, chase.points[chase.waypoint].z - position.z) < .015) chase.waypoint++;
+        if (chase.waypoint >= chase.points.length) {
+            bot.chase = undefined;
+            return false;
+        }
+        const waypoint = chase.points[chase.waypoint];
+        return this.move(bot, waypoint, delta, false);
     }
 
     private followWallRoute(bot: Bot, delta: number): void {
@@ -723,7 +766,7 @@ export class InfantryDefense {
         bot.group.removeFromParent();
         bot.group.visible = targetData(bot.group).bodyMesh.visible = false;
         targetData(bot.group).hp = 0;
-        bot.pose = bot.route = bot.wall = undefined;
+        bot.pose = bot.route = bot.wall = bot.chase = undefined;
     }
 
     dispose(): void {

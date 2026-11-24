@@ -17,6 +17,10 @@ export class MechaNavigation {
     private readonly boxes: NavigationBox[];
     private readonly solidBoxes: NavigationBox[];
     private readonly radius: number;
+    private searchCost?: Float64Array;
+    private searchParent?: Int32Array;
+    private searchSeen?: Uint8Array;
+    private searchClosed?: Uint8Array;
 
     constructor(obstacles: readonly NavigationBox[], lava: readonly NavigationBox[], radius: number, punchReach: number,
         halfSize = MAP_HALF_SIZE, actorHeight = MECHA_HEIGHT) {
@@ -115,6 +119,127 @@ export class MechaNavigation {
         return variationSeed === undefined ? this.shortestRoute(raw, heading, maxShortcutCells)
             : this.variedRoute(raw, heading, maxShortcutCells, variationSeed);
     }
+    /** Shortest obstacle- and lava-clearing chain from a moving start to a goal.
+     * Chases reuse the shared grid but cannot reuse the wall reverse search, so
+     * a bounded A* keeps rerouting cheap enough to run while tracking a player. */
+    routeTo(start: NavigationPoint, goal: NavigationPoint, maxShortcutCells = Infinity): NavigationPoint[] | null {
+        if (this.segmentClear(start, goal)) return [{ x: goal.x, z: goal.z }];
+        const from = this.probeCell(start, true), to = this.probeCell(goal, false);
+        if (from < 0 || to < 0) return null;
+        const raw = this.searchRoute(from, to);
+        if (!raw) return null;
+        // Anchor smoothing at the true start so every returned segment is clear
+        // for the actual footprint, not only from the snapped grid cell.
+        const points = this.smoothRoute([start, ...raw], maxShortcutCells).slice(1);
+        if (!points.length) return null;
+        const last = points[points.length - 1];
+        if (this.segmentClear(last, goal)) points.push({ x: goal.x, z: goal.z });
+        return points;
+    }
+    /** A footprint beside an obstacle edge can round into a reserved cell.
+     * Probing nearby cells finds an unblocked grid anchor; the start must also
+     * have a clear segment to that cell, while a player standing near cover or
+     * in lava still attracts bots to the nearest reachable cell. */
+    private probeCell(point: NavigationPoint, fromStart: boolean): number {
+        for (const [dx, dz] of [[0, 0], [4, 0], [-4, 0], [0, 4], [0, -4], [4, 4], [4, -4], [-4, 4], [-4, -4]]) {
+            const index = this.index(point.x + dx, point.z + dz);
+            if (index < 0 || this.blocked[index]) continue;
+            if (fromStart && !this.segmentClear(point, this.point(index))) continue;
+            return index;
+        }
+        return -1;
+    }
+    private searchRoute(start: number, goal: number): NavigationPoint[] | null {
+        const size = this.size, capacity = this.blocked.length;
+        this.searchCost ??= new Float64Array(capacity);
+        this.searchParent ??= new Int32Array(capacity);
+        this.searchSeen ??= new Uint8Array(capacity);
+        this.searchClosed ??= new Uint8Array(capacity);
+        const cost = this.searchCost, parent = this.searchParent, seen = this.searchSeen, closed = this.searchClosed;
+        const touched: number[] = [], heap: number[] = [];
+        const goalX = goal % size, goalZ = Math.floor(goal / size);
+        const estimate = (index: number) => {
+            const dx = Math.abs(index % size - goalX), dz = Math.abs(Math.floor(index / size) - goalZ);
+            return Math.max(dx, dz) + (Math.SQRT2 - 1) * Math.min(dx, dz);
+        };
+        const prio = (index: number) => cost[index] + estimate(index);
+        const push = (index: number) => {
+            heap.push(index);
+            for (let child = heap.length - 1; child > 0;) {
+                const up = (child - 1) >> 1;
+                if (prio(heap[up]) <= prio(heap[child])) break;
+                [heap[up], heap[child]] = [heap[child], heap[up]];
+                child = up;
+            }
+        };
+        const pop = (): number => {
+            const first = heap[0], last = heap.pop()!;
+            if (!heap.length) return first;
+            heap[0] = last;
+            for (let node = 0;;) {
+                const left = node * 2 + 1, right = left + 1;
+                let best = node;
+                if (left < heap.length && prio(heap[left]) < prio(heap[best])) best = left;
+                if (right < heap.length && prio(heap[right]) < prio(heap[best])) best = right;
+                if (best === node) return first;
+                [heap[node], heap[best]] = [heap[best], heap[node]];
+                node = best;
+            }
+        };
+        // The scratch grids stay allocated across chases; reset only the cells
+        // this search touched so a blocked or bounded search leaves no state.
+        touched.push(start);
+        seen[start] = 1;
+        cost[start] = 0;
+        parent[start] = -1;
+        push(start);
+        let expanded = 0;
+        try {
+            while (heap.length) {
+                const index = pop();
+                if (closed[index]) continue;
+                closed[index] = 1;
+                if (index === goal) {
+                    const raw: NavigationPoint[] = [];
+                    for (let node = goal; node !== -1; node = parent[node]) raw.push(this.point(node));
+                    return raw.reverse();
+                }
+                if (++expanded > 4096) return null;
+                const x = index % size, z = Math.floor(index / size);
+                for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+                    if ((!dx && !dz) || x + dx < 0 || z + dz < 0 || x + dx >= size || z + dz >= size) continue;
+                    const neighbor = (z + dz) * size + x + dx;
+                    if (this.blocked[neighbor]) continue;
+                    if (dx && dz && (this.blocked[z * size + x + dx] || this.blocked[(z + dz) * size + x])) continue;
+                    const next = cost[index] + (dx && dz ? Math.SQRT2 : 1);
+                    if (seen[neighbor] && next >= cost[neighbor]) continue;
+                    if (!seen[neighbor]) { seen[neighbor] = 1; touched.push(neighbor); }
+                    cost[neighbor] = next;
+                    parent[neighbor] = index;
+                    push(neighbor);
+                }
+            }
+            return null;
+        } finally {
+            for (const index of touched) {
+                cost[index] = 0;
+                parent[index] = -1;
+                seen[index] = 0;
+                closed[index] = 0;
+            }
+        }
+    }
+    private smoothRoute(raw: readonly NavigationPoint[], maxShortcutCells: number): NavigationPoint[] {
+        const points = [raw[0]];
+        let anchor = 0;
+        while (anchor < raw.length - 1) {
+            let end = anchor + 1;
+            while (end + 1 < raw.length && end + 1 - anchor <= maxShortcutCells && this.segmentClear(raw[anchor], raw[end + 1])) end++;
+            points.push(raw[end]);
+            anchor = end;
+        }
+        return points;
+    }
     borderSpawn(seed: number, available: (point: NavigationPoint) => boolean = () => true, maxShortcutCells = Infinity,
         variationSeed?: number): MechaRoute {
         // A separate seed stream never consumes procedural-world randomness.
@@ -137,14 +262,7 @@ export class MechaNavigation {
         throw new Error('No reachable border spawn for Forgotten Mecha');
     }
     private shortestRoute(raw: NavigationPoint[], heading: number, maxShortcutCells: number): MechaRoute {
-        const points = [raw[0]];
-        let anchor = 0;
-        while (anchor < raw.length - 1) {
-            let end = anchor + 1;
-            while (end + 1 < raw.length && end + 1 - anchor <= maxShortcutCells && this.segmentClear(raw[anchor], raw[end + 1])) end++;
-            points.push(raw[end]);
-            anchor = end;
-        }
+        const points = this.smoothRoute(raw, maxShortcutCells);
         const goal = points[points.length - 1];
         points.push({ x: Math.abs(Math.sin(heading)) > 0.5 ? -Math.sin(heading) * this.punchDistance : goal.x,
             z: Math.abs(Math.cos(heading)) > 0.5 ? -Math.cos(heading) * this.punchDistance : goal.z });
