@@ -406,14 +406,18 @@ test('shutdown can synchronously clear the current host input without firing aga
     } finally { cleanup(a); }
 });
 
-test('a late boarding rejection cannot relocate a respawned life', async () => {
+test('a late boarding rejection cannot relocate a respawned life or trigger the exit-blocked warning', async () => {
     const a = await actor(); host(a, []); state.isHost = false;
-    let releases = 0;
-    setMechaPresentation({ impact() {}, release: () => releases++, blocked() {}, hit() {}, damage() {}, gameOver() {} });
+    let releases = 0, blocked = 0;
+    setMechaPresentation({ impact() {}, release: () => releases++, blocked: () => blocked++, hit() {}, damage() {}, gameOver() {} });
     try {
         const { rememberMechaApproach } = await import('../src/mechaNetwork.ts'); rememberMechaApproach(); state.lifeId = 1;
         const packet: MechaEventPacket = { type: 'mecha_event', sequence: 1, state: a.captureNetworkState(1), event: { kind: 'board_denied', peerId: 'host', lifeId: 0 } };
-        assert.ok(parseNetworkPacket(packet)); receiveMechaEvent(packet); assert.equal(releases, 0);
+        assert.ok(parseNetworkPacket(packet)); receiveMechaEvent(packet); assert.equal(releases, 0); assert.equal(blocked, 0);
+        // Even an active-life board denial must not display the exit-blocked warning.
+        state.lifeId = 0;
+        receiveMechaEvent({ ...packet, sequence: 2 });
+        assert.equal(blocked, 0);
     } finally { cleanup(a); }
 });
 

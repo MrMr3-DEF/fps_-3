@@ -45,11 +45,10 @@ let boardStart: { lifeId: number; position: THREE.Vector3; quaternion: THREE.Qua
 const commandSequences = new Map<string, number>();
 const commandRates = new Map<string, { input: PacketRate; board: PacketRate; exit: PacketRate }>();
 let boardSequence = -1;
-const approaches = new Map<string, THREE.Vector3>();
 const pendingDamage: { packet: MechaEventPacket; beamDraw: number; rendered: boolean; expiresAt: number }[] = [];
 const aimCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 const aimRotation = new THREE.Euler(0, 0, 0, 'YXZ');
-const seat = new THREE.Vector3(), ray = new THREE.Ray();
+const seat = new THREE.Vector3();
 const logicalAim = new THREE.Vector3(), aimPoint = new THREE.Vector3();
 const aimDimensions = { distance: MECHA_CAMERA_DISTANCE, height: MECHA_CAMERA_HEIGHT, shoulder: MECHA_CAMERA_SHOULDER };
 const aimObstacles: THREE.Object3D[] = [];
@@ -62,7 +61,7 @@ export function resetMechaNetwork(): void {
     lastPublish = lastInputSent = lastInputReceived = -Infinity; previousFingerprint = previousPhase = '';
     replica = input = null; boardStart = null; yaw = pitch = 0; helmet = exit = false;
     requestedWeapon = null;
-    commandSequences.clear(); commandRates.clear(); approaches.clear(); pendingDamage.length = 0; boardSequence = -1;
+    commandSequences.clear(); commandRates.clear(); pendingDamage.length = 0; boardSequence = -1;
 }
 export function captureMechaSnapshot(): MechaState | undefined {
     const actor = activeActor;
@@ -202,6 +201,7 @@ export function receiveMechaDenial(packet: MechaDeniedPacket): void {
             presentation?.release({ position, quaternion: boardStart.quaternion, viewPosition: boardStart.position });
             boardStart = null;
         }
+        return;
     }
     presentation?.blocked();
 }
@@ -235,7 +235,7 @@ function applyEvent(packet: MechaEventPacket): void {
             const position = boardStart.position.clone(); position.y -= PLAYER_BODY_CAMERA_OFFSET;
             presentation?.release({ position, quaternion: boardStart.quaternion, viewPosition: boardStart.position }); boardStart = null;
         }
-        presentation?.blocked(); return;
+        return;
     }
     if (event.kind === 'blocked') { presentation?.blocked(); return; }
     if (event.lifeId !== state.lifeId) return;
@@ -313,13 +313,7 @@ export function acceptMechaCommand(peerId: string, packet: MechaInputPacket | Me
     commandSequences.set(peerId, packet.sequence);
     if (packet.type === 'mecha_board') {
         const denied = () => { deny(peerId, packet.lifeId, 'board', packet.sequence); return false; };
-        if (actor.revision !== packet.revision) return denied();
-        actor.seatAnchor.getWorldPosition(seat);
-        const approach = approaches.get(peerId) ?? player.position;
-        // Only a recent, unobstructed arrival through the real opening grants
-        // ownership. Receiving a request never teleports a distant player.
-        ray.origin.copy(approach); ray.direction.subVectors(seat, approach).normalize();
-        if (!actor.canMount || player.position.distanceTo(seat) > 20 || !actor.cockpitHit(ray, 40)) return denied();
+        if (actor.revision !== packet.revision || !actor.canMount) return denied();
         actor.pilotPeerId = peerId; actor.pilotLifeId = packet.lifeId;
         actor.localPilotPresentation = peerId === state.peer?.id;
         const rotation = new THREE.Quaternion().setFromEuler(aimRotation.set(0, player.yaw ?? 0, 0));
@@ -359,7 +353,7 @@ export function syncRemoteMechaPilot(): void {
 }
 export function mechaPeerLeft(peerId: string): void {
     if (endingAuthority) { endingAuthority.removePeer(peerId); publish(true); }
-    approaches.delete(peerId); commandSequences.delete(peerId); commandRates.delete(peerId);
+    commandSequences.delete(peerId); commandRates.delete(peerId);
     if (state.isHost && activeActor?.pilotPeerId === peerId) { detachRemotePilot(peerId); activeActor.abandonPilot(); input = null; publish(true); }
 }
 export function announceMechaHit(peerId: string | null, killed: boolean, position: THREE.Vector3, direction: THREE.Vector3): void {
@@ -370,8 +364,6 @@ export function updateMechaNetwork(delta: number): void {
     actor.localPeerId = state.peer?.id ?? null;
     if (state.isHost && state.isPlaying && !state.matchEnded) {
         const players = port?.players() ?? [];
-        actor.seatAnchor.getWorldPosition(seat);
-        for (const p of players) if (p.peerId && p.position.distanceTo(seat) > 2 && p.position.distanceTo(seat) < 40) approaches.set(p.peerId, p.position.clone());
         if (actor.pilotPeerId && !players.some(p => p.peerId === actor.pilotPeerId && p.lifeId === actor.pilotLifeId && p.alive)) { actor.abandonPilot(); input = null; }
         const activeInput = input && performance.now() - lastInputReceived <= MECHA_NETWORK_INPUT_TIMEOUT_MS ? input : null;
         actor.setPilotInput(activeInput?.direction ?? 0, activeInput?.shield ?? false);
