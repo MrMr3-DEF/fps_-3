@@ -25,12 +25,15 @@ export interface DataConnectionLike {
 
 export interface PeerData {
     lifeId?: number;
+    lastUpdateSeq?: number;
     deathReported?: boolean;
     /** Verified lobby identity used by world labels and smart-goggles scans. */
     username: string;
     mesh: THREE.Group;
     targetPosition: THREE.Vector3;
     targetYaw: number;
+    targetPitch?: number;
+    currentPitch?: number;
     leftGun: THREE.Group;
     rightGunContainer: THREE.Group;
     pistolMesh: THREE.Group;

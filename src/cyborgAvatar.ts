@@ -317,6 +317,8 @@ export class CyborgAvatar {
     private accents: THREE.MeshStandardMaterial[] = [];
     private lights = new Map<string, ChargeLight>();
     private bodyMeshes: {mesh: THREE.SkinnedMesh; full: THREE.BufferGeometry; hands: THREE.BufferGeometry | null}[] = [];
+    private shadowMeshes: THREE.SkinnedMesh[] = [];
+    private castingShadows = true;
     private chest: THREE.Object3D;
     private holster: THREE.Object3D;
     private arm: THREE.Object3D;
@@ -344,6 +346,7 @@ export class CyborgAvatar {
             if (n instanceof THREE.Bone && n.name.startsWith('Burst')) this.bursts.push(n);
             if (!(n instanceof THREE.SkinnedMesh)) return;
             this.bodyMeshes.push({mesh:n, full:n.geometry, hands:armsOnly(n)});
+            this.shadowMeshes.push(n);
             n.castShadow = n.receiveShadow = true;
             const mat = n.material as THREE.MeshStandardMaterial;
             if (/^(Prop|grapple|Holster|Exhaust •)/i.test(mat.name)) excludeFromStablePeerEnvelope(n);
@@ -360,6 +363,7 @@ export class CyborgAvatar {
             excludeFromStablePeerEnvelope(model);
             model.traverse(n => {
                 if (!(n instanceof THREE.SkinnedMesh)) return;
+                this.shadowMeshes.push(n);
                 n.castShadow = n.receiveShadow = true;
                 const m = n.material as THREE.MeshStandardMaterial;
                 if (m.name.includes('energized glass')) this.lights.set(key, new ChargeLight(this.instanceMaterial(n, m), model));
@@ -492,6 +496,12 @@ export class CyborgAvatar {
         }
         this.lights.get(weapon)?.set(input.chargeStage ?? 4);
         this.lights.get('GRAPPLE')?.set(input.grappleChargeStage ?? 4);
+    }
+
+    setShadowCasting(enabled: boolean): void {
+        if (this.castingShadows === enabled) return;
+        this.castingShadows = enabled;
+        for (const mesh of this.shadowMeshes) mesh.castShadow = enabled;
     }
 
     dispose(): void {

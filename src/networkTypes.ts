@@ -40,6 +40,8 @@ export interface HoverKeysPacket {
 
 export interface UpdatePacket {
     type: 'update';
+    /** Monotonic per-life sequence number used to discard out-of-order UDP/SCTP updates. */
+    seq?: number;
     bodyColor?: number;
     lifeId: number;
     senderPeerId?: string;
@@ -343,7 +345,8 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
             return value as unknown as MeleeCommand | MeleeEvent;
         }
         case 'update':
-            if (!(value.bodyColor === undefined || isInteger(value.bodyColor, 0, 0xffffff)) || !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isUsername(value.username) || !isVec3(value.pos) ||
+            if (!(value.seq === undefined || isInteger(value.seq, 0, Number.MAX_SAFE_INTEGER)) ||
+                !(value.bodyColor === undefined || isInteger(value.bodyColor, 0, 0xffffff)) || !isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) || !isUsername(value.username) || !isVec3(value.pos) ||
                 !isFiniteNumber(value.yaw, -Math.PI * 4, Math.PI * 4) ||
                 !isFiniteNumber(value.pitch, -Math.PI, Math.PI) ||
                 !isWeaponName(value.activeWeapon) ||
@@ -480,7 +483,7 @@ const packetFields = {
     melee_command: fields('action', 'sequence', 'lifeId'),
     melee_event: { ...fields('action', 'sequence', 'lifeId', 'charged', 'yaw', 'pitch'), origin: vec },
     melee_hit: { ...fields('sequence', 'lifeId', 'target', 'execution'), contact: vec },
-    update: { ...fields('bodyColor', 'lifeId', 'username', 'yaw', 'pitch', 'activeWeapon', 'switchState', 'nextWeapon',
+    update: { ...fields('seq', 'bodyColor', 'lifeId', 'username', 'yaw', 'pitch', 'activeWeapon', 'switchState', 'nextWeapon',
         'isMouseDown', 'isDead', 'hookState', 'isHovering', 'hp', 'maxHp', 'dayNightElapsedSeconds',
         'grounded','movingHook','scoped','inspectTime','switchTime'),
         pos: vec, hookPos: vec, hoverKeys: fields('w', 's', 'a', 'd') },

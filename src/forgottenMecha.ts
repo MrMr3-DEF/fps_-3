@@ -1005,29 +1005,46 @@ export class ForgottenMecha {
             head: { phase: h.phase, fold: h.fold, wantedOpen: h.wantedOpen, eyeBlend: h.eyeBlend, blackout: h.blackout, loadingProgress: h.loadingProgress, hudOpacity: h.hudOpacity, revealProgress: h.revealProgress },
             combat: this.combat.captureNetworkState(), rockets: this.pilot.rockets.captureNetworkState(), matchEnded };
     }
+    private replicaCollidersDirty = true;
     /** Replicas evaluate no AI, collision damage, cooldowns or ownership changes.
      * Interpolate the fitted pose so armor and observer visuals stay together. */
     applyNetworkState(s: MechaState, alpha = 1): void {
         if (!this.ready || this.disposed || s.boneCount !== this.bones.size) return;
         if (s.mode === 'destroying' || s.mode === 'destroyed') this.headEffects.dispose();
+        let moved = this.replicaCollidersDirty || this.mode !== s.mode || this.revision !== s.revision;
         this.mode = s.mode; this.revision = s.revision; this.hp = s.hp; this.elapsed = s.elapsed; this.recoveringExit = s.recoveringExit;
         this.pilotPeerId = s.pilotPeerId; this.pilotLifeId = s.pilotLifeId;
-        this.group.position.lerp(this.replicaPosition.set(s.position.x, s.position.y, s.position.z), alpha);
-        this.group.rotation.y += Math.atan2(Math.sin(s.heading - this.group.rotation.y), Math.cos(s.heading - this.group.rotation.y)) * alpha;
+        this.replicaPosition.set(s.position.x, s.position.y, s.position.z);
+        if (!moved && this.group.position.distanceToSquared(this.replicaPosition) > 1e-8) moved = true;
+        this.group.position.lerp(this.replicaPosition, alpha);
+        const headingStep = Math.atan2(Math.sin(s.heading - this.group.rotation.y), Math.cos(s.heading - this.group.rotation.y));
+        if (!moved && Math.abs(headingStep) > 1e-5) moved = true;
+        this.group.rotation.y += headingStep * alpha;
         this.pilot.yaw = s.pilotYaw; this.pilot.pitch = s.pilotPitch; this.pilot.cooldown = s.cooldown;
         this.pilotWeapon = s.pilotWeapon; this.stomp.active = s.stompActive; this.stomp.elapsed = s.stompElapsed; this.stomp.cooldown = s.stompCooldown; this.fireTime = s.rocketTime; this.releasePending = false;
-        let index = 0;
+        let index = 0, poseCursor = 0;
         for (const bone of this.bones.values()) {
-            const i = index++, pose = s.bones.find(p => p[0] === i), rest = this.networkRest[i];
+            const i = index++, rest = this.networkRest[i];
+            let pose: number[] | undefined;
+            while (poseCursor < s.bones.length && s.bones[poseCursor][0] < i) poseCursor++;
+            if (poseCursor < s.bones.length && s.bones[poseCursor][0] === i) pose = s.bones[poseCursor++];
+            else if (poseCursor > 0 && s.bones.length > 0 && s.bones[poseCursor - 1][0] > i) pose = s.bones.find(p => p[0] === i);
             this.replicaPosition.copy(rest.position); this.replicaQuaternion.copy(rest.quaternion);
             if (pose) { this.replicaPosition.fromArray(pose, 1); this.replicaQuaternion.fromArray(pose, 4); }
+            if (!moved && (bone.position.distanceToSquared(this.replicaPosition) > 1e-8 || bone.quaternion.angleTo(this.replicaQuaternion) > 1e-5)) moved = true;
             bone.position.lerp(this.replicaPosition, alpha); bone.quaternion.slerp(this.replicaQuaternion, alpha);
             this.replicaPosition.copy(rest.scale); if (pose) this.replicaPosition.fromArray(pose, 8);
+            if (!moved && bone.scale.distanceToSquared(this.replicaPosition) > 1e-8) moved = true;
             bone.scale.lerp(this.replicaPosition, alpha);
         }
         Object.assign(this.headView, s.head); this.combat.applyNetworkState(s.combat);
         this.pilot.rockets.applyNetworkState(s.rockets, alpha);
-        this.updateColliders(); this.updatePilotCamera(); this.updateEye();
+        // Box3.setFromObject(..., true) CPU-skins every mecha vertex; skip it once the replica pose settles.
+        if (moved) {
+            this.updateColliders();
+            this.replicaCollidersDirty = false;
+        }
+        this.updatePilotCamera(); this.updateEye();
         // Replicas have no private defeat/shutdown clocks or material history.
         if (this.eye) { this.eye.color.fromArray(s.eye); this.eye.emissive.fromArray(s.eye, 3); this.eye.emissiveIntensity = s.eye[6]; }
     }

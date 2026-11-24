@@ -1076,3 +1076,29 @@ test('host enforces grapple ownership, single-use fire attempts and timed magazi
         assert.equal(receipt().handling.pendingFire, null);
     } finally { disconnectMultiplayer(); state.scene=null; }
 });
+
+test('out-of-order sequenced update packets are rejected by host authority and remote presentation', async () => {
+    backend();
+    try {
+        await hostGame('Host', 'ABCDEFGH', 'create-room');
+        const host = Peer.latest;
+        const ticket = await registerTurnSession('ABCDEFGH', 'join-room', 'Alpha', 'Alpha');
+        const conn = new Connection('Alpha', { admissionToken: ticket.admissionToken });
+        host.emit('connection', conn);
+        await tick(); await tick();
+        startHostMatch();
+        state.scene = new THREE.Scene();
+
+        const base = update('Alpha');
+        stagePeer(conn, base);
+        const newer = { ...base, seq: 10, pos: { x: base.pos.x + 1, y: base.pos.y, z: base.pos.z } };
+        const older = { ...base, seq: 9, pos: { x: base.pos.x, y: base.pos.y, z: base.pos.z } };
+        conn.emit('data', newer);
+        assert.equal(state.peers.Alpha.targetPosition.x, newer.pos.x);
+        // A stale/reordered packet with lower seq must be dropped by host authority
+        // and must not pull the remote target position backward.
+        assert.equal(authorizeClientPacket('Alpha', older), null);
+        conn.emit('data', older);
+        assert.equal(state.peers.Alpha.targetPosition.x, newer.pos.x);
+    } finally { disconnectMultiplayer(); state.scene = null; }
+});
