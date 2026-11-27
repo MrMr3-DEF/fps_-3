@@ -213,13 +213,14 @@ export interface EnemyClass {
     hp: number;
     color: number;
     scale: number;
+    points: number;
 }
 
 export const ENEMY_CLASSES: EnemyClass[] = [
-    { hp: 1, color: 0x00bfff, scale: 1.5 },
-    { hp: 3, color: 0x2ed573, scale: 3 },
-    { hp: 5, color: 0xffa500, scale: 4.5 },
-    { hp: 10, color: 0xff4757, scale: 6 }
+    { hp: 1, color: 0x00bfff, scale: 1.5, points: 1 },
+    { hp: 3, color: 0x2ed573, scale: 3, points: 2 },
+    { hp: 5, color: 0xffa500, scale: 4.5, points: 3 },
+    { hp: 10, color: 0xff4757, scale: 6, points: 5 }
 ];
 
 // The crown must clear lintels even when the visor camera is below them.
@@ -277,7 +278,7 @@ export const NETWORK_TICK_MS = 33;
 export const MAX_PLAYERS = 5;
 export const MAX_PENDING_ROOM_CONNECTIONS = 2 * (MAX_PLAYERS - 1);
 // Peers must agree on body dimensions, muzzle limits and packet layouts.
-export const NETWORK_PROTOCOL_VERSION = 10;
+export const NETWORK_PROTOCOL_VERSION = 11;
 export const ROOM_PENDING_SESSION_MS = 90_000;
 export const MAX_SHOT_PELLET_INDEX = Math.max(...Object.values(WEAPON_STATS).map(stats => stats.pellets ?? 1)) - 1;
 // Eight unambiguous characters make active room discovery infeasible by brute force
@@ -386,5 +387,15 @@ export const KATANA = Object.freeze({ charge: 3, damage: 5, chargedDamage: 10, r
     duration: 0.6, windup: 0.1, slash: 0.2, chargedSlash: 0.08, chargedHold: 0.17, impact: 0.2, chargedImpact: 0.14, damageWindow: 0.4, waveDuration: 0.3, shake: 0.0012 });
 
 export const KATANA_FEEDBACK = Object.freeze({ impactDuration: .12, maxTrails: 32, maxSnapshots: 8 });
+
+// Skill progression is match-scoped; points and levels reset with the match,
+// while hit points are capped separately from ordinary player health.
+export const SKILL_TREE_MAX_LEVEL = 99;
+export const SKILL_TREE_HEALTH_COST = 50;
+export const SKILL_TREE_HEALTH_BONUS = 5;
+export const SKILL_TREE_MAX_HEALTH = 99999;
+export const SKILL_TREE_WEAPON_BASE_COST = 5;
+export const SKILL_TREE_WEAPON_COST_MULTIPLIER = 1.1;
+export const SKILL_TREE_MAX_WEAPON_DAMAGE = 9999;
 
 export const MECHA_NAPE = Object.freeze({ width: .6, height: .3, depth: .3 });

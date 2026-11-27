@@ -10,6 +10,7 @@ export const BIND_ACTIONS = [
     ['rifle', 'Equip assault rifle', 'Digit3'], ['sniper', 'Equip sniper', 'Digit4'],
     ['minigun', 'Equip minigun', 'Digit5'], ['katana', 'Equip katana', 'KeyV'], ['inspect', 'Inspect weapon', 'KeyX'],
     ['aim', 'Hold to aim', 'KeyC'], ['view', 'Toggle third person', 'KeyP'],
+    ['skillTree', 'Skill tree', 'KeyB'],
 ] as const;
 export type BindAction = typeof BIND_ACTIONS[number][0];
 export type Keybinds = Record<BindAction, string>;

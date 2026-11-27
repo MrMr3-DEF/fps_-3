@@ -1,14 +1,22 @@
+import { characterColor } from './appearance.js';
 import { state } from './state.js';
 
 export function renderPlayerList(): void {
     const rows = document.getElementById('player-list-rows');
     if (!rows) return;
     rows.replaceChildren();
-    for (const player of state.playerList) {
+    const players = state.isMultiplayer ? state.playerList : [{
+        peerId: 'local',
+        username: state.username,
+        bodyColor: Number.parseInt(characterColor.slice(1), 16),
+        kills: state.kills,
+        deaths: state.deaths,
+    }];
+    for (const player of players) {
         const row = document.createElement('div');
         row.className = 'player-list-row';
         row.setAttribute('role', 'listitem');
-        if (player.peerId === state.peer?.id) row.classList.add('player-list-self');
+        if (!state.isMultiplayer || player.peerId === state.peer?.id) row.classList.add('player-list-self');
         const face = document.createElement('span');
         face.className = 'player-list-face';
         face.setAttribute('aria-hidden', 'true');
@@ -28,7 +36,7 @@ export function renderPlayerList(): void {
 export function setPlayerListVisible(visible: boolean): void {
     const panel = document.getElementById('player-list');
     if (!panel) return;
-    if (visible && (!state.isMultiplayer || !state.isPlaying)) return;
+    if (visible && !state.isPlaying) return;
     if (visible && panel.hidden) renderPlayerList();
     panel.hidden = !visible;
     panel.setAttribute('aria-hidden', String(!visible));

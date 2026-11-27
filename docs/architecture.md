@@ -65,6 +65,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 | `surfaceDetail.ts` | World-space procedural surface detail and distance LOD for town, tree and ground materials, including biome-weighted ground relief and roughness/normal modulation |
 | `config.ts` | Shared gameplay constants, world counts, network limits, weapon statistics |
 | `state.ts` | Mutable client runtime state and reset helpers |
+| `skillTree.ts`, `skillTreeUI.ts` | Match-scoped skill points, upgrade costs, health and weapon damage formulas, and the toggleable upgrade overlay |
 | `world.ts` | Deterministic staged/synchronous arena construction, render chunks, spatial indexes, targets, town/lava lighting, world disposal |
 | `infantry.ts`, `infantryNetworkTypes.ts` | Match-owned infantry, wall durability, dawn waves, animated contacts, and bounded room replication |
 | `seededScenery.ts` | Shared grass/pillar/lava/vegetation recipes and original world RNG order, with explicit rendering/collision ownership ports |
@@ -122,7 +123,7 @@ Pointer lock is the practical boundary between menu state and active game input.
 
 ## Shared state and dependency seams
 
-Most client systems mutate the singleton exported by `state.ts`. This is deliberate for the frame-driven game, but it makes lifecycle boundaries important: a new match must not inherit projectiles, input flags, health, hook state, peer references, or score from the previous one.
+Most client systems mutate the singleton exported by `state.ts`. This is deliberate for the frame-driven game, but it makes lifecycle boundaries important: a new match must not inherit projectiles, input flags, health, hook state, peer references, or match counters from the previous one.
 
 Two small modules keep the dependency graph from becoming circular:
 
@@ -154,7 +155,7 @@ ticks preserve a live 100 ms flash; overlap replaces its expiry, and life,
 health-owner and runtime transitions cancel stale callbacks. Voluntary Mecha
 release restores the neutral on-foot bar. Respawn retains the actually equipped
 weapon, cancels pending switching/inspection and normalizes its pose while
-preserving match score, clock and terminal goggles failure. Fresh matches start
+preserving the match clock and terminal goggles failure. Fresh matches start
 with Pistol and reset match state.
 
 On-foot multiplayer lava remains active while local input is paused, using the
@@ -194,7 +195,7 @@ The render-distance slider is a chunk radius from 1 to 16, with 4 as the default
 
 ## Gameplay flow
 
-The standing cyborg measures 4.3 units from soles to helmet and clears the 4.8-unit building doorways. Held equipment inherits the same rig scale. The cyborg runs in four phase-matched directions, jumps, hovers on four thrusters and grapples. Five rechargeable firearms and the katana use the same equipped weapon and action clock in first person and third person. The logical camera owns aiming and shot direction. Normal jumps peak at 2.7 m. Shared movement and weapon values live in `config.ts`. On-foot goggles hide the local weapon rig and give floating cubes square, rotation-independent scan brackets. Infantry keep their upright frames. The first-person foreground pass frames the fitted hands, firearms and katana against the camera with bounded sway and outside depth-based camera motion blur; the katana keeps its authored eye-relative reach and restores the physical world pose for its blade trail and simulation. Reloads keep the glove and drawer together in view. The renderer restores the world pose before simulation resumes. World collision and multiplayer use the physical barrel socket. Local tracers and beams start at the visible barrel.
+The standing cyborg measures 4.3 units from soles to helmet and clears the 4.8-unit building doorways. Held equipment inherits the same rig scale. The cyborg runs in four phase-matched directions, jumps, hovers on four thrusters and grapples. Five rechargeable firearms and the katana use the same equipped weapon and action clock in first person and third person. The logical camera owns aiming and shot direction. Normal jumps peak at 2.7 m. Shared movement and weapon values live in `config.ts`. On-foot goggles hide the local weapon rig and give floating cubes square, rotation-independent scan brackets. Infantry keep their upright frames. The first-person foreground pass frames the fitted hands, firearms and katana against the camera with bounded sway and outside depth-based camera motion blur; the katana keeps its authored eye-relative reach and restores the physical world pose for its blade trail and simulation. Reloads keep the glove and drawer together in view. The renderer restores the world pose before simulation resumes. World collision and multiplayer use the physical barrel socket. Local tracers and beams start at the visible barrel. Cube enemies award skill points by class health; the skill tree spends them on health and weapon damage upgrades.
 
 Each match prepares one [Forgotten Mecha](forgotten-mecha.md) before
 renderer preparation. It navigates from a reachable random border point toward an
@@ -251,7 +252,8 @@ Player damage records the last damage time for regeneration and kill attribution
 | `V` | Equip katana; hold primary attack to charge, release to swing |
 | `X` | Inspect the active weapon |
 | `P` | Toggle third person. On foot, the camera follows over the right shoulder at a distance proportional to the cyborg’s size |
-| Hold `Tab` in multiplayer | Show the host-ordered player list with cyborg portraits with suit-colored accents and kills/deaths |
+| Hold `Tab` | Show the player list with cyborg portraits, suit-colored accents, kills/deaths, and the current day and enemies remaining |
+| `B` | Toggle the skill tree; `Escape` also closes it |
 | `Escape` | Toggle pause; offline simulation stops completely, while multiplayer continues. Resume waits for pointer lock. If the browser requires a fresh gesture after Esc, click Resume. |
 
 The [firearm guide](firearms.md) lists magazine capacities, reload times and grapple handoffs.
@@ -293,9 +295,9 @@ Clients do not connect directly to each other. The host parses and authorizes cl
 
 The host owns an ordered `lobby_roster`: host first, then admitted connections in admission order. Players choose their own suit color from the Character scan on the main menu. Clients submit their validated 24-bit color in admission metadata. The host accepts `lobby_color` updates only for the reporting client. The host republishes the roster after admissions, departures, and color reports. Clients queue it while preparing their world and accept it only from the expected host. Live roster colors update stationary and moving avatars. A damage flash restores the latest chosen color. The menu renders the host at center and successive guests alternating left/right and receding by row. Lobby previews reuse the animated peer scan for every other player, with a typed name and no stats panel or homing lock. Each room size has explicit callout preferences; placement avoids other names and the left menu once, then retains its corner and leader length until membership or viewport changes. Reused spawn-house slots do not alter admission order. Starting play hides the previews but retains host admission order for the held-Tab list; disconnecting clears both.
 
-During play, the host publishes a bounded `player_list` snapshot in admission order. It includes each admitted name and suit color with kills/deaths counted only from accepted `player_died` events. The host sends it on match start, admission, departure, color change, and confirmed death, so late joiners receive current scores after their world snapshot. Clients accept it only from their expected host. `src/playerList.ts` renders a portrait from the cyborg GLB with each player’s color on its glow accents and the held-Tab overlay; input release, window blur, pause, death, and disconnection hide it.
+During play, the host publishes a bounded `player_list` snapshot in admission order. It includes each admitted name and suit color with kills/deaths counted from accepted `player_died` events and infantry kills. Cube kills award skill points but do not count as kills or deaths. The host sends it on match start, admission, departure, color change, confirmed death, and infantry kill, so late joiners receive current scores after their world snapshot. Clients accept it only from their expected host. `src/playerList.ts` renders a portrait from the cyborg GLB with each player’s color on its glow accents and the held-Tab overview. The overview also works offline with a single local entry and shows the current day and enemies remaining. Input release, window blur, pause, death, and disconnection hide it.
 
-When a client's data channel opens, the host validates its single-use, peer-bound admission ticket through the Worker using the host capability. The Worker atomically reserves usernames case-insensitively and returns a proof known independently to the client; the client rejects snapshots before that proof. The metadata and proof reply carry the shared gameplay protocol version. After admission, the host sends a `world_snapshot` containing the seed, ordered roster, a validated client house slot (1–4), score, and every target state. The client prepares the seeded environment, applies the snapshot, and places the player in the assigned house before entering play. Other host packets arriving during preparation are queued and replayed after snapshot application; the queue is bounded and stale-session callbacks are ignored. Duplicate snapshots are ignored so they cannot relocate an existing player. Afterwards the host sends `target_state` packets for changed targets and `kill_target` packets for respawns and score changes. Synchronized clients apply both while waiting in the lobby as well as while playing.
+When a client's data channel opens, the host validates its single-use, peer-bound admission ticket through the Worker using the host capability. The Worker atomically reserves usernames case-insensitively and returns a proof known independently to the client; the client rejects snapshots before that proof. The metadata and proof reply carry the shared gameplay protocol version. After admission, the host sends a `world_snapshot` containing the seed, ordered roster, a validated client house slot (1–4), score, and every target state. The client prepares the seeded environment, applies the snapshot, and places the player in the assigned house before entering play. Other host packets arriving during preparation are queued and replayed after snapshot application; the queue is bounded and stale-session callbacks are ignored. Duplicate snapshots are ignored so they cannot relocate an existing player. Afterwards the host sends `target_state` packets for changed targets and `kill_target` packets for respawns. Synchronized clients apply both while waiting in the lobby as well as while playing.
 
 Local state is eligible for transmission every 33 ms. Position, view angles, hook position, and flags are quantized; unchanged state is suppressed but forced at least every 250 ms. Remote positions and yaw are exponentially interpolated.
 
@@ -323,7 +325,7 @@ Local state is eligible for transmission every 33 ms. Position, view angles, hoo
 | `mecha_denied` | Host only | Sends snapshot-free boarding or exit feedback directly to the requester |
 | `world_snapshot` | Host only | Initializes a joining client's deterministic world |
 | `target_state` | Host only | Replicates target health and other incremental state |
-| `kill_target` | Host only | Replicates target respawn and score |
+| `kill_target` | Host only | Replicates target respawn |
 
 Every received value first passes `parseNetworkPacket()`. It rejects unknown packet types, malformed structures, invalid usernames/weapons, non-finite or excessive coordinates, invalid directions, and oversized target snapshots. Accepted packets are reconstructed from known own fields, including nested snapshots and vectors. Peer IDs exclude inherited object keys. Gameplay updates use the host-stored roster color. Each admitted player can change their own color through the appearance controls. Do not handle a newly introduced packet before adding strict parsing for it.
 

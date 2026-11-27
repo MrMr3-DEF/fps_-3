@@ -17,7 +17,6 @@ export function applyHudPresentation(presentation: HudPresentation, powerJumpEna
     display('ui', presentation.ordinary, 'flex');
     display('locator-bar', presentation.locator);
     for (const id of ['health-container', 'reload-container', 'hover-container', 'weapon-indicator']) display(id, presentation.ordinary);
-    display('pvp-stats', presentation.pvpStats);
     display('goggles-scope', presentation.scope);
     const scope = getUI('goggles-scope');
     if (scope) { scope.style.opacity = String(presentation.scopeOpacity); scope.classList.toggle('mecha-goggles', presentation.mechaScope); }

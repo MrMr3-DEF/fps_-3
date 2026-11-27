@@ -13,7 +13,16 @@ import type { MechaHitPacket } from './mechaNetworkTypes.js';
 import { TargetMotionHistory, type HomingFireContext } from './projectileFlight.js';
 import { hasLineOfSightToOrientedBox } from './targetVisibility.js';
 import { touchesLava } from './lavaDamage.js';
-import { createPlayerLife, damagePlayerLife, healPlayerLife, type PlayerLife } from './playerLife.js';
+import { createPlayerLife, damagePlayerLife, healPlayerLife, upgradePlayerLifeMaxHp, type PlayerLife } from './playerLife.js';
+import {
+    applySkillUpgrade,
+    consumeWeaponShotIndex,
+    createSkillTreeState,
+    playerMaxHpForLevel,
+    SKILL_UPGRADE_ORDER,
+    type SkillTreeState,
+    type SkillUpgradeId,
+} from './skillTree.js';
 import { getTownSpawn } from './town.js';
 import { PacketRate } from './packetRate.js';
 import { cancelHookForTarget, clearHookTether } from './hookLifecycle.js';
@@ -75,6 +84,7 @@ import {
     type PlayerRespawnPacket,
     type PlayerListEntry,
     type NetworkPacket,
+    type SkillStatePacket,
     type TargetState,
     type TargetStatePacket,
     type UpdatePacket,
@@ -141,20 +151,14 @@ const UI = {
     hostLobbyStatus: null as HTMLElement | null,
     btnHostStart: null as HTMLButtonElement | null,
     joinErrorLog: null as HTMLElement | null,
-    pvpStats: null as HTMLElement | null,
     btnJoinConnect: null as HTMLButtonElement | null,
-    score: null as HTMLElement | null,
-    kills: null as HTMLElement | null,
 };
 
 const DOM = {
     hostLobbyStatus: () => (UI.hostLobbyStatus || (UI.hostLobbyStatus = document.getElementById('host-lobby-status'))),
     btnHostStart: () => (UI.btnHostStart || (UI.btnHostStart = document.getElementById('btn-host-start') as HTMLButtonElement | null)),
     joinErrorLog: () => (UI.joinErrorLog || (UI.joinErrorLog = document.getElementById('join-error-log'))),
-    pvpStats: () => (UI.pvpStats || (UI.pvpStats = document.getElementById('pvp-stats'))),
     btnJoinConnect: () => (UI.btnJoinConnect || (UI.btnJoinConnect = document.getElementById('btn-join-connect') as HTMLButtonElement | null)),
-    score: () => (UI.score || (UI.score = document.getElementById('score'))),
-    kills: () => (UI.kills || (UI.kills = document.getElementById('kills'))),
 };
 
 let cachedUsername = 'Guest1';
@@ -278,6 +282,15 @@ function recordConfirmedDeath(packet: PlayerDiedPacket): void {
     publishPlayerList();
 }
 
+/** Host-side credit for a killed infantry enemy; cubes award only skill points. */
+export function recordInfantryKill(attackerPeerId?: string): void {
+    if (!state.isHost || !state.isPlaying) return;
+    const killer = state.playerList.find(player => player.peerId === (attackerPeerId ?? state.peer?.id));
+    if (!killer) return;
+    killer.kills = Math.min(1_000_000, killer.kills + 1);
+    publishPlayerList();
+}
+
 function setCachedUsername(username: string): void {
     cachedUsername = username.trim() || 'Guest1';
     state.username = cachedUsername;
@@ -384,6 +397,7 @@ interface PeerRuntimeState {
     travelAllowance: number;
     shots: ShotLedger;
     life: PlayerLife;
+    skillTree: SkillTreeState;
     jumpRate: PacketRate;
     fireRate: PacketRate;
     weaponState: AcceptedWeaponState;
@@ -510,8 +524,10 @@ function playerLife(peerId: string): PlayerLife | undefined {
 }
 
 function applyLocalHealth(packet: PlayerHealthPacket, feedback: boolean): void {
-    if (packet.lifeId !== state.lifeId || state.playerHp === packet.hp) return;
+    if (packet.lifeId !== state.lifeId ||
+        (state.playerHp === packet.hp && (packet.maxHp === undefined || state.playerMaxHp === packet.maxHp))) return;
     const previousHp = state.playerHp;
+    if (packet.maxHp !== undefined) state.playerMaxHp = packet.maxHp;
     state.playerHp = packet.hp;
     onLocalHealth?.(previousHp, feedback);
 }
@@ -522,6 +538,7 @@ function applyHealth(packet: PlayerHealthPacket): void {
         if (peer?.lifeId === packet.lifeId) {
             if (packet.hp < peer.hp) getPlayerAvatar(peer.mesh)?.hit();
             peer.hp = packet.hp;
+            if (packet.maxHp !== undefined) peer.maxHp = packet.maxHp;
         }
         return;
     }
@@ -544,10 +561,62 @@ export function presentMultiplayerHealth(mechaSequence?: number): void {
 }
 
 function publishHealth(peerId: string, life: PlayerLife, mechaSequence?: number): void {
-    const packet: PlayerHealthPacket = { type: 'player_health', peerId, lifeId: life.id, hp: life.hp,
+    const packet: PlayerHealthPacket = { type: 'player_health', peerId, lifeId: life.id, hp: life.hp, maxHp: life.maxHp,
         ...(mechaSequence === undefined ? {} : { mechaSequence }) };
     broadcastToAll(packet);
     applyHealth(packet);
+}
+
+let onSkillStateUpdate: (() => void) | null = null;
+
+export function setSkillStateListener(cb: (() => void) | null): void {
+    onSkillStateUpdate = cb;
+}
+
+function sendSkillState(peerId: string, tree: SkillTreeState): void {
+    const packet: SkillStatePacket = {
+        type: 'skill_state',
+        peerId,
+        points: tree.points,
+        levels: { ...tree.levels },
+    };
+    sendToPeer(peerId, packet);
+}
+
+export function awardMultiplayerSkillPoints(killerPeerId: string | undefined, points: number, onLocalUpdate: () => void): void {
+    if (!state.isMultiplayer || !state.isHost || points <= 0) return;
+    if (!killerPeerId || killerPeerId === state.peer?.id) {
+        state.skillTree.points += points;
+        onLocalUpdate();
+        return;
+    }
+    const runtime = peerRuntime.get(killerPeerId);
+    if (!runtime) return;
+    runtime.skillTree.points += points;
+    sendSkillState(killerPeerId, runtime.skillTree);
+}
+
+export function requestSkillUpgrade(upgrade: SkillUpgradeId, onLocalUpdate: () => void): boolean {
+    if (!state.isPlaying || state.matchEnded || state.playerHp <= 0) return false;
+    if (!state.isMultiplayer || state.isHost) {
+        const result = applySkillUpgrade(state.skillTree, upgrade);
+        if (!result.ok) return false;
+        if (upgrade === 'HEALTH') {
+            if (state.isMultiplayer && state.isHost) {
+                upgradePlayerLifeMaxHp(hostLife, result.nextMaxHp);
+                state.playerMaxHp = hostLife.maxHp;
+                state.playerHp = hostLife.hp;
+                if (state.peer) publishHealth(state.peer.id, hostLife);
+            } else {
+                state.playerHp = Math.min(result.nextMaxHp, state.playerHp + (result.nextMaxHp - result.previousMaxHp));
+                state.playerMaxHp = result.nextMaxHp;
+            }
+        }
+        onLocalUpdate();
+        return true;
+    }
+    broadcastToAll({ type: 'skill_upgrade', upgrade });
+    return true;
 }
 
 function commitPlayerDamage(
@@ -606,7 +675,7 @@ function updateHostPlayerLives(): void {
 
 function createPeerRuntime(username: string, slot: number): PeerRuntimeState {
     const spawn = getTownSpawn(getWorldSeed(), 'house', slot);
-    return { username, motion: new TargetMotionHistory(), shots: new ShotLedger(), life: createPlayerLife(0), jumpRate: new PacketRate(4, 2), fireRate: new PacketRate(60, 8),
+    return { username, motion: new TargetMotionHistory(), shots: new ShotLedger(), life: createPlayerLife(0), skillTree: createSkillTreeState(), jumpRate: new PacketRate(4, 2), fireRate: new PacketRate(60, 8),
         handling: new WeaponHandling('PISTOL'), commandAck: 0, shotAck: -1, held: false, freshTrigger: false, intentRate: new PacketRate(12, 6), correctionDue: false, hookFlight: 'spent', wasMounted: false,
         position: new THREE.Vector3(spawn.x, PLAYER_HEIGHT, spawn.z), yaw: spawn.yaw, pitch: 0,
         lastUpdateAt: performance.now(), lastUpdateSeq: -1, travelAllowance: NETWORK_MOVEMENT_BURST, weaponState: initialWeaponState('PISTOL') };
@@ -632,7 +701,8 @@ function applyRespawn(packet: PlayerRespawnPacket): void {
     peer.lifeId = packet.lifeId;
     peer.lastUpdateSeq = undefined;
     peer.deathReported = false;
-    peer.hp = PLAYER_MAX_HP;
+    const maxHp = peer.maxHp || PLAYER_MAX_HP;
+    peer.hp = maxHp;
     peer.minigunRamp = 0;
     peer.lastHookState = 'IDLE';
     peer.targetPitch = 0;
@@ -641,7 +711,7 @@ function applyRespawn(packet: PlayerRespawnPacket): void {
     const pose = remotePoses.get(packet.peerId);
     if (pose) receiveRemotePose(packet.peerId, peer, {
         ...pose.packet, lifeId:packet.lifeId, pos:packet.pos, yaw:packet.yaw, pitch:0, activeWeapon:packet.weapon,
-        hp:PLAYER_MAX_HP, isDead:false, isMouseDown:false, isHovering:false, hookState:'IDLE', hookPos:null,
+        hp:maxHp, maxHp, isDead:false, isMouseDown:false, isHovering:false, hookState:'IDLE', hookPos:null,
         switchState:'IDLE', nextWeapon:null, inspectTime:undefined, grounded:true, scoped:false
     }, true);
     peer.targetPosition.set(packet.pos.x, packet.pos.y - PEER_Y_OFFSET, packet.pos.z);
@@ -664,7 +734,7 @@ function grantRespawn(peerId: string, lifeId: number): void {
         runtime.handling.reset(weapon); runtime.commandAck = 0; runtime.shotAck = -1;
         runtime.held = runtime.freshTrigger = runtime.correctionDue = false;
         runtime.hookFlight = 'spent'; runtime.wasMounted = false;
-        runtime.life = createPlayerLife(packet.lifeId);
+        runtime.life = createPlayerLife(packet.lifeId, playerMaxHpForLevel(runtime.skillTree.levels.HEALTH));
         runtime.position.set(packet.pos.x, packet.pos.y, packet.pos.z);
         runtime.yaw = spawn.yaw;
         runtime.pitch = 0;
@@ -674,7 +744,7 @@ function grantRespawn(peerId: string, lifeId: number): void {
         runtime.lastUpdateAt = performance.now();
         runtime.lastUpdateSeq = -1;
     } else {
-        hostLife = createPlayerLife(packet.lifeId);
+        hostLife = createPlayerLife(packet.lifeId, playerMaxHpForLevel(state.skillTree.levels.HEALTH));
     }
     broadcastToAll(packet);
     applyRespawn(packet);
@@ -852,8 +922,6 @@ function applyTargetState(targetState: TargetState): boolean {
 
 function setScore(score: number): void {
     state.score = score;
-    const scoreEl = DOM.score();
-    if (scoreEl) scoreEl.innerText = score.toString();
 }
 
 function sendWorldSnapshot(conn: DataConnectionLike, spawnHouseSlot: number): void {
@@ -1241,9 +1309,6 @@ export function disconnectMultiplayer(options: { preserveJoinError?: boolean; no
     resetKatana();
     npcMotion.clear(); localMotion = new TargetMotionHistory(); localMotionLife = -1;
     pendingConnectionPeers.clear();
-
-    const pvpStats = DOM.pvpStats();
-    if (pvpStats) pvpStats.style.display = 'none';
 
     const connections = state.connections;
     state.connections = [];
@@ -1701,7 +1766,7 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
         runtime.motion.add(now, _peerTargetPosition.copy(runtime.position).addScaledVector(THREE.Object3D.DEFAULT_UP, -PEER_Y_OFFSET), runtime.yaw);
         runtime.shots.updateTrigger((packet.isMouseDown || runtime.handling.pendingFire === 'MINIGUN') &&
             packet.activeWeapon === 'MINIGUN' && packet.switchState === 'IDLE' && runtime.handling.canFire('MINIGUN', now/1000), now);
-        return { ...packet, senderPeerId: fromPeerId, hp: runtime.life.hp, maxHp: PLAYER_MAX_HP, isDead: false };
+        return { ...packet, senderPeerId: fromPeerId, hp: runtime.life.hp, maxHp: runtime.life.maxHp, isDead: false };
     }
 
     const runtime = getPeerRuntime(fromPeerId);
@@ -1722,7 +1787,12 @@ export function authorizeClientPacket(fromPeerId: string, packet: NetworkPacket)
             Math.abs(_localBarrelOffset.x) > MAX_MUZZLE_LATERAL || _localBarrelOffset.z > MAX_MUZZLE_BEHIND_EYE ||
             shotObstructionT(runtime.position, _barrelPos, packet.weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS) !== null) return null;
         const firePacket = packet;
-        if (!runtime.shots.record(firePacket, now, false, () => homingFireContext(fromPeerId, firePacket, now), forgottenMecha?.revision)) return null;
+        const weaponLevel = runtime.skillTree.levels[firePacket.weapon];
+        const shotIndex = (firePacket.weapon === 'PISTOL' || firePacket.weapon === 'AR' || firePacket.weapon === 'MINIGUN')
+            ? runtime.skillTree.shotCounts[firePacket.weapon]
+            : 0;
+        if (!runtime.shots.record(firePacket, now, false, () => homingFireContext(fromPeerId, firePacket, now), forgottenMecha?.revision, weaponLevel, shotIndex)) return null;
+        consumeWeaponShotIndex(runtime.skillTree, firePacket.weapon);
         runtime.handling.spendShot(firePacket.weapon, now/1000);
         if (packet.weapon === 'SNIPER') {
             _baseFireDir.set(packet.dir.x, packet.dir.y, packet.dir.z).normalize();
@@ -1916,6 +1986,21 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             if (isKnownClient(fromPeerId)) grantRespawn(fromPeerId, msg.lifeId);
             return;
         }
+        if (msg.type === 'skill_upgrade') {
+            if (isKnownClient(fromPeerId)) {
+                const runtime = getPeerRuntime(fromPeerId);
+                if (runtime && runtime.life.hp > 0) {
+                    const result = applySkillUpgrade(runtime.skillTree, msg.upgrade);
+                    if (result.ok) {
+                        if (msg.upgrade === 'HEALTH' && upgradePlayerLifeMaxHp(runtime.life, result.nextMaxHp)) {
+                            publishHealth(fromPeerId, runtime.life);
+                        }
+                        sendSkillState(fromPeerId, runtime.skillTree);
+                    }
+                }
+            }
+            return;
+        }
         // Each reliable fire request is final, even when it arrives before the draw,
         // reload or cadence deadline. A replay cannot spend it later.
         if (parsed.type === 'fire' && parsed.shotId <= (peerRuntime.get(fromPeerId)?.shotAck ?? -1)) return;
@@ -1957,6 +2042,15 @@ function handlePeerMessage(fromPeerId: string, rawPacket: unknown): void {
             if (clientWorldSynchronized && state.isPlaying && !state.matchEnded) {
                 if (msg.type === 'player_health') applyHealth(msg);
                 else applyRespawn(msg);
+            }
+            return;
+        }
+        if (msg.type === 'skill_state') {
+            if (clientWorldSynchronized && state.isPlaying && !state.matchEnded && msg.peerId === state.peer?.id) {
+                state.skillTree.points = msg.points;
+                for (const id of SKILL_UPGRADE_ORDER) state.skillTree.levels[id] = msg.levels[id];
+                state.playerMaxHp = playerMaxHpForLevel(state.skillTree.levels.HEALTH);
+                onSkillStateUpdate?.();
             }
             return;
         }
@@ -2250,10 +2344,6 @@ function applyPlayerDeath(packet: PlayerDiedPacket): void {
     }
 
     if (packet.cause === 'player' && packet.killerPeerId === state.peer?.id) {
-        state.kills++;
-        const killsEl = DOM.kills();
-        if (killsEl) killsEl.innerText = state.kills.toString();
-
         flashHitmarker(true);
     }
 }
@@ -2664,8 +2754,12 @@ function broadcastLocalFire(
     }
 
     if (state.isHost && forgottenMecha?.networked) {
+        const weaponLevel = state.skillTree.levels[weapon];
+        const shotIndex = (weapon === 'PISTOL' || weapon === 'AR' || weapon === 'MINIGUN')
+            ? Math.max(0, state.skillTree.shotCounts[weapon] - 1)
+            : 0;
         hostMechaShots.updateTrigger(weapon === 'MINIGUN', performance.now());
-        hostMechaShots.record(packet, performance.now(), hostLife.hp <= 0, () => homingFireContext(state.peer!.id, packet, performance.now()), forgottenMecha?.revision);
+        hostMechaShots.record(packet, performance.now(), hostLife.hp <= 0, () => homingFireContext(state.peer!.id, packet, performance.now()), forgottenMecha?.revision, weaponLevel, shotIndex);
     }
     localShot = shotId;
     broadcastToAll(packet);
@@ -2813,7 +2907,7 @@ function publishInfantryEvent(event: InfantryEvent): void {
 }
 
 export function publishInfantryKill(index: number, revision: number, killer?: string): void {
-    publishInfantryEvent({ kind: 'kill', slot: index - ENEMY_COUNT, revision, score: state.score,
+    publishInfantryEvent({ kind: 'kill', slot: index - ENEMY_COUNT, revision, score: 0,
         killer: killer ?? state.peer?.id ?? null });
 }
 
@@ -2977,4 +3071,5 @@ setMeleeNetworkPort({
         if(state.isMultiplayer) announceMechaHit(attacker.id,result.killed,point,point.clone().sub(origin).normalize());
         return true;
     },
+    katanaLevel: peerId => peerId === (state.peer?.id ?? 'local') ? state.skillTree.levels.KATANA : (getPeerRuntime(peerId)?.skillTree.levels.KATANA ?? 0),
 });

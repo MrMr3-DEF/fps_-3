@@ -2,7 +2,7 @@ import { fields, isPacketRecord as record, projectKnown, variant, vectorFields a
 import { MECHA_ENDING_DURATION, MECHA_ENDING_TIMING, type MechaEndingState } from './mechaEndingTimeline.js';
 import { isPeerId } from './roomIdentity.js';
 import { DAY_NIGHT_CYCLE_SECONDS, MECHA_HP, MECHA_ROCKET_POOL_SIZE, MECHA_NETWORK_MAX_BONES, MECHA_STOMP_COOLDOWN, MECHA_ROCKET_FIRE_TIME,
-    MAX_SHOT_PELLET_INDEX, TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS } from './config.js';
+    MAX_SHOT_PELLET_INDEX, SKILL_TREE_MAX_WEAPON_DAMAGE, TOWN_HALF_SIZE, TOWN_WALL_HEIGHT, TOWN_WALL_THICKNESS } from './config.js';
 import type { Vec3Packet } from './networkTypes.js';
 import type { MechaMode, MechaImpact } from './forgottenMecha.js';
 import type { MechaHeadPhase } from './mechaHeadView.js';
@@ -123,7 +123,7 @@ function validateMechaPacket(x: Record<string, unknown>): MechaPacket | null {
     if (x.type === 'mecha_ending_ready') return integer(x.id) && x.id > 0 && integer(x.revision) ? x as unknown as MechaEndingReadyPacket : null;
     if (x.type === 'mecha_state') return isMechaState(x.state) ? x as unknown as MechaStatePacket : null;
     if (x.type === 'mecha_event') return integer(x.sequence) && isMechaState(x.state) && isEvent(x.event) ? x as unknown as MechaEventPacket : null;
-    if (x.type === 'hit_mecha') return integer(x.revision) && integer(x.shotId) && integer(x.pelletIndex, MAX_SHOT_PELLET_INDEX) && number(x.damage, 0.01, 100) ? x as unknown as MechaHitPacket : null;
+    if (x.type === 'hit_mecha') return integer(x.revision) && integer(x.shotId) && integer(x.pelletIndex, MAX_SHOT_PELLET_INDEX) && number(x.damage, 0.01, SKILL_TREE_MAX_WEAPON_DAMAGE * 2) ? x as unknown as MechaHitPacket : null;
     if (!integer(x.sequence) || !integer(x.revision) || !integer(x.lifeId) || !bool(x.thirdPerson) || !bool(x.secondaryHeld)) return null;
     if (x.type === 'mecha_board') return x as unknown as MechaBoardPacket;
     return x.type === 'mecha_input' && isPilotWeapon(x.weapon) && number(x.direction, -1, 1) && number(x.yaw, -10, 10) && number(x.pitch, -Math.PI, Math.PI) &&

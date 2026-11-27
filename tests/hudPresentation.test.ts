@@ -7,7 +7,7 @@ import { MechaHeadView } from '../src/mechaHeadView.ts';
 const playing: HudContext = { runtime: true, playing: true, input: true, alive: true, ended: false, conversation: false,
     loading: false, reveal: false, editor: false, scoped: false, thirdPerson: false, touch: false,
     showFps: true, multiplayer: true, pilot: null };
-const visibility = ['ordinary', 'locator', 'crosshair', 'scope', 'mechaScope', 'fps', 'accelerometer', 'powerJump', 'touchPowerJump', 'speedlines', 'prompt', 'border', 'hardware', 'pvpStats'] as const;
+const visibility = ['ordinary', 'locator', 'crosshair', 'scope', 'mechaScope', 'fps', 'accelerometer', 'powerJump', 'touchPowerJump', 'speedlines', 'prompt', 'border', 'hardware'] as const;
 const hud = (changes: Partial<HudContext> = {}) => deriveHudPresentation({ ...playing, ...changes });
 const pilot = (mode: NonNullable<HudContext['pilot']>['mode'], phase: NonNullable<HudContext['pilot']>['phase'], changes = {}) =>
     ({ mode, phase, blackout: 0, hudOpacity: 1, targetingReady: false, ...changes });
@@ -29,7 +29,7 @@ test('boot reveal and respawn expose the complete ordinary HUD without waiting f
     const normal = hud(), reveal = hud({ loading: true, reveal: true });
     assert.deepEqual(reveal, { ...normal, locator: false });
     assert.equal(normal.locator, true);
-    for (const key of ['ordinary', 'crosshair', 'fps', 'accelerometer', 'powerJump', 'prompt', 'border', 'pvpStats'] as const) assert.equal(reveal[key], true);
+    for (const key of ['ordinary', 'crosshair', 'fps', 'accelerometer', 'powerJump', 'prompt', 'border'] as const) assert.equal(reveal[key], true);
     assert.deepEqual(hud({ thirdPerson: true }), normal);
     assert.equal(hud({ input: false, loading: true, reveal: true }).ordinary, false, 'denied initial input does not expose HUD');
     const scoped = hud({ scoped: true }); assert.equal(scoped.scope, true);
@@ -120,7 +120,7 @@ test('the real HUD applicator clears stale DOM state and initializes both Power 
     node('npc-interaction').hidden = false;
     for (const mounted of [null, pilot('piloted', 'ready'), pilot('shutting-down', 'shutdown-hud')]) {
         applyHudPresentation(hud({ input: false, pilot: mounted }), false);
-        for (const id of ['crosshair', 'ui', 'locator-bar', 'health-container', 'reload-container', 'hover-container', 'weapon-indicator', 'goggles-scope', 'fps-counter', 'accelerometer', 'pvp-stats', 'world-border-overlay']) {
+        for (const id of ['crosshair', 'ui', 'locator-bar', 'health-container', 'reload-container', 'hover-container', 'weapon-indicator', 'goggles-scope', 'fps-counter', 'accelerometer', 'world-border-overlay']) {
             assert.equal(node(id).style.display, 'none', `${id} survived pause`);
         }
         assert.equal(node('npc-interaction').hidden, true); assert.equal(node('powerjump-toggle').hidden, true);

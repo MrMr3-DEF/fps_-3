@@ -2,6 +2,7 @@ import { KatanaEffects } from './katanaEffects.js';
 import { createKatanaSlash, katanaSlashDistance } from './katanaSlash.js';
 import * as THREE from 'three';
 import { state, onHeldInputReset } from './state.js';
+import { weaponDamageForShot } from './skillTree.js';
 import { KATANA } from './config.js';
 import { KatanaClock, katanaBoxContacts, type KatanaPose } from './katanaCombat.js';
 import { updateKatanaModel } from './katanaModel.js';
@@ -222,7 +223,8 @@ function contact(box: THREE.Box3, matrix: THREE.Matrix4, attack: Attack, mecha =
     return katanaBoxContacts(box, matrix, pose, radius, halfHeight).find(point => !getMeleeNetworkPort().blocked(pose.origin, point, mecha));
 }
 function resolve(attack: Attack): void {
-    const amount = attack.clock.charged ? KATANA.chargedDamage : KATANA.damage;
+    const level = attack.player.id === id() ? state.skillTree.levels.KATANA : (getMeleeNetworkPort().katanaLevel?.(attack.player.id) ?? 0);
+    const amount = weaponDamageForShot('KATANA', level, 0, 0, attack.clock.charged);
     let hit = false;
     state.targets.forEach((target, index) => {
         const data = targetData(target), body = data.bodyMesh;

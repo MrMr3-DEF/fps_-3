@@ -142,7 +142,7 @@ main application.
 | --- | --- |
 | `/tests/lighting-preview.html` | Sun/shadows, lava glow, fog, blur, wind, altitude and weather phase |
 | `/tests/town-preview.html` | Seeded streets/interiors, walls, stairs, rooftops, well and spawn views |
-| `/tests/player-list-preview.html` | Multiplayer Tab list and sample scores |
+| `/tests/player-list-preview.html` | Tab player/K/D overview with day and enemies remaining |
 | `/tests/player-list-preview.html?locator-preview` | Direction markers, elevation, culling and pilot occupancy |
 | `/tests/player-list-preview.html?weapon-preview` | Equipped/vehicle icons and touch HUD placement |
 | `/tests/player-list-preview.html?stomp-icons` | Stomp pictogram drafts |

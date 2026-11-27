@@ -30,8 +30,12 @@
     <button id="powerjump-toggle" hidden aria-pressed="false">POWER JUMP OFF</button>
     <div id="weapon-indicator" role="img" aria-label="Selected weapon"></div>
     <section id="player-list" hidden aria-hidden="true" aria-label="Players">
-        <div class="player-list-heading"><span>PLAYERS</span><span>K / D</span></div>
+        <div class="player-list-heading"><span>PLAYERS</span><span class="player-list-kd-heading">K / D</span></div>
         <div id="player-list-rows" role="list"></div>
+        <div class="player-list-stats">
+            <div class="player-list-stat"><span>Day</span><span id="defense-day" class="player-list-stat-value">1</span></div>
+            <div class="player-list-stat"><span>Enemies remaining</span><span id="enemies-remaining" class="player-list-stat-value">0</span></div>
+        </div>
     </section>
     <script type="module">
         import { state } from '../src/state.ts';

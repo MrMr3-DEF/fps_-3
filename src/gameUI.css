@@ -274,7 +274,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 .menu-input:focus { outline: 2px solid var(--menu-accent); outline-offset: 2px; }
 .menu-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .menu-actions-column { display: flex; flex-direction: column; width: 100%; }
-#btn-host-start, #pause-lobby-info, #pvp-stats { display: none; }
+#btn-host-start, #pause-lobby-info { display: none; }
 #join-error-log { font-size: 14px; color: #c93649; font-weight: bold; }
 #btn-copy-code { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 #room-code-display { font-size: 20px; font-weight: bold; letter-spacing: 2px; user-select: text; }
@@ -307,7 +307,7 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 #player-list {
     position: fixed;
     z-index: 9;
-    top: max(22px, env(safe-area-inset-top));
+    top: calc(env(safe-area-inset-top, 0px) + 48px);
     left: 50%;
     transform: translateX(-50%);
     width: min(440px, calc(100vw - 32px));
@@ -322,14 +322,15 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 #player-list[hidden] { display: none; }
 .player-list-heading {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 68px;
+    gap: 10px;
     padding: 2px 10px 7px;
     color: #d4d7d9;
     font-size: 12px;
     letter-spacing: 1.5px;
 }
+.player-list-kd-heading { text-align: right; letter-spacing: 0.5px; }
 .player-list-row {
     display: grid;
     grid-template-columns: 32px minmax(0, 1fr) 68px;
@@ -357,6 +358,17 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
 }
 .player-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-list-kd { text-align: right; font-variant-numeric: tabular-nums; }
+.player-list-stats { margin-top: 8px; padding-top: 4px; }
+.player-list-stat {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 68px;
+    align-items: center;
+    gap: 10px;
+    padding: 3px 10px;
+    color: #d4d7d9;
+    font-size: 14px;
+}
+.player-list-stat-value { text-align: right; color: #f5f7f8; font-variant-numeric: tabular-nums; }
 
 #speedlines {
     position: absolute;
@@ -540,6 +552,122 @@ fieldset.character-customize { border: 0; padding: 0; margin: 0; min-width: 0; }
     display: none;
 }
 #weapon-indicator svg { display: block; width: 100%; height: 100%; }
+
+#skill-points-hud {
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    width: fit-content;
+    line-height: 1;
+}
+
+.skill-orb-icon {
+    display: inline-flex;
+    flex: none;
+    width: 1.25em;
+    height: 1.25em;
+}
+
+.skill-orb-icon svg { display: block; width: 100%; height: 100%; }
+
+#skill-points-hud .skill-orb-icon svg { filter: drop-shadow(1px 1px 2px #ffffff); }
+
+#skill-tree-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.68);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    z-index: 40;
+    font-family: var(--ui-font);
+    color: #eef6ff;
+}
+#skill-tree-overlay[hidden] { display: none; }
+
+.skill-tree-balance {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: clamp(24px, 3vw, 36px);
+    font-weight: 700;
+    line-height: 1;
+    text-shadow: 0 0 18px #00aaff66;
+}
+
+#skill-tree-row {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(8px, 1.4vw, 18px);
+    max-width: 96vw;
+    padding: 0 16px;
+}
+
+.skill-tree-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.skill-tree-level {
+    font: 700 clamp(12px, 1.2vw, 16px)/1 var(--ui-font);
+    letter-spacing: 0.08em;
+    color: #cfe8ff;
+}
+
+.skill-tree-column.is-maxed .skill-tree-level { color: #ffd166; }
+
+.skill-tree-tile {
+    box-sizing: border-box;
+    border: 2px solid #ffffffb0;
+    border-radius: var(--control-radius);
+    background: #17283b88;
+    width: clamp(88px, 11.5vw, 140px);
+    height: clamp(52px, 6.5vw, 76px);
+    padding: 10px;
+    cursor: pointer;
+    transition: border-color 150ms, box-shadow 150ms, opacity 150ms;
+}
+
+.skill-tree-tile svg { display: block; width: 100%; height: 100%; }
+.skill-tree-tile.is-affordable { border-color: #8be2ff; }
+
+.skill-tree-tile.is-affordable:hover,
+.skill-tree-tile.is-affordable:focus-visible {
+    border-color: #40c8ff;
+    box-shadow: 0 0 14px #00aaff66;
+    outline: none;
+}
+
+.skill-tree-tile:disabled:not(.is-maxed) {
+    cursor: default;
+    opacity: 0.4;
+}
+
+.skill-tree-tile.is-maxed {
+    border-color: #ffd166;
+    box-shadow: 0 0 14px #ffb52e55;
+    cursor: default;
+}
+
+.skill-tree-cost {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font: 700 clamp(12px, 1.1vw, 15px)/1 var(--ui-font);
+    color: #dff4ff;
+}
+
+.skill-tree-cost .skill-orb-icon { width: 1.2em; height: 1.2em; }
+.skill-tree-column.is-maxed .skill-tree-cost { color: #ffd166; }
+
 #powerjump-toggle[aria-pressed="true"] {
     color: #8be2ff;
     border-color: #40c8ff;

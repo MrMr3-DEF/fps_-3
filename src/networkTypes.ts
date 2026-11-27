@@ -2,7 +2,8 @@ import { fields, isPacketRecord as isRecord, projectKnown, variant, vectorFields
 import { parseMechaPacket, isMechaState, mechaStateFields, type MechaPacket, type MechaState } from './mechaNetworkTypes.js';
 import { isUsername, isPeerId } from './roomIdentity.js';
 import { isHandlingSnapshot, handlingFields, type HandlingCommand, type HandlingStatePacket } from './handlingNetworkTypes.js';
-import { MAX_PLAYERS, PLAYER_MAX_HP, MAX_SHOT_PELLET_INDEX } from './config.js';
+import { MAX_PLAYERS, PLAYER_MAX_HP, MAX_SHOT_PELLET_INDEX, SKILL_TREE_MAX_HEALTH, SKILL_TREE_MAX_LEVEL, SKILL_TREE_MAX_WEAPON_DAMAGE } from './config.js';
+import { isSkillUpgradeId, SKILL_UPGRADE_ORDER, type SkillLevels, type SkillUpgradeId } from './skillTree.js';
 import { infantryEventFields, infantryStateFields, isInfantryEvent, isInfantrySequence, isInfantryState,
     type InfantryEventPacket, type InfantryState, type InfantryStatePacket } from './infantryNetworkTypes.js';
 export type HookState = 'IDLE' | 'FIRING' | 'PULLING';
@@ -142,7 +143,22 @@ export interface PlayerHealthPacket {
     peerId: string;
     lifeId: number;
     hp: number;
+    maxHp?: number;
     mechaSequence?: number;
+    senderPeerId?: string;
+}
+
+export interface SkillUpgradePacket {
+    type: 'skill_upgrade';
+    upgrade: SkillUpgradeId;
+    senderPeerId?: string;
+}
+
+export interface SkillStatePacket {
+    type: 'skill_state';
+    peerId: string;
+    points: number;
+    levels: SkillLevels;
     senderPeerId?: string;
 }
 
@@ -228,6 +244,7 @@ export type NetworkPacket =
     | PlayerHitPacket
     | PlayerDiedPacket
     | PlayerHealthPacket | RespawnRequestPacket | PlayerRespawnPacket
+    | SkillUpgradePacket | SkillStatePacket
     | JumpPacket
     | TargetStatePacket
     | WorldSnapshotPacket;
@@ -299,8 +316,14 @@ function isTargetState(value: unknown): value is TargetState {
 }
 
 function isPlayerHealth(value: Record<string, unknown>): boolean {
-    if (value.maxHp !== PLAYER_MAX_HP || !isInteger(value.hp, 0, PLAYER_MAX_HP)) return false;
+    if (!isInteger(value.maxHp, PLAYER_MAX_HP, SKILL_TREE_MAX_HEALTH) || !isInteger(value.hp, 0, value.maxHp)) return false;
     return value.isDead === true ? value.hp === 0 : value.isDead === false && value.hp > 0;
+}
+
+function isSkillLevels(value: unknown): value is SkillLevels {
+    if (!isRecord(value)) return false;
+    if (Object.keys(value).length !== SKILL_UPGRADE_ORDER.length) return false;
+    return SKILL_UPGRADE_ORDER.every(id => isInteger(value[id], 0, SKILL_TREE_MAX_LEVEL));
 }
 
 /**
@@ -391,7 +414,7 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
         case 'hit_target':
             return isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, MAX_SHOT_PELLET_INDEX) && isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
                 (value.targetRevision === undefined || isInteger(value.targetRevision, 1, Number.MAX_SAFE_INTEGER)) &&
-                isFiniteNumber(value.damage, 0.01, 100) ? value as unknown as HitTargetPacket : null;
+                isFiniteNumber(value.damage, 0.01, SKILL_TREE_MAX_WEAPON_DAMAGE * 2) ? value as unknown as HitTargetPacket : null;
 
         case 'kill_target':
             return isInteger(value.targetIndex, 0, MAX_TARGETS_IN_SNAPSHOT - 1) &&
@@ -402,7 +425,7 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
                 ? value as unknown as KillTargetPacket : null;
 
         case 'player_hit':
-            return isInteger(value.targetLifeId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, MAX_SHOT_PELLET_INDEX) && isPeerId(value.targetPeerId) && isInteger(value.damage, 1, 100) &&
+            return isInteger(value.targetLifeId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.shotId, 0, Number.MAX_SAFE_INTEGER) && isInteger(value.pelletIndex, 0, MAX_SHOT_PELLET_INDEX) && isPeerId(value.targetPeerId) && isInteger(value.damage, 1, SKILL_TREE_MAX_WEAPON_DAMAGE * 2) &&
                 isUsername(value.attackerName) ? value as unknown as PlayerHitPacket : null;
 
         case 'player_died':
@@ -414,9 +437,17 @@ function validateNetworkPacket(value: unknown): NetworkPacket | null {
 
         case 'player_health':
             return isPeerId(value.peerId) && isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) &&
-                isInteger(value.hp, 0, PLAYER_MAX_HP) &&
+                (value.maxHp === undefined || isInteger(value.maxHp, PLAYER_MAX_HP, SKILL_TREE_MAX_HEALTH)) &&
+                isInteger(value.hp, 0, typeof value.maxHp === 'number' ? value.maxHp : SKILL_TREE_MAX_HEALTH) &&
                 (value.mechaSequence === undefined || isInteger(value.mechaSequence, 0, Number.MAX_SAFE_INTEGER))
                 ? value as unknown as PlayerHealthPacket : null;
+
+        case 'skill_upgrade':
+            return isSkillUpgradeId(value.upgrade) ? value as unknown as SkillUpgradePacket : null;
+
+        case 'skill_state':
+            return isPeerId(value.peerId) && isInteger(value.points, 0, Number.MAX_SAFE_INTEGER) &&
+                isSkillLevels(value.levels) ? value as unknown as SkillStatePacket : null;
 
         case 'respawn_request':
             return isInteger(value.lifeId, 0, Number.MAX_SAFE_INTEGER) ? value as unknown as RespawnRequestPacket : null;
@@ -496,7 +527,9 @@ const packetFields = {
     kill_target: { ...fields('targetIndex', 'score', 'scale', 'hp', 'color', 'killerPeerId'), newPosition: vec },
     player_hit: fields('shotId', 'pelletIndex', 'targetPeerId', 'targetLifeId', 'damage', 'attackerName'),
     player_died: fields('lifeId', 'cause', 'killerPeerId', 'victimName', 'killerName', 'victimPeerId'),
-    player_health: fields('peerId', 'lifeId', 'hp', 'mechaSequence'),
+    player_health: fields('peerId', 'lifeId', 'hp', 'maxHp', 'mechaSequence'),
+    skill_upgrade: fields('upgrade'),
+    skill_state: { ...fields('peerId', 'points'), levels: fields(...SKILL_UPGRADE_ORDER) },
     respawn_request: fields('lifeId'),
     player_respawn: { ...fields('peerId', 'lifeId', 'yaw', 'weapon', 'cooldownMs'), pos: vec },
     start_game: {}, jump: fields('lifeId', 'powered'), peer_left: fields('peerId'), lobby_color: fields('bodyColor'),

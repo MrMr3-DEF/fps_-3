@@ -8,6 +8,7 @@ export interface HudContext {
     alive: boolean;
     ended: boolean;
     conversation: boolean;
+    skillTree?: boolean;
     loading: boolean;
     reveal: boolean;
     editor: boolean;
@@ -23,7 +24,7 @@ export interface HudContext {
  * presentation while worldLoading still owns the frozen simulation clock. */
 export function deriveHudPresentation(context: HudContext) {
     const active = context.runtime && context.playing && context.input && context.alive && !context.ended &&
-        !context.conversation && !context.editor && (!context.loading || context.reveal);
+        !context.conversation && !context.skillTree && !context.editor && (!context.loading || context.reveal);
     const pilot = context.pilot;
     const boot = pilot?.mode === 'startup' && (pilot.phase === 'hud' || pilot.phase === 'reveal');
     const shutdown = pilot?.mode === 'shutting-down' && (pilot.phase === 'shutdown-reveal' || pilot.phase === 'shutdown-hud');
@@ -51,7 +52,6 @@ export function deriveHudPresentation(context: HudContext) {
         prompt: onFoot,
         border: ordinary && !context.scoped,
         hardware: Boolean(active && pilot && pilot.phase !== 'inactive' && (!context.thirdPerson || pilot.recoveringExit)),
-        pvpStats: ordinary && context.multiplayer,
     };
 }
 export type HudPresentation = ReturnType<typeof deriveHudPresentation>;

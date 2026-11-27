@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseNetworkPacket } from '../src/networkTypes.ts';
+import { SKILL_TREE_MAX_HEALTH } from '../src/config.ts';
 
 test('lobby packets are bounded and reject duplicate or malformed identities and colors', () => {
     const host = { peerId: 'testfps-room-ABCDEFGH', username: 'Host', bodyColor: 0x3b5998 };
@@ -67,7 +68,8 @@ test('network parser requires canonical peer health consistent with life state',
         { hp: 11, maxHp: 10 },
         { hp: Number.NaN, maxHp: 10 },
         { hp: 0, maxHp: 10 },
-        { hp: 7, maxHp: 999 },
+        { hp: 7, maxHp: SKILL_TREE_MAX_HEALTH + 1 },
+        { hp: 7, maxHp: 9 },
         { isDead: true, hp: 7, maxHp: 10 },
     ]) {
         assert.equal(parseNetworkPacket({ ...validUpdate, ...health }), null);

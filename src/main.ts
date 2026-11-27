@@ -15,10 +15,12 @@ import { updateHealthRegen } from './healthRegen.js';
 import { checkLavaDamage } from './lavaDamage.js';
 export { checkLavaDamage } from './lavaDamage.js';
 import { GothChat } from './gothChat.js';
+import { SkillTreeOverlay } from './skillTreeUI.js';
+import { applySkillUpgrade, skillPointsForCubeMaxHp, type SkillUpgradeId } from './skillTree.js';
 import { ConversationCamera } from './conversationCamera.js';
 import { canUseGothChat, getGothConversationPose } from './gothGirlfriend.js';
 import { mountSettingsLivePreview, setupMainMenu, updateMenuPreview } from './mainMenu.js';
-import { setPlayerListVisible } from './playerList.js';
+import { renderPlayerList, setPlayerListVisible } from './playerList.js';
 import { LocatorBar } from './locatorBar.js';
 import { WeaponIndicator } from './weaponIndicator.js';
 import { setupMobileControls } from './mobileControls.js';
@@ -76,7 +78,11 @@ import {
     hostGame,
     joinGame,
     broadcastTargetKill,
-    updateRemotePeers, infantryAttack, infantryPlayers, publishInfantryKill, publishInfantryState
+    awardMultiplayerSkillPoints,
+    requestSkillUpgrade,
+    setSkillStateListener,
+    updateRemotePeers, infantryAttack, infantryPlayers, publishInfantryKill, publishInfantryState,
+    recordInfantryKill,
 } from './multiplayer.js';
 import { applyRendererSettings, cloneSettings, DEFAULT_USER_SETTINGS, loadUserSettings, saveUserSettings, userSettings, type UserSettings } from './settings.js';
 import { setProjectileTrailsEnabled, syncPendingProjectileTrailOrigins } from './projectileTrails.js';
@@ -102,6 +108,7 @@ let endingPlayback: MechaEndingPlayback | null = null;
 let offlineEnding: MechaEndingAuthority | null = null;
 let endingCover: HTMLDivElement | null = null;
 let gothChat: GothChat | null = null;
+let skillTreeUI: SkillTreeOverlay | null = null;
 let chatCharacter: typeof gothGirlfriend = null;
 let dayNightCycle: DayNightCycle | null = null;
 let lastLanternStrength = 0;
@@ -275,7 +282,7 @@ function processMechaDamage(damage: number, context?: import('./damage.js').Mech
         return;
     }
     flashHitmarker(hit.killed);
-    if (hit.killed) { state.score++; if (UI.score) UI.score.innerText = String(state.score); }
+    if (hit.killed) state.score++;
 }
 
 function onMechaPilotReleased(pose: MechaPilotRelease): void {
@@ -348,9 +355,6 @@ const UI = {
     get gogglesTargetLayer() { return getUI<HTMLElement>('goggles-target-layer'); },
     get crosshair() { return getUI<HTMLElement>('crosshair'); },
     get hoverContainer() { return getUI<HTMLElement>('hover-container'); },
-    get score() { return getUI<HTMLElement>('score'); },
-    get deaths() { return getUI<HTMLElement>('deaths'); },
-    get kills() { return getUI<HTMLElement>('kills'); },
     get blocker() { return getUI<HTMLElement>('blocker'); },
     get deathOverlay() { return getUI<HTMLElement>('death-overlay'); },
     get worldBorderOverlay() { return getUI<HTMLElement>('world-border-overlay'); },
@@ -844,19 +848,20 @@ function setupInputListeners(): void {
     });
     // Reacquire after key release so Escape cannot immediately unlock the new session.
     let resumeOnEscapeUp = false;
+    let resumeSkillTreeOnEscapeUp = false;
     const onKeyDown = (e: Pick<KeyboardEvent, 'code' | 'repeat'> & { preventDefault?: () => void }, code = e.code) => {
         if (state.matchEnded) return;
         // O is a vehicle-only binding, outside the bean's rebindable actions.
         if (e.code === 'KeyO' && forgottenMecha?.ownsLocalPilot) code = 'KeyO';
-        if (e.code === 'Tab' && state.isMultiplayer && state.isPlaying && isInputActive()) {
+        if (e.code === 'Tab' && state.isPlaying && isInputActive()) {
             e.preventDefault?.();
-            if (!e.repeat && !gothChat?.isOpen) setPlayerListVisible(true);
+            if (!e.repeat && !gothChat?.isOpen && !skillTreeUI?.isOpen) setPlayerListVisible(true);
             return;
         }
         // Movement state is already held between key events; repeated keydown
         // events must not toggle hook/view/weapon actions multiple times.
         if (e.repeat || gothChat?.isOpen) return;
-        if (code !== 'Escape' && !isInputActive()) return;
+        if (code !== 'Escape' && !(code === 'KeyB' && skillTreeUI?.isOpen) && !isInputActive()) return;
         if (e.code === 'F2' && state.isPlaying) {
             e.preventDefault?.();
             cinematicMode = !cinematicMode;
@@ -881,6 +886,12 @@ function setupInputListeners(): void {
                     break;
                 }
                 if (!state.controls) break;
+                if (skillTreeUI?.isOpen) {
+                    e.preventDefault?.();
+                    closeSkillTree(false);
+                    resumeSkillTreeOnEscapeUp = true;
+                    break;
+                }
                 const pauseAction = getEscapePauseAction(e.code, {
                     isPlaying: state.isPlaying,
                     isAlive: state.playerHp > 0,
@@ -1009,17 +1020,27 @@ function setupInputListeners(): void {
                     setThirdPerson(!state.isThirdPerson);
                 }
                 break;
+            case 'KeyB':
+                if (skillTreeUI?.isOpen) closeSkillTree(true);
+                else if (isInputActive()) openSkillTree();
+                break;
         }
     };
 
     const onKeyUp = (e: Pick<KeyboardEvent, 'code'> & { preventDefault?: () => void }, code = e.code) => {
         if (e.code === 'Tab') {
             setPlayerListVisible(false);
-            if (state.isMultiplayer && state.isPlaying && isInputActive()) e.preventDefault?.();
+            if (state.isPlaying && isInputActive()) e.preventDefault?.();
             return;
         }
         switch (code) {
             case 'Escape':
+                if (resumeSkillTreeOnEscapeUp) {
+                    resumeSkillTreeOnEscapeUp = false;
+                    e.preventDefault?.();
+                    if (state.controls && state.isPlaying && !state.matchEnded && state.playerHp > 0 && !isInputActive()) beginInput();
+                    break;
+                }
                 if (!resumeOnEscapeUp) break;
                 resumeOnEscapeUp = false;
                 e.preventDefault?.();
@@ -1155,6 +1176,7 @@ function currentHudPresentation() {
         runtime: Boolean(state.scene && state.camera && state.renderer && state.controls),
         playing: state.isPlaying, input: isInputActive(), alive: state.playerHp > 0,
         ended: state.matchEnded, conversation: gothChat?.isOpen ?? false,
+        skillTree: skillTreeUI?.isOpen ?? false,
         loading: isWorldLoading, reveal: isWorldReveal, editor: mobileControlsEditor.isOpen,
         scoped: state.isScoped, thirdPerson: state.isThirdPersonView, touch: touchMode,
         showFps: userSettings.showFps, multiplayer: state.isMultiplayer,
@@ -1198,6 +1220,39 @@ function updateWallHud(visible: boolean): void {
 
 function hideGameHud(): void { syncGameHud(); }
 
+function handleSkillUpgrade(upgrade: SkillUpgradeId): void {
+    if (!state.isPlaying || state.matchEnded || state.playerHp <= 0) return;
+    if (!state.isMultiplayer) {
+        const result = applySkillUpgrade(state.skillTree, upgrade);
+        if (result.ok && upgrade === 'HEALTH') {
+            state.playerHp = Math.min(result.nextMaxHp, state.playerHp + (result.nextMaxHp - result.previousMaxHp));
+            state.playerMaxHp = result.nextMaxHp;
+            updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp * 100));
+        }
+        skillTreeUI?.render(state.skillTree);
+        return;
+    }
+    requestSkillUpgrade(upgrade, () => {
+        skillTreeUI?.render(state.skillTree);
+        updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp * 100));
+    });
+}
+
+function openSkillTree(): void {
+    if (!state.isPlaying || state.matchEnded || state.playerHp <= 0 ||
+        gothChat?.isOpen || forgottenMecha?.ownsLocalPilot || skillTreeUI?.isOpen) return;
+    skillTreeUI?.open(state.skillTree);
+    endInput();
+    syncGameHud();
+}
+
+function closeSkillTree(resumeInput = true): void {
+    if (!skillTreeUI?.isOpen) return;
+    skillTreeUI.close();
+    syncGameHud();
+    if (resumeInput && state.isPlaying && !state.matchEnded && state.playerHp > 0) beginInput();
+}
+
 function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
     if (disposingGameRuntime) return;
     disposingGameRuntime = true;
@@ -1228,6 +1283,7 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
         if (gameOverOverlay) gameOverOverlay.style.display = 'none';
         if (UI.deathOverlay) UI.deathOverlay.style.display = 'none';
         gothChat?.reset({ preserveLoadedModel: userSettings.downloadWebLLMImmediately });
+        skillTreeUI?.close();
         smartGoggles?.reset();
         locatorBar?.reset();
         weaponIndicator?.reset();
@@ -1273,7 +1329,7 @@ function disposeGameRuntime(options: DisposeGameRuntimeOptions = {}): void {
         state.isThirdPersonView = false;
         state.prevTime = performance.now();
         lastFov = -1;
-        syncHudCounters();
+        skillTreeUI?.render(state.skillTree);
     } finally { reloadFrame.clear(); disposingGameRuntime = false; }
 }
 
@@ -1391,8 +1447,11 @@ function performPlayerReset(resetMatch = false): void {
     syncMountedControls(false);
     syncThirdPersonPresentation();
     resetWeaponPresentation();
-    if (resetMatch) resetMatchStats();
-    syncHudCounters();
+    if (resetMatch) {
+        resetMatchStats();
+        skillTreeUI?.close();
+        skillTreeUI?.render(state.skillTree);
+    }
     updateHealthBar(100);
     resetHook();
 }
@@ -1567,12 +1626,6 @@ function syncGogglesFailureVisuals(): void {
     scope.classList.toggle('is-tv-off', shuttingDown);
     scope.classList.toggle('is-bricked-noise', !forgottenMecha?.ownsLocalPilot && state.gogglesFailure.bricked && !shuttingDown);
     scope.classList.toggle('is-photosensitivity-mode', userSettings.photosensitivityMode);
-}
-
-function syncHudCounters(): void {
-    if (UI.score) UI.score.innerText = state.score.toString();
-    if (UI.kills) UI.kills.innerText = state.kills.toString();
-    if (UI.deaths) UI.deaths.innerText = state.deaths.toString();
 }
 
 function settingsEqual(a: UserSettings, b: UserSettings): boolean {
@@ -1982,7 +2035,7 @@ function init(): void {
         ending: startMechaEnding,
         blocked: () => { exitWarningRemaining = 3; }, gameOver: () => triggerDeath(true),
         damage: (_damage, _attacker, sequence) => presentMultiplayerHealth(sequence),
-        hit: (killed, score, local) => { if (local) flashHitmarker(killed); if (UI.score) UI.score.innerText = String(score); },
+        hit: (killed, _score, local) => { if (local) flashHitmarker(killed); },
     });
     loadUserSettings();
     setupSettingsControls();
@@ -1992,6 +2045,11 @@ function init(): void {
     if (locatorMarkers) locatorBar = new LocatorBar(locatorMarkers);
     const weaponPanel = document.getElementById('weapon-indicator');
     if (weaponPanel) weaponIndicator = new WeaponIndicator(weaponPanel);
+    skillTreeUI = new SkillTreeOverlay({ onUpgrade: handleSkillUpgrade });
+    setSkillStateListener(() => {
+        skillTreeUI?.render(state.skillTree);
+        updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp * 100));
+    });
 
     setupMenuListeners();
     gothChat = new GothChat({
@@ -2068,7 +2126,7 @@ function init(): void {
         if (!state.isMultiplayer || forgottenMecha?.ownsLocalPilot) forgottenMecha?.pilot.clearLookMotion();
         setPlayerListVisible(false);
         const isDead = state.matchEnded || UI.deathOverlay?.style.display === 'flex';
-        if (UI.blocker) UI.blocker.style.display = gothChat?.isOpen || isDead ? 'none' : 'flex';
+        if (UI.blocker) UI.blocker.style.display = gothChat?.isOpen || skillTreeUI?.isOpen || isDead ? 'none' : 'flex';
         state.moveForward = false;
         state.moveBackward = false;
         state.moveLeft = false;
@@ -2094,6 +2152,10 @@ function init(): void {
         if (gothChat?.isOpen) {
             if (UI.panelPause) UI.panelPause.style.display = 'none';
             gothChat.focus();
+            return;
+        }
+        if (skillTreeUI?.isOpen) {
+            if (UI.panelPause) UI.panelPause.style.display = 'none';
             return;
         }
         if (state.isPlaying) {
@@ -2167,7 +2229,7 @@ function startMechaEnding(scene: MechaEndingState): void {
     endInput(); setPlayerListVisible(false); clearApproachWarning(); clearMechaHeadPresentation();
     mountedFireRequested = false; hasRenderedAim = false;
     cameraShake.reset(); resetKatana(); mechaCameraHandoff.reset(); conversationCamera.cancel();
-    gothChat?.close(false); smartGoggles?.reset(); resetHook(); state.weaponHandling.cancelActions(); cancelInspect();
+    gothChat?.close(false); skillTreeUI?.close(); smartGoggles?.reset(); resetHook(); state.weaponHandling.cancelActions(); cancelInspect();
     state.velocity.set(0, 0, 0); state.isHovering = false;
     for (const panel of [UI.blocker, UI.panelMain, UI.panelSettings, UI.panelMp, UI.panelPause, UI.panelHostWaiting, UI.panelJoinRoom, UI.deathOverlay]) {
         if (panel) panel.style.display = 'none';
@@ -2688,15 +2750,15 @@ function renderLocalHealthChange(previousHp: number, feedback: boolean): void {
     }
 
     updateHealthBar(Math.max(0, state.playerHp / state.playerMaxHp * 100), feedback && damaged ? '#ff4757' : null);
-    if (state.playerHp <= 0 && previousHp > 0) {
-        triggerDeath();
-        state.deaths++;
-        if (UI.deaths) UI.deaths.innerText = state.deaths.toString();
-    }
+    if (state.playerHp <= 0 && previousHp > 0) triggerDeath();
 }
 
 export function triggerDeath(gameOver = false): void {
     if (state.matchEnded && !gameOver) return;
+    if (!state.isMultiplayer && !gameOver) {
+        state.deaths++;
+        renderPlayerList();
+    }
     resetHealthBarFlash();
     resetHitmarker();
     clearApproachWarning();
@@ -2708,6 +2770,7 @@ export function triggerDeath(gameOver = false): void {
     if (gameOver) state.matchEnded = true;
     setPlayerListVisible(false);
     gothChat?.close(false);
+    skillTreeUI?.close();
     smartGoggles?.reset();
     // The death overlay sits directly over the world, including when already paused.
     if (UI.blocker) UI.blocker.style.display = 'none';
@@ -2749,8 +2812,15 @@ export function processTargetHit(targetIndex: number, damage: number, attackerPe
         const result = infantry.damage(targetIndex, damage);
         if (result.accepted && (!state.isMultiplayer || !attackerPeerId || attackerPeerId === state.peer?.id)) flashHitmarker(result.killed);
         if (result.killed) {
-            state.score++;
-            syncHudCounters();
+            if (state.isMultiplayer) {
+                if (state.isHost) {
+                    recordInfantryKill(attackerPeerId);
+                    if (!attackerPeerId || attackerPeerId === state.peer?.id) state.kills++;
+                }
+            } else {
+                state.kills++;
+                renderPlayerList();
+            }
             publishInfantryKill(targetIndex, revision, attackerPeerId);
         }
         return result;
@@ -2765,6 +2835,7 @@ export function processTargetHit(targetIndex: number, damage: number, attackerPe
     data.healthBarFg.scale.x = hpRatio;
     
     if (data.hp <= 0) {
+        const killedMaxHp = data.maxHp;
         data.eliminationRevision = (data.eliminationRevision ?? 0) + 1;
         const enemyColor = data.color || 0xff4500;
         spawnParticles(target.position, enemyColor, 35, 30, 0.35, 15.0);
@@ -2773,12 +2844,19 @@ export function processTargetHit(targetIndex: number, damage: number, attackerPe
         
         respawnTarget(target);
         rebuildTargetHash();
-        state.score++;
-        
-        if (UI.score) UI.score.innerText = state.score.toString();
-        
+
         if (state.isMultiplayer && state.isHost) {
-            broadcastTargetKill(targetIndex, state.score, target.position, data, attackerPeerId ?? state.peer?.id ?? null);
+            broadcastTargetKill(targetIndex, 0, target.position, data, attackerPeerId ?? state.peer?.id ?? null);
+        }
+
+        const reward = skillPointsForCubeMaxHp(killedMaxHp);
+        if (reward > 0) {
+            if (!state.isMultiplayer) {
+                state.skillTree.points += reward;
+                skillTreeUI?.render(state.skillTree);
+            } else if (state.isHost) {
+                awardMultiplayerSkillPoints(attackerPeerId, reward, () => skillTreeUI?.render(state.skillTree));
+            }
         }
     }
     return { accepted: true, killed };

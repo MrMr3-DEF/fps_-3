@@ -6,6 +6,7 @@ import type { Particle } from './particles.js';
 import { createGogglesFailureState, resetGogglesFailure, type GogglesFailureState } from './gogglesFailure.js';
 import type { HookState, LobbyPlayer, PlayerListEntry } from './networkTypes.js';
 import type { ForgottenMecha } from './forgottenMecha.js';
+import { createSkillTreeState, resetSkillTreeState, type SkillTreeState } from './skillTree.js';
 
 export interface PeerLike {
     id: string;
@@ -71,6 +72,8 @@ export interface GameState {
     score: number;
     playerHp: number;
     playerMaxHp: number;
+    /** Match-scoped skill points, levels and per-weapon shot cycle counters. */
+    skillTree: SkillTreeState;
     regenDelayMs: number;
     lavaCooldownMs: number;
     isPlaying: boolean;
@@ -177,6 +180,7 @@ export const state: GameState = {
     score: 0,
     playerHp: PLAYER_MAX_HP,
     playerMaxHp: PLAYER_MAX_HP,
+    skillTree: createSkillTreeState(),
     regenDelayMs: 0,
     lavaCooldownMs: 0,
     isPlaying: false,
@@ -316,5 +320,7 @@ export function resetMatchStats() {
     state.score = 0;
     state.kills = 0;
     state.deaths = 0;
+    resetSkillTreeState(state.skillTree);
+    state.playerMaxHp = PLAYER_MAX_HP;
     resetGogglesFailure(state.gogglesFailure);
 }

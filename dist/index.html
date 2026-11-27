@@ -12,9 +12,9 @@
     <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <!-- Load the current UI before first paint, independently of game startup. -->
     <link rel="preload" href="/fonts/ScienceGothic-Latin.woff2" as="font" type="font/woff2" crossorigin>
-  <script type="module" crossorigin src="/assets/index-5Q5kmH-o.js"></script>
+  <script type="module" crossorigin src="/assets/index-BQan4EGp.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/three-C0Uuoxj3.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-BlfVYQ83.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-DkVKfDdo.css">
 </head>
 
 <body>
@@ -339,17 +339,22 @@
 
 
     <section id="player-list" hidden aria-hidden="true" aria-label="Players">
-        <div class="player-list-heading"><span>PLAYERS</span><span>K / D</span></div>
+        <div class="player-list-heading"><span>PLAYERS</span><span class="player-list-kd-heading">K / D</span></div>
         <div id="player-list-rows" role="list"></div>
+        <div class="player-list-stats">
+            <div class="player-list-stat"><span>Day</span><span id="defense-day" class="player-list-stat-value">1</span></div>
+            <div class="player-list-stat"><span>Enemies remaining</span><span id="enemies-remaining" class="player-list-stat-value">0</span></div>
+        </div>
     </section>
 
     <div id="ui">
-        <div>Targets Eliminated: <span id="score">0</span></div>
-        <div>Day <span id="defense-day">1</span></div>
-        <div>Enemies remaining: <span id="enemies-remaining">0</span></div>
-        <div id="pvp-stats">
-            Kills: <span id="kills">0</span> &nbsp;|&nbsp; Deaths: <span id="deaths">0</span>
+        <div id="skill-points-hud" aria-label="Skill points"><span class="skill-orb-icon" aria-hidden="true"></span><span id="skill-points">0</span></div>
+    </div>
+    <div id="skill-tree-overlay" hidden role="dialog" aria-modal="true" aria-label="Skill Tree">
+        <div class="skill-tree-balance">
+            <span class="skill-orb-icon" aria-hidden="true"></span><span id="skill-tree-balance-value">0</span>
         </div>
+        <div id="skill-tree-row"></div>
     </div>
     <div id="fps-counter">FPS: 0</div>
     <div id="wall-durability" hidden>

@@ -8,6 +8,7 @@ import { spreadDirection } from './shotAuthority.js';
 import * as THREE from 'three';
 import { pulseEmptyAmmoBar } from './hud.js';
 import { state, type GameState } from './state.js';
+import { consumeWeaponShotIndex, weaponDamageForShot } from './skillTree.js';
 import {
     SWITCH_DURATION,
     WEAPON_STATS,
@@ -255,6 +256,8 @@ export function fireProjectile(aimRay?: THREE.Ray): void {
     // clear. Both shooter and host test this segment before committing a round.
     if (shotObstructionT(_eyePosition, _barrelPos, weapon === 'SNIPER' ? 0 : PROJECTILE_RADIUS) !== null ||
         !state.weaponHandling.spendShot(weapon, state.weaponTime)) return;
+    const shotIndex = consumeWeaponShotIndex(state.skillTree, weapon);
+    const weaponLevel = state.skillTree.levels[weapon];
     if (!rig || state.isScoped || state.isThirdPersonView || !getHolderMuzzlePosition(rig, weapon, _visualMuzzle)) {
         _visualMuzzle.copy(_barrelPos);
     }
@@ -312,7 +315,7 @@ export function fireProjectile(aimRay?: THREE.Ray): void {
         data.age = 0;
         data.distanceTraveled = 0;
         data.visualOnly = false;
-        data.damage = stats.damage;
+        data.damage = weaponDamageForShot(weapon, weaponLevel, shotIndex, pelletIndex);
         (data.shotOrigin ??= new THREE.Vector3()).copy(_barrelPos);
         data.shotId = shotId;
         data.pelletIndex = pelletIndex;
@@ -336,6 +339,7 @@ export function fireProjectile(aimRay?: THREE.Ray): void {
     state.fireCooldown = currentFireRate;
 
     if (state.activeWeaponName === 'SNIPER') {
+        const sniperDamage = weaponDamageForShot('SNIPER', weaponLevel, shotIndex, 0);
         const barrelWorldPosition = _barrelPos;
         const camDirection = _camDirection;
 
@@ -422,12 +426,12 @@ export function fireProjectile(aimRay?: THREE.Ray): void {
         if (shieldDist < closestObstacleDist && shieldDist < closestTargetDist && shieldDist < closestPeerDist) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, shieldDist);
             if (state.isMultiplayer) { broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed); sniperFireBroadcast = true; }
-            processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, surface: 'shield', shotId, pelletIndex: 0 });
+            processMechaHit(sniperDamage, { origin: barrelWorldPosition, point: hitPoint, surface: 'shield', shotId, pelletIndex: 0 });
         } else if (closestObstacleDist < closestTargetDist && closestObstacleDist < closestPeerDist) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestObstacleDist);
             if (obstacleHits[0]?.distance === closestObstacleDist && obstacleData(obstacleHits[0].object).damageTarget === 'forgotten-mecha') {
                 if (state.isMultiplayer) { broadcastLocalFire(barrelWorldPosition, camDirection, hitPoint, shotId, spreadSeed); sniperFireBroadcast = true; }
-                processMechaHit(stats.damage, { origin: barrelWorldPosition, point: hitPoint, direction: camDirection, surface: 'body', shotId, pelletIndex: 0 });
+                processMechaHit(sniperDamage, { origin: barrelWorldPosition, point: hitPoint, direction: camDirection, surface: 'body', shotId, pelletIndex: 0 });
             } else spawnParticles(hitPoint, 0xccd5e0, 6, 8, 0.1, 8.0);
         } else if (hitTargetIndex !== -1 && closestTargetDist < closestPeerDist && hitTargetGroup) {
             hitPoint.copy(barrelWorldPosition).addScaledVector(camDirection, closestTargetDist);
@@ -443,14 +447,14 @@ export function fireProjectile(aimRay?: THREE.Ray): void {
                         type: 'hit_target', shotId, pelletIndex: 0,
                         targetIndex: hitTargetIndex,
                         ...(targetInfo.infantry ? { targetRevision: targetInfo.eliminationRevision } : {}),
-                        damage: stats.damage
+                        damage: sniperDamage
                     };
                     broadcastToAll(packet);
                 } else {
-                    processTargetHit(hitTargetIndex, stats.damage);
+                    processTargetHit(hitTargetIndex, sniperDamage);
                 }
             } else {
-                processTargetHit(hitTargetIndex, stats.damage);
+                processTargetHit(hitTargetIndex, sniperDamage);
             }
 
             spawnParticles(hitPoint, targetData(hitTargetGroup as THREE.Group).color || 0xffaa00, 15, 12, 0.15, 12.0);
@@ -470,7 +474,7 @@ export function fireProjectile(aimRay?: THREE.Ray): void {
                 type: 'player_hit', shotId, pelletIndex: 0,
                 targetPeerId: pvpPeerId,
                 targetLifeId: peerData?.lifeId ?? 0,
-                damage: stats.damage,
+                damage: sniperDamage,
                 attackerName: attackerName
             };
             broadcastToAll(packet);

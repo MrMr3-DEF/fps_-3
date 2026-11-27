@@ -7,6 +7,7 @@ import { PROJECTILE_GUIDANCE_STEP, HOMING_HISTORY_SAMPLES, HOMING_VERIFICATION_S
 import { PacketRate } from './packetRate.js';
 import { canContinueHoming, isWithinHomingAimEnvelope } from './projectileHoming.js';
 import { stepProjectileFlight, homingReplayCandidates, type HomingFireContext, type HomingFlightTarget, type TargetMotionHistory } from './projectileFlight.js';
+import { weaponDamageForShot } from './skillTree.js';
 
 const PROJECTILE_NETWORK_GRACE_MS = 100;
 const PROJECTILE_LEDGER_GRACE_MS = 250;
@@ -62,6 +63,7 @@ interface Shot {
     weapon: FirearmName;
     origin: THREE.Vector3;
     directions: THREE.Vector3[];
+    expectedDamage: number[];
     used: Set<number>;
     homingTarget?: HomingTargetPacket;
     flightTarget?: HomingFlightTarget;
@@ -107,7 +109,7 @@ export class ShotLedger {
         this.triggerUpdatedAt = null;
         this.minigunSample = null;
     }
-    record(packet: FirePacket, now: number, dead: boolean, context?: HomingFireContext | (() => HomingFireContext | null), mechaRevision?: number): boolean {
+    record(packet: FirePacket, now: number, dead: boolean, context?: HomingFireContext | (() => HomingFireContext | null), mechaRevision?: number, weaponLevel = 0, shotIndex = 0): boolean {
         const stats = WEAPON_STATS[packet.weapon];
         if (!stats) return false;
         let interval = stats.fireRate * 1000;
@@ -161,6 +163,7 @@ export class ShotLedger {
         this.shots.set(packet.shotId, { at: now, mechaRevision, weapon: packet.weapon,
             origin: new THREE.Vector3(packet.barrelPos.x, packet.barrelPos.y, packet.barrelPos.z),
             directions: Array.from({ length: count }, (_, i) => spreadDirection(base, packet.spreadSeed, i, stats.spread)),
+            expectedDamage: Array.from({ length: count }, (_, i) => weaponDamageForShot(packet.weapon, weaponLevel, shotIndex, i)),
             used: new Set(),
             homingTarget: packet.homingTarget,
             flightTarget, steeringStartsAt: packet.homingStartDistance,
@@ -177,7 +180,7 @@ export class ShotLedger {
         identity?: HomingTargetPacket,
     ): boolean {
         const shot = this.shots.get(shotId);
-        if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS || damage !== WEAPON_STATS[shot.weapon].damage) return false;
+        if (!shot || shot.used.has(pelletIndex) || !shot.directions[pelletIndex] || now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS || damage !== shot.expectedDamage[pelletIndex]) return false;
         if (identity && shot.homingTarget?.kind === identity.kind) {
             if (identity.kind === 'mecha' && shot.homingTarget.kind === 'mecha' && identity.targetRevision !== shot.homingTarget.targetRevision) return false;
             // A locked victim is only eligible through its moving history.
@@ -291,7 +294,7 @@ export class ShotLedger {
         if (!shot || !matches(shot.homingTarget) || shot.used.has(pelletIndex) ||
             !shot.directions[pelletIndex] ||
             now - shot.at > PROJECTILE_LIFETIME * 1000 + PROJECTILE_LEDGER_GRACE_MS ||
-            damage !== WEAPON_STATS[shot.weapon].damage) return false;
+            damage !== shot.expectedDamage[pelletIndex]) return false;
         const flight = shot.flightTarget, latest = flight?.history.samples.at(-1);
         // The caller must first sample the current authoritative target. Do not
         // verify a claim against a forgotten/stale replacement-world history.
